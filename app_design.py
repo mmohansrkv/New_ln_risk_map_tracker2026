@@ -105,13 +105,18 @@ def delete_rows(idx):
     else:
         for r in reversed(idx): ws.delete_rows(r)
 
+def desig_map():
+    return {str(e["Employee ID"]): str(e.get("Designation", "")) for e in rows("Employees")}
+
 def load_subs():
+    dm = desig_map()
     tph = {r["Process name"]: num(r["Target count / hour"]) for r in rows("Processes")}
     subs = {}
     for r in rows("Productivity log"):
         s = subs.setdefault(r["Submission ID"], dict(
             id=r["Submission ID"], date=r["Date"], band=r["Band"], emp_id=r["Employee ID"],
-            emp_name=r["Employee name"], procs=[], notes=[], rows=[]))
+            emp_name=r["Employee name"], designation=dm.get(str(r["Employee ID"]), ""),
+            procs=[], notes=[], rows=[]))
         s["rows"].append(r["_row"])
         h = num(r["Hour"])
         if r["Type"] == "Process":
@@ -280,18 +285,19 @@ EDIT = """<div class="card"><h2>Edit {{title}}</h2><form method="post" class="gr
 <button class="primary">Save</button> <a href="/admin/{{kind}}">Cancel</a></form>
 {% if locked %}<p class="mut">Personal details (grayed out) are entered by the employee on their own Personal details page.</p>{% endif %}</div>"""
 
-LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th>{% endif %}
+LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th><th>Designation</th>{% endif %}
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Productivity</th><th></th></tr>
-{% for s in subs %}<tr><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; {{s.emp_name}}</td>{% endif %}
+{% for s in subs %}<tr><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; {{s.emp_name}}</td><td>{{s.designation}}</td>{% endif %}
 <td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td><td>{{ 'Weekend - not counted' if s.off else (s.pct ~ '%') }}</td>
 <td class="act"><a href="/entry/{{s.id}}/view">View</a><a href="/entry/{{s.id}}">Edit</a>
 <form method="post" action="/entry/{{s.id}}/delete" onsubmit="return confirm('Delete this entry?')"><button class="danger">Delete</button></form></td></tr>
-{% else %}<tr><td colspan="7">Nothing yet.</td></tr>{% endfor %}</table>"""
+{% else %}<tr><td colspan="8">Nothing yet.</td></tr>{% endfor %}</table>"""
 
 FORM = """<div class="card"><h2>{{heading}}</h2>
 <form method="post" action="{{action}}">
 <div class="grid">
 <label>Date<input type="date" name="date" value="{{sub.date}}" required></label>
+<label>Designation<input value="{{sub.designation}}" readonly></label>
 <label>Band<input value="{{sub.band}}" readonly></label>
 <label>Employee ID<input value="{{sub.emp_id}}" readonly></label>
 <label>Employee name<input value="{{sub.emp_name}}" readonly></label></div>
@@ -323,7 +329,7 @@ function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e
 {{sub.procs|tojson}}.forEach(addProc);{{sub.notes|tojson}}.forEach(addNote);
 </script>"""
 
-VIEW = """<div class="card"><h2>{{s.date}} &middot; {{s.emp_name}} ({{s.emp_id}}, Band {{s.band}})</h2>
+VIEW = """<div class="card"><h2>{{s.date}} &middot; {{s.emp_name}} ({{s.emp_id}}{% if s.designation %}, {{s.designation}}{% endif %}, Band {{s.band}})</h2>
 <table><tr><th>Process</th><th>Description</th><th>Hour</th><th>Count</th><th>Target count</th><th>Achievement</th></tr>
 {% for p in s.procs %}<tr><td>{{p.name}}</td><td>{{p.desc}}</td><td>{{p.hour|g}}</td><td>{{p.count|g}}</td><td>{{p.target|g}}</td>
 <td>{{ (p.pct ~ '%') if p.pct is not none else '-' }}</td></tr>{% endfor %}</table><br>
@@ -428,7 +434,8 @@ def employee_login():
         for e in rows("Employees"):
             if u in (str(e["Employee ID"]).lower(), str(e["Email"]).lower()) and eq(request.form["p"], e["Password"]):
                 session.clear()
-                session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"])
+                session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"],
+                               designation=str(e.get("Designation", "")))
                 return redirect("/employee")
         flash("Wrong username or password.")
     return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee")
@@ -443,7 +450,8 @@ def form_page(sub, action, heading):
 @need("employee")
 def employee_home():
     today = str(dt.date.today())
-    sub = dict(date=today, band=session["band"], emp_id=session["emp_id"], emp_name=session["name"],
+    sub = dict(date=today, band=session["band"], designation=session.get("designation", ""),
+               emp_id=session["emp_id"], emp_name=session["name"],
                procs=[{}], notes=[{}])
     body, ctx = form_page(sub, "/employee/save", "Daily productivity entry")
     all_mine = [s for s in load_subs() if s["emp_id"] == session["emp_id"]]
@@ -535,7 +543,7 @@ def report(employees, subs, leaves, start, end):
         lv = {l["Date"] for l in leaves if str(l["Employee ID"]) == eid and a <= l["Date"] <= b and not is_off(l["Date"])}
         prod_hrs = sum(s["prod"] for s in mine)
         base = len(days) * DAY_HOURS                     # 8 hrs per present day = 100%
-        out.append(dict(id=eid, name=e["Name"], band=e["Band"], present=len(days), leave=len(lv),
+        out.append(dict(id=eid, name=e["Name"], band=e["Band"], designation=e.get("Designation", ""), present=len(days), leave=len(lv),
                         absent=max(wd - len(days | lv), 0), wd=wd,
                         att=min(round(len(days) / wd * 100), 100) if wd else 0,
                         pct=min(round(prod_hrs / base * 100), 100) if base else 0,
@@ -585,7 +593,7 @@ KPI = """<div class="kpis">
 {% for l,v in extra %}<div class="kpi"><span>{{l}}</span><b>{{v}}</b></div>{% endfor %}</div>"""
 
 EMP_TOP = """<div class="head"><div><h1>Hello, {{session.name}}</h1>
-<p class="mut">{{today}} &middot; Band {{session.band}} &middot; {{month_label}} summary</p></div>
+<p class="mut">{{today}} &middot; {% if session.designation %}{{session.designation}} &middot; {% endif %}Band {{session.band}} &middot; {{month_label}} summary</p></div>
 <a class="btnl" href="/employee/leave">Apply leave</a></div>""" + KPI
 
 SUMMARY = """<div class="head"><div><h1>Overview</h1>
@@ -594,9 +602,9 @@ SUMMARY = """<div class="head"><div><h1>Overview</h1>
 <form class="grid" method="get" style="margin:0"><input type="month" name="month" value="{{month if month!='all' else ''}}">
 <button class="primary">Show</button><a href="/admin/summary?month=all">All time</a></form>
 <button type="button" class="btnl" onclick="window.print()">&#128438; Print</button></div></div>""" + KPI + """
-<table><tr><th>Employee</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
+<table><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Productivity</th></tr>
-{% for r in rep %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>
+{% for r in rep %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>
 <td>{{r.att}}%<i class="bar {{r.att|tone}}"><u style="width:{{r.att}}%"></u></i></td>
 <td>{{r.prod|g}}</td><td>{{r.non|g}}</td>
 <td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td></tr>
@@ -618,11 +626,11 @@ LEAVE_ADMIN = """<div class="head"><h1>Leave log</h1></div>
 <label>Employee<select name="emp">{% for e in emps %}<option value="{{e['Employee ID']}}">{{e['Employee ID']}} - {{e['Name']}}</option>{% endfor %}</select></label>
 <label>From date<input type="date" name="d1" required></label><label>To date<input type="date" name="d2" required></label>
 <label>Reason<input name="reason" placeholder="Reason"></label><button class="primary">Add leave</button></form></div>
-<table><tr><th>Date</th><th>Employee</th><th>Band</th><th>Reason</th><th>Applied at</th><th></th></tr>
-{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td><td>{{r['Band']}}</td>
+<table><tr><th>Date</th><th>Employee</th><th>Designation</th><th>Band</th><th>Reason</th><th>Applied at</th><th></th></tr>
+{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td><td>{{r['Designation']}}</td><td>{{r['Band']}}</td>
 <td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td><td class="act"><a href="/admin/leave/{{r['_row']}}">Edit</a>
 <form method="post" action="/admin/leave/{{r['_row']}}/delete" onsubmit="return confirm('Delete?')"><button class="danger">Delete</button></form></td></tr>
-{% else %}<tr><td colspan="6">No leave records.</td></tr>{% endfor %}</table>"""
+{% else %}<tr><td colspan="7">No leave records.</td></tr>{% endfor %}</table>"""
 
 PERSONAL_VIEW = """<div class="head"><div><h1>Personal details</h1>
 <p class="mut">Admin can edit any employee's details; employees can also update their own from their Personal details page.</p></div>
@@ -692,9 +700,9 @@ MISSED = """<div class="head"><div><h1>Missed entries</h1>
 <button class="primary">Show</button><a href="/admin/missed">Reset</a><a href="/admin/missed?month=all">All time</a></form></div>
 <div class="kpis"><div class="kpi"><span>Missed entries</span><b>{{data|length}}</b></div>
 <div class="kpi"><span>Employees affected</span><b>{{n_emp}}</b></div></div>
-<table><tr><th>Date</th><th>Day</th><th>Employee</th><th>Band</th></tr>
-{% for r in data %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.band}}</td></tr>
-{% else %}<tr><td colspan="4">No missed entries.</td></tr>{% endfor %}</table>"""
+<table><tr><th>Date</th><th>Day</th><th>Employee</th><th>Designation</th><th>Band</th></tr>
+{% for r in data %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td></tr>
+{% else %}<tr><td colspan="5">No missed entries.</td></tr>{% endfor %}</table>"""
 
 PROFILE = """<div class="card"><h2>Personal details</h2>
 <p class="mut">Employee ID, name and Office Email ID (your login email) are set by admin. You can update the rest yourself; admin can edit them too.</p>
@@ -733,7 +741,8 @@ def admin_missed():
             continue
         for d in missing_dates(e["Employee ID"], subs, leaves, start, end, fmt="%Y-%m-%d"):
             data.append(dict(date=d, day=dt.date.fromisoformat(d).strftime("%a"),
-                             id=e["Employee ID"], name=e["Name"], band=e["Band"]))
+                             id=e["Employee ID"], name=e["Name"], band=e["Band"],
+                             designation=e.get("Designation", "")))
     data.sort(key=lambda r: (r["date"], str(r["name"])), reverse=True)
     return page(MISSED, title="Missed entries", data=data, n_emp=len({r["id"] for r in data}),
                 month=month, label=label, emp=request.args.get("emp", ""))
@@ -751,6 +760,8 @@ def admin_leave():
             flash(str(e))
         return redirect("/admin/leave")
     data = sorted(rows("Leave"), key=lambda r: r["Date"], reverse=True)
+    dm = desig_map()
+    for r in data: r["Designation"] = dm.get(str(r["Employee ID"]), "")
     return page(LEAVE_ADMIN, title="Leave log", emps=emps, data=data)
 
 def my_emp():

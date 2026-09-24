@@ -50,8 +50,8 @@ HEADERS = {
                   "Computer", "Hours worked", "Status"],
 }
 KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave", "holidays": "Holidays"}
-# "Login Log" is intentionally NOT in KINDS / the employee UI - it is an admin-only
-# attendance record (login/logout time + computer name), never shown to employees.
+# "Login Log" is not in KINDS (not editable as a generic table) but IS visible, read-only,
+# to both admin (/admin/loginlog, all employees) and each employee (/employee/loginlog, own records only).
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "change-me")
@@ -228,7 +228,7 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"), ("/admin/processes", "Processes"),
               ("/admin/log", "Productivity log"), ("/admin/missed", "Missed entries"), ("/admin/leave", "Leave log"),
               ("/admin/holidays", "Holidays"), ("/admin/loginlog", "Login/Logout log")],
-    "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave")],
+    "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave"), ("/employee/loginlog", "Login/Logout log")],
 }
 
 def page(body, title="Productivity Tracker", **ctx):
@@ -532,7 +532,8 @@ def report(employees, subs, leaves, start, end):
     return out
 
 # ---------------------------------------------------------------- login/logout time (Login Log sheet)
-# This log is admin-only: it is never shown to employees anywhere in the app.
+# Every employee login/logout is captured here; viewable by admin (all employees) and
+# by each employee for their own record at /employee/loginlog.
 def log_login(emp_id, name, computer):
     ws = book().worksheet("Login Log")
     now = dt.datetime.now()
@@ -693,11 +694,10 @@ def admin_missed():
                 month=month, label=label, emp=request.args.get("emp", ""))
 
 LOGINLOG = """<div class="head"><div><h1>Login/Logout log</h1>
-<p class="mut">Employee login and logout time, computer/device, and hours worked vs the 8 hr/day target.
-Admin-only - employees never see this.</p></div>
+<p class="mut">Login and logout time, computer/device, and hours worked vs the 8 hr/day target.</p></div>
 <form class="grid" method="get"><input type="date" name="date" value="{{request.args.get('date','')}}">
-<input name="emp" placeholder="Employee ID / name" value="{{request.args.get('emp','')}}">
-<button class="primary">Filter</button> <a href="/admin/loginlog">Clear</a></form></div>
+{% if emp_filter %}<input name="emp" placeholder="Employee ID / name" value="{{request.args.get('emp','')}}">{% endif %}
+<button class="primary">Filter</button> <a href="{{base}}">Clear</a></form></div>
 <table><tr><th>Date</th><th>Employee</th><th>Login</th><th>Logout</th><th>Computer</th><th>Hours worked</th><th>Status</th></tr>
 {% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
 <td>{{r['Login time']}}</td><td>{{r['Logout time']}}</td><td>{{r['Computer']}}</td>
@@ -711,7 +711,16 @@ def admin_loginlog():
     data = [r for r in rows("Login Log") if (not d or r["Date"] == d) and
             (not e or e in (str(r["Employee ID"]).lower(), str(r["Employee name"]).lower()))]
     data.sort(key=lambda r: (r["Date"], r["Login time"]), reverse=True)
-    return page(LOGINLOG, title="Login/Logout log", data=data)
+    return page(LOGINLOG, title="Login/Logout log", data=data, emp_filter=True, base="/admin/loginlog")
+
+@app.route("/employee/loginlog")
+@need("employee")
+def employee_loginlog():
+    d = request.args.get("date", "")
+    data = [r for r in rows("Login Log")
+            if str(r["Employee ID"]) == session["emp_id"] and (not d or r["Date"] == d)]
+    data.sort(key=lambda r: (r["Date"], r["Login time"]), reverse=True)
+    return page(LOGINLOG, title="Login/Logout log", data=data, emp_filter=False, base="/employee/loginlog")
 
 @app.route("/admin/leave", methods=["GET", "POST"])
 @need("admin")

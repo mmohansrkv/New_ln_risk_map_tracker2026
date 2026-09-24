@@ -173,37 +173,46 @@ body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;backgrou
 .app{display:flex;min-height:100vh}
 aside{width:220px;background:#1c2340;color:#fff;padding:20px 12px;display:flex;flex-direction:column;gap:4px;flex:none}
 .brand{font-weight:600;font-size:17px;padding:0 10px 16px}.brand small{display:block;font-weight:400;color:#9aa3c7;font-size:12px}
-aside a{color:#c9d0ee;text-decoration:none;padding:9px 12px;border-radius:8px;font-size:14px}
-aside a:hover{background:#2b3560}aside a.on{background:var(--pri);color:#fff}
-.me{margin-top:auto;padding:12px 10px 0;border-top:1px solid #2b3560;font-size:13px;color:#9aa3c7;display:flex;justify-content:space-between;gap:8px}
-.me a{padding:0;color:#fff}
-main{flex:1;padding:24px 28px;min-width:0}
+aside a{color:#c9d0ee;text-decoration:none;padding:9px 12px;border-radius:8px;font-size:14px;transition:background .2s ease,color .2s ease,transform .15s ease}
+aside a:hover{background:#2b3560;transform:translateX(2px)}aside a.on{background:var(--pri);color:#fff}
+.me{margin-bottom:14px;padding:0 10px 14px;border-bottom:1px solid #2b3560;font-size:13px;color:#9aa3c7;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.me a{padding:5px 12px;color:#fff;background:#2b3560;border-radius:7px;font-size:13px;transition:background .2s ease,transform .15s ease}
+.me a:hover{background:#e5484d;transform:translateY(-1px)}
+main{flex:1;padding:24px 28px;min-width:0;animation:fadeInUp .45s cubic-bezier(.22,1,.36,1)}
 .center{max-width:420px;margin:12vh auto;padding:0 16px}
 h1{font-size:22px;margin:0}h2{font-size:17px;margin:22px 0 10px}h3{font-size:15px;margin:14px 0 6px}
 .head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
 .mut{color:var(--mut);margin:2px 0 0;font-size:13px}
-.card{background:#fff;padding:18px;border-radius:14px;border:1px solid var(--line);margin-bottom:16px}
-input,select,button{padding:8px 10px;border:1px solid #cfd5e6;border-radius:8px;font-size:14px;margin:3px;background:#fff;color:var(--ink)}
+.card{background:#fff;padding:18px;border-radius:14px;border:1px solid var(--line);margin-bottom:16px;transition:box-shadow .2s ease,transform .2s ease}
+.card:hover{box-shadow:0 8px 22px #1c234014;transform:translateY(-1px)}
+input,select,button{padding:8px 10px;border:1px solid #cfd5e6;border-radius:8px;font-size:14px;margin:3px;background:#fff;color:var(--ink);transition:border-color .2s ease,box-shadow .2s ease}
 input:focus,select:focus{outline:2px solid #c7c4fb;border-color:var(--pri)}
 input[readonly]{background:#f1f3fa}
-button{cursor:pointer}
-.primary,.btnl{background:var(--pri);color:#fff;border:0;padding:9px 18px;border-radius:8px;text-decoration:none;font-size:14px;display:inline-block;cursor:pointer}
+button{cursor:pointer;transition:transform .15s ease,box-shadow .2s ease,background .2s ease}
+button:active{transform:scale(.97)}
+.primary,.btnl{background:var(--pri);color:#fff;border:0;padding:9px 18px;border-radius:8px;text-decoration:none;font-size:14px;display:inline-block;cursor:pointer;transition:background .2s ease,box-shadow .2s ease,transform .15s ease}
+.primary:hover,.btnl:hover{background:#4338ca;box-shadow:0 4px 14px #4f46e540;transform:translateY(-1px)}
 .danger{color:#c62828;border-color:#f3c1c1}
 .grid,.r{display:flex;flex-wrap:wrap;gap:6px;align-items:end}.grid label{display:flex;flex-direction:column;font-size:12px;color:var(--mut)}
 table{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
 th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}
 th{background:#f7f8fc;color:var(--mut);font-weight:500;font-size:13px}tr:last-child td{border-bottom:0}
+tbody tr{transition:background .15s ease}tbody tr:hover{background:#f7f8fd}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:18px}
-.kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;transition:box-shadow .2s ease,transform .2s ease}
+.kpi:hover{box-shadow:0 8px 22px #1c234014;transform:translateY(-1px)}
 .kpi span{font-size:13px;color:var(--mut)}.kpi b{display:block;font-size:26px;margin:4px 0 8px}
 .bar{display:block;height:6px;background:#eceffa;border-radius:3px;overflow:hidden;min-width:70px;margin-top:4px}
-.bar u{display:block;height:100%;background:#22a06b}.bar.a u{background:#e8a317}.bar.r u{background:#e5484d}
-.flash{background:#eef0ff;border:1px solid #d6d9ff;padding:10px 14px;border-radius:10px}
-.warn{background:#fff4e5;border:1px solid #ffd59a;color:#7a4b00;padding:12px 16px;border-radius:10px;margin-bottom:16px;font-size:14px}
+.bar u{display:block;height:100%;background:#22a06b;transition:width .5s ease}.bar.a u{background:#e8a317}.bar.r u{background:#e5484d}
+.flash{background:#eef0ff;border:1px solid #d6d9ff;padding:10px 14px;border-radius:10px;animation:fadeInUp .35s ease}
+.warn{background:#fff4e5;border:1px solid #ffd59a;color:#7a4b00;padding:12px 16px;border-radius:10px;margin-bottom:16px;font-size:14px;animation:fadeInUp .35s ease}
 .warn div{margin-top:4px}
 .totals{background:#eef0ff;padding:10px 14px;border-radius:10px;margin:12px 0}
-.act{display:flex;gap:8px;align-items:center}.act form{margin:0}.act a{color:var(--pri);text-decoration:none}
-@media(max-width:800px){.app{flex-direction:column}aside{width:auto;flex-direction:row;flex-wrap:wrap;align-items:center}.me{margin:0 0 0 auto;border:0;padding:0}main{padding:16px}}
+.act{display:flex;gap:8px;align-items:center}.act form{margin:0}.act a{color:var(--pri);text-decoration:none;transition:color .2s ease}.act a:hover{color:#4338ca}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@media print{aside,.me,.flash,.warn,form,.btnl,.no-print{display:none!important}main{padding:0;animation:none}body{background:#fff}
+.card{border:0;padding:0}table{border:1px solid #000}th,td{border-color:#000}.kpi{border:1px solid #000}}
+@media(max-width:800px){.app{flex-direction:column}aside{width:auto;flex-direction:row;flex-wrap:wrap;align-items:center}.me{order:99;margin:0 0 0 auto;border:0;padding:0}main{padding:16px}}
 .lg{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:linear-gradient(135deg,#c9b8f6 0%,#fbd3e2 45%,#b9d2f8 100%)}
 .win{position:relative;width:min(880px,100%);box-shadow:0 20px 50px #5b3f9a33;border-radius:14px}
 .wbar{background:#f6a5a5;height:28px;border-radius:14px 14px 0 0;display:flex;align-items:center;gap:6px;padding:0 12px}
@@ -220,14 +229,16 @@ th{background:#f7f8fc;color:var(--mut);font-weight:500;font-size:13px}tr:last-ch
 </style></head><body>
 {% if session.role %}<div class="app"><aside>
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
+<div class="me"><span>{{session.name}}</span><a href="/logout">Logout</a></div>
 {% for h,l,on in nav %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endfor %}
-<div class="me"><span>{{session.name}}</span><a href="/logout">Logout</a></div></aside>
+</aside>
 <main>{% for m in get_flashed_messages() %}<p class="flash">{{m}}</p>{% endfor %}{{body|safe}}</main></div>
 {% else %}<div class="lg">{% for m in get_flashed_messages() %}<p class="flash" style="background:#fff">{{m}}</p>{% endfor %}{{body|safe}}</div>{% endif %}
 </body></html>"""
 
 NAVS = {
-    "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"), ("/admin/processes", "Processes"),
+    "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"), ("/admin/personal", "Personal details"),
+              ("/admin/processes", "Processes"),
               ("/admin/log", "Productivity log"), ("/admin/missed", "Missed entries"), ("/admin/leave", "Leave log"),
               ("/admin/holidays", "Holidays")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave"), ("/employee/profile", "Personal details")],
@@ -564,8 +575,10 @@ EMP_TOP = """<div class="head"><div><h1>Hello, {{session.name}}</h1>
 
 SUMMARY = """<div class="head"><div><h1>Overview</h1>
 <p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; 8 hrs per present day (capped at 100%).</p></div>
-<form class="grid" method="get"><input type="month" name="month" value="{{month if month!='all' else ''}}">
-<button class="primary">Show</button><a href="/admin/summary?month=all">All time</a></form></div>""" + KPI + """
+<div class="no-print" style="display:flex;gap:8px;align-items:center">
+<form class="grid" method="get" style="margin:0"><input type="month" name="month" value="{{month if month!='all' else ''}}">
+<button class="primary">Show</button><a href="/admin/summary?month=all">All time</a></form>
+<button type="button" class="btnl" onclick="window.print()">&#128438; Print</button></div></div>""" + KPI + """
 <table><tr><th>Employee</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Productivity</th></tr>
 {% for r in rep %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>
@@ -595,6 +608,22 @@ LEAVE_ADMIN = """<div class="head"><h1>Leave log</h1></div>
 <td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td><td class="act"><a href="/admin/leave/{{r['_row']}}">Edit</a>
 <form method="post" action="/admin/leave/{{r['_row']}}/delete" onsubmit="return confirm('Delete?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="6">No leave records.</td></tr>{% endfor %}</table>"""
+
+PERSONAL_VIEW = """<div class="head"><div><h1>Personal details</h1>
+<p class="mut">View only &middot; each employee enters and updates their own details from their Personal details page.</p></div>
+<button type="button" class="btnl no-print" onclick="window.print()">&#128438; Print</button></div>
+<table><tr><th>Emp ID</th><th>Name</th><th>Address 1</th><th>Address 2</th><th>City</th><th>PIN</th>
+<th>Phone Number</th><th>WhatsApp</th><th>Personal Email ID</th><th>Office Email ID</th></tr>
+{% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td>{{e['Name']}}</td><td>{{e['Address_1']}}</td><td>{{e['Address_2']}}</td>
+<td>{{e['City']}}</td><td>{{e['PIN']}}</td><td>{{e['Phone Number']}}</td><td>{{e['WhatsApp']}}</td>
+<td>{{e['Personal Email ID']}}</td><td>{{e['Office Email ID']}}</td></tr>
+{% else %}<tr><td colspan="10">No employees yet.</td></tr>{% endfor %}</table>"""
+
+@app.route("/admin/personal")
+@need("admin")
+def admin_personal():
+    emps = sorted(rows("Employees"), key=lambda e: str(e["Name"]))
+    return page(PERSONAL_VIEW, title="Personal details", emps=emps)
 
 @app.route("/admin/summary")
 @need("admin")

@@ -42,7 +42,7 @@ PHOTOS = {
 HEADERS = {
     "Employees": ["Employee ID", "Name", "Band", "Email", "Password",
                   "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
-                  "Emergency no", "Personal Email ID", "Office Email ID"],
+                  "Emergency no", "Personal Email ID", "Office Email ID", "Designation"],
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
@@ -53,9 +53,9 @@ PERSONAL_FIELDS = ["Address Line_1", "Address Line_2", "City", "PIN", "Phone Num
                     "Emergency no", "Personal Email ID", "Office Email ID"]
 # Office Email ID is not typed by anyone: it always mirrors the employee's login Email.
 EDITABLE_PERSONAL = [f for f in PERSONAL_FIELDS if f != "Office Email ID"]
-# Columns shown on Admin -> Employees (personal fields live on the Personal details pages).
-# These are the leading sheet columns, so writing them never touches the personal columns.
-LIST_HEADERS = {"Employees": [h for h in HEADERS["Employees"] if h not in PERSONAL_FIELDS]}
+# Columns shown on Admin -> Employees, in this display order (personal fields live on the
+# Personal details pages). Display order != sheet column order, so reads/writes map by name.
+LIST_HEADERS = {"Employees": ["Employee ID", "Name", "Designation", "Band", "Email", "Password"]}
 def list_heads(sheet): return LIST_HEADERS.get(sheet, HEADERS[sheet])
 OPTIONAL_FIELDS = set(PERSONAL_FIELDS)   # not required when admin adds/edits an employee
 LOCKED_FIELDS = {}   # nothing locked: admin can add/edit personal details; employees can also edit their own via /employee/profile
@@ -76,8 +76,9 @@ def book():
         have = {w.title for w in b.worksheets()}
         for name, h in HEADERS.items():
             if name not in have:
-                b.add_worksheet(title=name, rows=1000, cols=12)
+                b.add_worksheet(title=name, rows=1000, cols=max(12, len(h)))
             ws = b.worksheet(name)
+            if ws.col_count < len(h): ws.add_cols(len(h) - ws.col_count)
             if ws.row_values(1) != h:
                 ws.update(range_name="A1", values=[h])
         _book = b
@@ -390,12 +391,14 @@ def admin_edit(kind, row):
     heads = list_heads(sheet); ws = book().worksheet(sheet)
     if request.method == "POST":
         vals = [request.form.get(f"f{i}", "").strip() for i in range(len(heads))]
-        ws.update(range_name=f"A{row}", values=[vals])
+        full = ws.row_values(row); full += [""] * (len(HEADERS[sheet]) - len(full))
+        for h, v in zip(heads, vals): full[HEADERS[sheet].index(h)] = v
         if sheet == "Employees":   # office email follows the login email
-            cell = gspread.utils.rowcol_to_a1(row, HEADERS[sheet].index("Office Email ID") + 1)
-            ws.update(range_name=cell, values=[[vals[heads.index("Email")]]])
+            full[HEADERS[sheet].index("Office Email ID")] = vals[heads.index("Email")]
+        ws.update(range_name=f"A{row}", values=[full])
         flash("Updated."); return redirect(f"/admin/{kind}")
-    vals = ws.row_values(row); vals += [""] * (len(heads) - len(vals))
+    cur = ws.row_values(row); cur += [""] * (len(HEADERS[sheet]) - len(cur))
+    vals = [cur[HEADERS[sheet].index(h)] for h in heads]
     return page(EDIT, title=sheet, heads=heads, vals=vals, kind=kind,
                 optional=OPTIONAL_FIELDS, locked=LOCKED_FIELDS.get(sheet, set()))
 

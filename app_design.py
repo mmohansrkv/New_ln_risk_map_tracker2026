@@ -556,6 +556,13 @@ def log_logout(row):
     status = "Full day (8 hr+)" if hrs >= DAY_HOURS else f"Short by {DAY_HOURS - hrs:g} hr"
     ws.update(range_name=f"E{row}", values=[[now.strftime("%H:%M:%S"), computer, hrs, status]])
 
+def find_open_login(emp_id):
+    """Row number of this employee's most recent login with no logout yet, else None."""
+    for r in reversed(rows("Login Log")):
+        if str(r["Employee ID"]) == str(emp_id) and r["Login time"] and not r["Logout time"]:
+            return r["_row"]
+    return None
+
 def add_leave(emp, d1, d2, reason):
     a, b = dt.date.fromisoformat(d1), dt.date.fromisoformat(d2)
     if b < a or (b - a).days > 31:
@@ -693,6 +700,20 @@ def admin_missed():
     return page(MISSED, title="Missed entries", data=data, n_emp=len({r["id"] for r in data}),
                 month=month, label=label, emp=request.args.get("emp", ""))
 
+PUNCH = """<div class="card"><form method="post" action="/employee/punch" id="pf">
+<input type="hidden" name="computer" id="computer">
+<button class="primary">{{'Logout' if open_row else 'Login'}}</button>
+<span class="mut">{% if open_row %}You're logged in - click Logout to close today's entry and record hours worked.
+{% else %}Click Login to start today's entry.{% endif %}</span>
+</form></div>
+<script>
+document.getElementById('pf').addEventListener('submit', function(){
+  var label = (window.name && window.name.trim()) ||
+              (navigator.platform || 'Unknown') + ' ' + (screen.width + 'x' + screen.height);
+  document.getElementById('computer').value = label;
+});
+</script>"""
+
 LOGINLOG = """<div class="head"><div><h1>Login/Logout log</h1>
 <p class="mut">Login and logout time, computer/device, and hours worked vs the 8 hr/day target.</p></div>
 <form class="grid" method="get"><input type="date" name="date" value="{{request.args.get('date','')}}">
@@ -720,7 +741,24 @@ def employee_loginlog():
     data = [r for r in rows("Login Log")
             if str(r["Employee ID"]) == session["emp_id"] and (not d or r["Date"] == d)]
     data.sort(key=lambda r: (r["Date"], r["Login time"]), reverse=True)
-    return page(LOGINLOG, title="Login/Logout log", data=data, emp_filter=False, base="/employee/loginlog")
+    open_row = find_open_login(session["emp_id"])
+    return page(PUNCH + LOGINLOG, title="Login/Logout log", data=data, emp_filter=False,
+                base="/employee/loginlog", open_row=open_row)
+
+@app.route("/employee/punch", methods=["POST"])
+@need("employee")
+def employee_punch():
+    open_row = find_open_login(session["emp_id"])
+    if open_row:
+        log_logout(open_row)
+        if session.get("login_row") == open_row:
+            session.pop("login_row", None)
+        flash("Logged out - hours worked recorded.")
+    else:
+        computer = request.form.get("computer", "").strip() or request.remote_addr
+        session["login_row"] = log_login(session["emp_id"], session["name"], computer)
+        flash("Logged in.")
+    return redirect("/employee/loginlog")
 
 @app.route("/admin/leave", methods=["GET", "POST"])
 @need("admin")

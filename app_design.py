@@ -105,8 +105,20 @@ def delete_rows(idx):
     else:
         for r in reversed(idx): ws.delete_rows(r)
 
+def _key(x): return str(x).strip().upper()
+
 def desig_map():
-    return {str(e["Employee ID"]): str(e.get("Designation", "")) for e in rows("Employees")}
+    """{EMPLOYEE ID (normalised): Designation} read live from the Employees sheet."""
+    return {_key(e["Employee ID"]): str(e.get("Designation", "")).strip() for e in rows("Employees")}
+
+def find_designation(emp_id, name="", band=""):
+    """Designation for an employee: matched by Employee ID; if the ID is not found,
+    fall back to Name + Band."""
+    emps = rows("Employees")
+    e = next((e for e in emps if _key(e["Employee ID"]) == _key(emp_id)), None)
+    if e is None:
+        e = next((e for e in emps if _key(e["Name"]) == _key(name) and _key(e["Band"]) == _key(band)), None)
+    return str(e.get("Designation", "")).strip() if e else ""
 
 def load_subs():
     dm = desig_map()
@@ -115,7 +127,7 @@ def load_subs():
     for r in rows("Productivity log"):
         s = subs.setdefault(r["Submission ID"], dict(
             id=r["Submission ID"], date=r["Date"], band=r["Band"], emp_id=r["Employee ID"],
-            emp_name=r["Employee name"], designation=dm.get(str(r["Employee ID"]), ""),
+            emp_name=r["Employee name"], designation=dm.get(_key(r["Employee ID"]), ""),
             procs=[], notes=[], rows=[]))
         s["rows"].append(r["_row"])
         h = num(r["Hour"])
@@ -273,6 +285,7 @@ LOGIN = """<div class="win"><div class="wbar"><i></i><i></i><i></i></div>
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
 <button class="primary">Add</button></form>
+{% if missing %}<p class="mut">&#9888; {{missing}} employee(s) have no Designation yet. Use Edit to set it; it then fills in automatically on their daily entry page.</p>{% endif %}
 {% if locked %}<p class="mut">Personal details are managed on the Personal details page. Office Email ID follows the login Email.</p>{% endif %}</div>
 <table><tr>{% for h in heads %}<th>{{h}}</th>{% endfor %}<th></th></tr>
 {% for r in data %}<tr>{% for h in heads %}<td>{{r[h]}}</td>{% endfor %}
@@ -297,7 +310,7 @@ FORM = """<div class="card"><h2>{{heading}}</h2>
 <form method="post" action="{{action}}">
 <div class="grid">
 <label>Date<input type="date" name="date" value="{{sub.date}}" required></label>
-<label>Designation<input value="{{sub.designation}}" readonly></label>
+<label>Designation<input value="{{sub.designation}}" placeholder="Not set - ask admin" readonly></label>
 <label>Band<input value="{{sub.band}}" readonly></label>
 <label>Employee ID<input value="{{sub.emp_id}}" readonly></label>
 <label>Employee name<input value="{{sub.emp_name}}" readonly></label></div>
@@ -387,7 +400,9 @@ def admin_list(kind):
                                                value_input_option="RAW")
             flash("Added.")
         return redirect(request.path)
-    return page(TABLE, title=sheet, heads=heads, data=rows(sheet), kind=kind,
+    data = rows(sheet)
+    missing = sum(1 for r in data if not str(r.get("Designation", "x")).strip()) if sheet == "Employees" else 0
+    return page(TABLE, title=sheet, heads=heads, data=data, kind=kind, missing=missing,
                 optional=OPTIONAL_FIELDS, locked=LOCKED_FIELDS.get(sheet, set()))
 
 @app.route("/admin/<kind>/<int:row>", methods=["GET", "POST"])
@@ -450,7 +465,8 @@ def form_page(sub, action, heading):
 @need("employee")
 def employee_home():
     today = str(dt.date.today())
-    sub = dict(date=today, band=session["band"], designation=session.get("designation", ""),
+    session["designation"] = find_designation(session["emp_id"], session["name"], session["band"])
+    sub = dict(date=today, band=session["band"], designation=session["designation"],
                emp_id=session["emp_id"], emp_name=session["name"],
                procs=[{}], notes=[{}])
     body, ctx = form_page(sub, "/employee/save", "Daily productivity entry")
@@ -761,7 +777,7 @@ def admin_leave():
         return redirect("/admin/leave")
     data = sorted(rows("Leave"), key=lambda r: r["Date"], reverse=True)
     dm = desig_map()
-    for r in data: r["Designation"] = dm.get(str(r["Employee ID"]), "")
+    for r in data: r["Designation"] = dm.get(_key(r["Employee ID"]), "")
     return page(LEAVE_ADMIN, title="Leave log", emps=emps, data=data)
 
 def my_emp():

@@ -49,6 +49,8 @@ HEADERS = {
     "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at"],
     "Holidays": ["Date", "Name"],
 }
+OPTIONAL_FIELDS = {"Address_1", "Address_2", "City", "PIN", "Phone Number",
+                    "WhatsApp", "Personal Email ID", "Office Email ID"}
 KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave", "holidays": "Holidays"}
 
 app = Flask(__name__)
@@ -244,7 +246,7 @@ LOGIN = """<div class="win"><div class="wbar"><i></i><i></i><i></i></div>
 <button>Log in</button></form></div></div><img class="orb" src="/photo/{{role}}" alt=""></div>"""
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
-<form method="post" class="grid">{% for h in heads %}<input name="f{{loop.index0}}" placeholder="{{h}}" required>{% endfor %}
+<form method="post" class="grid">{% for h in heads %}<input name="f{{loop.index0}}" placeholder="{{h}}"{% if h not in optional %} required{% endif %}>{% endfor %}
 <button class="primary">Add</button></form></div>
 <table><tr>{% for h in heads %}<th>{{h}}</th>{% endfor %}<th></th></tr>
 {% for r in data %}<tr>{% for h in heads %}<td>{{r[h]}}</td>{% endfor %}
@@ -253,7 +255,7 @@ TABLE = """<div class="card"><h2>{{title}}</h2>
 {% else %}<tr><td colspan="9">No records yet.</td></tr>{% endfor %}</table>"""
 
 EDIT = """<div class="card"><h2>Edit {{title}}</h2><form method="post" class="grid">
-{% for h in heads %}<label>{{h}}<input name="f{{loop.index0}}" value="{{vals[loop.index0]}}" required></label>{% endfor %}
+{% for h in heads %}<label>{{h}}<input name="f{{loop.index0}}" value="{{vals[loop.index0]}}"{% if h not in optional %} required{% endif %}></label>{% endfor %}
 <button class="primary">Save</button> <a href="/admin/{{kind}}">Cancel</a></form></div>"""
 
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th>{% endif %}
@@ -354,7 +356,7 @@ def admin_list(kind):
             book().worksheet(sheet).append_row(vals, value_input_option="RAW")
             flash("Added.")
         return redirect(request.path)
-    return page(TABLE, title=sheet, heads=heads, data=rows(sheet), kind=kind)
+    return page(TABLE, title=sheet, heads=heads, data=rows(sheet), kind=kind, optional=OPTIONAL_FIELDS)
 
 @app.route("/admin/<kind>/<int:row>", methods=["GET", "POST"])
 @need("admin")
@@ -366,7 +368,7 @@ def admin_edit(kind, row):
         ws.update(range_name=f"A{row}", values=[vals])
         flash("Updated."); return redirect(f"/admin/{kind}")
     vals = ws.row_values(row); vals += [""] * (len(heads) - len(vals))
-    return page(EDIT, title=sheet, heads=heads, vals=vals, kind=kind)
+    return page(EDIT, title=sheet, heads=heads, vals=vals, kind=kind, optional=OPTIONAL_FIELDS)
 
 @app.route("/admin/<kind>/<int:row>/delete", methods=["POST"])
 @need("admin")

@@ -41,18 +41,18 @@ PHOTOS = {
 
 HEADERS = {
     "Employees": ["Employee ID", "Name", "Band", "Email", "Password",
-                  "Address_1", "Address_2", "City", "PIN", "Phone Number",
-                  "WhatsApp", "Personal Email ID", "Office Email ID"],
+                  "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
+                  "Emergency no", "Personal Email ID", "Office Email ID"],
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
     "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at"],
     "Holidays": ["Date", "Name"],
 }
-PERSONAL_FIELDS = ["Address_1", "Address_2", "City", "PIN", "Phone Number",
-                    "WhatsApp", "Personal Email ID", "Office Email ID"]
+PERSONAL_FIELDS = ["Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
+                    "Emergency no", "Personal Email ID", "Office Email ID"]
 OPTIONAL_FIELDS = set(PERSONAL_FIELDS)   # not required when admin adds/edits an employee
-LOCKED_FIELDS = {"Employees": set(PERSONAL_FIELDS)}  # admin can view but not edit; employee edits these via /employee/profile
+LOCKED_FIELDS = {}   # nothing locked: admin can add/edit personal details; employees can also edit their own via /employee/profile
 KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave", "holidays": "Holidays"}
 
 app = Flask(__name__)
@@ -610,14 +610,14 @@ LEAVE_ADMIN = """<div class="head"><h1>Leave log</h1></div>
 {% else %}<tr><td colspan="6">No leave records.</td></tr>{% endfor %}</table>"""
 
 PERSONAL_VIEW = """<div class="head"><div><h1>Personal details</h1>
-<p class="mut">View only &middot; each employee enters and updates their own details from their Personal details page.</p></div>
+<p class="mut">Admin can edit any employee's details; employees can also update their own from their Personal details page.</p></div>
 <button type="button" class="btnl no-print" onclick="window.print()">&#128438; Print</button></div>
-<table><tr><th>Emp ID</th><th>Name</th><th>Address 1</th><th>Address 2</th><th>City</th><th>PIN</th>
-<th>Phone Number</th><th>WhatsApp</th><th>Personal Email ID</th><th>Office Email ID</th></tr>
-{% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td>{{e['Name']}}</td><td>{{e['Address_1']}}</td><td>{{e['Address_2']}}</td>
-<td>{{e['City']}}</td><td>{{e['PIN']}}</td><td>{{e['Phone Number']}}</td><td>{{e['WhatsApp']}}</td>
-<td>{{e['Personal Email ID']}}</td><td>{{e['Office Email ID']}}</td></tr>
-{% else %}<tr><td colspan="10">No employees yet.</td></tr>{% endfor %}</table>"""
+<table><tr><th>Emp ID</th><th>Name</th><th>Address Line_1</th><th>Address Line_2</th><th>City</th><th>PIN</th>
+<th>Phone Number</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID</th><th></th></tr>
+{% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td>{{e['Name']}}</td><td>{{e['Address Line_1']}}</td><td>{{e['Address Line_2']}}</td>
+<td>{{e['City']}}</td><td>{{e['PIN']}}</td><td>{{e['Phone Number']}}</td><td>{{e['Emergency no']}}</td>
+<td>{{e['Personal Email ID']}}</td><td>{{e['Office Email ID']}}</td><td class="act"><a href="/admin/employees/{{e['_row']}}">Edit</a></td></tr>
+{% else %}<tr><td colspan="11">No employees yet.</td></tr>{% endfor %}</table>"""
 
 @app.route("/admin/personal")
 @need("admin")
@@ -658,16 +658,16 @@ MISSED = """<div class="head"><div><h1>Missed entries</h1>
 {% else %}<tr><td colspan="4">No missed entries.</td></tr>{% endfor %}</table>"""
 
 PROFILE = """<div class="card"><h2>Personal details</h2>
-<p class="mut">Employee ID and name are set by admin. Keep the rest up to date yourself.</p>
+<p class="mut">Employee ID and name are set by admin. You can update the rest yourself; admin can edit them too.</p>
 <form method="post" class="grid">
 <label>Emp ID<input value="{{emp['Employee ID']}}" readonly></label>
 <label>Name<input value="{{emp['Name']}}" readonly></label>
-<label>Address 1<input name="Address_1" value="{{emp['Address_1']}}"></label>
-<label>Address 2<input name="Address_2" value="{{emp['Address_2']}}"></label>
+<label>Address Line_1<input name="Address Line_1" value="{{emp['Address Line_1']}}"></label>
+<label>Address Line_2<input name="Address Line_2" value="{{emp['Address Line_2']}}"></label>
 <label>City<input name="City" value="{{emp['City']}}"></label>
 <label>PIN<input name="PIN" value="{{emp['PIN']}}"></label>
 <label>Phone Number<input name="Phone Number" value="{{emp['Phone Number']}}"></label>
-<label>WhatsApp<input name="WhatsApp" value="{{emp['WhatsApp']}}"></label>
+<label>Emergency no<input name="Emergency no" value="{{emp['Emergency no']}}"></label>
 <label>Personal Email ID<input type="email" name="Personal Email ID" value="{{emp['Personal Email ID']}}"></label>
 <label>Office Email ID<input type="email" name="Office Email ID" value="{{emp['Office Email ID']}}"></label>
 <button class="primary">Save</button></form></div>"""

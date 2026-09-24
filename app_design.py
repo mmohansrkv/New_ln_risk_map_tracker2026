@@ -534,10 +534,15 @@ def report(employees, subs, leaves, start, end):
 # ---------------------------------------------------------------- login/logout time (Login Log sheet)
 # Every employee login/logout is captured here; viewable by admin (all employees) and
 # by each employee for their own record at /employee/loginlog.
+def _t(r):
+    try: return dt.datetime.strptime(r["Login time"] or "12:00:00 AM", "%I:%M:%S %p").time()
+    except ValueError: return dt.time.min
+
 def log_login(emp_id, name, computer):
     ws = book().worksheet("Login Log")
     now = dt.datetime.now()
-    ws.append_row([str(now.date()), str(emp_id), name, now.strftime("%H:%M:%S"), "", computer, "", ""],
+    computer = f"{name} - {computer}" if computer else name
+    ws.append_row([str(now.date()), str(emp_id), name, now.strftime("%I:%M:%S %p"), "", computer, "", ""],
                   value_input_option="RAW")
     return len(ws.get_all_values())        # row number of the entry just appended
 
@@ -549,12 +554,12 @@ def log_logout(row):
     if not login_t: return
     now = dt.datetime.now()
     try:
-        lt = dt.datetime.strptime(f"{date_s} {login_t}", "%Y-%m-%d %H:%M:%S")
+        lt = dt.datetime.strptime(f"{date_s} {login_t}", "%Y-%m-%d %I:%M:%S %p")
         hrs = round((now - lt).total_seconds() / 3600, 2)
     except ValueError:
         hrs = 0
     status = "Full day (8 hr+)" if hrs >= DAY_HOURS else f"Short by {DAY_HOURS - hrs:g} hr"
-    ws.update(range_name=f"E{row}", values=[[now.strftime("%H:%M:%S"), computer, hrs, status]])
+    ws.update(range_name=f"E{row}", values=[[now.strftime("%I:%M:%S %p"), computer, hrs, status]])
 
 def find_open_login(emp_id):
     """Row number of this employee's most recent login with no logout yet, else None."""
@@ -731,7 +736,7 @@ def admin_loginlog():
     d, e = request.args.get("date", ""), request.args.get("emp", "").strip().lower()
     data = [r for r in rows("Login Log") if (not d or r["Date"] == d) and
             (not e or e in (str(r["Employee ID"]).lower(), str(r["Employee name"]).lower()))]
-    data.sort(key=lambda r: (r["Date"], r["Login time"]), reverse=True)
+    data.sort(key=lambda r: (r["Date"], _t(r)), reverse=True)
     return page(LOGINLOG, title="Login/Logout log", data=data, emp_filter=True, base="/admin/loginlog")
 
 @app.route("/employee/loginlog")
@@ -740,7 +745,7 @@ def employee_loginlog():
     d = request.args.get("date", "")
     data = [r for r in rows("Login Log")
             if str(r["Employee ID"]) == session["emp_id"] and (not d or r["Date"] == d)]
-    data.sort(key=lambda r: (r["Date"], r["Login time"]), reverse=True)
+    data.sort(key=lambda r: (r["Date"], _t(r)), reverse=True)
     open_row = find_open_login(session["emp_id"])
     return page(PUNCH + LOGINLOG, title="Login/Logout log", data=data, emp_filter=False,
                 base="/employee/loginlog", open_row=open_row)

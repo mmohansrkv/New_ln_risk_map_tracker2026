@@ -51,6 +51,12 @@ HEADERS = {
 }
 PERSONAL_FIELDS = ["Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                     "Emergency no", "Personal Email ID", "Office Email ID"]
+# Office Email ID is not typed by anyone: it always mirrors the employee's login Email.
+EDITABLE_PERSONAL = [f for f in PERSONAL_FIELDS if f != "Office Email ID"]
+# Columns shown on Admin -> Employees (personal fields live on the Personal details pages).
+# These are the leading sheet columns, so writing them never touches the personal columns.
+LIST_HEADERS = {"Employees": [h for h in HEADERS["Employees"] if h not in PERSONAL_FIELDS]}
+def list_heads(sheet): return LIST_HEADERS.get(sheet, HEADERS[sheet])
 OPTIONAL_FIELDS = set(PERSONAL_FIELDS)   # not required when admin adds/edits an employee
 LOCKED_FIELDS = {}   # nothing locked: admin can add/edit personal details; employees can also edit their own via /employee/profile
 KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave", "holidays": "Holidays"}
@@ -261,7 +267,7 @@ LOGIN = """<div class="win"><div class="wbar"><i></i><i></i><i></i></div>
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
 <button class="primary">Add</button></form>
-{% if locked %}<p class="mut">Personal details are entered by each employee on their own Personal details page.</p>{% endif %}</div>
+{% if locked %}<p class="mut">Personal details are managed on the Personal details page. Office Email ID follows the login Email.</p>{% endif %}</div>
 <table><tr>{% for h in heads %}<th>{{h}}</th>{% endfor %}<th></th></tr>
 {% for r in data %}<tr>{% for h in heads %}<td>{{r[h]}}</td>{% endfor %}
 <td class="act"><a href="/admin/{{kind}}/{{r['_row']}}">Edit</a>
@@ -362,13 +368,16 @@ def admin_home(): return redirect("/admin/summary")
 @need("admin")
 def admin_list(kind):
     sheet = KINDS.get(kind) or abort(404)
-    heads = HEADERS[sheet]
+    heads = list_heads(sheet)
     if request.method == "POST":
         vals = [request.form.get(f"f{i}", "").strip() for i in range(len(heads))]
         if any(str(r[heads[0]]) == vals[0] for r in rows(sheet)):
             flash(f"{heads[0]} '{vals[0]}' already exists.")
         else:
-            book().worksheet(sheet).append_row(vals, value_input_option="RAW")
+            full = dict(zip(heads, vals))
+            if sheet == "Employees": full["Office Email ID"] = full.get("Email", "")
+            book().worksheet(sheet).append_row([full.get(h, "") for h in HEADERS[sheet]],
+                                               value_input_option="RAW")
             flash("Added.")
         return redirect(request.path)
     return page(TABLE, title=sheet, heads=heads, data=rows(sheet), kind=kind,
@@ -378,10 +387,13 @@ def admin_list(kind):
 @need("admin")
 def admin_edit(kind, row):
     sheet = KINDS.get(kind) or abort(404)
-    heads = HEADERS[sheet]; ws = book().worksheet(sheet)
+    heads = list_heads(sheet); ws = book().worksheet(sheet)
     if request.method == "POST":
         vals = [request.form.get(f"f{i}", "").strip() for i in range(len(heads))]
         ws.update(range_name=f"A{row}", values=[vals])
+        if sheet == "Employees":   # office email follows the login email
+            cell = gspread.utils.rowcol_to_a1(row, HEADERS[sheet].index("Office Email ID") + 1)
+            ws.update(range_name=cell, values=[[vals[heads.index("Email")]]])
         flash("Updated."); return redirect(f"/admin/{kind}")
     vals = ws.row_values(row); vals += [""] * (len(heads) - len(vals))
     return page(EDIT, title=sheet, heads=heads, vals=vals, kind=kind,
@@ -452,7 +464,7 @@ def employee_home():
     k = report([my_emp()], all_mine, lv, first, t0)[0]
     missed = missing_dates(session["emp_id"], all_mine, lv, first, t0 - dt.timedelta(days=1))
     pend = bool(missing_dates(session["emp_id"], all_mine, lv, t0, t0))
-    profile_incomplete = any(not str(my_emp_row().get(f, "")).strip() for f in PERSONAL_FIELDS)
+    profile_incomplete = any(not str(my_emp_row().get(f, "")).strip() for f in EDITABLE_PERSONAL)
     extra = [("Present days", k["present"]), ("Leave days", k["leave"])]
     return page(EMP_TOP + EMP_ALERT + body + '<h2>Submitted today</h2>' + LIST + month_html,
                 title="Daily productivity", missed=missed, pend=pend, subs=mine, msubs=month_subs, m_count=m_count, m_prod=m_prod, m_non=m_non,
@@ -613,10 +625,10 @@ PERSONAL_VIEW = """<div class="head"><div><h1>Personal details</h1>
 <p class="mut">Admin can edit any employee's details; employees can also update their own from their Personal details page.</p></div>
 <button type="button" class="btnl no-print" onclick="window.print()">&#128438; Print</button></div>
 <table><tr><th>Emp ID</th><th>Name</th><th>Address Line_1</th><th>Address Line_2</th><th>City</th><th>PIN</th>
-<th>Phone Number</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID</th><th></th></tr>
+<th>Phone Number</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID <small>(login)</small></th><th></th></tr>
 {% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td>{{e['Name']}}</td><td>{{e['Address Line_1']}}</td><td>{{e['Address Line_2']}}</td>
 <td>{{e['City']}}</td><td>{{e['PIN']}}</td><td>{{e['Phone Number']}}</td><td>{{e['Emergency no']}}</td>
-<td>{{e['Personal Email ID']}}</td><td>{{e['Office Email ID']}}</td><td class="act"><a href="/admin/employees/{{e['_row']}}">Edit</a></td></tr>
+<td>{{e['Personal Email ID']}}</td><td>{{e['Email']}}</td><td class="act"><a href="/admin/personal/{{e['_row']}}">Edit</a></td></tr>
 {% else %}<tr><td colspan="11">No employees yet.</td></tr>{% endfor %}</table>"""
 
 @app.route("/admin/personal")
@@ -624,6 +636,30 @@ PERSONAL_VIEW = """<div class="head"><div><h1>Personal details</h1>
 def admin_personal():
     emps = sorted(rows("Employees"), key=lambda e: str(e["Name"]))
     return page(PERSONAL_VIEW, title="Personal details", emps=emps)
+
+PERSONAL_EDIT = """<div class="card"><h2>Edit personal details</h2>
+<form method="post" class="grid">
+<label>Emp ID<input value="{{emp['Employee ID']}}" readonly></label>
+<label>Name<input value="{{emp['Name']}}" readonly></label>
+{% for f in fields %}<label>{{f}}<input {% if f.endswith('Email ID') %}type="email" {% endif %}name="{{f}}" value="{{emp[f]}}"></label>{% endfor %}
+<label>Office Email ID<input value="{{emp['Email']}}" readonly></label>
+<button class="primary">Save</button> <a href="/admin/personal">Cancel</a></form>
+<p class="mut">Office Email ID is linked to the employee's login email. To change it, edit the Email on the Employees page.</p></div>"""
+
+@app.route("/admin/personal/<int:row>", methods=["GET", "POST"])
+@need("admin")
+def admin_personal_edit(row):
+    heads = HEADERS["Employees"]
+    emp = next((e for e in rows("Employees") if e["_row"] == row), None)
+    if not emp: abort(404)
+    if request.method == "POST":
+        vals = [str(emp.get(h, "")) for h in heads]
+        for f in EDITABLE_PERSONAL:
+            vals[heads.index(f)] = request.form.get(f, "").strip()
+        vals[heads.index("Office Email ID")] = str(emp.get("Email", ""))
+        book().worksheet("Employees").update(range_name=f"A{row}", values=[vals])
+        flash("Updated."); return redirect("/admin/personal")
+    return page(PERSONAL_EDIT, title="Personal details", emp=emp, fields=EDITABLE_PERSONAL)
 
 @app.route("/admin/summary")
 @need("admin")
@@ -658,7 +694,7 @@ MISSED = """<div class="head"><div><h1>Missed entries</h1>
 {% else %}<tr><td colspan="4">No missed entries.</td></tr>{% endfor %}</table>"""
 
 PROFILE = """<div class="card"><h2>Personal details</h2>
-<p class="mut">Employee ID and name are set by admin. You can update the rest yourself; admin can edit them too.</p>
+<p class="mut">Employee ID, name and Office Email ID (your login email) are set by admin. You can update the rest yourself; admin can edit them too.</p>
 <form method="post" class="grid">
 <label>Emp ID<input value="{{emp['Employee ID']}}" readonly></label>
 <label>Name<input value="{{emp['Name']}}" readonly></label>
@@ -669,7 +705,7 @@ PROFILE = """<div class="card"><h2>Personal details</h2>
 <label>Phone Number<input name="Phone Number" value="{{emp['Phone Number']}}"></label>
 <label>Emergency no<input name="Emergency no" value="{{emp['Emergency no']}}"></label>
 <label>Personal Email ID<input type="email" name="Personal Email ID" value="{{emp['Personal Email ID']}}"></label>
-<label>Office Email ID<input type="email" name="Office Email ID" value="{{emp['Office Email ID']}}"></label>
+<label>Office Email ID<input value="{{emp['Email']}}" readonly></label>
 <button class="primary">Save</button></form></div>"""
 
 @app.route("/admin/missed")
@@ -730,8 +766,9 @@ def employee_profile():
     if request.method == "POST":
         heads = HEADERS["Employees"]
         vals = [str(emp.get(h, "")) for h in heads]
-        for f in PERSONAL_FIELDS:
+        for f in EDITABLE_PERSONAL:
             vals[heads.index(f)] = request.form.get(f, "").strip()
+        vals[heads.index("Office Email ID")] = str(emp.get("Email", ""))
         book().worksheet("Employees").update(range_name=f"A{emp['_row']}", values=[vals])
         flash("Profile updated.")
         return redirect("/employee/profile")

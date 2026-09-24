@@ -49,8 +49,10 @@ HEADERS = {
     "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at"],
     "Holidays": ["Date", "Name"],
 }
-OPTIONAL_FIELDS = {"Address_1", "Address_2", "City", "PIN", "Phone Number",
-                    "WhatsApp", "Personal Email ID", "Office Email ID"}
+PERSONAL_FIELDS = ["Address_1", "Address_2", "City", "PIN", "Phone Number",
+                    "WhatsApp", "Personal Email ID", "Office Email ID"]
+OPTIONAL_FIELDS = set(PERSONAL_FIELDS)   # not required when admin adds/edits an employee
+LOCKED_FIELDS = {"Employees": set(PERSONAL_FIELDS)}  # admin can view but not edit; employee edits these via /employee/profile
 KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave", "holidays": "Holidays"}
 
 app = Flask(__name__)
@@ -228,7 +230,7 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"), ("/admin/processes", "Processes"),
               ("/admin/log", "Productivity log"), ("/admin/missed", "Missed entries"), ("/admin/leave", "Leave log"),
               ("/admin/holidays", "Holidays")],
-    "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave")],
+    "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave"), ("/employee/profile", "Personal details")],
 }
 
 def page(body, title="Productivity Tracker", **ctx):
@@ -246,8 +248,9 @@ LOGIN = """<div class="win"><div class="wbar"><i></i><i></i><i></i></div>
 <button>Log in</button></form></div></div><img class="orb" src="/photo/{{role}}" alt=""></div>"""
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
-<form method="post" class="grid">{% for h in heads %}<input name="f{{loop.index0}}" placeholder="{{h}}"{% if h not in optional %} required{% endif %}>{% endfor %}
-<button class="primary">Add</button></form></div>
+<form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
+<button class="primary">Add</button></form>
+{% if locked %}<p class="mut">Personal details are entered by each employee on their own Personal details page.</p>{% endif %}</div>
 <table><tr>{% for h in heads %}<th>{{h}}</th>{% endfor %}<th></th></tr>
 {% for r in data %}<tr>{% for h in heads %}<td>{{r[h]}}</td>{% endfor %}
 <td class="act"><a href="/admin/{{kind}}/{{r['_row']}}">Edit</a>
@@ -255,8 +258,9 @@ TABLE = """<div class="card"><h2>{{title}}</h2>
 {% else %}<tr><td colspan="9">No records yet.</td></tr>{% endfor %}</table>"""
 
 EDIT = """<div class="card"><h2>Edit {{title}}</h2><form method="post" class="grid">
-{% for h in heads %}<label>{{h}}<input name="f{{loop.index0}}" value="{{vals[loop.index0]}}"{% if h not in optional %} required{% endif %}></label>{% endfor %}
-<button class="primary">Save</button> <a href="/admin/{{kind}}">Cancel</a></form></div>"""
+{% for h in heads %}<label>{{h}}<input name="f{{loop.index0}}" value="{{vals[loop.index0]}}"{% if h not in optional %} required{% endif %}{% if h in locked %} readonly{% endif %}></label>{% endfor %}
+<button class="primary">Save</button> <a href="/admin/{{kind}}">Cancel</a></form>
+{% if locked %}<p class="mut">Personal details (grayed out) are entered by the employee on their own Personal details page.</p>{% endif %}</div>"""
 
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th>{% endif %}
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Productivity</th><th></th></tr>
@@ -356,7 +360,8 @@ def admin_list(kind):
             book().worksheet(sheet).append_row(vals, value_input_option="RAW")
             flash("Added.")
         return redirect(request.path)
-    return page(TABLE, title=sheet, heads=heads, data=rows(sheet), kind=kind, optional=OPTIONAL_FIELDS)
+    return page(TABLE, title=sheet, heads=heads, data=rows(sheet), kind=kind,
+                optional=OPTIONAL_FIELDS, locked=LOCKED_FIELDS.get(sheet, set()))
 
 @app.route("/admin/<kind>/<int:row>", methods=["GET", "POST"])
 @need("admin")
@@ -368,7 +373,8 @@ def admin_edit(kind, row):
         ws.update(range_name=f"A{row}", values=[vals])
         flash("Updated."); return redirect(f"/admin/{kind}")
     vals = ws.row_values(row); vals += [""] * (len(heads) - len(vals))
-    return page(EDIT, title=sheet, heads=heads, vals=vals, kind=kind, optional=OPTIONAL_FIELDS)
+    return page(EDIT, title=sheet, heads=heads, vals=vals, kind=kind,
+                optional=OPTIONAL_FIELDS, locked=LOCKED_FIELDS.get(sheet, set()))
 
 @app.route("/admin/<kind>/<int:row>/delete", methods=["POST"])
 @need("admin")
@@ -435,11 +441,12 @@ def employee_home():
     k = report([my_emp()], all_mine, lv, first, t0)[0]
     missed = missing_dates(session["emp_id"], all_mine, lv, first, t0 - dt.timedelta(days=1))
     pend = bool(missing_dates(session["emp_id"], all_mine, lv, t0, t0))
+    profile_incomplete = any(not str(my_emp_row().get(f, "")).strip() for f in PERSONAL_FIELDS)
     extra = [("Present days", k["present"]), ("Leave days", k["leave"])]
     return page(EMP_TOP + EMP_ALERT + body + '<h2>Submitted today</h2>' + LIST + month_html,
                 title="Daily productivity", missed=missed, pend=pend, subs=mine, msubs=month_subs, m_count=m_count, m_prod=m_prod, m_non=m_non,
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
-                a1=k["att"], a2=k["pct"], extra=extra, **ctx)
+                a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete, **ctx)
 
 @app.route("/employee/save", methods=["POST"])
 @need("employee")
@@ -537,7 +544,9 @@ def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
 EMP_ALERT = """{% if missed or pend %}<div class="warn"><b>&#9888; Productivity entry pending</b>
 {% if missed %}<div>You missed the entry for {{missed|length}} day(s) this month: {{missed|join(', ')}}.
 Pick that date in the form below and submit, or apply leave.</div>{% endif %}
-{% if pend %}<div>Today's entry is not submitted yet.</div>{% endif %}</div>{% endif %}"""
+{% if pend %}<div>Today's entry is not submitted yet.</div>{% endif %}</div>{% endif %}
+{% if profile_incomplete %}<div class="warn"><b>&#9888; Personal details incomplete</b>
+<div>Please <a href="/employee/profile">complete your personal details</a>.</div></div>{% endif %}"""
 
 ADMIN_ALERT = """{% if miss or pend %}<div class="warn"><b>&#9888; Missed entries - {{mlabel}}</b>
 {% for r in miss %}<div>{{r.id}} &middot; {{r.name}}: {{r.days|length}} day(s) - {{r.days|join(', ')}}</div>{% endfor %}
@@ -619,6 +628,21 @@ MISSED = """<div class="head"><div><h1>Missed entries</h1>
 {% for r in data %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.band}}</td></tr>
 {% else %}<tr><td colspan="4">No missed entries.</td></tr>{% endfor %}</table>"""
 
+PROFILE = """<div class="card"><h2>Personal details</h2>
+<p class="mut">Employee ID and name are set by admin. Keep the rest up to date yourself.</p>
+<form method="post" class="grid">
+<label>Emp ID<input value="{{emp['Employee ID']}}" readonly></label>
+<label>Name<input value="{{emp['Name']}}" readonly></label>
+<label>Address 1<input name="Address_1" value="{{emp['Address_1']}}"></label>
+<label>Address 2<input name="Address_2" value="{{emp['Address_2']}}"></label>
+<label>City<input name="City" value="{{emp['City']}}"></label>
+<label>PIN<input name="PIN" value="{{emp['PIN']}}"></label>
+<label>Phone Number<input name="Phone Number" value="{{emp['Phone Number']}}"></label>
+<label>WhatsApp<input name="WhatsApp" value="{{emp['WhatsApp']}}"></label>
+<label>Personal Email ID<input type="email" name="Personal Email ID" value="{{emp['Personal Email ID']}}"></label>
+<label>Office Email ID<input type="email" name="Office Email ID" value="{{emp['Office Email ID']}}"></label>
+<button class="primary">Save</button></form></div>"""
+
 @app.route("/admin/missed")
 @need("admin")
 def admin_missed():
@@ -663,6 +687,26 @@ def admin_leave():
 
 def my_emp():
     return {"Employee ID": session["emp_id"], "Name": session["name"], "Band": session["band"]}
+
+def my_emp_row():
+    """Full Employees-sheet record (with _row) for the logged-in employee."""
+    r = next((e for e in rows("Employees") if str(e["Employee ID"]) == session["emp_id"]), None)
+    if not r: abort(404)
+    return r
+
+@app.route("/employee/profile", methods=["GET", "POST"])
+@need("employee")
+def employee_profile():
+    emp = my_emp_row()
+    if request.method == "POST":
+        heads = HEADERS["Employees"]
+        vals = [str(emp.get(h, "")) for h in heads]
+        for f in PERSONAL_FIELDS:
+            vals[heads.index(f)] = request.form.get(f, "").strip()
+        book().worksheet("Employees").update(range_name=f"A{emp['_row']}", values=[vals])
+        flash("Profile updated.")
+        return redirect("/employee/profile")
+    return page(PROFILE, title="Personal details", emp=emp)
 
 @app.route("/employee/leave", methods=["GET", "POST"])
 @need("employee")

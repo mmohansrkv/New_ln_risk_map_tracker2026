@@ -13,7 +13,7 @@ CREDS_FILE = os.getenv("GOOGLE_CREDS", "credentials.json")
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
 ADMIN_PASS = os.getenv("ADMIN_PASS", "admin123")   # change this!
 DAY_HOURS = 8
-WEEKOFF = (6,)   # weekly off days: 5 = Saturday, 6 = Sunday. Use (5, 6) if Sat + Sun are both off.
+WEEKOFF = (5, 6)   # weekly off days: 5 = Saturday, 6 = Sunday - working week is Monday-Friday.
 
 _holidays_cache = None
 def holidays():
@@ -46,12 +46,8 @@ HEADERS = {
                          "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
     "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at"],
     "Holidays": ["Date", "Name"],
-    "Login Log": ["Date", "Employee ID", "Employee name", "Login time", "Logout time",
-                  "Computer", "Hours worked", "Status"],
 }
 KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave", "holidays": "Holidays"}
-# "Login Log" is not in KINDS (not editable as a generic table) but IS visible, read-only,
-# to both admin (/admin/loginlog, all employees) and each employee (/employee/loginlog, own records only).
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "change-me")
@@ -119,7 +115,7 @@ def load_subs():
         s["non"] = sum(n["hour"] for n in s["notes"])
         s["total"] = s["prod"] + s["non"]
         s["earned"] = sum(p["earned"] for p in s["procs"])     # hours' worth of standard output
-        s["pct"] = round(s["earned"] / DAY_HOURS * 100)         # 8 hrs = 100%
+        s["pct"] = min(round(s["prod"] / DAY_HOURS * 100), 100) if DAY_HOURS else 0  # 8 productive hrs logged = 100%
         s["off"] = is_off(s["date"])                            # weekly-off entry: saved, not counted
     return sorted(subs.values(), key=lambda s: s["date"], reverse=True)
 
@@ -227,8 +223,8 @@ th{background:#f7f8fc;color:var(--mut);font-weight:500;font-size:13px}tr:last-ch
 NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"), ("/admin/processes", "Processes"),
               ("/admin/log", "Productivity log"), ("/admin/missed", "Missed entries"), ("/admin/leave", "Leave log"),
-              ("/admin/holidays", "Holidays"), ("/admin/loginlog", "Login/Logout log")],
-    "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave"), ("/employee/loginlog", "Login/Logout log")],
+              ("/admin/holidays", "Holidays")],
+    "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave")],
 }
 
 def page(body, title="Productivity Tracker", **ctx):
@@ -241,21 +237,9 @@ def page(body, title="Productivity Tracker", **ctx):
 
 LOGIN = """<div class="win"><div class="wbar"><i></i><i></i><i></i></div>
 <div class="wbody"><div class="lcard"><h2>Welcome back</h2><p>{{title}}</p>
-<form method="post" id="lf"><input name="u" placeholder="{{ph}}" required autofocus>
+<form method="post"><input name="u" placeholder="{{ph}}" required autofocus>
 <input name="p" type="password" placeholder="Password" required>
-<input type="hidden" name="computer" id="computer">
-<button>Log in</button></form></div></div><img class="orb" src="/photo/{{role}}" alt=""></div>
-<script>
-// Best-effort device label: browsers don't expose the real OS/computer name for
-// privacy reasons, so this is a stable fingerprint (platform + resolution) that
-// lets admin tell devices apart. If your desktop launcher sets window.name to the
-// PC's hostname before opening this page, that real computer name is used instead.
-document.getElementById('lf').addEventListener('submit', function(){
-  var label = (window.name && window.name.trim()) ||
-              (navigator.platform || 'Unknown') + ' ' + (screen.width + 'x' + screen.height);
-  document.getElementById('computer').value = label;
-});
-</script>"""
+<button>Log in</button></form></div></div><img class="orb" src="/photo/{{role}}" alt=""></div>"""
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}<input name="f{{loop.index0}}" placeholder="{{h}}" required>{% endfor %}
@@ -291,7 +275,7 @@ FORM = """<div class="card"><h2>{{heading}}</h2>
 <button type="button" onclick="addNote()">+ Add note</button>
 <div class="totals">Total day: <b>{{day}}</b> hrs &middot; Productive: <b id="tp">0</b> hrs &middot;
 Non-productive: <b id="tn">0</b> hrs &middot; Balance: <b id="tb">{{day}}</b> hrs &middot;
-Productivity: <b id="tpct">0</b>% <span class="mut">({{day}} hrs = 100%)</span></div>
+Productivity: <b id="tpct">0</b>% <span class="mut">({{day}} productive hrs = 100%)</span></div>
 <button class="primary">Save</button></form></div>
 <script>
 const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day}};
@@ -308,10 +292,8 @@ function addNote(n){n=n||{};document.getElementById('notes').appendChild(row(
  '<input name="nh" type="number" step="0.25" min="0" placeholder="Hour" value="'+(n.hour||'')+'" oninput="calc()">'));calc()}
 function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e.value||0),0);
  const p=s('[name=ph]'),n=s('[name=nh]'),b=DAY-p-n;
- let e=0;document.querySelectorAll('#procs .r').forEach(r=>{
-  const t=T[r.querySelector('[name=pn]').value]||0;e+=t?(+r.querySelector('[name=pc]').value||0)/t:0});
  tp.textContent=p;tn.textContent=n;tb.textContent=b;tb.style.color=b<0?'red':'';
- tpct.textContent=Math.round(e/DAY*100)}
+ tpct.textContent=Math.min(Math.round(p/DAY*100),100)}
 {{sub.procs|tojson}}.forEach(addProc);{{sub.notes|tojson}}.forEach(addNote);
 </script>"""
 
@@ -340,9 +322,6 @@ def index():
 @app.route("/logout")
 def logout():
     r = session.get("role")
-    if r == "employee":
-        try: log_logout(session.get("login_row"))
-        except Exception: pass
     session.clear()
     return redirect("/admin/login" if r == "admin" else "/employee/login")
 
@@ -414,11 +393,6 @@ def employee_login():
             if u in (str(e["Employee ID"]).lower(), str(e["Email"]).lower()) and eq(request.form["p"], e["Password"]):
                 session.clear()
                 session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"])
-                try:
-                    computer = request.form.get("computer", "").strip() or request.remote_addr
-                    session["login_row"] = log_login(e["Employee ID"], e["Name"], computer)
-                except Exception:
-                    pass
                 return redirect("/employee")
         flash("Wrong username or password.")
     return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee")
@@ -522,51 +496,14 @@ def report(employees, subs, leaves, start, end):
         mine = [s for s in subs if str(s["emp_id"]) == eid and a <= s["date"] <= b and not s["off"]]
         days = {s["date"] for s in mine}
         lv = {l["Date"] for l in leaves if str(l["Employee ID"]) == eid and a <= l["Date"] <= b and not is_off(l["Date"])}
-        earned = sum(s["earned"] for s in mine)          # hours' worth of standard output
+        prod_hrs = sum(s["prod"] for s in mine)
         base = len(days) * DAY_HOURS                     # 8 hrs per present day = 100%
         out.append(dict(id=eid, name=e["Name"], band=e["Band"], present=len(days), leave=len(lv),
                         absent=max(wd - len(days | lv), 0), wd=wd,
                         att=min(round(len(days) / wd * 100), 100) if wd else 0,
-                        pct=round(earned / base * 100) if base else 0,
-                        prod=sum(s["prod"] for s in mine), non=sum(s["non"] for s in mine)))
+                        pct=min(round(prod_hrs / base * 100), 100) if base else 0,
+                        prod=prod_hrs, non=sum(s["non"] for s in mine)))
     return out
-
-# ---------------------------------------------------------------- login/logout time (Login Log sheet)
-# Every employee login/logout is captured here; viewable by admin (all employees) and
-# by each employee for their own record at /employee/loginlog.
-def _t(r):
-    try: return dt.datetime.strptime(r["Login time"] or "12:00:00 AM", "%I:%M:%S %p").time()
-    except ValueError: return dt.time.min
-
-def log_login(emp_id, name, computer):
-    ws = book().worksheet("Login Log")
-    now = dt.datetime.now()
-    computer = f"{name} - {computer}" if computer else name
-    ws.append_row([str(now.date()), str(emp_id), name, now.strftime("%I:%M:%S %p"), "", computer, "", ""],
-                  value_input_option="RAW")
-    return len(ws.get_all_values())        # row number of the entry just appended
-
-def log_logout(row):
-    if not row: return
-    ws = book().worksheet("Login Log")
-    vals = ws.row_values(row) + [""] * 8
-    date_s, login_t, computer = vals[0], vals[3], vals[5]
-    if not login_t: return
-    now = dt.datetime.now()
-    try:
-        lt = dt.datetime.strptime(f"{date_s} {login_t}", "%Y-%m-%d %I:%M:%S %p")
-        hrs = round((now - lt).total_seconds() / 3600, 2)
-    except ValueError:
-        hrs = 0
-    status = "Full day (8 hr+)" if hrs >= DAY_HOURS else f"Short by {DAY_HOURS - hrs:g} hr"
-    ws.update(range_name=f"E{row}", values=[[now.strftime("%I:%M:%S %p"), computer, hrs, status]])
-
-def find_open_login(emp_id):
-    """Row number of this employee's most recent login with no logout yet, else None."""
-    for r in reversed(rows("Login Log")):
-        if str(r["Employee ID"]) == str(emp_id) and r["Login time"] and not r["Logout time"]:
-            return r["_row"]
-    return None
 
 def add_leave(emp, d1, d2, reason):
     a, b = dt.date.fromisoformat(d1), dt.date.fromisoformat(d2)
@@ -613,7 +550,7 @@ EMP_TOP = """<div class="head"><div><h1>Hello, {{session.name}}</h1>
 <a class="btnl" href="/employee/leave">Apply leave</a></div>""" + KPI
 
 SUMMARY = """<div class="head"><div><h1>Overview</h1>
-<p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = standard hours earned (count &divide; target count per hour) &divide; 8 hrs per present day.</p></div>
+<p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; 8 hrs per present day (capped at 100%).</p></div>
 <form class="grid" method="get"><input type="month" name="month" value="{{month if month!='all' else ''}}">
 <button class="primary">Show</button><a href="/admin/summary?month=all">All time</a></form></div>""" + KPI + """
 <table><tr><th>Employee</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
@@ -705,65 +642,6 @@ def admin_missed():
     return page(MISSED, title="Missed entries", data=data, n_emp=len({r["id"] for r in data}),
                 month=month, label=label, emp=request.args.get("emp", ""))
 
-PUNCH = """<div class="card"><form method="post" action="/employee/punch" id="pf">
-<input type="hidden" name="computer" id="computer">
-<button class="primary">{{'Logout' if open_row else 'Login'}}</button>
-<span class="mut">{% if open_row %}You're logged in - click Logout to close today's entry and record hours worked.
-{% else %}Click Login to start today's entry.{% endif %}</span>
-</form></div>
-<script>
-document.getElementById('pf').addEventListener('submit', function(){
-  var label = (window.name && window.name.trim()) ||
-              (navigator.platform || 'Unknown') + ' ' + (screen.width + 'x' + screen.height);
-  document.getElementById('computer').value = label;
-});
-</script>"""
-
-LOGINLOG = """<div class="head"><div><h1>Login/Logout log</h1>
-<p class="mut">Login and logout time, computer/device, and hours worked vs the 8 hr/day target.</p></div>
-<form class="grid" method="get"><input type="date" name="date" value="{{request.args.get('date','')}}">
-{% if emp_filter %}<input name="emp" placeholder="Employee ID / name" value="{{request.args.get('emp','')}}">{% endif %}
-<button class="primary">Filter</button> <a href="{{base}}">Clear</a></form></div>
-<table><tr><th>Date</th><th>Employee</th><th>Login</th><th>Logout</th><th>Computer</th><th>Hours worked</th><th>Status</th></tr>
-{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
-<td>{{r['Login time']}}</td><td>{{r['Logout time']}}</td><td>{{r['Computer']}}</td>
-<td>{{r['Hours worked']}}</td><td>{{r['Status']}}</td></tr>
-{% else %}<tr><td colspan="7">No login records.</td></tr>{% endfor %}</table>"""
-
-@app.route("/admin/loginlog")
-@need("admin")
-def admin_loginlog():
-    d, e = request.args.get("date", ""), request.args.get("emp", "").strip().lower()
-    data = [r for r in rows("Login Log") if (not d or r["Date"] == d) and
-            (not e or e in (str(r["Employee ID"]).lower(), str(r["Employee name"]).lower()))]
-    data.sort(key=lambda r: (r["Date"], _t(r)), reverse=True)
-    return page(LOGINLOG, title="Login/Logout log", data=data, emp_filter=True, base="/admin/loginlog")
-
-@app.route("/employee/loginlog")
-@need("employee")
-def employee_loginlog():
-    d = request.args.get("date", "")
-    data = [r for r in rows("Login Log")
-            if str(r["Employee ID"]) == session["emp_id"] and (not d or r["Date"] == d)]
-    data.sort(key=lambda r: (r["Date"], _t(r)), reverse=True)
-    open_row = find_open_login(session["emp_id"])
-    return page(PUNCH + LOGINLOG, title="Login/Logout log", data=data, emp_filter=False,
-                base="/employee/loginlog", open_row=open_row)
-
-@app.route("/employee/punch", methods=["POST"])
-@need("employee")
-def employee_punch():
-    open_row = find_open_login(session["emp_id"])
-    if open_row:
-        log_logout(open_row)
-        if session.get("login_row") == open_row:
-            session.pop("login_row", None)
-        flash("Logged out - hours worked recorded.")
-    else:
-        computer = request.form.get("computer", "").strip() or request.remote_addr
-        session["login_row"] = log_login(session["emp_id"], session["name"], computer)
-        flash("Logged in.")
-    return redirect("/employee/loginlog")
 
 @app.route("/admin/leave", methods=["GET", "POST"])
 @need("admin")

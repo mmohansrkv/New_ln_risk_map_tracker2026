@@ -15,8 +15,22 @@ ADMIN_PASS = os.getenv("ADMIN_PASS", "admin123")   # change this!
 DAY_HOURS = 8
 WEEKOFF = (6,)   # weekly off days: 5 = Saturday, 6 = Sunday. Use (5, 6) if Sat + Sun are both off.
 
+_holidays_cache = None
+def holidays():
+    """Set of holiday date strings ('YYYY-MM-DD'), read from the 'Holidays' sheet."""
+    global _holidays_cache
+    if _holidays_cache is None:
+        try:
+            _holidays_cache = {str(r["Date"]).strip() for r in rows("Holidays") if r.get("Date")}
+        except Exception:
+            _holidays_cache = set()
+    return _holidays_cache
+
 def is_off(d):
-    try: return dt.date.fromisoformat(str(d)).weekday() in WEEKOFF
+    """True for weekly-off days AND declared holidays - both are excluded from working days."""
+    ds = str(d)
+    if ds in holidays(): return True
+    try: return dt.date.fromisoformat(ds).weekday() in WEEKOFF
     except ValueError: return False
 
 # Login pictures are embedded here, so no static folder is needed.
@@ -31,8 +45,13 @@ HEADERS = {
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
     "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at"],
+    "Holidays": ["Date", "Name"],
+    "Login Log": ["Date", "Employee ID", "Employee name", "Login time", "Logout time",
+                  "Computer", "Hours worked", "Status"],
 }
-KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave"}
+KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave", "holidays": "Holidays"}
+# "Login Log" is intentionally NOT in KINDS / the employee UI - it is an admin-only
+# attendance record (login/logout time + computer name), never shown to employees.
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "change-me")
@@ -207,7 +226,8 @@ th{background:#f7f8fc;color:var(--mut);font-weight:500;font-size:13px}tr:last-ch
 
 NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"), ("/admin/processes", "Processes"),
-              ("/admin/log", "Productivity log"), ("/admin/missed", "Missed entries"), ("/admin/leave", "Leave log")],
+              ("/admin/log", "Productivity log"), ("/admin/missed", "Missed entries"), ("/admin/leave", "Leave log"),
+              ("/admin/holidays", "Holidays"), ("/admin/loginlog", "Login/Logout log")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave")],
 }
 
@@ -221,9 +241,21 @@ def page(body, title="Productivity Tracker", **ctx):
 
 LOGIN = """<div class="win"><div class="wbar"><i></i><i></i><i></i></div>
 <div class="wbody"><div class="lcard"><h2>Welcome back</h2><p>{{title}}</p>
-<form method="post"><input name="u" placeholder="{{ph}}" required autofocus>
+<form method="post" id="lf"><input name="u" placeholder="{{ph}}" required autofocus>
 <input name="p" type="password" placeholder="Password" required>
-<button>Log in</button></form></div></div><img class="orb" src="/photo/{{role}}" alt=""></div>"""
+<input type="hidden" name="computer" id="computer">
+<button>Log in</button></form></div></div><img class="orb" src="/photo/{{role}}" alt=""></div>
+<script>
+// Best-effort device label: browsers don't expose the real OS/computer name for
+// privacy reasons, so this is a stable fingerprint (platform + resolution) that
+// lets admin tell devices apart. If your desktop launcher sets window.name to the
+// PC's hostname before opening this page, that real computer name is used instead.
+document.getElementById('lf').addEventListener('submit', function(){
+  var label = (window.name && window.name.trim()) ||
+              (navigator.platform || 'Unknown') + ' ' + (screen.width + 'x' + screen.height);
+  document.getElementById('computer').value = label;
+});
+</script>"""
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}<input name="f{{loop.index0}}" placeholder="{{h}}" required>{% endfor %}
@@ -307,7 +339,11 @@ def index():
 
 @app.route("/logout")
 def logout():
-    r = session.get("role"); session.clear()
+    r = session.get("role")
+    if r == "employee":
+        try: log_logout(session.get("login_row"))
+        except Exception: pass
+    session.clear()
     return redirect("/admin/login" if r == "admin" else "/employee/login")
 
 # ---------------------------------------------------------------- admin
@@ -378,6 +414,11 @@ def employee_login():
             if u in (str(e["Employee ID"]).lower(), str(e["Email"]).lower()) and eq(request.form["p"], e["Password"]):
                 session.clear()
                 session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"])
+                try:
+                    computer = request.form.get("computer", "").strip() or request.remote_addr
+                    session["login_row"] = log_login(e["Employee ID"], e["Name"], computer)
+                except Exception:
+                    pass
                 return redirect("/employee")
         flash("Wrong username or password.")
     return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee")
@@ -490,6 +531,30 @@ def report(employees, subs, leaves, start, end):
                         prod=sum(s["prod"] for s in mine), non=sum(s["non"] for s in mine)))
     return out
 
+# ---------------------------------------------------------------- login/logout time (Login Log sheet)
+# This log is admin-only: it is never shown to employees anywhere in the app.
+def log_login(emp_id, name, computer):
+    ws = book().worksheet("Login Log")
+    now = dt.datetime.now()
+    ws.append_row([str(now.date()), str(emp_id), name, now.strftime("%H:%M:%S"), "", computer, "", ""],
+                  value_input_option="RAW")
+    return len(ws.get_all_values())        # row number of the entry just appended
+
+def log_logout(row):
+    if not row: return
+    ws = book().worksheet("Login Log")
+    vals = ws.row_values(row) + [""] * 8
+    date_s, login_t, computer = vals[0], vals[3], vals[5]
+    if not login_t: return
+    now = dt.datetime.now()
+    try:
+        lt = dt.datetime.strptime(f"{date_s} {login_t}", "%Y-%m-%d %H:%M:%S")
+        hrs = round((now - lt).total_seconds() / 3600, 2)
+    except ValueError:
+        hrs = 0
+    status = "Full day (8 hr+)" if hrs >= DAY_HOURS else f"Short by {DAY_HOURS - hrs:g} hr"
+    ws.update(range_name=f"E{row}", values=[[now.strftime("%H:%M:%S"), computer, hrs, status]])
+
 def add_leave(emp, d1, d2, reason):
     a, b = dt.date.fromisoformat(d1), dt.date.fromisoformat(d2)
     if b < a or (b - a).days > 31:
@@ -584,12 +649,9 @@ def admin_summary():
     n = len(rep) or 1
     a1, a2 = round(sum(r["att"] for r in rep) / n), round(sum(r["pct"] for r in rep) / n)
     extra = [("Employees", len(rep)), ("Total leave days", sum(r["leave"] for r in rep))]
-    m1 = today.replace(day=1); miss, pend = [], []
-    for e in sorted(emps, key=lambda e: str(e["Name"])):
-        d = missing_dates(e["Employee ID"], subs, leaves, m1, today - dt.timedelta(days=1))
-        if d: miss.append(dict(id=e["Employee ID"], name=e["Name"], days=d))
-        if missing_dates(e["Employee ID"], subs, leaves, today, today): pend.append(e["Name"])
-    return page(ADMIN_ALERT + SUMMARY, title="Overview", miss=miss, pend=pend, mlabel=m1.strftime("%B %Y"), rep=rep, month=month, label=label, wd=workdays(start, end),
+    # Missed-entries list is intentionally NOT shown on the Overview page any more;
+    # it lives only on the dedicated "Missed entries" page (/admin/missed).
+    return page(SUMMARY, title="Overview", rep=rep, month=month, label=label, wd=workdays(start, end),
                 lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra)
 
 MISSED = """<div class="head"><div><h1>Missed entries</h1>
@@ -629,6 +691,27 @@ def admin_missed():
     data.sort(key=lambda r: (r["date"], str(r["name"])), reverse=True)
     return page(MISSED, title="Missed entries", data=data, n_emp=len({r["id"] for r in data}),
                 month=month, label=label, emp=request.args.get("emp", ""))
+
+LOGINLOG = """<div class="head"><div><h1>Login/Logout log</h1>
+<p class="mut">Employee login and logout time, computer/device, and hours worked vs the 8 hr/day target.
+Admin-only - employees never see this.</p></div>
+<form class="grid" method="get"><input type="date" name="date" value="{{request.args.get('date','')}}">
+<input name="emp" placeholder="Employee ID / name" value="{{request.args.get('emp','')}}">
+<button class="primary">Filter</button> <a href="/admin/loginlog">Clear</a></form></div>
+<table><tr><th>Date</th><th>Employee</th><th>Login</th><th>Logout</th><th>Computer</th><th>Hours worked</th><th>Status</th></tr>
+{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
+<td>{{r['Login time']}}</td><td>{{r['Logout time']}}</td><td>{{r['Computer']}}</td>
+<td>{{r['Hours worked']}}</td><td>{{r['Status']}}</td></tr>
+{% else %}<tr><td colspan="7">No login records.</td></tr>{% endfor %}</table>"""
+
+@app.route("/admin/loginlog")
+@need("admin")
+def admin_loginlog():
+    d, e = request.args.get("date", ""), request.args.get("emp", "").strip().lower()
+    data = [r for r in rows("Login Log") if (not d or r["Date"] == d) and
+            (not e or e in (str(r["Employee ID"]).lower(), str(r["Employee name"]).lower()))]
+    data.sort(key=lambda r: (r["Date"], r["Login time"]), reverse=True)
+    return page(LOGINLOG, title="Login/Logout log", data=data)
 
 @app.route("/admin/leave", methods=["GET", "POST"])
 @need("admin")

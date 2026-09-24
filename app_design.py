@@ -13,6 +13,11 @@ CREDS_FILE = os.getenv("GOOGLE_CREDS", "credentials.json")
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
 ADMIN_PASS = os.getenv("ADMIN_PASS", "admin123")   # change this!
 DAY_HOURS = 8
+WEEKOFF = (6,)   # weekly off days: 5 = Saturday, 6 = Sunday. Use (5, 6) if Sat + Sun are both off.
+
+def is_off(d):
+    try: return dt.date.fromisoformat(str(d)).weekday() in WEEKOFF
+    except ValueError: return False
 
 # Login pictures are embedded here, so no static folder is needed.
 PHOTOS = {
@@ -96,6 +101,7 @@ def load_subs():
         s["total"] = s["prod"] + s["non"]
         s["earned"] = sum(p["earned"] for p in s["procs"])     # hours' worth of standard output
         s["pct"] = round(s["earned"] / DAY_HOURS * 100)         # 8 hrs = 100%
+        s["off"] = is_off(s["date"])                            # weekly-off entry: saved, not counted
     return sorted(subs.values(), key=lambda s: s["date"], reverse=True)
 
 def get_sub(sid):
@@ -201,7 +207,7 @@ th{background:#f7f8fc;color:var(--mut);font-weight:500;font-size:13px}tr:last-ch
 
 NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"), ("/admin/processes", "Processes"),
-              ("/admin/log", "Productivity log"), ("/admin/leave", "Leave log")],
+              ("/admin/log", "Productivity log"), ("/admin/missed", "Missed entries"), ("/admin/leave", "Leave log")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave")],
 }
 
@@ -235,7 +241,7 @@ EDIT = """<div class="card"><h2>Edit {{title}}</h2><form method="post" class="gr
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th>{% endif %}
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Productivity</th><th></th></tr>
 {% for s in subs %}<tr><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; {{s.emp_name}}</td>{% endif %}
-<td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td><td>{{s.pct}}%</td>
+<td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td><td>{{ 'Weekend - not counted' if s.off else (s.pct ~ '%') }}</td>
 <td class="act"><a href="/entry/{{s.id}}/view">View</a><a href="/entry/{{s.id}}">Edit</a>
 <form method="post" action="/entry/{{s.id}}/delete" onsubmit="return confirm('Delete this entry?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="7">Nothing yet.</td></tr>{% endfor %}</table>"""
@@ -282,7 +288,7 @@ VIEW = """<div class="card"><h2>{{s.date}} &middot; {{s.emp_name}} ({{s.emp_id}}
 {% for p in s.procs %}<tr><td>{{p.name}}</td><td>{{p.desc}}</td><td>{{p.hour|g}}</td><td>{{p.count|g}}</td><td>{{p.target|g}}</td>
 <td>{{ (p.pct ~ '%') if p.pct is not none else '-' }}</td></tr>{% endfor %}</table><br>
 <table><tr><th>Notes</th><th>Hour</th></tr>{% for n in s.notes %}<tr><td>{{n.desc}}</td><td>{{n.hour|g}}</td></tr>{% endfor %}</table>
-<div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day}} hrs &middot; Productivity: <b>{{s.pct}}%</b> ({{day}} hrs = 100%)</div>
+<div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day}} hrs &middot; {% if s.off %}<b>Weekend entry - not counted</b>{% else %}Productivity: <b>{{s.pct}}%</b> ({{day}} hrs = 100%){% endif %}</div>
 <a href="{{back}}">Back</a></div>"""
 
 # ---------------------------------------------------------------- routes: common
@@ -394,11 +400,13 @@ def employee_home():
     month = today[:7]                                   # e.g. 2026-09
     month_subs = sorted((s for s in all_mine if str(s["date"]).startswith(month)),
                         key=lambda s: s["date"], reverse=True)
-    m_prod = sum(s["prod"] for s in month_subs)
-    m_non = sum(s["non"] for s in month_subs)
+    counted = [s for s in month_subs if not s["off"]]     # weekly-off entries are not calculated
+    m_count = len(counted)
+    m_prod = sum(s["prod"] for s in counted)
+    m_non = sum(s["non"] for s in counted)
     month_html = (
         '<h2>This month (' + dt.date.today().strftime("%B %Y") + ')</h2>'
-        '<div class="totals">Entries: <b>{{msubs|length}}</b> &middot; '
+        '<div class="totals">Entries: <b>{{m_count}}</b> &middot; '
         'Productive: <b>{{m_prod|g}}</b> hrs &middot; '
         'Non-productive: <b>{{m_non|g}}</b> hrs &middot; '
         'Total: <b>{{(m_prod + m_non)|g}}</b> hrs</div>'
@@ -410,7 +418,7 @@ def employee_home():
     pend = bool(missing_dates(session["emp_id"], all_mine, lv, t0, t0))
     extra = [("Present days", k["present"]), ("Leave days", k["leave"])]
     return page(EMP_TOP + EMP_ALERT + body + '<h2>Submitted today</h2>' + LIST + month_html,
-                title="Daily productivity", missed=missed, pend=pend, subs=mine, msubs=month_subs, m_prod=m_prod, m_non=m_non,
+                title="Daily productivity", missed=missed, pend=pend, subs=mine, msubs=month_subs, m_count=m_count, m_prod=m_prod, m_non=m_non,
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
                 a1=k["att"], a2=k["pct"], extra=extra, **ctx)
 
@@ -421,7 +429,7 @@ def employee_save():
     if err:
         flash(err); return redirect("/employee")
     write_sub(uuid.uuid4().hex[:10], date, (session["band"], session["emp_id"], session["name"]), procs, notes)
-    flash("Saved."); return redirect("/employee")
+    flash("Saved." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else "")); return redirect("/employee")
 
 @app.route("/entry/<sid>", methods=["GET", "POST"])
 @need()
@@ -433,7 +441,7 @@ def entry_edit(sid):
             flash(err); return redirect(request.path)
         delete_rows(s["rows"])
         write_sub(sid, date, (s["band"], s["emp_id"], s["emp_name"]), procs, notes)
-        flash("Updated."); return redirect(home())
+        flash("Updated." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else "")); return redirect(home())
     body, ctx = form_page(s, request.path, "Edit entry")
     return page(body, title="Edit entry", **ctx)
 
@@ -454,7 +462,7 @@ app.jinja_env.filters["tone"] = lambda v: "" if v >= 90 else ("a" if v >= 75 els
 def workdays(start, end):          # Mon-Sat (Sunday = weekly off)
     n, d = 0, start
     while d <= end:
-        n += d.weekday() != 6
+        n += d.weekday() not in WEEKOFF
         d += dt.timedelta(days=1)
     return n
 
@@ -470,9 +478,9 @@ def report(employees, subs, leaves, start, end):
     wd, a, b, out = workdays(start, end), str(start), str(end), []
     for e in employees:
         eid = str(e["Employee ID"])
-        mine = [s for s in subs if str(s["emp_id"]) == eid and a <= s["date"] <= b]
+        mine = [s for s in subs if str(s["emp_id"]) == eid and a <= s["date"] <= b and not s["off"]]
         days = {s["date"] for s in mine}
-        lv = {l["Date"] for l in leaves if str(l["Employee ID"]) == eid and a <= l["Date"] <= b}
+        lv = {l["Date"] for l in leaves if str(l["Employee ID"]) == eid and a <= l["Date"] <= b and not is_off(l["Date"])}
         earned = sum(s["earned"] for s in mine)          # hours' worth of standard output
         base = len(days) * DAY_HOURS                     # 8 hrs per present day = 100%
         out.append(dict(id=eid, name=e["Name"], band=e["Band"], present=len(days), leave=len(lv),
@@ -495,15 +503,15 @@ def add_leave(emp, d1, d2, reason):
     if new: book().worksheet("Leave").append_rows(new, value_input_option="RAW")
     return len(new)
 
-def missing_dates(eid, subs, leaves, start, end):
+def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
     """Working days (Mon-Sat) in start..end with no entry and no leave."""
     eid = str(eid)
     done = {s["date"] for s in subs if str(s["emp_id"]) == eid} | \
            {l["Date"] for l in leaves if str(l["Employee ID"]) == eid}
     out, d = [], start
     while d <= end:
-        if d.weekday() != 6 and str(d) not in done:
-            out.append(d.strftime("%d %b"))
+        if d.weekday() not in WEEKOFF and str(d) not in done:
+            out.append(d.strftime(fmt))
         d += dt.timedelta(days=1)
     return out
 
@@ -514,7 +522,8 @@ Pick that date in the form below and submit, or apply leave.</div>{% endif %}
 
 ADMIN_ALERT = """{% if miss or pend %}<div class="warn"><b>&#9888; Missed entries - {{mlabel}}</b>
 {% for r in miss %}<div>{{r.id}} &middot; {{r.name}}: {{r.days|length}} day(s) - {{r.days|join(', ')}}</div>{% endfor %}
-{% if pend %}<div>Not submitted today: {{pend|join(', ')}}</div>{% endif %}</div>{% endif %}"""
+{% if pend %}<div>Not submitted today: {{pend|join(', ')}}</div>{% endif %}
+<div><a href="/admin/missed">View full missed entries log</a></div></div>{% endif %}"""
 
 KPI = """<div class="kpis">
 <div class="kpi"><span>{{lab1}}</span><b>{{a1}}%</b><i class="bar {{a1|tone}}"><u style="width:{{[a1,100]|min}}%"></u></i></div>
@@ -526,7 +535,7 @@ EMP_TOP = """<div class="head"><div><h1>Hello, {{session.name}}</h1>
 <a class="btnl" href="/employee/leave">Apply leave</a></div>""" + KPI
 
 SUMMARY = """<div class="head"><div><h1>Overview</h1>
-<p class="mut">{{label}} &middot; {{wd}} working days (Mon-Sat). Attendance = present days / working days. Productivity = standard hours earned (count &divide; target count per hour) &divide; 8 hrs per present day.</p></div>
+<p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = standard hours earned (count &divide; target count per hour) &divide; 8 hrs per present day.</p></div>
 <form class="grid" method="get"><input type="month" name="month" value="{{month if month!='all' else ''}}">
 <button class="primary">Show</button><a href="/admin/summary?month=all">All time</a></form></div>""" + KPI + """
 <table><tr><th>Employee</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
@@ -582,6 +591,44 @@ def admin_summary():
         if missing_dates(e["Employee ID"], subs, leaves, today, today): pend.append(e["Name"])
     return page(ADMIN_ALERT + SUMMARY, title="Overview", miss=miss, pend=pend, mlabel=m1.strftime("%B %Y"), rep=rep, month=month, label=label, wd=workdays(start, end),
                 lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra)
+
+MISSED = """<div class="head"><div><h1>Missed entries</h1>
+<p class="mut">{{label}} &middot; Working days (weekly off excluded) with no productivity entry and no leave. Today is not included.</p></div>
+<form class="grid" method="get"><input type="month" name="month" value="{{month if month!='all' else ''}}">
+<input name="emp" placeholder="Employee ID / name" value="{{emp}}">
+<button class="primary">Show</button><a href="/admin/missed">Reset</a><a href="/admin/missed?month=all">All time</a></form></div>
+<div class="kpis"><div class="kpi"><span>Missed entries</span><b>{{data|length}}</b></div>
+<div class="kpi"><span>Employees affected</span><b>{{n_emp}}</b></div></div>
+<table><tr><th>Date</th><th>Day</th><th>Employee</th><th>Band</th></tr>
+{% for r in data %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.band}}</td></tr>
+{% else %}<tr><td colspan="4">No missed entries.</td></tr>{% endfor %}</table>"""
+
+@app.route("/admin/missed")
+@need("admin")
+def admin_missed():
+    today = dt.date.today()
+    month = request.args.get("month") or today.strftime("%Y-%m")
+    q = request.args.get("emp", "").strip().lower()
+    subs, leaves, emps = load_subs(), rows("Leave"), rows("Employees")
+    if month == "all":
+        ds = [s["date"] for s in subs] + [l["Date"] for l in leaves]
+        start, label = (dt.date.fromisoformat(min(ds)) if ds else today), "All time"
+    else:
+        start, _ = month_range(month); label = start.strftime("%B %Y")
+    end = today - dt.timedelta(days=1)
+    if month != "all":
+        end = min(month_range(month)[1], end)
+    data = []
+    for e in emps:
+        if q and q not in (str(e["Employee ID"]).lower(), str(e["Name"]).lower()) \
+                and q not in str(e["Name"]).lower():
+            continue
+        for d in missing_dates(e["Employee ID"], subs, leaves, start, end, fmt="%Y-%m-%d"):
+            data.append(dict(date=d, day=dt.date.fromisoformat(d).strftime("%a"),
+                             id=e["Employee ID"], name=e["Name"], band=e["Band"]))
+    data.sort(key=lambda r: (r["date"], str(r["name"])), reverse=True)
+    return page(MISSED, title="Missed entries", data=data, n_emp=len({r["id"] for r in data}),
+                month=month, label=label, emp=request.args.get("emp", ""))
 
 @app.route("/admin/leave", methods=["GET", "POST"])
 @need("admin")

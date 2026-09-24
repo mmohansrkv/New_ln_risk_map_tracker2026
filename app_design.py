@@ -24,7 +24,7 @@ HEADERS = {
     "Employees": ["Employee ID", "Name", "Band", "Email", "Password"],
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
-                         "Type", "Process / Description", "Hour", "Count", "Submitted at"],
+                         "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
     "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at"],
 }
 KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave"}
@@ -82,15 +82,20 @@ def load_subs():
         s["rows"].append(r["_row"])
         h = num(r["Hour"])
         if r["Type"] == "Process":
-            c = num(r["Count"]); t = h * tph.get(r["Process / Description"], 0)
+            rate = tph.get(r["Process / Description"], 0)
+            c = num(r["Count"]); t = h * rate
             s["procs"].append(dict(name=r["Process / Description"], hour=h, count=c,
-                                   target=round(t, 1), pct=round(c / t * 100) if t else None))
+                                   desc=str(r.get("Description", "")),
+                                   target=round(t, 1), pct=round(c / t * 100) if t else None,
+                                   earned=(c / rate) if rate else 0.0))
         else:
             s["notes"].append(dict(desc=r["Process / Description"], hour=h))
     for s in subs.values():
         s["prod"] = sum(p["hour"] for p in s["procs"])
         s["non"] = sum(n["hour"] for n in s["notes"])
         s["total"] = s["prod"] + s["non"]
+        s["earned"] = sum(p["earned"] for p in s["procs"])     # hours' worth of standard output
+        s["pct"] = round(s["earned"] / DAY_HOURS * 100)         # 8 hrs = 100%
     return sorted(subs.values(), key=lambda s: s["date"], reverse=True)
 
 def get_sub(sid):
@@ -101,7 +106,7 @@ def get_sub(sid):
 
 def parse_form():
     g = request.form.getlist
-    procs = [(n, num(h), num(c)) for n, h, c in zip(g("pn"), g("ph"), g("pc")) if num(h) > 0]
+    procs = [(n, num(h), num(c), d.strip()) for n, h, c, d in zip(g("pn"), g("ph"), g("pc"), g("pd")) if num(h) > 0]
     notes = [(t.strip(), num(h)) for t, h in zip(g("nd"), g("nh")) if num(h) > 0]
     tot = sum(p[1] for p in procs) + sum(n[1] for n in notes)
     err = None
@@ -112,8 +117,8 @@ def parse_form():
 def write_sub(sid, date, emp, procs, notes):
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     base = [sid, date, *emp]      # emp = (band, id, name)
-    out = [base + ["Process", n, h, c, now] for n, h, c in procs] + \
-          [base + ["Note", t, h, "", now] for t, h in notes]
+    out = [base + ["Process", n, h, c, now, d] for n, h, c, d in procs] + \
+          [base + ["Note", t, h, "", now, ""] for t, h in notes]
     book().worksheet("Productivity log").append_rows(out, value_input_option="RAW")
 
 # ---------------------------------------------------------------- auth helpers
@@ -167,6 +172,8 @@ th{background:#f7f8fc;color:var(--mut);font-weight:500;font-size:13px}tr:last-ch
 .bar{display:block;height:6px;background:#eceffa;border-radius:3px;overflow:hidden;min-width:70px;margin-top:4px}
 .bar u{display:block;height:100%;background:#22a06b}.bar.a u{background:#e8a317}.bar.r u{background:#e5484d}
 .flash{background:#eef0ff;border:1px solid #d6d9ff;padding:10px 14px;border-radius:10px}
+.warn{background:#fff4e5;border:1px solid #ffd59a;color:#7a4b00;padding:12px 16px;border-radius:10px;margin-bottom:16px;font-size:14px}
+.warn div{margin-top:4px}
 .totals{background:#eef0ff;padding:10px 14px;border-radius:10px;margin:12px 0}
 .act{display:flex;gap:8px;align-items:center}.act form{margin:0}.act a{color:var(--pri);text-decoration:none}
 @media(max-width:800px){.app{flex-direction:column}aside{width:auto;flex-direction:row;flex-wrap:wrap;align-items:center}.me{margin:0 0 0 auto;border:0;padding:0}main{padding:16px}}
@@ -226,12 +233,12 @@ EDIT = """<div class="card"><h2>Edit {{title}}</h2><form method="post" class="gr
 <button class="primary">Save</button> <a href="/admin/{{kind}}">Cancel</a></form></div>"""
 
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th>{% endif %}
-<th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th></th></tr>
+<th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Productivity</th><th></th></tr>
 {% for s in subs %}<tr><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; {{s.emp_name}}</td>{% endif %}
-<td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
+<td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td><td>{{s.pct}}%</td>
 <td class="act"><a href="/entry/{{s.id}}/view">View</a><a href="/entry/{{s.id}}">Edit</a>
 <form method="post" action="/entry/{{s.id}}/delete" onsubmit="return confirm('Delete this entry?')"><button class="danger">Delete</button></form></td></tr>
-{% else %}<tr><td colspan="6">Nothing yet.</td></tr>{% endfor %}</table>"""
+{% else %}<tr><td colspan="7">Nothing yet.</td></tr>{% endfor %}</table>"""
 
 FORM = """<div class="card"><h2>{{heading}}</h2>
 <form method="post" action="{{action}}">
@@ -245,31 +252,37 @@ FORM = """<div class="card"><h2>{{heading}}</h2>
 <h3>Notes</h3><div id="notes"></div>
 <button type="button" onclick="addNote()">+ Add note</button>
 <div class="totals">Total day: <b>{{day}}</b> hrs &middot; Productive: <b id="tp">0</b> hrs &middot;
-Non-productive: <b id="tn">0</b> hrs &middot; Balance: <b id="tb">{{day}}</b> hrs</div>
+Non-productive: <b id="tn">0</b> hrs &middot; Balance: <b id="tb">{{day}}</b> hrs &middot;
+Productivity: <b id="tpct">0</b>% <span class="mut">({{day}} hrs = 100%)</span></div>
 <button class="primary">Save</button></form></div>
 <script>
-const P={{names|tojson}}, DAY={{day}};
+const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day}};
+const E=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function row(h){const d=document.createElement('div');d.className='r';
  d.innerHTML=h+'<button type="button" class="danger" onclick="this.parentNode.remove();calc()">X</button>';return d}
 function addProc(p){p=p||{};document.getElementById('procs').appendChild(row(
- '<select name="pn">'+P.map(n=>'<option '+(n==p.name?'selected':'')+'>'+n+'</option>').join('')+'</select>'+
+ '<select name="pn" onchange="calc()">'+P.map(n=>'<option '+(n==p.name?'selected':'')+'>'+E(n)+'</option>').join('')+'</select>'+
  '<input name="ph" type="number" step="0.25" min="0" placeholder="Hour" value="'+(p.hour||'')+'" oninput="calc()">'+
- '<input name="pc" type="number" min="0" placeholder="Count" value="'+(p.count||'')+'">'));calc()}
+ '<input name="pc" type="number" min="0" placeholder="Count" value="'+(p.count||'')+'" oninput="calc()">'+
+ '<input name="pd" placeholder="Description" size="28" value="'+E(p.desc)+'">'));calc()}
 function addNote(n){n=n||{};document.getElementById('notes').appendChild(row(
- '<input name="nd" placeholder="Description" size="30" value="'+(n.desc||'')+'">'+
+ '<input name="nd" placeholder="Description" size="30" value="'+E(n.desc)+'">'+
  '<input name="nh" type="number" step="0.25" min="0" placeholder="Hour" value="'+(n.hour||'')+'" oninput="calc()">'));calc()}
 function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e.value||0),0);
  const p=s('[name=ph]'),n=s('[name=nh]'),b=DAY-p-n;
- tp.textContent=p;tn.textContent=n;tb.textContent=b;tb.style.color=b<0?'red':''}
+ let e=0;document.querySelectorAll('#procs .r').forEach(r=>{
+  const t=T[r.querySelector('[name=pn]').value]||0;e+=t?(+r.querySelector('[name=pc]').value||0)/t:0});
+ tp.textContent=p;tn.textContent=n;tb.textContent=b;tb.style.color=b<0?'red':'';
+ tpct.textContent=Math.round(e/DAY*100)}
 {{sub.procs|tojson}}.forEach(addProc);{{sub.notes|tojson}}.forEach(addNote);
 </script>"""
 
 VIEW = """<div class="card"><h2>{{s.date}} &middot; {{s.emp_name}} ({{s.emp_id}}, Band {{s.band}})</h2>
-<table><tr><th>Process</th><th>Hour</th><th>Count</th><th>Target count</th><th>Achievement</th></tr>
-{% for p in s.procs %}<tr><td>{{p.name}}</td><td>{{p.hour|g}}</td><td>{{p.count|g}}</td><td>{{p.target|g}}</td>
+<table><tr><th>Process</th><th>Description</th><th>Hour</th><th>Count</th><th>Target count</th><th>Achievement</th></tr>
+{% for p in s.procs %}<tr><td>{{p.name}}</td><td>{{p.desc}}</td><td>{{p.hour|g}}</td><td>{{p.count|g}}</td><td>{{p.target|g}}</td>
 <td>{{ (p.pct ~ '%') if p.pct is not none else '-' }}</td></tr>{% endfor %}</table><br>
 <table><tr><th>Notes</th><th>Hour</th></tr>{% for n in s.notes %}<tr><td>{{n.desc}}</td><td>{{n.hour|g}}</td></tr>{% endfor %}</table>
-<div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day}} hrs</div>
+<div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day}} hrs &middot; Productivity: <b>{{s.pct}}%</b> ({{day}} hrs = 100%)</div>
 <a href="{{back}}">Back</a></div>"""
 
 # ---------------------------------------------------------------- routes: common
@@ -364,8 +377,10 @@ def employee_login():
     return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee")
 
 def form_page(sub, action, heading):
-    names = [r["Process name"] for r in rows("Processes")]
-    return FORM, dict(sub=sub, action=action, heading=heading, names=names, day=DAY_HOURS)
+    procs = rows("Processes")
+    names = [r["Process name"] for r in procs]
+    tph = {r["Process name"]: num(r["Target count / hour"]) for r in procs}
+    return FORM, dict(sub=sub, action=action, heading=heading, names=names, tph=tph, day=DAY_HOURS)
 
 @app.route("/employee")
 @need("employee")
@@ -389,10 +404,13 @@ def employee_home():
         'Total: <b>{{(m_prod + m_non)|g}}</b> hrs</div>'
         + LIST.replace("in subs", "in msubs"))
     first = dt.date.today().replace(day=1)
-    k = report([my_emp()], all_mine, rows("Leave"), first, dt.date.today())[0]
+    lv = rows("Leave"); t0 = dt.date.today()
+    k = report([my_emp()], all_mine, lv, first, t0)[0]
+    missed = missing_dates(session["emp_id"], all_mine, lv, first, t0 - dt.timedelta(days=1))
+    pend = bool(missing_dates(session["emp_id"], all_mine, lv, t0, t0))
     extra = [("Present days", k["present"]), ("Leave days", k["leave"])]
-    return page(EMP_TOP + body + '<h2>Submitted today</h2>' + LIST + month_html,
-                title="Daily productivity", subs=mine, msubs=month_subs, m_prod=m_prod, m_non=m_non,
+    return page(EMP_TOP + EMP_ALERT + body + '<h2>Submitted today</h2>' + LIST + month_html,
+                title="Daily productivity", missed=missed, pend=pend, subs=mine, msubs=month_subs, m_prod=m_prod, m_non=m_non,
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
                 a1=k["att"], a2=k["pct"], extra=extra, **ctx)
 
@@ -455,12 +473,12 @@ def report(employees, subs, leaves, start, end):
         mine = [s for s in subs if str(s["emp_id"]) == eid and a <= s["date"] <= b]
         days = {s["date"] for s in mine}
         lv = {l["Date"] for l in leaves if str(l["Employee ID"]) == eid and a <= l["Date"] <= b}
-        cnt = sum(p["count"] for s in mine for p in s["procs"] if p["target"])
-        tgt = sum(p["target"] for s in mine for p in s["procs"] if p["target"])
+        earned = sum(s["earned"] for s in mine)          # hours' worth of standard output
+        base = len(days) * DAY_HOURS                     # 8 hrs per present day = 100%
         out.append(dict(id=eid, name=e["Name"], band=e["Band"], present=len(days), leave=len(lv),
                         absent=max(wd - len(days | lv), 0), wd=wd,
                         att=min(round(len(days) / wd * 100), 100) if wd else 0,
-                        pct=round(cnt / tgt * 100) if tgt else 0,
+                        pct=round(earned / base * 100) if base else 0,
                         prod=sum(s["prod"] for s in mine), non=sum(s["non"] for s in mine)))
     return out
 
@@ -477,6 +495,27 @@ def add_leave(emp, d1, d2, reason):
     if new: book().worksheet("Leave").append_rows(new, value_input_option="RAW")
     return len(new)
 
+def missing_dates(eid, subs, leaves, start, end):
+    """Working days (Mon-Sat) in start..end with no entry and no leave."""
+    eid = str(eid)
+    done = {s["date"] for s in subs if str(s["emp_id"]) == eid} | \
+           {l["Date"] for l in leaves if str(l["Employee ID"]) == eid}
+    out, d = [], start
+    while d <= end:
+        if d.weekday() != 6 and str(d) not in done:
+            out.append(d.strftime("%d %b"))
+        d += dt.timedelta(days=1)
+    return out
+
+EMP_ALERT = """{% if missed or pend %}<div class="warn"><b>&#9888; Productivity entry pending</b>
+{% if missed %}<div>You missed the entry for {{missed|length}} day(s) this month: {{missed|join(', ')}}.
+Pick that date in the form below and submit, or apply leave.</div>{% endif %}
+{% if pend %}<div>Today's entry is not submitted yet.</div>{% endif %}</div>{% endif %}"""
+
+ADMIN_ALERT = """{% if miss or pend %}<div class="warn"><b>&#9888; Missed entries - {{mlabel}}</b>
+{% for r in miss %}<div>{{r.id}} &middot; {{r.name}}: {{r.days|length}} day(s) - {{r.days|join(', ')}}</div>{% endfor %}
+{% if pend %}<div>Not submitted today: {{pend|join(', ')}}</div>{% endif %}</div>{% endif %}"""
+
 KPI = """<div class="kpis">
 <div class="kpi"><span>{{lab1}}</span><b>{{a1}}%</b><i class="bar {{a1|tone}}"><u style="width:{{[a1,100]|min}}%"></u></i></div>
 <div class="kpi"><span>{{lab2}}</span><b>{{a2}}%</b><i class="bar {{a2|tone}}"><u style="width:{{[a2,100]|min}}%"></u></i></div>
@@ -487,7 +526,7 @@ EMP_TOP = """<div class="head"><div><h1>Hello, {{session.name}}</h1>
 <a class="btnl" href="/employee/leave">Apply leave</a></div>""" + KPI
 
 SUMMARY = """<div class="head"><div><h1>Overview</h1>
-<p class="mut">{{label}} &middot; {{wd}} working days (Mon-Sat). Attendance = present days / working days. Productivity = count / target count.</p></div>
+<p class="mut">{{label}} &middot; {{wd}} working days (Mon-Sat). Attendance = present days / working days. Productivity = standard hours earned (count &divide; target count per hour) &divide; 8 hrs per present day.</p></div>
 <form class="grid" method="get"><input type="month" name="month" value="{{month if month!='all' else ''}}">
 <button class="primary">Show</button><a href="/admin/summary?month=all">All time</a></form></div>""" + KPI + """
 <table><tr><th>Employee</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
@@ -531,11 +570,17 @@ def admin_summary():
         start, end, label = (dt.date.fromisoformat(min(ds)) if ds else today), today, "All time"
     else:
         start, end = month_range(month); label = start.strftime("%B %Y")
-    rep = sorted(report(rows("Employees"), subs, leaves, start, end), key=lambda r: str(r["name"]))
+    emps = rows("Employees")
+    rep = sorted(report(emps, subs, leaves, start, end), key=lambda r: str(r["name"]))
     n = len(rep) or 1
     a1, a2 = round(sum(r["att"] for r in rep) / n), round(sum(r["pct"] for r in rep) / n)
     extra = [("Employees", len(rep)), ("Total leave days", sum(r["leave"] for r in rep))]
-    return page(SUMMARY, title="Overview", rep=rep, month=month, label=label, wd=workdays(start, end),
+    m1 = today.replace(day=1); miss, pend = [], []
+    for e in sorted(emps, key=lambda e: str(e["Name"])):
+        d = missing_dates(e["Employee ID"], subs, leaves, m1, today - dt.timedelta(days=1))
+        if d: miss.append(dict(id=e["Employee ID"], name=e["Name"], days=d))
+        if missing_dates(e["Employee ID"], subs, leaves, today, today): pend.append(e["Name"])
+    return page(ADMIN_ALERT + SUMMARY, title="Overview", miss=miss, pend=pend, mlabel=m1.strftime("%B %Y"), rep=rep, month=month, label=label, wd=workdays(start, end),
                 lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra)
 
 @app.route("/admin/leave", methods=["GET", "POST"])

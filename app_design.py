@@ -40,7 +40,9 @@ PHOTOS = {
 }
 
 HEADERS = {
-    "Employees": ["Employee ID", "Name", "Band", "Email", "Password"],
+    "Employees": ["Employee ID", "Name", "Band", "Email", "Password",
+                  "Address_1", "Address_2", "City", "PIN", "Phone Number",
+                  "WhatsApp", "Personal Email ID", "Office Email ID"],
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],

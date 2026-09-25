@@ -48,8 +48,6 @@ HEADERS = {
                          "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
     "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at"],
     "Holidays": ["Date", "Name"],
-    # Hidden from employees: no nav link points here, and no employee route reads it.
-    "Login log": ["Date", "Employee ID", "Employee name", "Band", "Login time", "Logout time", "Duration (min)"],
 }
 PERSONAL_FIELDS = ["Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                     "Emergency no", "Personal Email ID", "Office Email ID"]
@@ -266,7 +264,7 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"), ("/admin/personal", "Personal details"),
               ("/admin/processes", "Processes"),
               ("/admin/log", "Productivity log"), ("/admin/missed", "Missed entries"), ("/admin/leave", "Leave log"),
-              ("/admin/holidays", "Holidays"), ("/admin/logins", "Login activity")],
+              ("/admin/holidays", "Holidays")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave"), ("/employee/profile", "Personal details")],
 }
 
@@ -369,7 +367,6 @@ def index():
 @app.route("/logout")
 def logout():
     r = session.get("role")
-    if r == "employee": log_logout(session.get("emp_id", ""))
     session.clear()
     return redirect("/admin/login" if r == "admin" else "/employee/login")
 
@@ -445,25 +442,6 @@ def admin_log():
     return page(f + LIST, title="Productivity log", subs=subs)
 
 # ---------------------------------------------------------------- employee
-LOGIN_LOG = """<div class="head"><h1>Login activity</h1>
-<form method="get" class="filter"><input type="date" name="date" value="{{sel}}">
-<button class="primary">Filter</button> <a href="/admin/logins">Today</a></form></div>
-{% if open_now %}<p class="mut">&#128308; {{open_now}} employee(s) currently logged in.</p>{% endif %}
-<table><tr><th>Employee</th><th>Band</th><th>Login time</th><th>Logout time</th><th>Duration</th></tr>
-{% for r in data %}<tr><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td><td>{{r['Band']}}</td>
-<td>{{r['Login time']}}</td><td>{{r['Logout time'] or 'Still logged in'}}</td>
-<td>{{r['Duration (min)'] and (r['Duration (min)'] ~ ' min') or ''}}</td></tr>
-{% else %}<tr><td colspan="5">No login activity for this date.</td></tr>{% endfor %}</table>"""
-
-@app.route("/admin/logins")
-@need("admin")
-def admin_logins():
-    sel = request.args.get("date") or str(dt.date.today())
-    data = sorted((r for r in rows("Login log") if r["Date"] == sel),
-                  key=lambda r: r["Login time"], reverse=True)
-    open_now = sum(1 for r in data if not str(r["Logout time"]).strip())
-    return page(LOGIN_LOG, title="Login activity", data=data, sel=sel, open_now=open_now)
-
 @app.route("/employee/login", methods=["GET", "POST"])
 def employee_login():
     if request.method == "POST":
@@ -473,36 +451,9 @@ def employee_login():
                 session.clear()
                 session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"],
                                designation=str(e.get("Designation", "")))
-                log_login(str(e["Employee ID"]), e["Name"], e["Band"])
                 return redirect("/employee")
         flash("Wrong username or password.")
     return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee")
-
-def _now(): return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-def log_login(emp_id, name, band):
-    """Record a new login. If a previous session was left open (browser closed
-    without logging out), close it out using its own last-seen time isn't
-    available, so it is closed with no duration and flagged \'(no logout)\'."""
-    ws = book().worksheet("Login log")
-    recs = rows("Login log")
-    for r in reversed(recs):
-        if str(r["Employee ID"]) == str(emp_id) and not str(r["Logout time"]).strip():
-            ws.update(range_name=f"F{r['_row']}", values=[["(no logout)"]])
-            break
-    ws.append_row([str(dt.date.today()), emp_id, name, band, _now(), "", ""], value_input_option="RAW")
-
-def log_logout(emp_id):
-    ws = book().worksheet("Login log")
-    recs = rows("Login log")
-    for r in reversed(recs):
-        if str(r["Employee ID"]) == str(emp_id) and not str(r["Logout time"]).strip():
-            login_t = dt.datetime.strptime(r["Login time"], "%Y-%m-%d %H:%M:%S")
-            logout_t = dt.datetime.now()
-            mins = round((logout_t - login_t).total_seconds() / 60)
-            ws.update(range_name=f"F{r['_row']}", values=[[logout_t.strftime("%Y-%m-%d %H:%M:%S")]])
-            ws.update(range_name=f"G{r['_row']}", values=[[mins]])
-            break
 
 def form_page(sub, action, heading):
     procs = rows("Processes")

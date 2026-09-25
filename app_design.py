@@ -78,7 +78,12 @@ KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave", "
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "change-me")
-app.jinja_env.filters["g"] = lambda x: "%g" % (float(x) if str(x).strip() else 0)
+def _g(x):
+    try:
+        return "%g" % float(x) if str(x).strip() not in ("", "None") else "0"
+    except (TypeError, ValueError):
+        return "0"
+app.jinja_env.filters["g"] = _g
 app.jinja_env.globals["PERMISSION_MONTHLY_LIMIT"] = PERMISSION_MONTHLY_LIMIT
 
 @app.before_request
@@ -764,7 +769,7 @@ onsubmit="return confirm('Delete this leave?')"><button class="danger">Delete</b
 <h2>Permission requests</h2>
 <p class="mut">Employees can apply for permission only for the current day, up to {{PERMISSION_MONTHLY_LIMIT|g}} hrs total per month. Review pending requests below.</p>
 <table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th><th>Reviewed at</th><th class="no-print"></th></tr>
-{% for r in perms %}<tr><td>{{r['Date']}}</td><td>{{r['Hours']|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
+{% for r in perms %}<tr><td>{{r['Date']}}</td><td>{{r.get('Hours',0)|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
 <td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td><td>{{r['Reviewed at'] or '-'}}</td>
 <td class="act no-print">{% if r['Status']=='Pending' %}
 <form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/permission/{{r['_row']}}/approve"><button class="primary">Approve</button></form>
@@ -996,7 +1001,7 @@ def employee_productivity():
         + LIST.replace("in subs", "in msubs")
         + '<h2>Permission requests (' + today.strftime("%B %Y") + ')</h2>'
         + '<table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th></tr>'
-        + '{% for r in perms %}<tr><td>{{r["Date"]}}</td><td>{{r["Hours"]|g}}</td><td>{{r["Reason"]}}</td><td>{{r["Applied at"]}}</td>'
+        + '{% for r in perms %}<tr><td>{{r["Date"]}}</td><td>{{r.get("Hours",0)|g}}</td><td>{{r["Reason"]}}</td><td>{{r["Applied at"]}}</td>'
         + '<td><span class="pill {{r["Status"]|ppill}}">{{r["Status"]}}</span></td></tr>'
         + '{% else %}<tr><td colspan="5">No permission requests this month.</td></tr>{% endfor %}</table>')
     return page(body, title="Productivity Info", msubs=month_subs, m_count=m_count, m_prod=m_prod, m_non=m_non,
@@ -1246,7 +1251,7 @@ PERMISSION_EMP = """<div class="head"><h1>Apply permission</h1><a href="/employe
 <label>Reason<input name="reason" size="30" placeholder="Reason for permission" required></label>
 <button class="primary">Submit request</button></form></div>
 <h2>My permission requests</h2><table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
-{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Hours']|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
+{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r.get('Hours',0)|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
 <td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td>
 <td>{% if r['Status']=='Pending' %}<form method="post" action="/employee/permission/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this request?')"><button class="danger">Cancel</button></form>{% else %}-{% endif %}</td></tr>
 {% else %}<tr><td colspan="6">No permission requests yet.</td></tr>{% endfor %}</table>"""

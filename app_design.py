@@ -55,6 +55,8 @@ HEADERS = {
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
     "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at"],
+    "Permissions": ["Permission ID", "Date", "Employee ID", "Employee name", "Band", "Reason",
+                     "Applied at", "Status", "Reviewed at", "Reviewed by"],
     "Holidays": ["Date", "Name"],
     # Background login/logout tracking (never shown to employees)
     "Attendance": ["Session ID", "Date", "Employee ID", "Employee name", "Band",
@@ -345,6 +347,24 @@ button:focus-visible,.primary:focus-visible,.btnl:focus-visible{outline:2px soli
 .primary:hover,.btnl:hover{background:#4338ca}
 .danger{color:#c62828;border-color:#f3c1c1}
 .danger:hover{background:#fdeaea;border-color:#e5484d;box-shadow:0 6px 16px #e5484d26}
+/* ---- subtle post-login animation for labels, buttons and log/table sections ---- */
+h1,h2,h3,.mut,label,.kpi span{animation:fadeInUp .35s ease backwards}
+h2{animation-delay:.03s}h3{animation-delay:.05s}.mut{animation-delay:.06s}
+table{animation:fadeInUp .4s cubic-bezier(.22,1,.36,1) backwards}
+tbody tr{animation:rowIn .3s ease backwards}
+tbody tr:nth-child(1){animation-delay:.02s}tbody tr:nth-child(2){animation-delay:.05s}
+tbody tr:nth-child(3){animation-delay:.08s}tbody tr:nth-child(4){animation-delay:.11s}
+tbody tr:nth-child(5){animation-delay:.14s}tbody tr:nth-child(6){animation-delay:.17s}
+tbody tr:nth-child(n+7){animation-delay:.2s}
+@keyframes rowIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+aside a{animation:navIn .35s ease backwards}
+aside a:nth-child(1){animation-delay:.03s}aside a:nth-child(2){animation-delay:.06s}
+aside a:nth-child(3){animation-delay:.09s}aside a:nth-child(4){animation-delay:.12s}
+aside a:nth-child(5){animation-delay:.15s}aside a:nth-child(6){animation-delay:.18s}
+aside a:nth-child(7){animation-delay:.21s}aside a:nth-child(8){animation-delay:.24s}
+@keyframes navIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+.pill{transition:transform .18s ease,box-shadow .2s ease}.pill:hover{transform:translateY(-1px)}
+.compact-log table th,.compact-log table td{font-size:12px;padding:5px 8px;line-height:1.3}
 @media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 .grid,.r{display:flex;flex-wrap:wrap;gap:6px;align-items:end}.grid label{display:flex;flex-direction:column;font-size:12px;color:var(--mut)}
 table{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
@@ -419,7 +439,8 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"),
               ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/attendance", "Login History")],
-    "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave"), ("/employee/profile", "Personal details"),
+    "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave"),
+                 ("/employee/permission", "Apply permission"), ("/employee/profile", "Personal details"),
                  ("/employee/productivity", "Productivity Info")],
 }
 
@@ -597,7 +618,7 @@ def admin_log():
          '<label>Date<input type="date" name="date" value="{{request.args.get("date","")}}"></label>'
          '<label>Employee ID / name<input name="emp" value="{{request.args.get("emp","")}}"></label>'
          '<button class="primary">Filter</button> <a href="/admin/log">Clear</a></form></div>')
-    return page(f + LIST, title="Productivity log", subs=subs)
+    return page(f + '<div class="compact-log">' + LIST + '</div>', title="Productivity log", subs=subs)
 
 # ---------------------------------------------------------------- admin: login history + notifications
 ATT = """<div class="head"><div><h1>Login history</h1>
@@ -737,7 +758,17 @@ T_LEAVE = """<div class="card no-print"><h2>Add leave</h2><form method="post" ac
 {% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
 <td class="act no-print"><form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/leave/{{r['_row']}}/delete"
 onsubmit="return confirm('Delete this leave?')"><button class="danger">Delete</button></form></td></tr>
-{% else %}<tr><td colspan="4">No leave records.</td></tr>{% endfor %}</table>"""
+{% else %}<tr><td colspan="4">No leave records.</td></tr>{% endfor %}</table>
+<h2>Permission requests</h2>
+<p class="mut">Employees can apply for permission only for the current day. Review pending requests below.</p>
+<table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th><th>Reviewed at</th><th class="no-print"></th></tr>
+{% for r in perms %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
+<td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td><td>{{r['Reviewed at'] or '-'}}</td>
+<td class="act no-print">{% if r['Status']=='Pending' %}
+<form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/permission/{{r['_row']}}/approve"><button class="primary">Approve</button></form>
+<form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/permission/{{r['_row']}}/reject"><button class="danger">Reject</button></form>
+{% else %}-{% endif %}</td></tr>
+{% else %}<tr><td colspan="6">No permission requests.</td></tr>{% endfor %}</table>"""
 
 T_HOLIDAYS = """<p class="mut">Company holidays (they apply to every employee). <a href="/admin/holidays">Manage holidays</a></p>
 <table><tr><th>Date</th><th>Day</th><th>Holiday</th></tr>
@@ -810,7 +841,9 @@ def admin_employee_detail(eid):
     elif tab == "leave":
         data = sorted((r for r in rows("Leave") if _key(r["Employee ID"]) == _key(eid)),
                       key=lambda r: r["Date"], reverse=True)
-        body = T_LEAVE; ctx["data"] = data
+        perms = sorted((r for r in rows("Permissions") if _key(r["Employee ID"]) == _key(eid)),
+                       key=lambda r: r["Applied at"], reverse=True)
+        body = T_LEAVE; ctx["data"] = data; ctx["perms"] = perms
     elif tab == "holidays":
         data = sorted(rows("Holidays"), key=lambda r: str(r["Date"]), reverse=True)
         for r in data:
@@ -863,6 +896,26 @@ def admin_employee_leave_delete(eid, row):
     book().worksheet("Leave").delete_rows(row)
     flash("Leave deleted."); return redirect(f"/admin/employee-info/{eid}?tab=leave")
 
+def _review_permission(eid, row, status):
+    emp = emp_or_404(eid)
+    r = next((r for r in rows("Permissions") if r["_row"] == row), None)
+    if not r or _key(r["Employee ID"]) != _key(emp["Employee ID"]): abort(404)
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S")
+    book().worksheet("Permissions").update(range_name=f"H{row}:J{row}",
+                                           values=[[status, now, "Admin"]], value_input_option="RAW")
+    flash(f"Permission request {status.lower()}.")
+    return redirect(f"/admin/employee-info/{eid}?tab=leave")
+
+@app.route("/admin/employee-info/<eid>/permission/<int:row>/approve", methods=["POST"])
+@need("admin")
+def admin_permission_approve(eid, row):
+    return _review_permission(eid, row, "Approved")
+
+@app.route("/admin/employee-info/<eid>/permission/<int:row>/reject", methods=["POST"])
+@need("admin")
+def admin_permission_reject(eid, row):
+    return _review_permission(eid, row, "Rejected")
+
 # ---------------------------------------------------------------- employee
 @app.route("/employee/login", methods=["GET", "POST"])
 def employee_login():
@@ -903,10 +956,13 @@ def employee_home():
     pend = bool(missing_dates(session["emp_id"], all_mine, lv, t0, t0))
     profile_incomplete = any(not str(my_emp_row().get(f, "")).strip() for f in EDITABLE_PERSONAL)
     extra = [("Present days", k["present"]), ("Leave days", k["leave"])]
+    today_perm = next((r for r in rows("Permissions")
+                       if str(r["Employee ID"]) == session["emp_id"] and r["Date"] == today), None)
     return page(EMP_TOP + EMP_ALERT + body + '<h2>Submitted today</h2>' + LIST,
                 title="Daily productivity", missed=missed, pend=pend, subs=mine,
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
-                a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete, **ctx)
+                a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete,
+                today_perm=today_perm, **ctx)
 
 @app.route("/employee/productivity")
 @need("employee")
@@ -922,6 +978,9 @@ def employee_productivity():
     m_count = len(counted)
     m_prod = sum(s["prod"] for s in counted)
     m_non = sum(s["non"] for s in counted)
+    perms = sorted((r for r in rows("Permissions")
+                    if str(r["Employee ID"]) == session["emp_id"] and str(r["Date"]).startswith(month)),
+                   key=lambda r: r["Applied at"], reverse=True)
     body = (
         '<div class="head"><h1>Productivity Info</h1></div>'
         '<h2>This month (' + today.strftime("%B %Y") + ')</h2>'
@@ -929,8 +988,14 @@ def employee_productivity():
         'Productive: <b>{{m_prod|g}}</b> hrs &middot; '
         'Non-productive: <b>{{m_non|g}}</b> hrs &middot; '
         'Total: <b>{{(m_prod + m_non)|g}}</b> hrs</div>'
-        + LIST.replace("in subs", "in msubs"))
-    return page(body, title="Productivity Info", msubs=month_subs, m_count=m_count, m_prod=m_prod, m_non=m_non)
+        + LIST.replace("in subs", "in msubs")
+        + '<h2>Permission requests (' + today.strftime("%B %Y") + ')</h2>'
+        + '<table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th></tr>'
+        + '{% for r in perms %}<tr><td>{{r["Date"]}}</td><td>{{r["Reason"]}}</td><td>{{r["Applied at"]}}</td>'
+        + '<td><span class="pill {{r["Status"]|ppill}}">{{r["Status"]}}</span></td></tr>'
+        + '{% else %}<tr><td colspan="4">No permission requests this month.</td></tr>{% endfor %}</table>')
+    return page(body, title="Productivity Info", msubs=month_subs, m_count=m_count, m_prod=m_prod, m_non=m_non,
+                perms=perms)
 
 @app.route("/employee/save", methods=["POST"])
 @need("employee")
@@ -1013,6 +1078,22 @@ def add_leave(emp, d1, d2, reason):
     if new: book().worksheet("Leave").append_rows(new, value_input_option="RAW")
     return len(new)
 
+def add_permission(emp, reason):
+    """Employees may only apply for permission for the current day, and only once per day."""
+    eid, date = str(emp["Employee ID"]), str(today_local())
+    if any(str(r["Employee ID"]) == eid and r["Date"] == date for r in rows("Permissions")):
+        raise ValueError("You have already applied for permission today.")
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S")
+    pid = uuid.uuid4().hex[:10]
+    book().worksheet("Permissions").append_row(
+        [pid, date, eid, emp["Name"], emp["Band"], reason or "Permission", now, "Pending", "", ""],
+        value_input_option="RAW")
+    return pid
+
+def permission_pill(status):
+    return "in" if status == "Approved" else ("out" if status == "Rejected" else "act")
+app.jinja_env.filters["ppill"] = permission_pill
+
 def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
     """Working days (Mon-Sat) in start..end with no entry and no leave."""
     eid = str(eid)
@@ -1043,8 +1124,9 @@ KPI = """<div class="kpis">
 {% for l,v in extra %}<div class="kpi"><span>{{l}}</span><b>{{v}}</b></div>{% endfor %}</div>"""
 
 EMP_TOP = """<div class="head"><div><h1>Hello, {{session.name}}</h1>
-<p class="mut">{{today}} &middot; {% if session.designation %}{{session.designation}} &middot; {% endif %}Band {{session.band}} &middot; {{month_label}} summary</p></div>
-<a class="btnl" href="/employee/leave">Apply leave</a></div>""" + KPI
+<p class="mut">{{today}} &middot; {% if session.designation %}{{session.designation}} &middot; {% endif %}Band {{session.band}} &middot; {{month_label}} summary
+{% if today_perm %}&middot; Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div>
+<div><a class="btnl" href="/employee/permission">Apply permission</a> <a class="btnl" href="/employee/leave">Apply leave</a></div></div>""" + KPI
 
 SUMMARY = """<div class="head"><div><h1>Overview</h1>
 <p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; 8 hrs per present day (capped at 100%).</p></div>
@@ -1070,6 +1152,18 @@ LEAVE_EMP = """<div class="head"><h1>Apply leave</h1><a href="/employee">Back to
 {% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
 <td><form method="post" action="/employee/leave/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this leave?')"><button class="danger">Cancel</button></form></td></tr>
 {% else %}<tr><td colspan="4">No leave yet.</td></tr>{% endfor %}</table>"""
+
+PERMISSION_EMP = """<div class="head"><h1>Apply permission</h1><a href="/employee">Back to daily entry</a></div>
+<div class="card"><p class="mut">Permission can only be applied for today ({{today}}) - use it if you need to arrive late, leave early, or step out during work hours. One request per day.</p>
+<form method="post" class="grid">
+<label>Date<input value="{{today}}" readonly></label>
+<label>Reason<input name="reason" size="30" placeholder="Reason for permission" required></label>
+<button class="primary">Submit request</button></form></div>
+<h2>My permission requests</h2><table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
+{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
+<td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td>
+<td>{% if r['Status']=='Pending' %}<form method="post" action="/employee/permission/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this request?')"><button class="danger">Cancel</button></form>{% else %}-{% endif %}</td></tr>
+{% else %}<tr><td colspan="5">No permission requests yet.</td></tr>{% endfor %}</table>"""
 
 LEAVE_ADMIN = """<div class="head"><h1>Leave log</h1></div>
 <div class="card"><form method="post" class="grid">
@@ -1258,6 +1352,30 @@ def employee_leave_delete(row):
     if not r or str(r["Employee ID"]) != session["emp_id"]: abort(403)
     book().worksheet("Leave").delete_rows(row)
     flash("Leave cancelled."); return redirect("/employee/leave")
+
+@app.route("/employee/permission", methods=["GET", "POST"])
+@need("employee")
+def employee_permission():
+    if request.method == "POST":
+        try:
+            add_permission(my_emp(), request.form.get("reason", "").strip())
+            flash("Permission request submitted for today.")
+        except ValueError as e:
+            flash(str(e))
+        return redirect("/employee/permission")
+    data = sorted((r for r in rows("Permissions") if str(r["Employee ID"]) == session["emp_id"]),
+                  key=lambda r: r["Applied at"], reverse=True)
+    return page(PERMISSION_EMP, title="Apply permission", data=data, today=str(today_local()))
+
+@app.route("/employee/permission/<int:row>/delete", methods=["POST"])
+@need("employee")
+def employee_permission_delete(row):
+    r = next((r for r in rows("Permissions") if r["_row"] == row), None)
+    if not r or str(r["Employee ID"]) != session["emp_id"]: abort(403)
+    if str(r.get("Status", "")).strip() != "Pending":
+        flash("Only pending requests can be cancelled."); return redirect("/employee/permission")
+    book().worksheet("Permissions").delete_rows(row)
+    flash("Permission request cancelled."); return redirect("/employee/permission")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

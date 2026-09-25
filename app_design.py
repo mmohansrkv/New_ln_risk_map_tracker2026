@@ -19,6 +19,7 @@ CREDS_FILE = os.getenv("GOOGLE_CREDS", "credentials.json")
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
 ADMIN_PASS = os.getenv("ADMIN_PASS", "admin123")   # change this!
 DAY_HOURS = 8
+PERMISSION_MONTHLY_LIMIT = 2   # hrs of permission an employee may apply for per calendar month
 WEEKOFF = (5, 6)   # weekly off days: 5 = Saturday, 6 = Sunday - working week is Monday-Friday.
 # Idle minutes of no activity before the system automatically logs someone out (recorded as "Auto (Inactivity)").
 SESSION_IDLE_MINUTES = int(os.getenv("SESSION_IDLE_MINUTES", "30"))
@@ -55,7 +56,7 @@ HEADERS = {
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
     "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at"],
-    "Permissions": ["Permission ID", "Date", "Employee ID", "Employee name", "Band", "Reason",
+    "Permissions": ["Permission ID", "Date", "Employee ID", "Employee name", "Band", "Hours", "Reason",
                      "Applied at", "Status", "Reviewed at", "Reviewed by"],
     "Holidays": ["Date", "Name"],
     # Background login/logout tracking (never shown to employees)
@@ -77,7 +78,8 @@ KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave", "
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "change-me")
-app.jinja_env.filters["g"] = lambda x: "%g" % x
+app.jinja_env.filters["g"] = lambda x: "%g" % (float(x) if str(x).strip() else 0)
+app.jinja_env.globals["PERMISSION_MONTHLY_LIMIT"] = PERMISSION_MONTHLY_LIMIT
 
 @app.before_request
 def _idle_auto_logout():
@@ -760,15 +762,15 @@ T_LEAVE = """<div class="card no-print"><h2>Add leave</h2><form method="post" ac
 onsubmit="return confirm('Delete this leave?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="4">No leave records.</td></tr>{% endfor %}</table>
 <h2>Permission requests</h2>
-<p class="mut">Employees can apply for permission only for the current day. Review pending requests below.</p>
-<table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th><th>Reviewed at</th><th class="no-print"></th></tr>
-{% for r in perms %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
+<p class="mut">Employees can apply for permission only for the current day, up to {{PERMISSION_MONTHLY_LIMIT|g}} hrs total per month. Review pending requests below.</p>
+<table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th><th>Reviewed at</th><th class="no-print"></th></tr>
+{% for r in perms %}<tr><td>{{r['Date']}}</td><td>{{r['Hours']|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
 <td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td><td>{{r['Reviewed at'] or '-'}}</td>
 <td class="act no-print">{% if r['Status']=='Pending' %}
 <form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/permission/{{r['_row']}}/approve"><button class="primary">Approve</button></form>
 <form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/permission/{{r['_row']}}/reject"><button class="danger">Reject</button></form>
 {% else %}-{% endif %}</td></tr>
-{% else %}<tr><td colspan="6">No permission requests.</td></tr>{% endfor %}</table>"""
+{% else %}<tr><td colspan="7">No permission requests.</td></tr>{% endfor %}</table>"""
 
 T_HOLIDAYS = """<p class="mut">Company holidays (they apply to every employee). <a href="/admin/holidays">Manage holidays</a></p>
 <table><tr><th>Date</th><th>Day</th><th>Holiday</th></tr>
@@ -901,7 +903,7 @@ def _review_permission(eid, row, status):
     r = next((r for r in rows("Permissions") if r["_row"] == row), None)
     if not r or _key(r["Employee ID"]) != _key(emp["Employee ID"]): abort(404)
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
-    book().worksheet("Permissions").update(range_name=f"H{row}:J{row}",
+    book().worksheet("Permissions").update(range_name=f"I{row}:K{row}",
                                            values=[[status, now, "Admin"]], value_input_option="RAW")
     flash(f"Permission request {status.lower()}.")
     return redirect(f"/admin/employee-info/{eid}?tab=leave")
@@ -958,11 +960,13 @@ def employee_home():
     extra = [("Present days", k["present"]), ("Leave days", k["leave"])]
     today_perm = next((r for r in rows("Permissions")
                        if str(r["Employee ID"]) == session["emp_id"] and r["Date"] == today), None)
+    perm_used = permission_hours_used(session["emp_id"], today[:7])
     return page(EMP_TOP + EMP_ALERT + body + '<h2>Submitted today</h2>' + LIST,
                 title="Daily productivity", missed=missed, pend=pend, subs=mine,
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
                 a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete,
-                today_perm=today_perm, **ctx)
+                today_perm=today_perm, perm_limit=PERMISSION_MONTHLY_LIMIT, perm_used=perm_used,
+                perm_remaining=round(PERMISSION_MONTHLY_LIMIT - perm_used, 2), **ctx)
 
 @app.route("/employee/productivity")
 @need("employee")
@@ -976,26 +980,27 @@ def employee_productivity():
                         key=lambda s: s["date"], reverse=True)
     counted = [s for s in month_subs if not s["off"]]    # weekly-off entries are not calculated
     m_count = len(counted)
-    m_prod = sum(s["prod"] for s in counted)
-    m_non = sum(s["non"] for s in counted)
     perms = sorted((r for r in rows("Permissions")
                     if str(r["Employee ID"]) == session["emp_id"] and str(r["Date"]).startswith(month)),
                    key=lambda r: r["Applied at"], reverse=True)
+    m_perm = sum(num(r.get("Hours")) for r in perms if str(r.get("Status", "")).strip() == "Approved")
+    m_prod = sum(s["prod"] for s in counted) + m_perm   # approved permission hours count toward productivity
+    m_non = sum(s["non"] for s in counted)
     body = (
         '<div class="head"><h1>Productivity Info</h1></div>'
         '<h2>This month (' + today.strftime("%B %Y") + ')</h2>'
         '<div class="totals">Entries: <b>{{m_count}}</b> &middot; '
-        'Productive: <b>{{m_prod|g}}</b> hrs &middot; '
+        'Productive: <b>{{m_prod|g}}</b> hrs (incl. <b>{{m_perm|g}}</b> approved permission hrs) &middot; '
         'Non-productive: <b>{{m_non|g}}</b> hrs &middot; '
         'Total: <b>{{(m_prod + m_non)|g}}</b> hrs</div>'
         + LIST.replace("in subs", "in msubs")
         + '<h2>Permission requests (' + today.strftime("%B %Y") + ')</h2>'
-        + '<table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th></tr>'
-        + '{% for r in perms %}<tr><td>{{r["Date"]}}</td><td>{{r["Reason"]}}</td><td>{{r["Applied at"]}}</td>'
+        + '<table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th></tr>'
+        + '{% for r in perms %}<tr><td>{{r["Date"]}}</td><td>{{r["Hours"]|g}}</td><td>{{r["Reason"]}}</td><td>{{r["Applied at"]}}</td>'
         + '<td><span class="pill {{r["Status"]|ppill}}">{{r["Status"]}}</span></td></tr>'
-        + '{% else %}<tr><td colspan="4">No permission requests this month.</td></tr>{% endfor %}</table>')
+        + '{% else %}<tr><td colspan="5">No permission requests this month.</td></tr>{% endfor %}</table>')
     return page(body, title="Productivity Info", msubs=month_subs, m_count=m_count, m_prod=m_prod, m_non=m_non,
-                perms=perms)
+                m_perm=m_perm, perms=perms)
 
 @app.route("/employee/save", methods=["POST"])
 @need("employee")
@@ -1051,18 +1056,37 @@ def month_range(m):
 
 def report(employees, subs, leaves, start, end):
     wd, a, b, out = workdays(start, end), str(start), str(end), []
+    perms = rows("Permissions")     # fetched once, filtered per employee below
     for e in employees:
         eid = str(e["Employee ID"])
         mine = [s for s in subs if str(s["emp_id"]) == eid and a <= s["date"] <= b and not s["off"]]
         days = {s["date"] for s in mine}
         lv = {l["Date"] for l in leaves if str(l["Employee ID"]) == eid and a <= l["Date"] <= b and not is_off(l["Date"])}
-        prod_hrs = sum(s["prod"] for s in mine)
+        perm_hrs = sum(num(r.get("Hours")) for r in perms
+                       if str(r["Employee ID"]) == eid and a <= str(r["Date"]) <= b
+                       and str(r.get("Status", "")).strip() == "Approved")
+        prod_hrs = sum(s["prod"] for s in mine) + perm_hrs   # approved permission hours count toward productivity
         base = len(days) * DAY_HOURS                     # 8 hrs per present day = 100%
         out.append(dict(id=eid, name=e["Name"], band=e["Band"], designation=e.get("Designation", ""), present=len(days), leave=len(lv),
                         absent=max(wd - len(days | lv), 0), wd=wd,
                         att=min(round(len(days) / wd * 100), 100) if wd else 0,
                         pct=min(round(prod_hrs / base * 100), 100) if base else 0,
-                        prod=prod_hrs, non=sum(s["non"] for s in mine)))
+                        prod=prod_hrs, non=sum(s["non"] for s in mine), perm=perm_hrs))
+    return out
+
+def pivot_by_band(rep):
+    """Aggregate the per-employee report rows into one row per Band, for the Admin pivot chart."""
+    groups = {}
+    for r in rep:
+        g = groups.setdefault(r["band"], dict(band=r["band"], n=0, att=0, pct=0, prod=0, non=0, perm=0))
+        g["n"] += 1; g["att"] += r["att"]; g["pct"] += r["pct"]
+        g["prod"] += r["prod"]; g["non"] += r["non"]; g["perm"] += r.get("perm", 0)
+    out = []
+    for g in groups.values():
+        n = g["n"]
+        out.append(dict(band=g["band"], n=n, att=round(g["att"] / n), pct=round(g["pct"] / n),
+                        prod=round(g["prod"], 2), non=round(g["non"], 2), perm=round(g["perm"], 2)))
+    out.sort(key=lambda x: str(x["band"]))
     return out
 
 def add_leave(emp, d1, d2, reason):
@@ -1078,15 +1102,35 @@ def add_leave(emp, d1, d2, reason):
     if new: book().worksheet("Leave").append_rows(new, value_input_option="RAW")
     return len(new)
 
-def add_permission(emp, reason):
-    """Employees may only apply for permission for the current day, and only once per day."""
+def permission_hours_used(eid, month):
+    """Hours already applied for (Pending + Approved; Rejected doesn't count) by this employee
+    in the given month ('YYYY-MM')."""
+    eid = str(eid)
+    return sum(num(r.get("Hours")) for r in rows("Permissions")
+               if str(r["Employee ID"]) == eid and str(r["Date"]).startswith(month)
+               and str(r.get("Status", "")).strip() != "Rejected")
+
+def add_permission(emp, reason, hours):
+    """Employees may only apply for permission for the current day, once per day, and only up to
+    PERMISSION_MONTHLY_LIMIT hrs total (Pending + Approved) per calendar month."""
     eid, date = str(emp["Employee ID"]), str(today_local())
     if any(str(r["Employee ID"]) == eid and r["Date"] == date for r in rows("Permissions")):
         raise ValueError("You have already applied for permission today.")
+    try:
+        hours = round(float(hours), 2)
+    except (TypeError, ValueError):
+        raise ValueError("Enter a valid number of permission hours.")
+    if hours <= 0:
+        raise ValueError("Permission hours must be greater than 0.")
+    month = date[:7]
+    used = permission_hours_used(eid, month)
+    if used + hours > PERMISSION_MONTHLY_LIMIT:
+        raise ValueError(f"Monthly permission limit is {PERMISSION_MONTHLY_LIMIT:g} hrs. "
+                          f"You have {round(PERMISSION_MONTHLY_LIMIT - used, 2):g} hr(s) remaining this month.")
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
     pid = uuid.uuid4().hex[:10]
     book().worksheet("Permissions").append_row(
-        [pid, date, eid, emp["Name"], emp["Band"], reason or "Permission", now, "Pending", "", ""],
+        [pid, date, eid, emp["Name"], emp["Band"], hours, reason or "Permission", now, "Pending", "", ""],
         value_input_option="RAW")
     return pid
 
@@ -1126,7 +1170,12 @@ KPI = """<div class="kpis">
 EMP_TOP = """<div class="head"><div><h1>Hello, {{session.name}}</h1>
 <p class="mut">{{today}} &middot; {% if session.designation %}{{session.designation}} &middot; {% endif %}Band {{session.band}} &middot; {{month_label}} summary
 {% if today_perm %}&middot; Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div>
-<div><a class="btnl" href="/employee/permission">Apply permission</a> <a class="btnl" href="/employee/leave">Apply leave</a></div></div>""" + KPI
+<div><a class="btnl" href="/employee/leave">Apply leave</a></div></div>""" + KPI + """
+<div class="card"><h2>Permission</h2>
+<p class="mut">Employees can apply for permission (arriving late, leaving early, or stepping out) up to {{perm_limit|g}} hrs per month.
+Used this month: <b>{{perm_used|g}}</b> hrs &middot; Remaining: <b>{{perm_remaining|g}}</b> hrs
+{% if today_perm %} &middot; Today's request: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p>
+<a class="primary" href="/employee/permission">Apply for Permission</a></div>"""
 
 SUMMARY = """<div class="head"><div><h1>Overview</h1>
 <p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; 8 hrs per present day (capped at 100%).</p></div>
@@ -1140,7 +1189,40 @@ SUMMARY = """<div class="head"><div><h1>Overview</h1>
 <td>{{r.att}}%<i class="bar {{r.att|tone}}"><u style="width:{{r.att}}%"></u></i></td>
 <td>{{r.prod|g}}</td><td>{{r.non|g}}</td>
 <td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td></tr>
-{% else %}<tr><td colspan="9">No employees yet.</td></tr>{% endfor %}</table>"""
+{% else %}<tr><td colspan="9">No employees yet.</td></tr>{% endfor %}</table>
+
+<h2>Productivity pivot (by Band)</h2>
+<p class="mut">Employee productivity data summarized by Band - each employee's Productive hrs already include their approved permission hours.</p>
+<table><tr><th>Band</th><th>Employees</th><th>Avg attendance</th><th>Avg productivity</th><th>Total productive hrs</th><th>Total non-productive hrs</th><th>Approved permission hrs</th></tr>
+{% for p in pivot %}<tr><td>{{p.band}}</td><td>{{p.n}}</td><td>{{p.att}}%</td><td>{{p.pct}}%</td><td>{{p.prod|g}}</td><td>{{p.non|g}}</td><td>{{p.perm|g}}</td></tr>
+{% else %}<tr><td colspan="7">No data.</td></tr>{% endfor %}</table>
+
+<div class="card no-print"><h2 style="margin-top:0">Pivot chart</h2>
+<canvas id="pivotChart" height="100"></canvas></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script>
+(function(){
+  var d = {{ pivot_chart|tojson }};
+  var el = document.getElementById('pivotChart');
+  if (el && window.Chart) {
+    new Chart(el, {
+      type: 'bar',
+      data: {
+        labels: d.band_labels,
+        datasets: [
+          {label: 'Avg attendance %', data: d.band_att, backgroundColor: '#4f46e5'},
+          {label: 'Avg productivity %', data: d.band_pct, backgroundColor: '#16a34a'}
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {legend: {position: 'top'}, title: {display: true, text: 'Attendance vs Productivity by Band'}},
+        scales: {y: {beginAtZero: true, max: 100}}
+      }
+    });
+  }
+})();
+</script>"""
 
 LEAVE_EMP = """<div class="head"><h1>Apply leave</h1><a href="/employee">Back to daily entry</a></div>
 <div class="card"><form method="post" class="grid">
@@ -1154,16 +1236,20 @@ LEAVE_EMP = """<div class="head"><h1>Apply leave</h1><a href="/employee">Back to
 {% else %}<tr><td colspan="4">No leave yet.</td></tr>{% endfor %}</table>"""
 
 PERMISSION_EMP = """<div class="head"><h1>Apply permission</h1><a href="/employee">Back to daily entry</a></div>
-<div class="card"><p class="mut">Permission can only be applied for today ({{today}}) - use it if you need to arrive late, leave early, or step out during work hours. One request per day.</p>
+<div class="card"><p class="mut">Permission can only be applied for today ({{today}}) - use it if you need to arrive late, leave early, or step out during work hours. One request per day, up to {{perm_limit|g}} hrs total per month.</p>
+<div class="kpis"><div class="kpi"><span>Monthly limit</span><b>{{perm_limit|g}} hrs</b></div>
+<div class="kpi"><span>Used this month</span><b>{{perm_used|g}} hrs</b></div>
+<div class="kpi"><span>Remaining</span><b>{{perm_remaining|g}} hrs</b></div></div>
 <form method="post" class="grid">
 <label>Date<input value="{{today}}" readonly></label>
+<label>Hours<input type="number" name="hours" step="0.25" min="0.25" max="{{perm_limit}}" placeholder="e.g. 1" required></label>
 <label>Reason<input name="reason" size="30" placeholder="Reason for permission" required></label>
 <button class="primary">Submit request</button></form></div>
-<h2>My permission requests</h2><table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
-{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
+<h2>My permission requests</h2><table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
+{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Hours']|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
 <td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td>
 <td>{% if r['Status']=='Pending' %}<form method="post" action="/employee/permission/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this request?')"><button class="danger">Cancel</button></form>{% else %}-{% endif %}</td></tr>
-{% else %}<tr><td colspan="5">No permission requests yet.</td></tr>{% endfor %}</table>"""
+{% else %}<tr><td colspan="6">No permission requests yet.</td></tr>{% endfor %}</table>"""
 
 LEAVE_ADMIN = """<div class="head"><h1>Leave log</h1></div>
 <div class="card"><form method="post" class="grid">
@@ -1234,8 +1320,20 @@ def admin_summary():
     extra = [("Employees", len(rep)), ("Total leave days", sum(r["leave"] for r in rep))]
     # Missed-entries list is intentionally NOT shown on the Overview page any more;
     # it lives only on the dedicated "Missed entries" page (/admin/missed).
+    pivot = pivot_by_band(rep)
+    pivot_chart = dict(
+        emp_labels=[f"{r['id']} - {r['name']}" for r in rep],
+        emp_pct=[r["pct"] for r in rep],
+        emp_att=[r["att"] for r in rep],
+        band_labels=[str(p["band"]) for p in pivot],
+        band_att=[p["att"] for p in pivot],
+        band_pct=[p["pct"] for p in pivot],
+        band_prod=[p["prod"] for p in pivot],
+        band_non=[p["non"] for p in pivot],
+    )
     return page(SUMMARY, title="Overview", rep=rep, month=month, label=label, wd=workdays(start, end),
-                lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra)
+                lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra,
+                pivot=pivot, pivot_chart=pivot_chart)
 
 MISSED = """<div class="head"><div><h1>Missed entries</h1>
 <p class="mut">{{label}} &middot; Working days (weekly off excluded) with no productivity entry and no leave. Today is not included.</p></div>
@@ -1358,14 +1456,18 @@ def employee_leave_delete(row):
 def employee_permission():
     if request.method == "POST":
         try:
-            add_permission(my_emp(), request.form.get("reason", "").strip())
+            add_permission(my_emp(), request.form.get("reason", "").strip(), request.form.get("hours", ""))
             flash("Permission request submitted for today.")
         except ValueError as e:
             flash(str(e))
         return redirect("/employee/permission")
     data = sorted((r for r in rows("Permissions") if str(r["Employee ID"]) == session["emp_id"]),
                   key=lambda r: r["Applied at"], reverse=True)
-    return page(PERMISSION_EMP, title="Apply permission", data=data, today=str(today_local()))
+    month = str(today_local())[:7]
+    used = permission_hours_used(session["emp_id"], month)
+    return page(PERMISSION_EMP, title="Apply permission", data=data, today=str(today_local()),
+                perm_limit=PERMISSION_MONTHLY_LIMIT, perm_used=used,
+                perm_remaining=round(PERMISSION_MONTHLY_LIMIT - used, 2))
 
 @app.route("/employee/permission/<int:row>/delete", methods=["POST"])
 @need("employee")

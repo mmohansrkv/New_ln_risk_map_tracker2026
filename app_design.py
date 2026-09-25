@@ -8,6 +8,12 @@ import gspread
 from google.oauth2.service_account import Credentials
 from flask import Flask, request, redirect, session, render_template_string, flash, abort, jsonify
 
+from zoneinfo import ZoneInfo
+# The server clock is often UTC. All app times use this timezone instead (set APP_TZ to change it).
+TZ = ZoneInfo(os.getenv("APP_TZ", "Asia/Kolkata"))
+def now_local(): return dt.datetime.now(TZ).replace(tzinfo=None)
+def today_local(): return now_local().date()
+
 SHEET_ID = os.getenv("SHEET_ID", "1zh_W-ZDLEa3XZCt_a0iw8m5V8VxrUg3pj55FG0ZFJJg")
 CREDS_FILE = os.getenv("GOOGLE_CREDS", "credentials.json")
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
@@ -167,10 +173,10 @@ def parse_form():
     err = None
     if not procs and not notes: err = "Add at least one process or note with hours."
     elif tot > DAY_HOURS: err = f"Total {tot:g} hrs is more than {DAY_HOURS} hrs."
-    return request.form.get("date") or str(dt.date.today()), procs, notes, err
+    return request.form.get("date") or str(today_local()), procs, notes, err
 
 def write_sub(sid, date, emp, procs, notes):
-    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S")
     base = [sid, date, *emp]      # emp = (band, id, name)
     out = [base + ["Process", n, h, c, now, d] for n, h, c, d in procs] + \
           [base + ["Note", t, h, "", now, ""] for t, h in notes]
@@ -254,12 +260,12 @@ def _log_logout(sid, emp_id, name, band, now):
 def track_login(emp_id, name, band):
     """Start the day's clock: called right after a successful employee login."""
     session["att_id"] = uuid.uuid4().hex[:12]
-    _bg(_log_login, session["att_id"], emp_id, name, band, dt.datetime.now())
+    _bg(_log_login, session["att_id"], emp_id, name, band, now_local())
 
 def track_logout():
     """Save the logout time (no-op if the current session is not an employee session)."""
     if session.get("role") == "employee" and session.get("att_id"):
-        _bg(_log_logout, session["att_id"], session["emp_id"], session["name"], session["band"], dt.datetime.now())
+        _bg(_log_logout, session["att_id"], session["emp_id"], session["name"], session["band"], now_local())
         session.pop("att_id", None)
 
 # ---------------------------------------------------------------- auth helpers
@@ -340,6 +346,9 @@ tbody tr{transition:background .15s ease}tbody tr:hover{background:#f7f8fd}
 .lcard button{width:100%;background:#f58a8a;color:#fff;border:0;border-radius:20px;padding:11px;margin:12px 0 0;font-size:15px}
 .orb{object-fit:cover;position:absolute;left:-50px;bottom:-50px;width:230px;height:230px;border-radius:50%;border:6px solid #fff;background:#fff center/cover no-repeat;box-shadow:0 10px 30px #0003}
 @media(max-width:800px){.orb{display:none}.wbody{padding:20px 10px}}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 18px}
+.tabs a{padding:8px 14px;border-radius:8px;background:#fff;border:1px solid var(--line);color:var(--ink);text-decoration:none;font-size:14px;transition:background .2s ease}
+.tabs a:hover{background:#eef0ff}.tabs a.on{background:var(--pri);color:#fff;border-color:var(--pri)}
 .pill{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;background:#eceffa;color:var(--mut)}
 .pill.in{background:#e3f6ec;color:#146c43}.pill.out{background:#fdeaea;color:#a52a2a}.pill.act{background:#fff4e5;color:#7a4b00}
 .nb{display:none;margin-left:8px;min-width:18px;padding:1px 6px;border-radius:9px;background:#e5484d;color:#fff;font-size:11px;text-align:center}
@@ -356,7 +365,7 @@ tbody tr{transition:background .15s ease}tbody tr:hover{background:#f7f8fd}
 {% else %}<div class="lg">{% for m in get_flashed_messages() %}<p class="flash" style="background:#fff">{{m}}</p>{% endfor %}{{body|safe}}</div>{% endif %}
 {% if session.role=='admin' %}<div id="toasts"></div><script>
 (function(){var since="0",first=1;
-function badge(n){var a=document.querySelector('aside a[href="/admin/notifications"]');if(!a)return;
+function badge(n){var a=document.querySelector('aside a[href="/admin/employee-info"]');if(!a)return;
  var b=a.querySelector('.nb');if(!b){b=document.createElement('span');b.className='nb';a.appendChild(b)}
  b.textContent=n;b.style.display=n>0?'inline-block':'none'}
 function toast(t){var d=document.createElement('div');d.className='toast';d.textContent=t;
@@ -369,11 +378,9 @@ poll();setInterval(poll,15000)})();
 </body></html>"""
 
 NAVS = {
-    "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"), ("/admin/personal", "Personal details"),
-              ("/admin/processes", "Processes"),
-              ("/admin/log", "Productivity log"), ("/admin/missed", "Missed entries"), ("/admin/leave", "Leave log"),
-              ("/admin/holidays", "Holidays"),
-              ("/admin/attendance", "Login history"), ("/admin/notifications", "Notifications")],
+    "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"),
+              ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
+              ("/admin/employee-info", "Employee Info")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave"), ("/employee/profile", "Personal details")],
 }
 
@@ -572,14 +579,8 @@ ATT = """<div class="head"><div><h1>Login history</h1>
 <td>{{r['Duration'] or '-'}}</td></tr>
 {% else %}<tr><td colspan="6">No login records for this selection.</td></tr>{% endfor %}</table>"""
 
-@app.route("/admin/attendance")
-@need("admin")
-def admin_attendance():
-    today = str(dt.date.today())
-    d = request.args.get("date", today).strip()
-    q = request.args.get("emp", "").strip().lower()
-    data = [r for r in rows("Attendance") if (not d or r["Date"] == d) and
-            (not q or q in str(r["Employee ID"]).lower() or q in str(r["Employee name"]).lower())]
+def att_prepare(data, today):
+    """Adds status fields to attendance rows; returns (daily summary, sessions newest-first, #active)."""
     for r in data:
         out = str(r["Logout time"]).strip()
         r["out"] = out or "Not recorded"
@@ -598,6 +599,17 @@ def admin_attendance():
     for g in days: g["total"] = _hms(g["secs"]) if g["secs"] else "-"
     data.sort(key=key, reverse=True)
     active = len({r["Employee ID"] for r in data if r["status"] == "Active"})
+    return days, data, active
+
+@app.route("/admin/attendance")
+@need("admin")
+def admin_attendance():
+    today = str(today_local())
+    d = request.args.get("date", today).strip()
+    q = request.args.get("emp", "").strip().lower()
+    data = [r for r in rows("Attendance") if (not d or r["Date"] == d) and
+            (not q or q in str(r["Employee ID"]).lower() or q in str(r["Employee name"]).lower())]
+    days, data, active = att_prepare(data, today)
     return page(ATT, title="Login history", data=data, days=days, d=d, q=request.args.get("emp", ""), active=active)
 
 NOTIF = """<div class="head"><div><h1>Notifications</h1>
@@ -635,6 +647,152 @@ def admin_notify_poll():
     return jsonify(unseen=sum(1 for r in data if str(r.get("Seen", "")).strip() != "Yes"),
                    last=str(max(last, since)), items=items)
 
+# ---------------------------------------------------------------- admin: Employee Info (list -> employee details)
+TABS = [("personal", "Personal Details"), ("missed", "Missed Entries"), ("leave", "Leave Log"),
+        ("holidays", "Holidays"), ("history", "Login History"), ("notifications", "Notifications")]
+
+EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">Click an employee's name to open their details.</p></div>
+<form class="grid" method="get"><input name="q" placeholder="Search ID / name" value="{{q}}">
+<button class="primary">Search</button><a href="/admin/employee-info">Reset</a></form></div>
+<table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Band</th></tr>
+{% for e in emps %}<tr><td>{{e['Employee ID']}}</td>
+<td><a href="/admin/employee-info/{{e['Employee ID']|urlencode}}"><b>{{e['Name']}}</b></a></td>
+<td>{{e['Designation']}}</td><td>{{e['Band']}}</td></tr>
+{% else %}<tr><td colspan="4">No employees found.</td></tr>{% endfor %}</table>"""
+
+EMP_HEAD = """<div class="head"><div><h1>{{emp['Name']}}</h1>
+<p class="mut">{{emp['Employee ID']}} &middot; {{emp['Designation'] or 'No designation'}} &middot; Band {{emp['Band']}}</p></div>
+<a href="/admin/employee-info">&larr; All employees</a></div>
+<div class="tabs no-print">{% for k,l in tabs %}<a href="/admin/employee-info/{{emp['Employee ID']|urlencode}}?tab={{k}}"
+class="{{'on' if k==tab else ''}}">{{l}}</a>{% endfor %}</div>"""
+
+T_PERSONAL = """<div class="card"><h2>Personal details</h2>
+<table>{% for l,v in fields %}<tr><th style="width:220px">{{l}}</th><td>{{v or '-'}}</td></tr>{% endfor %}</table><br>
+<a class="btnl no-print" href="/admin/personal/{{emp['_row']}}">Edit details</a></div>"""
+
+T_MISSED = """<form class="grid no-print" method="get"><input type="hidden" name="tab" value="missed">
+<input type="month" name="month" value="{{month if month!='all' else ''}}"><button class="primary">Show</button>
+<a href="?tab=missed">This month</a><a href="?tab=missed&month=all">All time</a></form>
+<div class="kpis"><div class="kpi"><span>Missed entries &middot; {{label}}</span><b>{{data|length}}</b></div></div>
+<p class="mut">Working days (weekly off excluded) with no productivity entry and no leave. Today is not included.</p>
+<table><tr><th>Date</th><th>Day</th></tr>
+{% for r in data %}<tr><td>{{r.date}}</td><td>{{r.day}}</td></tr>
+{% else %}<tr><td colspan="2">No missed entries.</td></tr>{% endfor %}</table>"""
+
+T_LEAVE = """<div class="card no-print"><h2>Add leave</h2><form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/leave" class="grid">
+<label>From date<input type="date" name="d1" required></label><label>To date<input type="date" name="d2" required></label>
+<label>Reason<input name="reason" placeholder="Reason"></label><button class="primary">Add leave</button></form></div>
+<table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th class="no-print"></th></tr>
+{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
+<td class="act no-print"><form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/leave/{{r['_row']}}/delete"
+onsubmit="return confirm('Delete this leave?')"><button class="danger">Delete</button></form></td></tr>
+{% else %}<tr><td colspan="4">No leave records.</td></tr>{% endfor %}</table>"""
+
+T_HOLIDAYS = """<p class="mut">Company holidays (they apply to every employee). <a href="/admin/holidays">Manage holidays</a></p>
+<table><tr><th>Date</th><th>Day</th><th>Holiday</th></tr>
+{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r.day}}</td><td>{{r['Name']}}</td></tr>
+{% else %}<tr><td colspan="3">No holidays declared.</td></tr>{% endfor %}</table>"""
+
+T_HISTORY_FORM = """<form class="grid no-print" method="get"><input type="hidden" name="tab" value="history">
+<input type="month" name="month" value="{{month}}"><button class="primary">Show</button>
+<a href="?tab=history">This month</a><a href="?tab=history&month=all">All time</a></form>
+<p class="mut">{{label}} &middot; recorded automatically when the employee logs in and out.</p>"""
+
+T_NOTIF = """<p class="mut">Login / logout alerts for this employee, newest first (latest 200).</p>
+<table><tr><th>Time</th><th>Event</th></tr>
+{% for r in data %}<tr{% if r.new %} style="font-weight:600"{% endif %}><td>{{r['Time']}}</td>
+<td><span class="pill {{'in' if r['Event']=='Logged in' else 'out'}}">{{r['Event']}}</span></td></tr>
+{% else %}<tr><td colspan="2">No notifications yet.</td></tr>{% endfor %}</table>"""
+
+@app.route("/admin/employee-info")
+@need("admin")
+def admin_employee_info():
+    q = request.args.get("q", "").strip().lower()
+    emps = [e for e in rows("Employees") if not q or q in str(e["Employee ID"]).lower() or q in str(e["Name"]).lower()]
+    emps.sort(key=lambda e: str(e["Name"]).lower())
+    return page(EMP_LIST, title="Employee Info", emps=emps, q=request.args.get("q", ""))
+
+def emp_or_404(eid):
+    e = next((e for e in rows("Employees") if _key(e["Employee ID"]) == _key(eid)), None)
+    return e or abort(404)
+
+@app.route("/admin/employee-info/<eid>")
+@need("admin")
+def admin_employee_detail(eid):
+    emp = emp_or_404(eid); eid = str(emp["Employee ID"])
+    tab = request.args.get("tab", "personal")
+    if tab not in dict(TABS): tab = "personal"
+    today = today_local()
+    month = request.args.get("month") or today.strftime("%Y-%m")
+    ctx = dict(emp=emp, tab=tab, tabs=TABS)
+    if tab == "personal":
+        fields = [("Employee ID", emp["Employee ID"]), ("Name", emp["Name"]), ("Designation", emp.get("Designation", "")),
+                  ("Band", emp["Band"])] + [(f, emp.get(f, "")) for f in EDITABLE_PERSONAL] + \
+                 [("Office Email ID", emp.get("Email", ""))]
+        body = T_PERSONAL; ctx["fields"] = fields
+    elif tab == "missed":
+        subs = [s for s in load_subs() if _key(s["emp_id"]) == _key(eid)]
+        leaves = [l for l in rows("Leave") if _key(l["Employee ID"]) == _key(eid)]
+        if month == "all":
+            ds = [s["date"] for s in subs] + [l["Date"] for l in leaves]
+            start, label = (dt.date.fromisoformat(min(ds)) if ds else today), "All time"
+            end = today - dt.timedelta(days=1)
+        else:
+            start, _ = month_range(month); label = start.strftime("%B %Y")
+            end = min(month_range(month)[1], today - dt.timedelta(days=1))
+        data = [dict(date=d, day=dt.date.fromisoformat(d).strftime("%a"))
+                for d in missing_dates(eid, subs, leaves, start, end, fmt="%Y-%m-%d")]
+        data.sort(key=lambda r: r["date"], reverse=True)
+        body = T_MISSED; ctx.update(data=data, month=month, label=label)
+    elif tab == "leave":
+        data = sorted((r for r in rows("Leave") if _key(r["Employee ID"]) == _key(eid)),
+                      key=lambda r: r["Date"], reverse=True)
+        body = T_LEAVE; ctx["data"] = data
+    elif tab == "holidays":
+        data = sorted(rows("Holidays"), key=lambda r: str(r["Date"]), reverse=True)
+        for r in data:
+            try: r["day"] = dt.date.fromisoformat(str(r["Date"])).strftime("%a")
+            except ValueError: r["day"] = ""
+        body = T_HOLIDAYS; ctx["data"] = data
+    elif tab == "history":
+        data = [r for r in rows("Attendance") if _key(r["Employee ID"]) == _key(eid) and
+                (month == "all" or str(r["Date"]).startswith(month))]
+        days, data, active = att_prepare(data, str(today))
+        label = "All time" if month == "all" else dt.datetime.strptime(month + "-01", "%Y-%m-%d").strftime("%B %Y") \
+                if len(month) == 7 else month
+        body = T_HISTORY_FORM + ATT[ATT.index("<h2>Daily summary</h2>"):]
+        ctx.update(data=data, days=days, month=month if month != "all" else "", label=label)
+    else:   # notifications - opening the tab marks this employee's alerts as read
+        data = [r for r in rows("Notifications") if _key(r["Employee ID"]) == _key(eid)]
+        for r in data: r["new"] = str(r.get("Seen", "")).strip() != "Yes"
+        fresh = [r for r in data if r["new"]]
+        if fresh:
+            book().worksheet("Notifications").batch_update(
+                [{"range": f"F{r['_row']}", "values": [["Yes"]]} for r in fresh], value_input_option="RAW")
+            _notif_cache[1] = None
+        data.sort(key=_nid, reverse=True)
+        body = T_NOTIF; ctx["data"] = data[:200]
+    return page(EMP_HEAD + body, title=emp["Name"], **ctx)
+
+@app.route("/admin/employee-info/<eid>/leave", methods=["POST"])
+@need("admin")
+def admin_employee_leave_add(eid):
+    emp = emp_or_404(eid)
+    try:
+        flash(f"{add_leave(emp, request.form['d1'], request.form['d2'], request.form['reason'].strip())} leave day(s) added.")
+    except (ValueError, TypeError) as e:
+        flash(str(e))
+    return redirect(f"/admin/employee-info/{eid}?tab=leave")
+
+@app.route("/admin/employee-info/<eid>/leave/<int:row>/delete", methods=["POST"])
+@need("admin")
+def admin_employee_leave_delete(eid, row):
+    emp = emp_or_404(eid)
+    r = next((r for r in rows("Leave") if r["_row"] == row), None)
+    if not r or _key(r["Employee ID"]) != _key(emp["Employee ID"]): abort(404)
+    book().worksheet("Leave").delete_rows(row)
+    flash("Leave deleted."); return redirect(f"/admin/employee-info/{eid}?tab=leave")
+
 # ---------------------------------------------------------------- employee
 @app.route("/employee/login", methods=["GET", "POST"])
 def employee_login():
@@ -660,7 +818,7 @@ def form_page(sub, action, heading):
 @app.route("/employee")
 @need("employee")
 def employee_home():
-    today = str(dt.date.today())
+    today = str(today_local())
     session["designation"] = find_designation(session["emp_id"], session["name"], session["band"])
     sub = dict(date=today, band=session["band"], designation=session["designation"],
                emp_id=session["emp_id"], emp_name=session["name"],
@@ -676,14 +834,14 @@ def employee_home():
     m_prod = sum(s["prod"] for s in counted)
     m_non = sum(s["non"] for s in counted)
     month_html = (
-        '<h2>This month (' + dt.date.today().strftime("%B %Y") + ')</h2>'
+        '<h2>This month (' + today_local().strftime("%B %Y") + ')</h2>'
         '<div class="totals">Entries: <b>{{m_count}}</b> &middot; '
         'Productive: <b>{{m_prod|g}}</b> hrs &middot; '
         'Non-productive: <b>{{m_non|g}}</b> hrs &middot; '
         'Total: <b>{{(m_prod + m_non)|g}}</b> hrs</div>'
         + LIST.replace("in subs", "in msubs"))
-    first = dt.date.today().replace(day=1)
-    lv = rows("Leave"); t0 = dt.date.today()
+    first = today_local().replace(day=1)
+    lv = rows("Leave"); t0 = today_local()
     k = report([my_emp()], all_mine, lv, first, t0)[0]
     missed = missing_dates(session["emp_id"], all_mine, lv, first, t0 - dt.timedelta(days=1))
     pend = bool(missing_dates(session["emp_id"], all_mine, lv, t0, t0))
@@ -742,9 +900,9 @@ def month_range(m):
     try:
         y, mo = map(int, m.split("-")); s = dt.date(y, mo, 1)
     except (ValueError, AttributeError):
-        s = dt.date.today().replace(day=1)
+        s = today_local().replace(day=1)
     e = (s.replace(day=28) + dt.timedelta(days=4)).replace(day=1) - dt.timedelta(days=1)
-    return s, min(e, dt.date.today())
+    return s, min(e, today_local())
 
 def report(employees, subs, leaves, start, end):
     wd, a, b, out = workdays(start, end), str(start), str(end), []
@@ -768,7 +926,7 @@ def add_leave(emp, d1, d2, reason):
         raise ValueError("Choose a valid date range (max 31 days).")
     eid = str(emp["Employee ID"])
     have = {l["Date"] for l in rows("Leave") if str(l["Employee ID"]) == eid}
-    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S")
     new = [[str(a + dt.timedelta(days=i)), eid, emp["Name"], emp["Band"], reason or "Leave", now]
            for i in range((b - a).days + 1)]
     new = [r for r in new if r[0] not in have]
@@ -887,7 +1045,7 @@ def admin_personal_edit(row):
 @app.route("/admin/summary")
 @need("admin")
 def admin_summary():
-    today = dt.date.today()
+    today = today_local()
     month = request.args.get("month") or today.strftime("%Y-%m")
     subs, leaves = load_subs(), rows("Leave")
     if month == "all":
@@ -934,7 +1092,7 @@ PROFILE = """<div class="card"><h2>Personal details</h2>
 @app.route("/admin/missed")
 @need("admin")
 def admin_missed():
-    today = dt.date.today()
+    today = today_local()
     month = request.args.get("month") or today.strftime("%Y-%m")
     q = request.args.get("emp", "").strip().lower()
     subs, leaves, emps = load_subs(), rows("Leave"), rows("Employees")
@@ -1011,7 +1169,7 @@ def employee_leave():
         return redirect("/employee/leave")
     data = sorted((r for r in rows("Leave") if str(r["Employee ID"]) == session["emp_id"]),
                   key=lambda r: r["Date"], reverse=True)
-    return page(LEAVE_EMP, title="Apply leave", data=data, today=str(dt.date.today()))
+    return page(LEAVE_EMP, title="Apply leave", data=data, today=str(today_local()))
 
 @app.route("/employee/leave/<int:row>/delete", methods=["POST"])
 @need("employee")

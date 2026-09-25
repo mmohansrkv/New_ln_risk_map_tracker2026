@@ -404,12 +404,8 @@ tbody tr{transition:background .15s ease}
 .lcard img{width:112px;border-radius:22px}
 .lcard h2{font-family:Georgia,serif;color:#5b4fb0;font-size:27px;margin:8px 0 2px}
 .lcard p{margin:0 0 14px;color:var(--mut);font-size:13px}
-.lcard input{width:100%;margin:4px 0;border:1px solid #f08c8c;border-radius:8px;padding:10px;transition:box-shadow .15s ease,border-color .15s ease}
-.lcard .field{position:relative}
-.lcard input.key-pulse{border-color:#c9448a;box-shadow:0 0 0 4px #f58a8a3a}
+.lcard input{width:100%;margin:4px 0;border:1px solid #f08c8c;border-radius:8px;padding:10px}
 .lcard button{width:100%;background:#f58a8a;color:#fff;border:0;border-radius:20px;padding:11px;margin:12px 0 0;font-size:15px}
-.fly-letter{position:absolute;top:10px;right:14px;font-weight:700;font-size:15px;color:#c9448a;pointer-events:none;z-index:2;animation:flyLetter .8s ease-out forwards}
-@keyframes flyLetter{0%{opacity:0;transform:translate(0,0) scale(.5) rotate(-10deg)}18%{opacity:1;transform:translate(2px,-4px) scale(1.25) rotate(6deg)}100%{opacity:0;transform:translate(14px,-38px) scale(.85) rotate(-8deg)}}
 .orb{object-fit:cover;position:absolute;left:-50px;bottom:-50px;width:230px;height:230px;border-radius:50%;border:6px solid #fff;background:#fff center/cover no-repeat;box-shadow:0 10px 30px #0003;will-change:transform;animation:orbFloat 4.5s ease-in-out infinite}
 @keyframes orbFloat{0%,100%{transform:translateY(0) rotate(0deg)}50%{transform:translateY(-14px) rotate(-3deg)}}
 @media(max-width:800px){.orb{display:none}.wbody{padding:20px 10px}}
@@ -459,31 +455,9 @@ def page(body, title="Productivity Tracker", **ctx):
 
 LOGIN = """<div class="win"><div class="wbar"><i></i><i></i><i></i></div>
 <div class="wbody"><div class="lcard"><h2>Welcome back</h2><p>{{title}}</p>
-<form method="post">
-<div class="field"><input id="login_u" name="u" placeholder="{{ph}}" required autofocus autocomplete="off"></div>
-<div class="field"><input id="login_p" name="p" type="password" placeholder="Password" required autocomplete="off"></div>
-<button>Log in</button></form></div></div><img class="orb" src="/photo/{{role}}" alt=""></div>
-<script>
-(function(){
-  function animate(input, masked){
-    var field = input.closest('.field');
-    input.classList.remove('key-pulse');
-    void input.offsetWidth;          // restart the pulse animation on every keystroke
-    input.classList.add('key-pulse');
-    var ch = (input.value || '').slice(-1);
-    if (!ch) return;
-    var span = document.createElement('span');
-    span.className = 'fly-letter';
-    span.textContent = masked ? '\\u2022' : ch;
-    field.appendChild(span);
-    span.addEventListener('animationend', function(){ span.remove(); });
-    setTimeout(function(){ span.remove(); }, 900);
-  }
-  var u = document.getElementById('login_u'), p = document.getElementById('login_p');
-  if (u) u.addEventListener('input', function(){ animate(u, false); });
-  if (p) p.addEventListener('input', function(){ animate(p, true); });
-})();
-</script>"""
+<form method="post"><input name="u" placeholder="{{ph}}" required autofocus>
+<input name="p" type="password" placeholder="Password" required>
+<button>Log in</button></form></div></div><img class="orb" src="/photo/{{role}}" alt=""></div>"""
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
@@ -1006,6 +980,21 @@ def report(employees, subs, leaves, start, end):
                         prod=prod_hrs, non=sum(s["non"] for s in mine), perm=perm_hrs))
     return out
 
+def pivot_by_band(rep):
+    """Aggregate the per-employee report rows into one row per Band, for the Admin pivot chart."""
+    groups = {}
+    for r in rep:
+        g = groups.setdefault(r["band"], dict(band=r["band"], n=0, att=0, pct=0, prod=0, non=0, perm=0))
+        g["n"] += 1; g["att"] += r["att"]; g["pct"] += r["pct"]
+        g["prod"] += r["prod"]; g["non"] += r["non"]; g["perm"] += r.get("perm", 0)
+    out = []
+    for g in groups.values():
+        n = g["n"]
+        out.append(dict(band=g["band"], n=n, att=round(g["att"] / n), pct=round(g["pct"] / n),
+                        prod=round(g["prod"], 2), non=round(g["non"], 2), perm=round(g["perm"], 2)))
+    out.sort(key=lambda x: str(x["band"]))
+    return out
+
 def add_leave(emp, d1, d2, reason):
     a, b = dt.date.fromisoformat(d1), dt.date.fromisoformat(d2)
     if b < a or (b - a).days > 31:
@@ -1101,7 +1090,40 @@ SUMMARY = """<div class="head"><div><h1>Overview</h1>
 <td>{{r.att}}%<i class="bar {{r.att|tone}}"><u style="width:{{r.att}}%"></u></i></td>
 <td>{{r.prod|g}}</td><td>{{r.non|g}}</td>
 <td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td></tr>
-{% else %}<tr><td colspan="9">No employees yet.</td></tr>{% endfor %}</table>"""
+{% else %}<tr><td colspan="9">No employees yet.</td></tr>{% endfor %}</table>
+
+<h2>Productivity pivot (by Band)</h2>
+<p class="mut">Employee productivity data summarized by Band - each employee's Productive hrs already include their approved permission hours.</p>
+<table><tr><th>Band</th><th>Employees</th><th>Avg attendance</th><th>Avg productivity</th><th>Total productive hrs</th><th>Total non-productive hrs</th><th>Approved permission hrs</th></tr>
+{% for p in pivot %}<tr><td>{{p.band}}</td><td>{{p.n}}</td><td>{{p.att}}%</td><td>{{p.pct}}%</td><td>{{p.prod|g}}</td><td>{{p.non|g}}</td><td>{{p.perm|g}}</td></tr>
+{% else %}<tr><td colspan="7">No data.</td></tr>{% endfor %}</table>
+
+<div class="card no-print"><h2 style="margin-top:0">Pivot chart</h2>
+<canvas id="pivotChart" height="100"></canvas></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script>
+(function(){
+  var d = {{ pivot_chart|tojson }};
+  var el = document.getElementById('pivotChart');
+  if (el && window.Chart) {
+    new Chart(el, {
+      type: 'bar',
+      data: {
+        labels: d.band_labels,
+        datasets: [
+          {label: 'Avg attendance %', data: d.band_att, backgroundColor: '#4f46e5'},
+          {label: 'Avg productivity %', data: d.band_pct, backgroundColor: '#16a34a'}
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {legend: {position: 'top'}, title: {display: true, text: 'Attendance vs Productivity by Band'}},
+        scales: {y: {beginAtZero: true, max: 100}}
+      }
+    });
+  }
+})();
+</script>"""
 
 LEAVE_EMP = """<div class="head"><h1>Leave &amp; Permission</h1><a href="/employee">Back to daily entry</a></div>
 
@@ -1199,8 +1221,20 @@ def admin_summary():
     extra = [("Employees", len(rep)), ("Total leave days", sum(r["leave"] for r in rep))]
     # Missed-entries list is intentionally NOT shown on the Overview page any more;
     # it lives only on the dedicated "Missed entries" page (/admin/missed).
+    pivot = pivot_by_band(rep)
+    pivot_chart = dict(
+        emp_labels=[f"{r['id']} - {r['name']}" for r in rep],
+        emp_pct=[r["pct"] for r in rep],
+        emp_att=[r["att"] for r in rep],
+        band_labels=[str(p["band"]) for p in pivot],
+        band_att=[p["att"] for p in pivot],
+        band_pct=[p["pct"] for p in pivot],
+        band_prod=[p["prod"] for p in pivot],
+        band_non=[p["non"] for p in pivot],
+    )
     return page(SUMMARY, title="Overview", rep=rep, month=month, label=label, wd=workdays(start, end),
-                lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra)
+                lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra,
+                pivot=pivot, pivot_chart=pivot_chart)
 
 MISSED = """<div class="head"><div><h1>Missed entries</h1>
 <p class="mut">{{label}} &middot; Working days (weekly off excluded) with no productivity entry and no leave. Today is not included.</p></div>

@@ -404,8 +404,12 @@ tbody tr{transition:background .15s ease}
 .lcard img{width:112px;border-radius:22px}
 .lcard h2{font-family:Georgia,serif;color:#5b4fb0;font-size:27px;margin:8px 0 2px}
 .lcard p{margin:0 0 14px;color:var(--mut);font-size:13px}
-.lcard input{width:100%;margin:4px 0;border:1px solid #f08c8c;border-radius:8px;padding:10px}
+.lcard input{width:100%;margin:4px 0;border:1px solid #f08c8c;border-radius:8px;padding:10px;transition:box-shadow .15s ease,border-color .15s ease}
+.lcard .field{position:relative}
+.lcard input.key-pulse{border-color:#c9448a;box-shadow:0 0 0 4px #f58a8a3a}
 .lcard button{width:100%;background:#f58a8a;color:#fff;border:0;border-radius:20px;padding:11px;margin:12px 0 0;font-size:15px}
+.fly-letter{position:absolute;top:10px;right:14px;font-weight:700;font-size:15px;color:#c9448a;pointer-events:none;z-index:2;animation:flyLetter .8s ease-out forwards}
+@keyframes flyLetter{0%{opacity:0;transform:translate(0,0) scale(.5) rotate(-10deg)}18%{opacity:1;transform:translate(2px,-4px) scale(1.25) rotate(6deg)}100%{opacity:0;transform:translate(14px,-38px) scale(.85) rotate(-8deg)}}
 .orb{object-fit:cover;position:absolute;left:-50px;bottom:-50px;width:230px;height:230px;border-radius:50%;border:6px solid #fff;background:#fff center/cover no-repeat;box-shadow:0 10px 30px #0003;will-change:transform;animation:orbFloat 4.5s ease-in-out infinite}
 @keyframes orbFloat{0%,100%{transform:translateY(0) rotate(0deg)}50%{transform:translateY(-14px) rotate(-3deg)}}
 @media(max-width:800px){.orb{display:none}.wbody{padding:20px 10px}}
@@ -455,9 +459,31 @@ def page(body, title="Productivity Tracker", **ctx):
 
 LOGIN = """<div class="win"><div class="wbar"><i></i><i></i><i></i></div>
 <div class="wbody"><div class="lcard"><h2>Welcome back</h2><p>{{title}}</p>
-<form method="post"><input name="u" placeholder="{{ph}}" required autofocus>
-<input name="p" type="password" placeholder="Password" required>
-<button>Log in</button></form></div></div><img class="orb" src="/photo/{{role}}" alt=""></div>"""
+<form method="post">
+<div class="field"><input id="login_u" name="u" placeholder="{{ph}}" required autofocus autocomplete="off"></div>
+<div class="field"><input id="login_p" name="p" type="password" placeholder="Password" required autocomplete="off"></div>
+<button>Log in</button></form></div></div><img class="orb" src="/photo/{{role}}" alt=""></div>
+<script>
+(function(){
+  function animate(input, masked){
+    var field = input.closest('.field');
+    input.classList.remove('key-pulse');
+    void input.offsetWidth;          // restart the pulse animation on every keystroke
+    input.classList.add('key-pulse');
+    var ch = (input.value || '').slice(-1);
+    if (!ch) return;
+    var span = document.createElement('span');
+    span.className = 'fly-letter';
+    span.textContent = masked ? '\\u2022' : ch;
+    field.appendChild(span);
+    span.addEventListener('animationend', function(){ span.remove(); });
+    setTimeout(function(){ span.remove(); }, 900);
+  }
+  var u = document.getElementById('login_u'), p = document.getElementById('login_p');
+  if (u) u.addEventListener('input', function(){ animate(u, false); });
+  if (p) p.addEventListener('input', function(){ animate(p, true); });
+})();
+</script>"""
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}

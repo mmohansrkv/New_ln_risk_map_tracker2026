@@ -260,12 +260,21 @@ def get_sub(sid):
 
 def parse_form():
     g = request.form.getlist
-    procs = [(n, num(h), num(c), d.strip()) for n, h, c, d in zip(g("pn"), g("ph"), g("pc"), g("pd")) if num(h) > 0]
-    notes = [(t.strip(), num(h)) for t, h in zip(g("nd"), g("nh")) if num(h) > 0]
+    raw = list(zip(g("pn"), g("ph"), g("pc"), g("pd")))
+    procs, err = [], None
+    for n, h, c, d in raw:
+        n, h, c, d = (n or "").strip(), (h or "").strip(), (c or "").strip(), (d or "").strip()
+        if not n and not h and not c and not d:
+            continue   # a fully blank spare row from the UI - just ignore it
+        if not n or not h or num(h) <= 0 or not c or not d:
+            err = "Process / Description, Hour, Count and Description are all required for every process entry."
+            break
+        procs.append((n, num(h), num(c), d))
+    notes = [] if err else [(t.strip(), num(h)) for t, h in zip(g("nd"), g("nh")) if num(h) > 0]
     tot = sum(p[1] for p in procs) + sum(n[1] for n in notes)
-    err = None
-    if not procs and not notes: err = "Add at least one process or note with hours."
-    elif tot > DAY_HOURS: err = f"Total {tot:g} hrs is more than {DAY_HOURS} hrs."
+    if not err:
+        if not procs and not notes: err = "Add at least one process or note with hours."
+        elif tot > DAY_HOURS: err = f"Total {tot:g} hrs is more than {DAY_HOURS} hrs."
     return request.form.get("date") or str(today_local()), procs, notes, err
 
 def write_sub(sid, date, emp, procs, notes):
@@ -601,10 +610,10 @@ const E=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>
 function row(h){const d=document.createElement('div');d.className='r';
  d.innerHTML=h+'<button type="button" class="danger" onclick="this.parentNode.remove();calc()">X</button>';return d}
 function addProc(p){p=p||{};document.getElementById('procs').appendChild(row(
- '<select name="pn" onchange="calc()">'+P.map(n=>'<option '+(n==p.name?'selected':'')+'>'+E(n)+'</option>').join('')+'</select>'+
- '<input name="ph" type="number" step="0.25" min="0" placeholder="Hour" value="'+(p.hour||'')+'" oninput="calc()">'+
- '<input name="pc" type="number" min="0" placeholder="Count" value="'+(p.count||'')+'" oninput="calc()">'+
- '<input name="pd" placeholder="Description" size="28" value="'+E(p.desc)+'">'));calc()}
+ '<select name="pn" onchange="calc()" required>'+P.map(n=>'<option '+(n==p.name?'selected':'')+'>'+E(n)+'</option>').join('')+'</select>'+
+ '<input name="ph" type="number" step="0.25" min="0.01" placeholder="Hour" value="'+(p.hour||'')+'" oninput="calc()" required>'+
+ '<input name="pc" type="number" min="0" placeholder="Count" value="'+(p.count||'')+'" oninput="calc()" required>'+
+ '<input name="pd" placeholder="Description" size="28" value="'+E(p.desc)+'" required>'));calc()}
 function addNote(n){n=n||{};document.getElementById('notes').appendChild(row(
  '<input name="nd" placeholder="Description" size="30" value="'+E(n.desc)+'">'+
  '<input name="nh" type="number" step="0.25" min="0" placeholder="Hour" value="'+(n.hour||'')+'" oninput="calc()">'));calc()}

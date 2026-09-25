@@ -364,13 +364,13 @@ aside a:nth-child(5){animation-delay:.15s}aside a:nth-child(6){animation-delay:.
 aside a:nth-child(7){animation-delay:.21s}aside a:nth-child(8){animation-delay:.24s}
 @keyframes navIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
 .pill{transition:transform .18s ease,box-shadow .2s ease}.pill:hover{transform:translateY(-1px)}
-.compact-log table th,.compact-log table td{font-size:12px;padding:5px 8px;line-height:1.3}
+tbody tr:nth-child(even){background:#f9fafd}tbody tr:hover{background:#eef0ff!important}
 @media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 .grid,.r{display:flex;flex-wrap:wrap;gap:6px;align-items:end}.grid label{display:flex;flex-direction:column;font-size:12px;color:var(--mut)}
 table{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
-th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}
+th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;font-size:12.5px;line-height:1.35}
 th{background:#f7f8fc;color:var(--mut);font-weight:500;font-size:13px}tr:last-child td{border-bottom:0}
-tbody tr{transition:background .15s ease}tbody tr:hover{background:#f7f8fd}
+tbody tr{transition:background .15s ease}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:18px}
 .kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;transition:box-shadow .2s ease,transform .2s ease}
 .kpi:hover{box-shadow:0 8px 22px #1c234014;transform:translateY(-1px)}
@@ -618,7 +618,7 @@ def admin_log():
          '<label>Date<input type="date" name="date" value="{{request.args.get("date","")}}"></label>'
          '<label>Employee ID / name<input name="emp" value="{{request.args.get("emp","")}}"></label>'
          '<button class="primary">Filter</button> <a href="/admin/log">Clear</a></form></div>')
-    return page(f + '<div class="compact-log">' + LIST + '</div>', title="Productivity log", subs=subs)
+    return page(f + LIST, title="Productivity log", subs=subs)
 
 # ---------------------------------------------------------------- admin: login history + notifications
 ATT = """<div class="head"><div><h1>Login history</h1>

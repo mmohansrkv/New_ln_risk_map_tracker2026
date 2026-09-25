@@ -20,8 +20,6 @@ ADMIN_USER = os.getenv("ADMIN_USER", "admin")
 ADMIN_PASS = os.getenv("ADMIN_PASS", "admin123")   # change this!
 DAY_HOURS = 8
 WEEKOFF = (5, 6)   # weekly off days: 5 = Saturday, 6 = Sunday - working week is Monday-Friday.
-# Idle minutes of no activity before the system automatically logs someone out (recorded as "Auto (Inactivity)").
-SESSION_IDLE_MINUTES = int(os.getenv("SESSION_IDLE_MINUTES", "30"))
 
 _holidays_cache = None
 def holidays():
@@ -58,7 +56,7 @@ HEADERS = {
     "Holidays": ["Date", "Name"],
     # Background login/logout tracking (never shown to employees)
     "Attendance": ["Session ID", "Date", "Employee ID", "Employee name", "Band",
-                   "Login time", "Logout time", "Duration", "Logout type"],
+                   "Login time", "Logout time", "Duration"],
     "Notifications": ["Notification ID", "Time", "Employee ID", "Employee name", "Event", "Seen"],
 }
 PERSONAL_FIELDS = ["Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
@@ -76,23 +74,6 @@ KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave", "
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "change-me")
 app.jinja_env.filters["g"] = lambda x: "%g" % x
-
-@app.before_request
-def _idle_auto_logout():
-    """If nobody has clicked anything for SESSION_IDLE_MINUTES, the system logs the
-    user out itself. That gets saved as an automatic logout, distinct from a manual one."""
-    if request.endpoint in (None, "static", "logout"):
-        return
-    if session.get("role"):
-        now_ts = time.time()
-        last = session.get("last_seen")
-        if last and now_ts - last > SESSION_IDLE_MINUTES * 60:
-            was_admin = session.get("role") == "admin"
-            track_logout(auto=True, reason="Inactivity")
-            session.clear()
-            flash(f"You were logged out automatically after {SESSION_IDLE_MINUTES} minutes of inactivity.")
-            return redirect("/admin/login" if was_admin else "/employee/login")
-        session["last_seen"] = now_ts
 
 # ---------------------------------------------------------------- Google Sheets
 _book = None
@@ -244,56 +225,49 @@ def note_text(r):
     return f"{r['Employee name']} ({r['Employee ID']}) {str(r['Event']).lower()} at {r['Time']}"
 
 def _close_stale(emp_id, now):
-    """Sessions from earlier days that never logged out (browser/computer closed, etc.)
-    are marked so - the system closed these itself, so they're tagged as an automatic logout."""
+    """Sessions from earlier days that never logged out (browser closed, etc.) are marked so."""
     with _att_lock:
         ws = book().worksheet("Attendance")
         fixes = []
         for i, r in enumerate(ws.get_all_values()[1:], start=2):
-            r = r + [""] * 9
+            r = r + [""] * 8
             if r[2] == emp_id and r[1] < str(now.date()) and not r[6].strip():
-                fixes.append({"range": f"G{i}:I{i}", "values": [["Not recorded", "", "Auto (Session left open)"]]})
+                fixes.append({"range": f"G{i}", "values": [["Not recorded"]]})
         if fixes: ws.batch_update(fixes, value_input_option="RAW")
 
 def _log_login(sid, emp_id, name, band, now):
     with _att_lock:
         book().worksheet("Attendance").append_row(
-            [sid, str(now.date()), emp_id, name, band, now.strftime(TIME_FMT), "", "", ""], value_input_option="RAW")
+            [sid, str(now.date()), emp_id, name, band, now.strftime(TIME_FMT), "", ""], value_input_option="RAW")
     notify(emp_id, name, "Logged in", now)
     _close_stale(emp_id, now)
 
-def _log_logout(sid, emp_id, name, band, now, logout_type="Manual"):
-    """logout_type is "Manual" (the person clicked Logout) or an "Auto (...)" label
-    describing why the system logged them out (inactivity, a fresh login elsewhere, etc.)."""
+def _log_logout(sid, emp_id, name, band, now):
     with _att_lock:
         ws = book().worksheet("Attendance")
         ids = ws.col_values(1)
         if sid in ids:
             r = ids.index(sid) + 1
-            v = ws.row_values(r) + [""] * 9
+            v = ws.row_values(r) + [""] * 8
             if v[6].strip(): return                      # already closed
             dur = _hms(max((now - _ts(v[1], v[5])).total_seconds(), 0))
-            ws.update(range_name=f"G{r}", values=[[now.strftime(TIME_FMT), dur, logout_type]], value_input_option="RAW")
+            ws.update(range_name=f"G{r}", values=[[now.strftime(TIME_FMT), dur]], value_input_option="RAW")
         else:                                            # login row missing: still keep the logout
-            ws.append_row([sid, str(now.date()), emp_id, name, band, "", now.strftime(TIME_FMT), "", logout_type],
+            ws.append_row([sid, str(now.date()), emp_id, name, band, "", now.strftime(TIME_FMT), ""],
                           value_input_option="RAW")
-    notify(emp_id, name, "Logged out" if logout_type == "Manual" else f"Logged out — {logout_type}", now)
+    notify(emp_id, name, "Logged out", now)
 
 def track_login(emp_id, name, band):
     """Start the day's clock: called right after a successful login (Admin or Employee)."""
     session["att_id"] = uuid.uuid4().hex[:12]
     session["att_eid"], session["att_name"], session["att_band"] = emp_id, name, band
-    session["last_seen"] = time.time()
     _bg(_log_login, session["att_id"], emp_id, name, band, now_local())
 
-def track_logout(auto=False, reason=""):
-    """Save the logout time for whoever is currently logged in (Admin or Employee); no-op otherwise.
-    Pass auto=True with a short reason (e.g. "Inactivity") when the system - not the person - ended
-    the session, so it's recorded distinctly from a manual logout."""
+def track_logout():
+    """Save the logout time for whoever is currently logged in (Admin or Employee); no-op otherwise."""
     if session.get("att_id"):
-        logout_type = f"Auto ({reason})" if auto else "Manual"
         _bg(_log_logout, session["att_id"], session.get("att_eid", "ADMIN"),
-            session.get("att_name", "Admin"), session.get("att_band", "-"), now_local(), logout_type)
+            session.get("att_name", "Admin"), session.get("att_band", "-"), now_local())
         session.pop("att_id", None)
 
 # ---------------------------------------------------------------- auth helpers
@@ -392,7 +366,10 @@ tbody tr{transition:background .15s ease}tbody tr:hover{background:#f7f8fd}
 .tabs a:hover{background:#eef0ff}.tabs a.on{background:var(--pri);color:#fff;border-color:var(--pri)}
 .pill{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;background:#eceffa;color:var(--mut)}
 .pill.in{background:#e3f6ec;color:#146c43}.pill.out{background:#fdeaea;color:#a52a2a}.pill.act{background:#fff4e5;color:#7a4b00}
-.nb{display:none;margin-left:8px;min-width:18px;padding:1px 6px;border-radius:9px;background:#e5484d;color:#fff;font-size:11px;text-align:center}
+.nb{display:none;margin-left:8px;min-width:18px;padding:1px 6px;border-radius:9px;background:#e5484d;color:#fff;font-size:11px;text-align:center;position:relative;cursor:default}
+.nb::after{content:attr(data-tip);position:absolute;bottom:130%;left:50%;transform:translateX(-50%);background:#e5484d;color:#fff;padding:5px 10px;border-radius:6px;font-size:11px;font-weight:normal;white-space:nowrap;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .15s ease;box-shadow:0 4px 12px #0004;z-index:10}
+.nb::before{content:"";position:absolute;bottom:100%;left:50%;transform:translateX(-50%) translateY(4px);border:5px solid transparent;border-top-color:#e5484d;opacity:0;visibility:hidden;transition:opacity .15s ease}
+.nb:hover::after,.nb:hover::before{opacity:1;visibility:visible}
 #toasts{position:fixed;top:16px;right:16px;z-index:99;display:flex;flex-direction:column;gap:8px;max-width:340px}
 .toast{background:#1c2340;color:#fff;padding:12px 16px;border-radius:10px;font-size:14px;box-shadow:0 8px 24px #0004;animation:fadeInUp .3s ease}
 @media print{ #toasts{display:none}}
@@ -409,8 +386,7 @@ tbody tr{transition:background .15s ease}tbody tr:hover{background:#f7f8fd}
 function badge(n){var a=document.querySelector('aside a[href="/admin/employee-info"]');if(!a)return;
  var b=a.querySelector('.nb');if(!b){b=document.createElement('span');b.className='nb';a.appendChild(b)}
  b.textContent=n;b.style.display=n>0?'inline-block':'none';
- var tip=n>0?('Red means '+n+' unseen employee login/logout notification(s)'):'';
- a.title=tip;b.title=tip}
+ b.setAttribute('data-tip',n+' unseen login/logout notification'+(n==1?'':'s'))}
 function toast(t){var d=document.createElement('div');d.className='toast';d.textContent=t;
  document.getElementById('toasts').appendChild(d);setTimeout(function(){d.remove()},10000)}
 function poll(){fetch('/admin/notify/poll?since='+since+'&first='+first,{credentials:'same-origin'})
@@ -535,7 +511,7 @@ def logout():
 def admin_login():
     if request.method == "POST":
         if eq(request.form["u"], ADMIN_USER) and eq(request.form["p"], ADMIN_PASS):
-            track_logout(auto=True, reason="New login")      # closes a previous session in this browser, if any
+            track_logout()      # closes a previous session in this browser, if any
             session.clear(); session.update(role="admin", name="Admin")
             track_login("ADMIN", "Admin", "-")
             return redirect("/admin/summary")
@@ -605,59 +581,42 @@ def admin_log():
 
 # ---------------------------------------------------------------- admin: login history + notifications
 ATT = """<div class="head"><div><h1>Login history</h1>
-<p class="mut">{{'All dates' if not d else d}} &middot; system login and logout time for every user - Admin and Employees - recorded automatically, including logouts the system itself performs (inactivity, or a fresh login elsewhere).</p></div>
+<p class="mut">{{'All dates' if not d else d}} &middot; system login and logout time for every user - Admin and Employees - recorded automatically.</p></div>
 <form class="grid no-print" method="get"><label>Date<input type="date" name="date" value="{{d}}"></label>
 <label>ID / name<input name="emp" value="{{q}}" placeholder="Employee ID / name, or Admin"></label>
 <button class="primary">Filter</button><a href="/admin/attendance">Today</a><a href="/admin/attendance?date=">All dates</a></form></div>
 <div class="kpis"><div class="kpi"><span>Currently logged in</span><b>{{active}}</b></div>
 <div class="kpi"><span>Sessions shown</span><b>{{data|length}}</b></div></div>
 <h2>Daily summary</h2>
-<table><tr><th>Date</th><th>User</th><th>First login</th><th>Last logout</th><th>Logins</th><th>Logouts</th><th>Auto logouts</th><th>Time logged in</th></tr>
+<table><tr><th>Date</th><th>User</th><th>First login</th><th>Last logout</th><th>Sessions</th><th>Time logged in</th></tr>
 {% for g in days %}<tr><td>{{g.date}}</td><td>{{g.emp}}</td><td>{{g.first or '-'}}</td>
 <td>{% if g.active %}<span class="pill act">Still logged in</span>{% else %}{{g.last or '-'}}{% endif %}</td>
-<td>{{g.logins}}</td><td>{{g.logouts}}</td><td>{{g.auto_logouts}}</td><td>{{g.total}}</td></tr>
-{% else %}<tr><td colspan="8">No login records for this selection.</td></tr>{% endfor %}</table>
+<td>{{g.sessions}}</td><td>{{g.total}}</td></tr>
+{% else %}<tr><td colspan="6">No login records for this selection.</td></tr>{% endfor %}</table>
 <h2>All sessions</h2>
-<table><tr><th>Date</th><th>User</th><th>Role</th><th>Login</th><th>Logout</th><th>Logout type</th><th>Duration</th></tr>
+<table><tr><th>Date</th><th>User</th><th>Role</th><th>Login</th><th>Logout</th><th>Duration</th></tr>
 {% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
 <td>{{ 'Admin' if r['Employee ID']=='ADMIN' else 'Employee (' ~ r['Band'] ~ ')' }}</td>
 <td>{{r['Login time'] or '-'}}</td><td>{% if r.status=='Active' %}<span class="pill act">Still logged in</span>{% else %}{{r.out}}{% endif %}</td>
-<td>{% if r.status=='Logged out' %}<span class="pill {{'in' if r.ltype=='Manual' else 'out'}}">{{r.ltype}}</span>{% else %}-{% endif %}</td>
 <td>{{r['Duration'] or '-'}}</td></tr>
-{% else %}<tr><td colspan="7">No login records for this selection.</td></tr>{% endfor %}</table>
-<h2>Productivity Info</h2>
-<p class="mut">All employee login records for {{prod_label}}.</p>
-<table><tr><th>Date</th><th>Employee</th><th>Login</th><th>Logout</th><th>Logout type</th><th>Duration</th></tr>
-{% for r in prod %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
-<td>{{r['Login time'] or '-'}}</td><td>{% if r.status=='Active' %}<span class="pill act">Still logged in</span>{% else %}{{r.out}}{% endif %}</td>
-<td>{% if r.status=='Logged out' %}<span class="pill {{'in' if r.ltype=='Manual' else 'out'}}">{{r.ltype}}</span>{% else %}-{% endif %}</td>
-<td>{{r['Duration'] or '-'}}</td></tr>
-{% else %}<tr><td colspan="6">No employee login records this month.</td></tr>{% endfor %}</table>"""
+{% else %}<tr><td colspan="6">No login records for this selection.</td></tr>{% endfor %}</table>"""
 
 def att_prepare(data, today):
-    """Adds status fields to attendance rows; returns (daily summary, sessions newest-first, #active).
-    The daily summary counts how many times each employee logged in and logged out that day, and
-    how many of those logouts the system did automatically (Logout type starting with "Auto")."""
+    """Adds status fields to attendance rows; returns (daily summary, sessions newest-first, #active)."""
     for r in data:
         out = str(r["Logout time"]).strip()
         r["out"] = out or "Not recorded"
         r["status"] = "Active" if (not out and r["Date"] == today) else ("Logged out" if out else "Not recorded")
-        r["ltype"] = str(r.get("Logout type", "")).strip() or "Manual"
     key = lambda r: _ts(r["Date"], r["Login time"] or r["Logout time"])
     days = {}
     for r in sorted(data, key=key):                        # oldest first, so "last" = latest logout
         g = days.setdefault((r["Date"], str(r["Employee ID"])), dict(
             date=r["Date"], emp=f"{r['Employee ID']} · {r['Employee name']}", first="", last="",
-            sessions=0, secs=0, active=False, logins=0, logouts=0, auto_logouts=0))
+            sessions=0, secs=0, active=False))
         g["sessions"] += 1; g["secs"] += _secs(r["Duration"])
-        if str(r["Login time"]).strip():
-            g["logins"] += 1
-            if not g["first"]: g["first"] = str(r["Login time"])
-        if r["status"] == "Active":
-            g["active"] = True
-        elif r["status"] == "Logged out":
-            g["last"] = r["out"]; g["logouts"] += 1
-            if r["ltype"].startswith("Auto"): g["auto_logouts"] += 1
+        if not g["first"]: g["first"] = str(r["Login time"])
+        if r["status"] == "Active": g["active"] = True
+        elif r["status"] == "Logged out": g["last"] = r["out"]
     days = sorted(days.values(), key=lambda g: (g["date"], g["emp"]), reverse=True)
     for g in days: g["total"] = _hms(g["secs"]) if g["secs"] else "-"
     data.sort(key=key, reverse=True)
@@ -673,14 +632,7 @@ def admin_attendance():
     data = [r for r in rows("Attendance") if (not d or r["Date"] == d) and
             (not q or q in str(r["Employee ID"]).lower() or q in str(r["Employee name"]).lower())]
     days, data, active = att_prepare(data, today)
-    # "Productivity Info" log: every employee (not Admin) login record for the current month.
-    month = today_local().strftime("%Y-%m")
-    prod = [r for r in rows("Attendance")
-            if str(r["Employee ID"]) != "ADMIN" and str(r["Date"]).startswith(month)]
-    _, prod, _ = att_prepare(prod, today)
-    prod_label = today_local().strftime("%B %Y")
-    return page(ATT, title="Login history", data=data, days=days, d=d, q=request.args.get("emp", ""),
-                active=active, prod=prod, prod_label=prod_label)
+    return page(ATT, title="Login history", data=data, days=days, d=d, q=request.args.get("emp", ""), active=active)
 
 NOTIF = """<div class="head"><div><h1>Notifications</h1>
 <p class="mut">Employee login / logout alerts with the exact time, newest first (latest 200). New ones are in bold.</p></div>
@@ -870,7 +822,7 @@ def employee_login():
         u = request.form["u"].strip().lower()
         for e in rows("Employees"):
             if u in (str(e["Employee ID"]).lower(), str(e["Email"]).lower()) and eq(request.form["p"], e["Password"]):
-                track_logout(auto=True, reason="New login")      # closes a previous session in this browser, if any
+                track_logout()      # closes a previous session in this browser, if any
                 session.clear()
                 session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"],
                                designation=str(e.get("Designation", "")))

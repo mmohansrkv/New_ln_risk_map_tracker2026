@@ -440,10 +440,9 @@ poll();setInterval(poll,15000)})();
 NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"),
               ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
-              ("/admin/employee-info", "Employee Info"), ("/admin/attendance", "Login History")],
-    "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave"),
-                 ("/employee/permission", "Apply permission"), ("/employee/profile", "Personal details"),
-                 ("/employee/productivity", "Productivity Info")],
+              ("/admin/employee-info", "Employee Info")],
+    "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
+                 ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
 
 def page(body, title="Productivity Tracker", **ctx):
@@ -622,73 +621,9 @@ def admin_log():
          '<button class="primary">Filter</button> <a href="/admin/log">Clear</a></form></div>')
     return page(f + LIST, title="Productivity log", subs=subs)
 
-# ---------------------------------------------------------------- admin: login history + notifications
-ATT = """<div class="head"><div><h1>Login history</h1>
-<p class="mut">{{'All dates' if not d else d}} &middot; system login and logout time for every user - Admin and Employees - recorded automatically, including logouts the system itself performs (inactivity, or a fresh login elsewhere).</p></div>
-<form class="grid no-print" method="get"><label>Date<input type="date" name="date" value="{{d}}"></label>
-<label>ID / name<input name="emp" value="{{q}}" placeholder="Employee ID / name, or Admin"></label>
-<button class="primary">Filter</button><a href="/admin/attendance">Today</a><a href="/admin/attendance?date=">All dates</a></form></div>
-<div class="kpis"><div class="kpi"><span>Currently logged in</span><b>{{active}}</b></div>
-<div class="kpi"><span>Sessions shown</span><b>{{data|length}}</b></div></div>
-<h2>Daily summary</h2>
-<table><tr><th>Date</th><th>User</th><th>First login</th><th>Last logout</th><th>Logins</th><th>Logouts</th><th>Auto logouts</th><th>Time logged in</th></tr>
-{% for g in days %}<tr><td>{{g.date}}</td><td>{{g.emp}}</td><td>{{g.first or '-'}}</td>
-<td>{% if g.active %}<span class="pill act">Still logged in</span>{% else %}{{g.last or '-'}}{% endif %}</td>
-<td>{{g.logins}}</td><td>{{g.logouts}}</td><td>{{g.auto_logouts}}</td><td>{{g.total}}</td></tr>
-{% else %}<tr><td colspan="8">No login records for this selection.</td></tr>{% endfor %}</table>
-<h2>All sessions</h2>
-<table><tr><th>Date</th><th>User</th><th>Role</th><th>Login</th><th>Logout</th><th>Logout type</th><th>Duration</th></tr>
-{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
-<td>{{ 'Admin' if r['Employee ID']=='ADMIN' else 'Employee (' ~ r['Band'] ~ ')' }}</td>
-<td>{{r['Login time'] or '-'}}</td><td>{% if r.status=='Active' %}<span class="pill act">Still logged in</span>{% else %}{{r.out}}{% endif %}</td>
-<td>{% if r.status=='Logged out' %}<span class="pill {{'in' if r.ltype=='Manual' else 'out'}}">{{r.ltype}}</span>{% else %}-{% endif %}</td>
-<td>{{r['Duration'] or '-'}}</td></tr>
-{% else %}<tr><td colspan="7">No login records for this selection.</td></tr>{% endfor %}</table>"""
-
-def att_prepare(data, today):
-    """Adds status fields to attendance rows; returns (daily summary, sessions newest-first, #active).
-    The daily summary counts how many times each employee logged in and logged out that day, and
-    how many of those logouts the system did automatically (Logout type starting with "Auto")."""
-    for r in data:
-        out = str(r["Logout time"]).strip()
-        r["out"] = out or "Not recorded"
-        r["status"] = "Active" if (not out and r["Date"] == today) else ("Logged out" if out else "Not recorded")
-        r["ltype"] = str(r.get("Logout type", "")).strip() or "Manual"
-    key = lambda r: _ts(r["Date"], r["Login time"] or r["Logout time"])
-    days = {}
-    for r in sorted(data, key=key):                        # oldest first, so "last" = latest logout
-        g = days.setdefault((r["Date"], str(r["Employee ID"])), dict(
-            date=r["Date"], emp=f"{r['Employee ID']} · {r['Employee name']}", first="", last="",
-            sessions=0, secs=0, active=False, logins=0, logouts=0, auto_logouts=0))
-        g["sessions"] += 1; g["secs"] += _secs(r["Duration"])
-        if str(r["Login time"]).strip():
-            g["logins"] += 1
-            if not g["first"]: g["first"] = str(r["Login time"])
-        if r["status"] == "Active":
-            g["active"] = True
-        elif r["status"] == "Logged out":
-            g["last"] = r["out"]; g["logouts"] += 1
-            if r["ltype"].startswith("Auto"): g["auto_logouts"] += 1
-    days = sorted(days.values(), key=lambda g: (g["date"], g["emp"]), reverse=True)
-    for g in days: g["total"] = _hms(g["secs"]) if g["secs"] else "-"
-    data.sort(key=key, reverse=True)
-    active = len({r["Employee ID"] for r in data if r["status"] == "Active"})
-    return days, data, active
-
-@app.route("/admin/attendance")
-@need("admin")
-def admin_attendance():
-    today = str(today_local())
-    d = request.args.get("date", today).strip()
-    q = request.args.get("emp", "").strip().lower()
-    data = [r for r in rows("Attendance") if (not d or r["Date"] == d) and
-            (not q or q in str(r["Employee ID"]).lower() or q in str(r["Employee name"]).lower())]
-    days, data, active = att_prepare(data, today)
-    return page(ATT, title="Login history", data=data, days=days, d=d, q=request.args.get("emp", ""), active=active)
-
+# ---------------------------------------------------------------- admin: notifications
 NOTIF = """<div class="head"><div><h1>Notifications</h1>
-<p class="mut">Employee login / logout alerts with the exact time, newest first (latest 200). New ones are in bold.</p></div>
-<a class="btnl" href="/admin/attendance">Login history</a></div>
+<p class="mut">Employee login / logout alerts with the exact time, newest first (latest 200). New ones are in bold.</p></div></div>
 <table><tr><th>Time</th><th>Employee</th><th>Event</th></tr>
 {% for r in data %}<tr{% if r.new %} style="font-weight:600"{% endif %}><td>{{r['Time']}}</td>
 <td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
@@ -723,7 +658,7 @@ def admin_notify_poll():
 
 # ---------------------------------------------------------------- admin: Employee Info (list -> employee details)
 TABS = [("personal", "Personal Details"), ("missed", "Missed Entries"), ("leave", "Leave Log"),
-        ("holidays", "Holidays"), ("history", "Login History"), ("notifications", "Notifications")]
+        ("holidays", "Holidays"), ("notifications", "Notifications")]
 
 EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">Click an employee's name to open their details. A name in red has unseen login/logout notifications.</p></div>
 <form class="grid" method="get"><input name="q" placeholder="Search ID / name" value="{{q}}">
@@ -776,20 +711,6 @@ T_HOLIDAYS = """<p class="mut">Company holidays (they apply to every employee). 
 <table><tr><th>Date</th><th>Day</th><th>Holiday</th></tr>
 {% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r.day}}</td><td>{{r['Name']}}</td></tr>
 {% else %}<tr><td colspan="3">No holidays declared.</td></tr>{% endfor %}</table>"""
-
-T_HISTORY_FORM = """<form class="grid no-print" method="get"><input type="hidden" name="tab" value="history">
-<input type="month" name="month" value="{{month}}"><button class="primary">Show</button>
-<a href="?tab=history">This month</a><a href="?tab=history&month=all">All time</a></form>
-<p class="mut">{{label}} &middot; recorded automatically when the employee logs in and out.</p>"""
-
-T_PRODUCTIVITY = """<h2>Productivity Info</h2>
-<p class="mut">This Month ({{prod_label}}) &middot; all login/logout records for this employee this month.</p>
-<table><tr><th>Date</th><th>Login</th><th>Logout</th><th>Logout type</th><th>Duration</th></tr>
-{% for r in prod %}<tr><td>{{r['Date']}}</td><td>{{r['Login time'] or '-'}}</td>
-<td>{% if r.status=='Active' %}<span class="pill act">Still logged in</span>{% else %}{{r.out}}{% endif %}</td>
-<td>{% if r.status=='Logged out' %}<span class="pill {{'in' if r.ltype=='Manual' else 'out'}}">{{r.ltype}}</span>{% else %}-{% endif %}</td>
-<td>{{r['Duration'] or '-'}}</td></tr>
-{% else %}<tr><td colspan="5">No login/logout records this month.</td></tr>{% endfor %}</table>"""
 
 T_NOTIF = """<p class="mut">Login / logout alerts for this employee, newest first (latest 200).</p>
 <table><tr><th>Time</th><th>Event</th></tr>
@@ -852,21 +773,6 @@ def admin_employee_detail(eid):
             try: r["day"] = dt.date.fromisoformat(str(r["Date"])).strftime("%a")
             except ValueError: r["day"] = ""
         body = T_HOLIDAYS; ctx["data"] = data
-    elif tab == "history":
-        data = [r for r in rows("Attendance") if _key(r["Employee ID"]) == _key(eid) and
-                (month == "all" or str(r["Date"]).startswith(month))]
-        days, data, active = att_prepare(data, str(today))
-        label = "All time" if month == "all" else dt.datetime.strptime(month + "-01", "%Y-%m-%d").strftime("%B %Y") \
-                if len(month) == 7 else month
-        # "Productivity Info" log: this employee's login/logout records for the current month.
-        cur_month = today.strftime("%Y-%m")
-        prod = [r for r in rows("Attendance") if _key(r["Employee ID"]) == _key(eid) and
-                str(r["Date"]).startswith(cur_month)]
-        _, prod, _ = att_prepare(prod, str(today))
-        prod_label = today.strftime("%B %Y")
-        body = T_HISTORY_FORM + ATT[ATT.index("<h2>Daily summary</h2>"):] + T_PRODUCTIVITY
-        ctx.update(data=data, days=days, month=month if month != "all" else "", label=label,
-                   prod=prod, prod_label=prod_label)
     else:   # notifications - opening the tab marks this employee's alerts as read
         data = [r for r in rows("Notifications") if _key(r["Employee ID"]) == _key(eid)]
         for r in data: r["new"] = str(r.get("Seen", "")).strip() != "Yes"
@@ -1170,12 +1076,7 @@ KPI = """<div class="kpis">
 EMP_TOP = """<div class="head"><div><h1>Hello, {{session.name}}</h1>
 <p class="mut">{{today}} &middot; {% if session.designation %}{{session.designation}} &middot; {% endif %}Band {{session.band}} &middot; {{month_label}} summary
 {% if today_perm %}&middot; Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div>
-<div><a class="btnl" href="/employee/leave">Apply leave</a></div></div>""" + KPI + """
-<div class="card"><h2>Permission</h2>
-<p class="mut">Employees can apply for permission (arriving late, leaving early, or stepping out) up to {{perm_limit|g}} hrs per month.
-Used this month: <b>{{perm_used|g}}</b> hrs &middot; Remaining: <b>{{perm_remaining|g}}</b> hrs
-{% if today_perm %} &middot; Today's request: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p>
-<a class="primary" href="/employee/permission">Apply for Permission</a></div>"""
+<div><a class="primary" href="/employee/leave">Leave &amp; Permission</a></div></div>""" + KPI
 
 SUMMARY = """<div class="head"><div><h1>Overview</h1>
 <p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; 8 hrs per present day (capped at 100%).</p></div>
@@ -1224,8 +1125,9 @@ SUMMARY = """<div class="head"><div><h1>Overview</h1>
 })();
 </script>"""
 
-LEAVE_EMP = """<div class="head"><h1>Apply leave</h1><a href="/employee">Back to daily entry</a></div>
-<div class="card"><form method="post" class="grid">
+LEAVE_EMP = """<div class="head"><h1>Leave &amp; Permission</h1><a href="/employee">Back to daily entry</a></div>
+
+<div class="card"><h2>Apply leave</h2><form method="post" action="/employee/leave" class="grid">
 <label>From date<input type="date" name="d1" value="{{today}}" required></label>
 <label>To date<input type="date" name="d2" value="{{today}}" required></label>
 <label>Reason<input name="reason" size="30" placeholder="Reason"></label>
@@ -1233,20 +1135,19 @@ LEAVE_EMP = """<div class="head"><h1>Apply leave</h1><a href="/employee">Back to
 <h2>My leave days</h2><table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th></th></tr>
 {% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
 <td><form method="post" action="/employee/leave/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this leave?')"><button class="danger">Cancel</button></form></td></tr>
-{% else %}<tr><td colspan="4">No leave yet.</td></tr>{% endfor %}</table>"""
+{% else %}<tr><td colspan="4">No leave yet.</td></tr>{% endfor %}</table>
 
-PERMISSION_EMP = """<div class="head"><h1>Apply permission</h1><a href="/employee">Back to daily entry</a></div>
-<div class="card"><p class="mut">Permission can only be applied for today ({{today}}) - use it if you need to arrive late, leave early, or step out during work hours. One request per day, up to {{perm_limit|g}} hrs total per month.</p>
+<div class="card"><h2>Apply permission</h2><p class="mut">Permission can only be applied for today ({{today}}) - use it if you need to arrive late, leave early, or step out during work hours. One request per day, up to {{perm_limit|g}} hrs total per month.</p>
 <div class="kpis"><div class="kpi"><span>Monthly limit</span><b>{{perm_limit|g}} hrs</b></div>
 <div class="kpi"><span>Used this month</span><b>{{perm_used|g}} hrs</b></div>
 <div class="kpi"><span>Remaining</span><b>{{perm_remaining|g}} hrs</b></div></div>
-<form method="post" class="grid">
+<form method="post" action="/employee/permission" class="grid">
 <label>Date<input value="{{today}}" readonly></label>
 <label>Hours<input type="number" name="hours" step="0.25" min="0.25" max="{{perm_limit}}" placeholder="e.g. 1" required></label>
 <label>Reason<input name="reason" size="30" placeholder="Reason for permission" required></label>
 <button class="primary">Submit request</button></form></div>
 <h2>My permission requests</h2><table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
-{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Hours']|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
+{% for r in perm_data %}<tr><td>{{r['Date']}}</td><td>{{r['Hours']|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
 <td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td>
 <td>{% if r['Status']=='Pending' %}<form method="post" action="/employee/permission/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this request?')"><button class="danger">Cancel</button></form>{% else %}-{% endif %}</td></tr>
 {% else %}<tr><td colspan="6">No permission requests yet.</td></tr>{% endfor %}</table>"""
@@ -1441,7 +1342,13 @@ def employee_leave():
         return redirect("/employee/leave")
     data = sorted((r for r in rows("Leave") if str(r["Employee ID"]) == session["emp_id"]),
                   key=lambda r: r["Date"], reverse=True)
-    return page(LEAVE_EMP, title="Apply leave", data=data, today=str(today_local()))
+    perm_data = sorted((r for r in rows("Permissions") if str(r["Employee ID"]) == session["emp_id"]),
+                       key=lambda r: r["Applied at"], reverse=True)
+    month = str(today_local())[:7]
+    used = permission_hours_used(session["emp_id"], month)
+    return page(LEAVE_EMP, title="Leave & Permission", data=data, perm_data=perm_data, today=str(today_local()),
+                perm_limit=PERMISSION_MONTHLY_LIMIT, perm_used=used,
+                perm_remaining=round(PERMISSION_MONTHLY_LIMIT - used, 2))
 
 @app.route("/employee/leave/<int:row>/delete", methods=["POST"])
 @need("employee")
@@ -1451,23 +1358,15 @@ def employee_leave_delete(row):
     book().worksheet("Leave").delete_rows(row)
     flash("Leave cancelled."); return redirect("/employee/leave")
 
-@app.route("/employee/permission", methods=["GET", "POST"])
+@app.route("/employee/permission", methods=["POST"])
 @need("employee")
 def employee_permission():
-    if request.method == "POST":
-        try:
-            add_permission(my_emp(), request.form.get("reason", "").strip(), request.form.get("hours", ""))
-            flash("Permission request submitted for today.")
-        except ValueError as e:
-            flash(str(e))
-        return redirect("/employee/permission")
-    data = sorted((r for r in rows("Permissions") if str(r["Employee ID"]) == session["emp_id"]),
-                  key=lambda r: r["Applied at"], reverse=True)
-    month = str(today_local())[:7]
-    used = permission_hours_used(session["emp_id"], month)
-    return page(PERMISSION_EMP, title="Apply permission", data=data, today=str(today_local()),
-                perm_limit=PERMISSION_MONTHLY_LIMIT, perm_used=used,
-                perm_remaining=round(PERMISSION_MONTHLY_LIMIT - used, 2))
+    try:
+        add_permission(my_emp(), request.form.get("reason", "").strip(), request.form.get("hours", ""))
+        flash("Permission request submitted for today.")
+    except ValueError as e:
+        flash(str(e))
+    return redirect("/employee/leave")
 
 @app.route("/employee/permission/<int:row>/delete", methods=["POST"])
 @need("employee")
@@ -1475,9 +1374,9 @@ def employee_permission_delete(row):
     r = next((r for r in rows("Permissions") if r["_row"] == row), None)
     if not r or str(r["Employee ID"]) != session["emp_id"]: abort(403)
     if str(r.get("Status", "")).strip() != "Pending":
-        flash("Only pending requests can be cancelled."); return redirect("/employee/permission")
+        flash("Only pending requests can be cancelled."); return redirect("/employee/leave")
     book().worksheet("Permissions").delete_rows(row)
-    flash("Permission request cancelled."); return redirect("/employee/permission")
+    flash("Permission request cancelled."); return redirect("/employee/leave")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

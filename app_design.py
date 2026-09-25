@@ -443,9 +443,9 @@ poll();setInterval(poll,15000)})();
 </body></html>"""
 
 NAVS = {
-    "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"),
+    "admin": [("/admin/summary", "Pivot Chart"), ("/admin/employees", "Employees"),
               ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
-              ("/admin/employee-info", "Employee Info"), ("/admin/attendance", "Login History")],
+              ("/admin/employee-info", "Employee Info")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave"),
                  ("/employee/permission", "Apply permission"), ("/employee/profile", "Personal details"),
                  ("/employee/productivity", "Productivity Info")],
@@ -680,20 +680,8 @@ def att_prepare(data, today):
     active = len({r["Employee ID"] for r in data if r["status"] == "Active"})
     return days, data, active
 
-@app.route("/admin/attendance")
-@need("admin")
-def admin_attendance():
-    today = str(today_local())
-    d = request.args.get("date", today).strip()
-    q = request.args.get("emp", "").strip().lower()
-    data = [r for r in rows("Attendance") if (not d or r["Date"] == d) and
-            (not q or q in str(r["Employee ID"]).lower() or q in str(r["Employee name"]).lower())]
-    days, data, active = att_prepare(data, today)
-    return page(ATT, title="Login history", data=data, days=days, d=d, q=request.args.get("emp", ""), active=active)
-
 NOTIF = """<div class="head"><div><h1>Notifications</h1>
-<p class="mut">Employee login / logout alerts with the exact time, newest first (latest 200). New ones are in bold.</p></div>
-<a class="btnl" href="/admin/attendance">Login history</a></div>
+<p class="mut">Employee login / logout alerts with the exact time, newest first (latest 200). New ones are in bold.</p></div></div>
 <table><tr><th>Time</th><th>Employee</th><th>Event</th></tr>
 {% for r in data %}<tr{% if r.new %} style="font-weight:600"{% endif %}><td>{{r['Time']}}</td>
 <td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
@@ -1079,19 +1067,21 @@ def report(employees, subs, leaves, start, end):
                         prod=prod_hrs, non=sum(s["non"] for s in mine), perm=perm_hrs))
     return out
 
-def pivot_by_band(rep):
-    """Aggregate the per-employee report rows into one row per Band, for the Admin pivot chart."""
+def pivot_by(rep, keyfn):
+    """Aggregate the per-employee report rows into one row per group (e.g. Band or Designation),
+    for the Admin Pivot Chart."""
     groups = {}
     for r in rep:
-        g = groups.setdefault(r["band"], dict(band=r["band"], n=0, att=0, pct=0, prod=0, non=0, perm=0))
+        k = keyfn(r) or "Unassigned"
+        g = groups.setdefault(k, dict(label=k, n=0, att=0, pct=0, prod=0, non=0, perm=0))
         g["n"] += 1; g["att"] += r["att"]; g["pct"] += r["pct"]
         g["prod"] += r["prod"]; g["non"] += r["non"]; g["perm"] += r.get("perm", 0)
     out = []
     for g in groups.values():
         n = g["n"]
-        out.append(dict(band=g["band"], n=n, att=round(g["att"] / n), pct=round(g["pct"] / n),
+        out.append(dict(label=g["label"], n=n, att=round(g["att"] / n), pct=round(g["pct"] / n),
                         prod=round(g["prod"], 2), non=round(g["non"], 2), perm=round(g["perm"], 2)))
-    out.sort(key=lambda x: str(x["band"]))
+    out.sort(key=lambda x: str(x["label"]))
     return out
 
 def add_leave(emp, d1, d2, reason):
@@ -1182,50 +1172,43 @@ Used this month: <b>{{perm_used|g}}</b> hrs &middot; Remaining: <b>{{perm_remain
 {% if today_perm %} &middot; Today's request: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p>
 <a class="primary" href="/employee/permission">Apply for Permission</a></div>"""
 
-SUMMARY = """<div class="head"><div><h1>Overview</h1>
-<p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; 8 hrs per present day (capped at 100%).</p></div>
-<div class="no-print" style="display:flex;gap:8px;align-items:center">
+SUMMARY = """<div class="head"><div><h1>Pivot Chart</h1>
+<p class="mut">{{label}} &middot; Attendance = present days &divide; working days. Productivity = productive hours (incl. approved permission hrs) &divide; 8 hrs per present day, capped at 100%.</p></div>
+<div class="no-print" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
 <form class="grid" method="get" style="margin:0"><input type="month" name="month" value="{{month if month!='all' else ''}}">
 <button class="primary">Show</button><a href="/admin/summary?month=all">All time</a></form>
-<button type="button" class="btnl" onclick="window.print()">&#128438; Print</button></div></div>""" + KPI + """
-<table><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
-<th>Productive hrs</th><th>Non-productive hrs</th><th>Productivity</th></tr>
-{% for r in rep %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>
-<td>{{r.att}}%<i class="bar {{r.att|tone}}"><u style="width:{{r.att}}%"></u></i></td>
-<td>{{r.prod|g}}</td><td>{{r.non|g}}</td>
-<td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td></tr>
-{% else %}<tr><td colspan="9">No employees yet.</td></tr>{% endfor %}</table>
-
-<h2>Productivity pivot (by Band)</h2>
-<p class="mut">Employee productivity data summarized by Band - each employee's Productive hrs already include their approved permission hours.</p>
-<table><tr><th>Band</th><th>Employees</th><th>Avg attendance</th><th>Avg productivity</th><th>Total productive hrs</th><th>Total non-productive hrs</th><th>Approved permission hrs</th></tr>
-{% for p in pivot %}<tr><td>{{p.band}}</td><td>{{p.n}}</td><td>{{p.att}}%</td><td>{{p.pct}}%</td><td>{{p.prod|g}}</td><td>{{p.non|g}}</td><td>{{p.perm|g}}</td></tr>
-{% else %}<tr><td colspan="7">No data.</td></tr>{% endfor %}</table>
-
-<div class="card no-print"><h2 style="margin-top:0">Pivot chart</h2>
-<canvas id="pivotChart" height="100"></canvas></div>
+<label style="margin:0;display:flex;align-items:center;gap:6px">Group by
+<select id="groupBy" onchange="renderPivot()"><option value="band">Band</option><option value="designation">Designation</option></select></label>
+</div></div>
+<div class="card no-print"><canvas id="pivotChart" height="100"></canvas></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <script>
 (function(){
   var d = {{ pivot_chart|tojson }};
-  var el = document.getElementById('pivotChart');
-  if (el && window.Chart) {
-    new Chart(el, {
+  var chart = null;
+  window.renderPivot = function(){
+    var g = document.getElementById('groupBy').value;
+    var s = d[g];
+    var el = document.getElementById('pivotChart');
+    if (!el || !window.Chart) return;
+    if (chart) chart.destroy();
+    chart = new Chart(el, {
       type: 'bar',
       data: {
-        labels: d.band_labels,
+        labels: s.labels,
         datasets: [
-          {label: 'Avg attendance %', data: d.band_att, backgroundColor: '#4f46e5'},
-          {label: 'Avg productivity %', data: d.band_pct, backgroundColor: '#16a34a'}
+          {label: 'Avg attendance %', data: s.att, backgroundColor: '#4f46e5'},
+          {label: 'Avg productivity %', data: s.pct, backgroundColor: '#16a34a'}
         ]
       },
       options: {
         responsive: true,
-        plugins: {legend: {position: 'top'}, title: {display: true, text: 'Attendance vs Productivity by Band'}},
+        plugins: {legend: {position: 'top'}, title: {display: true, text: 'Attendance vs Productivity by ' + (g === 'band' ? 'Band' : 'Designation')}},
         scales: {y: {beginAtZero: true, max: 100}}
       }
     });
-  }
+  };
+  renderPivot();
 })();
 </script>"""
 
@@ -1319,26 +1302,18 @@ def admin_summary():
     else:
         start, end = month_range(month); label = start.strftime("%B %Y")
     emps = rows("Employees")
-    rep = sorted(report(emps, subs, leaves, start, end), key=lambda r: str(r["name"]))
-    n = len(rep) or 1
-    a1, a2 = round(sum(r["att"] for r in rep) / n), round(sum(r["pct"] for r in rep) / n)
-    extra = [("Employees", len(rep)), ("Total leave days", sum(r["leave"] for r in rep))]
+    rep = report(emps, subs, leaves, start, end)
     # Missed-entries list is intentionally NOT shown on the Overview page any more;
     # it lives only on the dedicated "Missed entries" page (/admin/missed).
-    pivot = pivot_by_band(rep)
+    pivot_band = pivot_by(rep, lambda r: r["band"])
+    pivot_desig = pivot_by(rep, lambda r: r["designation"])
     pivot_chart = dict(
-        emp_labels=[f"{r['id']} - {r['name']}" for r in rep],
-        emp_pct=[r["pct"] for r in rep],
-        emp_att=[r["att"] for r in rep],
-        band_labels=[str(p["band"]) for p in pivot],
-        band_att=[p["att"] for p in pivot],
-        band_pct=[p["pct"] for p in pivot],
-        band_prod=[p["prod"] for p in pivot],
-        band_non=[p["non"] for p in pivot],
+        band=dict(labels=[str(p["label"]) for p in pivot_band],
+                  att=[p["att"] for p in pivot_band], pct=[p["pct"] for p in pivot_band]),
+        designation=dict(labels=[str(p["label"]) for p in pivot_desig],
+                         att=[p["att"] for p in pivot_desig], pct=[p["pct"] for p in pivot_desig]),
     )
-    return page(SUMMARY, title="Overview", rep=rep, month=month, label=label, wd=workdays(start, end),
-                lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra,
-                pivot=pivot, pivot_chart=pivot_chart)
+    return page(SUMMARY, title="Pivot Chart", month=month, label=label, pivot_chart=pivot_chart)
 
 MISSED = """<div class="head"><div><h1>Missed entries</h1>
 <p class="mut">{{label}} &middot; Working days (weekly off excluded) with no productivity entry and no leave. Today is not included.</p></div>

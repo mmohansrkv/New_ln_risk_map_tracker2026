@@ -2,9 +2,10 @@
 Admin link:    /admin/login
 Employee link: /employee/login
 """
-import os, uuid, hmac, time, threading, datetime as dt
+import os, uuid, hmac, time, random, threading, datetime as dt
 from functools import wraps
 import gspread
+from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
 from flask import Flask, request, redirect, session, render_template_string, flash, abort, jsonify
 
@@ -77,6 +78,13 @@ LOCKED_FIELDS = {}   # nothing locked: admin can add/edit personal details; empl
 KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave", "holidays": "Holidays"}
 
 app = Flask(__name__)
+
+@app.errorhandler(APIError)
+def _handle_sheets_api_error(e):
+    # Reached only if retries in _with_retry were exhausted (Sheets still
+    # unavailable/rate-limited after ~6 attempts with backoff).
+    return ("Google Sheets is temporarily busy handling everyone's requests. "
+            "Please wait a few seconds and try again."), 503
 app.secret_key = os.getenv("SECRET_KEY", "change-me")
 app.jinja_env.filters["g"] = lambda x: "%g" % (float(x) if str(x).strip() else 0)
 app.jinja_env.globals["PERMISSION_MONTHLY_LIMIT"] = PERMISSION_MONTHLY_LIMIT
@@ -99,29 +107,91 @@ def _idle_auto_logout():
         session["last_seen"] = now_ts
 
 # ---------------------------------------------------------------- Google Sheets
+#
+# Under concurrent load (multiple users hitting the app at once) Google Sheets'
+# API quota (per-minute read/write limits) gets exceeded quickly, since every
+# page view previously made a fresh API call. That raised an unhandled
+# gspread.exceptions.APIError -> Flask 500 "Internal Server Error".
+#
+# Fix: (1) every Sheets call is retried with exponential backoff+jitter on
+# 429/500/503 instead of failing immediately, and (2) reads are cached for a
+# few seconds so 20 people loading the same page doesn't mean 20 API calls.
+
+_RETRYABLE_CODES = {429, 500, 502, 503, 504}
+
+def _with_retry(fn, *args, **kwargs):
+    """Call a gspread function, retrying on rate-limit / transient errors."""
+    delay = 0.5
+    for attempt in range(6):
+        try:
+            return fn(*args, **kwargs)
+        except APIError as e:
+            code = None
+            try:
+                code = e.response.status_code
+            except Exception:
+                pass
+            if code in _RETRYABLE_CODES and attempt < 5:
+                time.sleep(delay + random.uniform(0, 0.3))
+                delay = min(delay * 2, 8)
+                continue
+            raise
+
 _book = None
+_book_lock = threading.Lock()
+
 def book():
     global _book
     if _book is None:
-        creds = Credentials.from_service_account_file(
-            CREDS_FILE, scopes=["https://www.googleapis.com/auth/spreadsheets"])
-        b = gspread.authorize(creds).open_by_key(SHEET_ID)
-        have = {w.title for w in b.worksheets()}
-        for name, h in HEADERS.items():
-            if name not in have:
-                b.add_worksheet(title=name, rows=1000, cols=max(12, len(h)))
-            ws = b.worksheet(name)
-            if ws.col_count < len(h): ws.add_cols(len(h) - ws.col_count)
-            if ws.row_values(1) != h:
-                ws.update(range_name="A1", values=[h])
-        _book = b
+        with _book_lock:
+            if _book is None:
+                creds = Credentials.from_service_account_file(
+                    CREDS_FILE, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+                client = gspread.authorize(creds)
+                b = _with_retry(client.open_by_key, SHEET_ID)
+                have = {w.title for w in _with_retry(b.worksheets)}
+                for name, h in HEADERS.items():
+                    if name not in have:
+                        _with_retry(b.add_worksheet, title=name, rows=1000, cols=max(12, len(h)))
+                    ws = _with_retry(b.worksheet, name)
+                    if ws.col_count < len(h): _with_retry(ws.add_cols, len(h) - ws.col_count)
+                    if _with_retry(ws.row_values, 1) != h:
+                        _with_retry(ws.update, range_name="A1", values=[h])
+                _book = b
     return _book
 
+def ws_of(name):
+    """Get a worksheet, with retry on transient/rate-limit errors."""
+    return _with_retry(book().worksheet, name)
+
+# Short-lived cache for reads: cuts repeated-page-load API calls under
+# concurrent traffic. Any write (see invalidate_cache) clears the relevant
+# entry immediately, so nobody sees stale data after their own action.
+_ROWS_CACHE_TTL = float(os.getenv("ROWS_CACHE_TTL", "4"))
+_rows_cache = {}
+_rows_cache_lock = threading.Lock()
+
+def invalidate_cache(name=None):
+    with _rows_cache_lock:
+        if name is None:
+            _rows_cache.clear()
+        else:
+            _rows_cache.pop(name, None)
+
 def rows(name):
-    recs = book().worksheet(name).get_all_records(numericise_ignore=["all"])
+    now = time.monotonic()
+    with _rows_cache_lock:
+        cached = _rows_cache.get(name)
+        if cached and now - cached[0] < _ROWS_CACHE_TTL:
+            return [dict(r) for r in cached[1]]
+
+    recs = _with_retry(ws_of(name).get_all_records, numericise_ignore=["all"])
     for i, r in enumerate(recs, start=2):
         r["_row"] = i
-    return recs
+
+    with _rows_cache_lock:
+        _rows_cache[name] = (now, recs)
+    return [dict(r) for r in recs]
 
 def num(x):
     try: return float(x)
@@ -131,7 +201,7 @@ def eq(a, b):
     return hmac.compare_digest(str(a).encode(), str(b).encode())
 
 def delete_rows(idx):
-    ws = book().worksheet("Productivity log")
+    ws = ws_of("Productivity log")
     idx = sorted(idx)
     if idx[-1] - idx[0] + 1 == len(idx):
         ws.delete_rows(idx[0], idx[-1])
@@ -203,7 +273,7 @@ def write_sub(sid, date, emp, procs, notes):
     base = [sid, date, *emp]      # emp = (band, id, name)
     out = [base + ["Process", n, h, c, now, d] for n, h, c, d in procs] + \
           [base + ["Note", t, h, "", now, ""] for t, h in notes]
-    book().worksheet("Productivity log").append_rows(out, value_input_option="RAW")
+    ws_of("Productivity log").append_rows(out, value_input_option="RAW"); invalidate_cache("Productivity log")
 
 # ---------------------------------------------------------------- login / logout tracking
 # Runs silently in a background thread: the employee never sees it and is never slowed down.
@@ -235,7 +305,7 @@ def _nid(r):
 
 def notify(emp_id, name, event, now):
     _notif_cache[1] = None
-    book().worksheet("Notifications").append_row(
+    ws_of("Notifications").append_row(
         [str(int(time.time() * 1_000_000)), now.strftime("%Y-%m-%d " + TIME_FMT), emp_id, name, event, ""],
         value_input_option="RAW")
 
@@ -251,7 +321,7 @@ def _close_stale(emp_id, now):
     """Sessions from earlier days that never logged out (browser/computer closed, etc.)
     are marked so - the system closed these itself, so they're tagged as an automatic logout."""
     with _att_lock:
-        ws = book().worksheet("Attendance")
+        ws = ws_of("Attendance")
         fixes = []
         for i, r in enumerate(ws.get_all_values()[1:], start=2):
             r = r + [""] * 9
@@ -261,7 +331,7 @@ def _close_stale(emp_id, now):
 
 def _log_login(sid, emp_id, name, band, now):
     with _att_lock:
-        book().worksheet("Attendance").append_row(
+        ws_of("Attendance").append_row(
             [sid, str(now.date()), emp_id, name, band, now.strftime(TIME_FMT), "", "", ""], value_input_option="RAW")
     notify(emp_id, name, "Logged in", now)
     _close_stale(emp_id, now)
@@ -270,7 +340,7 @@ def _log_logout(sid, emp_id, name, band, now, logout_type="Manual"):
     """logout_type is "Manual" (the person clicked Logout) or an "Auto (...)" label
     describing why the system logged them out (inactivity, a fresh login elsewhere, etc.)."""
     with _att_lock:
-        ws = book().worksheet("Attendance")
+        ws = ws_of("Attendance")
         ids = ws.col_values(1)
         if sid in ids:
             r = ids.index(sid) + 1
@@ -602,8 +672,8 @@ def admin_list(kind):
         else:
             full = dict(zip(heads, vals))
             if sheet == "Employees": full["Office Email ID"] = full.get("Email", "")
-            book().worksheet(sheet).append_row([full.get(h, "") for h in HEADERS[sheet]],
-                                               value_input_option="RAW")
+            ws_of(sheet).append_row([full.get(h, "") for h in HEADERS[sheet]],
+                                               value_input_option="RAW"); invalidate_cache(sheet)
             flash("Added.")
         return redirect(request.path)
     data = rows(sheet)
@@ -615,7 +685,7 @@ def admin_list(kind):
 @need("admin")
 def admin_edit(kind, row):
     sheet = KINDS.get(kind) or abort(404)
-    heads = list_heads(sheet); ws = book().worksheet(sheet)
+    heads = list_heads(sheet); ws = ws_of(sheet)
     if request.method == "POST":
         vals = [request.form.get(f"f{i}", "").strip() for i in range(len(heads))]
         full = ws.row_values(row); full += [""] * (len(HEADERS[sheet]) - len(full))
@@ -632,7 +702,7 @@ def admin_edit(kind, row):
 @app.route("/admin/<kind>/<int:row>/delete", methods=["POST"])
 @need("admin")
 def admin_delete(kind, row):
-    book().worksheet(KINDS.get(kind) or abort(404)).delete_rows(row)
+    ws_of(KINDS.get(kind) or abort(404)).delete_rows(row); invalidate_cache(KINDS.get(kind))
     flash("Deleted."); return redirect(f"/admin/{kind}")
 
 @app.route("/admin/log")
@@ -663,7 +733,7 @@ def admin_notifications():
     for r in data: r["new"] = str(r.get("Seen", "")).strip() != "Yes"
     fresh = [r for r in data if r["new"]]
     if fresh:                                              # opening the page marks them as read
-        book().worksheet("Notifications").batch_update(
+        ws_of("Notifications").batch_update(
             [{"range": f"F{r['_row']}", "values": [["Yes"]]} for r in fresh], value_input_option="RAW")
         _notif_cache[1] = None
     data.sort(key=_nid, reverse=True)
@@ -804,7 +874,7 @@ def admin_employee_detail(eid):
         for r in data: r["new"] = str(r.get("Seen", "")).strip() != "Yes"
         fresh = [r for r in data if r["new"]]
         if fresh:
-            book().worksheet("Notifications").batch_update(
+            ws_of("Notifications").batch_update(
                 [{"range": f"F{r['_row']}", "values": [["Yes"]]} for r in fresh], value_input_option="RAW")
             _notif_cache[1] = None
         data.sort(key=_nid, reverse=True)
@@ -827,7 +897,8 @@ def admin_employee_leave_delete(eid, row):
     emp = emp_or_404(eid)
     r = next((r for r in rows("Leave") if r["_row"] == row), None)
     if not r or _key(r["Employee ID"]) != _key(emp["Employee ID"]): abort(404)
-    book().worksheet("Leave").delete_rows(row)
+    ws_of("Leave").delete_rows(row)
+    invalidate_cache("Leave")
     flash("Leave deleted."); return redirect(f"/admin/employee-info/{eid}?tab=leave")
 
 def _review_permission(eid, row, status):
@@ -835,8 +906,9 @@ def _review_permission(eid, row, status):
     r = next((r for r in rows("Permissions") if r["_row"] == row), None)
     if not r or _key(r["Employee ID"]) != _key(emp["Employee ID"]): abort(404)
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
-    book().worksheet("Permissions").update(range_name=f"I{row}:K{row}",
+    ws_of("Permissions").update(range_name=f"I{row}:K{row}",
                                            values=[[status, now, "Admin"]], value_input_option="RAW")
+    invalidate_cache("Permissions")
     flash(f"Permission request {status.lower()}.")
     return redirect(f"/admin/employee-info/{eid}?tab=leave")
 
@@ -1016,7 +1088,7 @@ def add_leave(emp, d1, d2, reason):
     new = [[str(a + dt.timedelta(days=i)), eid, emp["Name"], emp["Band"], reason or "Leave", now]
            for i in range((b - a).days + 1)]
     new = [r for r in new if r[0] not in have]
-    if new: book().worksheet("Leave").append_rows(new, value_input_option="RAW")
+    if new: ws_of("Leave").append_rows(new, value_input_option="RAW"); invalidate_cache("Leave")
     return len(new)
 
 def permission_hours_used(eid, month):
@@ -1046,9 +1118,10 @@ def add_permission(emp, reason, hours):
                           f"You have {round(PERMISSION_MONTHLY_LIMIT - used, 2):g} hr(s) remaining this month.")
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
     pid = uuid.uuid4().hex[:10]
-    book().worksheet("Permissions").append_row(
+    ws_of("Permissions").append_row(
         [pid, date, eid, emp["Name"], emp["Band"], hours, reason or "Permission", now, "Pending", "", ""],
         value_input_option="RAW")
+    invalidate_cache("Permissions")
     return pid
 
 def permission_pill(status):
@@ -1177,7 +1250,8 @@ def admin_personal_edit(row):
         for f in EDITABLE_PERSONAL:
             vals[heads.index(f)] = request.form.get(f, "").strip()
         vals[heads.index("Office Email ID")] = str(emp.get("Email", ""))
-        book().worksheet("Employees").update(range_name=f"A{row}", values=[vals])
+        ws_of("Employees").update(range_name=f"A{row}", values=[vals])
+        invalidate_cache("Employees")
         flash("Updated."); return redirect("/admin/personal")
     return page(PERSONAL_EDIT, title="Personal details", emp=emp, fields=EDITABLE_PERSONAL)
 
@@ -1292,7 +1366,8 @@ def employee_profile():
         for f in EDITABLE_PERSONAL:
             vals[heads.index(f)] = request.form.get(f, "").strip()
         vals[heads.index("Office Email ID")] = str(emp.get("Email", ""))
-        book().worksheet("Employees").update(range_name=f"A{emp['_row']}", values=[vals])
+        ws_of("Employees").update(range_name=f"A{emp['_row']}", values=[vals])
+        invalidate_cache("Employees")
         flash("Profile updated.")
         return redirect("/employee/profile")
     return page(PROFILE, title="Personal details", emp=emp)
@@ -1321,7 +1396,8 @@ def employee_leave():
 def employee_leave_delete(row):
     r = next((r for r in rows("Leave") if r["_row"] == row), None)
     if not r or str(r["Employee ID"]) != session["emp_id"]: abort(403)
-    book().worksheet("Leave").delete_rows(row)
+    ws_of("Leave").delete_rows(row)
+    invalidate_cache("Leave")
     flash("Leave cancelled."); return redirect("/employee/leave")
 
 @app.route("/employee/permission", methods=["POST"])
@@ -1341,8 +1417,19 @@ def employee_permission_delete(row):
     if not r or str(r["Employee ID"]) != session["emp_id"]: abort(403)
     if str(r.get("Status", "")).strip() != "Pending":
         flash("Only pending requests can be cancelled."); return redirect("/employee/leave")
-    book().worksheet("Permissions").delete_rows(row)
+    ws_of("Permissions").delete_rows(row)
+    invalidate_cache("Permissions")
     flash("Permission request cancelled."); return redirect("/employee/leave")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # NOTE: Flask's built-in dev server (even with threaded=True) is still not
+    # meant for real concurrent traffic, and debug=True is a security risk in
+    # production (exposes a remote code-execution console on error pages).
+    # For local testing with a few users this is fine; for the real deployment
+    # run with a production WSGI server instead, e.g.:
+    #   pip install gunicorn
+    #   gunicorn -w 4 --threads 4 -b 0.0.0.0:5000 app:app
+    # (4 worker processes x 4 threads comfortably covers 20 concurrent users;
+    # gspread calls are I/O-bound so threads work well here.)
+    debug = os.getenv("FLASK_DEBUG", "0") == "1"
+    app.run(host="0.0.0.0", port=5000, debug=debug, threaded=True)

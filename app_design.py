@@ -980,21 +980,6 @@ def report(employees, subs, leaves, start, end):
                         prod=prod_hrs, non=sum(s["non"] for s in mine), perm=perm_hrs))
     return out
 
-def pivot_by_band(rep):
-    """Aggregate the per-employee report rows into one row per Band, for the Admin pivot chart."""
-    groups = {}
-    for r in rep:
-        g = groups.setdefault(r["band"], dict(band=r["band"], n=0, att=0, pct=0, prod=0, non=0, perm=0))
-        g["n"] += 1; g["att"] += r["att"]; g["pct"] += r["pct"]
-        g["prod"] += r["prod"]; g["non"] += r["non"]; g["perm"] += r.get("perm", 0)
-    out = []
-    for g in groups.values():
-        n = g["n"]
-        out.append(dict(band=g["band"], n=n, att=round(g["att"] / n), pct=round(g["pct"] / n),
-                        prod=round(g["prod"], 2), non=round(g["non"], 2), perm=round(g["perm"], 2)))
-    out.sort(key=lambda x: str(x["band"]))
-    return out
-
 def add_leave(emp, d1, d2, reason):
     a, b = dt.date.fromisoformat(d1), dt.date.fromisoformat(d2)
     if b < a or (b - a).days > 31:
@@ -1090,40 +1075,7 @@ SUMMARY = """<div class="head"><div><h1>Overview</h1>
 <td>{{r.att}}%<i class="bar {{r.att|tone}}"><u style="width:{{r.att}}%"></u></i></td>
 <td>{{r.prod|g}}</td><td>{{r.non|g}}</td>
 <td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td></tr>
-{% else %}<tr><td colspan="9">No employees yet.</td></tr>{% endfor %}</table>
-
-<h2>Productivity pivot (by Band)</h2>
-<p class="mut">Employee productivity data summarized by Band - each employee's Productive hrs already include their approved permission hours.</p>
-<table><tr><th>Band</th><th>Employees</th><th>Avg attendance</th><th>Avg productivity</th><th>Total productive hrs</th><th>Total non-productive hrs</th><th>Approved permission hrs</th></tr>
-{% for p in pivot %}<tr><td>{{p.band}}</td><td>{{p.n}}</td><td>{{p.att}}%</td><td>{{p.pct}}%</td><td>{{p.prod|g}}</td><td>{{p.non|g}}</td><td>{{p.perm|g}}</td></tr>
-{% else %}<tr><td colspan="7">No data.</td></tr>{% endfor %}</table>
-
-<div class="card no-print"><h2 style="margin-top:0">Pivot chart</h2>
-<canvas id="pivotChart" height="100"></canvas></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
-<script>
-(function(){
-  var d = {{ pivot_chart|tojson }};
-  var el = document.getElementById('pivotChart');
-  if (el && window.Chart) {
-    new Chart(el, {
-      type: 'bar',
-      data: {
-        labels: d.band_labels,
-        datasets: [
-          {label: 'Avg attendance %', data: d.band_att, backgroundColor: '#4f46e5'},
-          {label: 'Avg productivity %', data: d.band_pct, backgroundColor: '#16a34a'}
-        ]
-      },
-      options: {
-        responsive: true,
-        plugins: {legend: {position: 'top'}, title: {display: true, text: 'Attendance vs Productivity by Band'}},
-        scales: {y: {beginAtZero: true, max: 100}}
-      }
-    });
-  }
-})();
-</script>"""
+{% else %}<tr><td colspan="9">No employees yet.</td></tr>{% endfor %}</table>"""
 
 LEAVE_EMP = """<div class="head"><h1>Leave &amp; Permission</h1><a href="/employee">Back to daily entry</a></div>
 
@@ -1221,20 +1173,8 @@ def admin_summary():
     extra = [("Employees", len(rep)), ("Total leave days", sum(r["leave"] for r in rep))]
     # Missed-entries list is intentionally NOT shown on the Overview page any more;
     # it lives only on the dedicated "Missed entries" page (/admin/missed).
-    pivot = pivot_by_band(rep)
-    pivot_chart = dict(
-        emp_labels=[f"{r['id']} - {r['name']}" for r in rep],
-        emp_pct=[r["pct"] for r in rep],
-        emp_att=[r["att"] for r in rep],
-        band_labels=[str(p["band"]) for p in pivot],
-        band_att=[p["att"] for p in pivot],
-        band_pct=[p["pct"] for p in pivot],
-        band_prod=[p["prod"] for p in pivot],
-        band_non=[p["non"] for p in pivot],
-    )
     return page(SUMMARY, title="Overview", rep=rep, month=month, label=label, wd=workdays(start, end),
-                lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra,
-                pivot=pivot, pivot_chart=pivot_chart)
+                lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra)
 
 MISSED = """<div class="head"><div><h1>Missed entries</h1>
 <p class="mut">{{label}} &middot; Working days (weekly off excluded) with no productivity entry and no leave. Today is not included.</p></div>

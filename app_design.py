@@ -2,11 +2,11 @@
 Admin link:    /admin/login
 Employee link: /employee/login
 """
-import os, uuid, hmac, datetime as dt
+import os, uuid, hmac, time, threading, datetime as dt
 from functools import wraps
 import gspread
 from google.oauth2.service_account import Credentials
-from flask import Flask, request, redirect, session, render_template_string, flash, abort
+from flask import Flask, request, redirect, session, render_template_string, flash, abort, jsonify
 
 SHEET_ID = os.getenv("SHEET_ID", "1zh_W-ZDLEa3XZCt_a0iw8m5V8VxrUg3pj55FG0ZFJJg")
 CREDS_FILE = os.getenv("GOOGLE_CREDS", "credentials.json")
@@ -48,6 +48,10 @@ HEADERS = {
                          "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
     "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at"],
     "Holidays": ["Date", "Name"],
+    # Background login/logout tracking (never shown to employees)
+    "Attendance": ["Session ID", "Date", "Employee ID", "Employee name", "Band",
+                   "Login time", "Logout time", "Duration"],
+    "Notifications": ["Notification ID", "Time", "Employee ID", "Employee name", "Event", "Seen"],
 }
 PERSONAL_FIELDS = ["Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                     "Emergency no", "Personal Email ID", "Office Email ID"]
@@ -172,6 +176,92 @@ def write_sub(sid, date, emp, procs, notes):
           [base + ["Note", t, h, "", now, ""] for t, h in notes]
     book().worksheet("Productivity log").append_rows(out, value_input_option="RAW")
 
+# ---------------------------------------------------------------- login / logout tracking
+# Runs silently in a background thread: the employee never sees it and is never slowed down.
+# Sheets used: "Attendance" (one row per login session) and "Notifications" (admin alerts).
+TIME_FMT = "%I:%M:%S %p"
+_att_lock = threading.Lock()
+_notif_cache = [0.0, None]          # [fetched_at, rows] - keeps admin polling light on the Sheets quota
+
+def _bg(fn, *a):
+    def run():
+        try: fn(*a)
+        except Exception as e: print("login tracking error:", e)
+    threading.Thread(target=run, daemon=True).start()
+
+def _ts(date, t):
+    try: return dt.datetime.strptime(f"{date} {t}", "%Y-%m-%d " + TIME_FMT)
+    except ValueError: return dt.datetime.min
+
+def _hms(sec):
+    sec = int(sec); return f"{sec // 3600}:{sec % 3600 // 60:02d}:{sec % 60:02d}"
+
+def _secs(s):
+    try: h, m, x = map(int, str(s).split(":")); return h * 3600 + m * 60 + x
+    except ValueError: return 0
+
+def _nid(r):
+    v = str(r.get("Notification ID", ""))
+    return int(v) if v.isdigit() else 0
+
+def notify(emp_id, name, event, now):
+    _notif_cache[1] = None
+    book().worksheet("Notifications").append_row(
+        [str(int(time.time() * 1_000_000)), now.strftime("%Y-%m-%d " + TIME_FMT), emp_id, name, event, ""],
+        value_input_option="RAW")
+
+def notif_rows():
+    if _notif_cache[1] is None or time.time() - _notif_cache[0] > 8:
+        _notif_cache[:] = [time.time(), rows("Notifications")]
+    return _notif_cache[1]
+
+def note_text(r):
+    return f"{r['Employee name']} ({r['Employee ID']}) {str(r['Event']).lower()} at {r['Time']}"
+
+def _close_stale(emp_id, now):
+    """Sessions from earlier days that never logged out (browser closed, etc.) are marked so."""
+    with _att_lock:
+        ws = book().worksheet("Attendance")
+        fixes = []
+        for i, r in enumerate(ws.get_all_values()[1:], start=2):
+            r = r + [""] * 8
+            if r[2] == emp_id and r[1] < str(now.date()) and not r[6].strip():
+                fixes.append({"range": f"G{i}", "values": [["Not recorded"]]})
+        if fixes: ws.batch_update(fixes, value_input_option="RAW")
+
+def _log_login(sid, emp_id, name, band, now):
+    with _att_lock:
+        book().worksheet("Attendance").append_row(
+            [sid, str(now.date()), emp_id, name, band, now.strftime(TIME_FMT), "", ""], value_input_option="RAW")
+    notify(emp_id, name, "Logged in", now)
+    _close_stale(emp_id, now)
+
+def _log_logout(sid, emp_id, name, band, now):
+    with _att_lock:
+        ws = book().worksheet("Attendance")
+        ids = ws.col_values(1)
+        if sid in ids:
+            r = ids.index(sid) + 1
+            v = ws.row_values(r) + [""] * 8
+            if v[6].strip(): return                      # already closed
+            dur = _hms(max((now - _ts(v[1], v[5])).total_seconds(), 0))
+            ws.update(range_name=f"G{r}", values=[[now.strftime(TIME_FMT), dur]], value_input_option="RAW")
+        else:                                            # login row missing: still keep the logout
+            ws.append_row([sid, str(now.date()), emp_id, name, band, "", now.strftime(TIME_FMT), ""],
+                          value_input_option="RAW")
+    notify(emp_id, name, "Logged out", now)
+
+def track_login(emp_id, name, band):
+    """Start the day's clock: called right after a successful employee login."""
+    session["att_id"] = uuid.uuid4().hex[:12]
+    _bg(_log_login, session["att_id"], emp_id, name, band, dt.datetime.now())
+
+def track_logout():
+    """Save the logout time (no-op if the current session is not an employee session)."""
+    if session.get("role") == "employee" and session.get("att_id"):
+        _bg(_log_logout, session["att_id"], session["emp_id"], session["name"], session["band"], dt.datetime.now())
+        session.pop("att_id", None)
+
 # ---------------------------------------------------------------- auth helpers
 def need(role=None):
     def deco(f):
@@ -250,6 +340,12 @@ tbody tr{transition:background .15s ease}tbody tr:hover{background:#f7f8fd}
 .lcard button{width:100%;background:#f58a8a;color:#fff;border:0;border-radius:20px;padding:11px;margin:12px 0 0;font-size:15px}
 .orb{object-fit:cover;position:absolute;left:-50px;bottom:-50px;width:230px;height:230px;border-radius:50%;border:6px solid #fff;background:#fff center/cover no-repeat;box-shadow:0 10px 30px #0003}
 @media(max-width:800px){.orb{display:none}.wbody{padding:20px 10px}}
+.pill{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;background:#eceffa;color:var(--mut)}
+.pill.in{background:#e3f6ec;color:#146c43}.pill.out{background:#fdeaea;color:#a52a2a}.pill.act{background:#fff4e5;color:#7a4b00}
+.nb{display:none;margin-left:8px;min-width:18px;padding:1px 6px;border-radius:9px;background:#e5484d;color:#fff;font-size:11px;text-align:center}
+#toasts{position:fixed;top:16px;right:16px;z-index:99;display:flex;flex-direction:column;gap:8px;max-width:340px}
+.toast{background:#1c2340;color:#fff;padding:12px 16px;border-radius:10px;font-size:14px;box-shadow:0 8px 24px #0004;animation:fadeInUp .3s ease}
+@media print{ #toasts{display:none}}
 </style></head><body>
 {% if session.role %}<div class="app"><aside>
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
@@ -258,13 +354,26 @@ tbody tr{transition:background .15s ease}tbody tr:hover{background:#f7f8fd}
 </aside>
 <main>{% for m in get_flashed_messages() %}<p class="flash">{{m}}</p>{% endfor %}{{body|safe}}</main></div>
 {% else %}<div class="lg">{% for m in get_flashed_messages() %}<p class="flash" style="background:#fff">{{m}}</p>{% endfor %}{{body|safe}}</div>{% endif %}
+{% if session.role=='admin' %}<div id="toasts"></div><script>
+(function(){var since="0",first=1;
+function badge(n){var a=document.querySelector('aside a[href="/admin/notifications"]');if(!a)return;
+ var b=a.querySelector('.nb');if(!b){b=document.createElement('span');b.className='nb';a.appendChild(b)}
+ b.textContent=n;b.style.display=n>0?'inline-block':'none'}
+function toast(t){var d=document.createElement('div');d.className='toast';d.textContent=t;
+ document.getElementById('toasts').appendChild(d);setTimeout(function(){d.remove()},10000)}
+function poll(){fetch('/admin/notify/poll?since='+since+'&first='+first,{credentials:'same-origin'})
+ .then(function(r){return r.json()}).then(function(j){badge(j.unseen);
+ j.items.forEach(function(i){toast(i.text)});since=j.last;first=0}).catch(function(){})}
+poll();setInterval(poll,15000)})();
+</script>{% endif %}
 </body></html>"""
 
 NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"), ("/admin/personal", "Personal details"),
               ("/admin/processes", "Processes"),
               ("/admin/log", "Productivity log"), ("/admin/missed", "Missed entries"), ("/admin/leave", "Leave log"),
-              ("/admin/holidays", "Holidays")],
+              ("/admin/holidays", "Holidays"),
+              ("/admin/attendance", "Login history"), ("/admin/notifications", "Notifications")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave"), ("/employee/profile", "Personal details")],
 }
 
@@ -367,6 +476,7 @@ def index():
 @app.route("/logout")
 def logout():
     r = session.get("role")
+    track_logout()
     session.clear()
     return redirect("/admin/login" if r == "admin" else "/employee/login")
 
@@ -441,6 +551,90 @@ def admin_log():
          '<button class="primary">Filter</button> <a href="/admin/log">Clear</a></form></div>')
     return page(f + LIST, title="Productivity log", subs=subs)
 
+# ---------------------------------------------------------------- admin: login history + notifications
+ATT = """<div class="head"><div><h1>Login history</h1>
+<p class="mut">{{'All dates' if not d else d}} &middot; recorded automatically when employees log in and out.</p></div>
+<form class="grid no-print" method="get"><label>Date<input type="date" name="date" value="{{d}}"></label>
+<label>Employee ID / name<input name="emp" value="{{q}}"></label>
+<button class="primary">Filter</button><a href="/admin/attendance">Today</a><a href="/admin/attendance?date=">All dates</a></form></div>
+<div class="kpis"><div class="kpi"><span>Currently logged in</span><b>{{active}}</b></div>
+<div class="kpi"><span>Sessions shown</span><b>{{data|length}}</b></div></div>
+<h2>Daily summary</h2>
+<table><tr><th>Date</th><th>Employee</th><th>First login</th><th>Last logout</th><th>Sessions</th><th>Time logged in</th></tr>
+{% for g in days %}<tr><td>{{g.date}}</td><td>{{g.emp}}</td><td>{{g.first or '-'}}</td>
+<td>{% if g.active %}<span class="pill act">Still logged in</span>{% else %}{{g.last or '-'}}{% endif %}</td>
+<td>{{g.sessions}}</td><td>{{g.total}}</td></tr>
+{% else %}<tr><td colspan="6">No login records for this selection.</td></tr>{% endfor %}</table>
+<h2>All sessions</h2>
+<table><tr><th>Date</th><th>Employee</th><th>Band</th><th>Login</th><th>Logout</th><th>Duration</th></tr>
+{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td><td>{{r['Band']}}</td>
+<td>{{r['Login time'] or '-'}}</td><td>{% if r.status=='Active' %}<span class="pill act">Still logged in</span>{% else %}{{r.out}}{% endif %}</td>
+<td>{{r['Duration'] or '-'}}</td></tr>
+{% else %}<tr><td colspan="6">No login records for this selection.</td></tr>{% endfor %}</table>"""
+
+@app.route("/admin/attendance")
+@need("admin")
+def admin_attendance():
+    today = str(dt.date.today())
+    d = request.args.get("date", today).strip()
+    q = request.args.get("emp", "").strip().lower()
+    data = [r for r in rows("Attendance") if (not d or r["Date"] == d) and
+            (not q or q in str(r["Employee ID"]).lower() or q in str(r["Employee name"]).lower())]
+    for r in data:
+        out = str(r["Logout time"]).strip()
+        r["out"] = out or "Not recorded"
+        r["status"] = "Active" if (not out and r["Date"] == today) else ("Logged out" if out else "Not recorded")
+    key = lambda r: _ts(r["Date"], r["Login time"] or r["Logout time"])
+    days = {}
+    for r in sorted(data, key=key):                        # oldest first, so "last" = latest logout
+        g = days.setdefault((r["Date"], str(r["Employee ID"])), dict(
+            date=r["Date"], emp=f"{r['Employee ID']} · {r['Employee name']}", first="", last="",
+            sessions=0, secs=0, active=False))
+        g["sessions"] += 1; g["secs"] += _secs(r["Duration"])
+        if not g["first"]: g["first"] = str(r["Login time"])
+        if r["status"] == "Active": g["active"] = True
+        elif r["status"] == "Logged out": g["last"] = r["out"]
+    days = sorted(days.values(), key=lambda g: (g["date"], g["emp"]), reverse=True)
+    for g in days: g["total"] = _hms(g["secs"]) if g["secs"] else "-"
+    data.sort(key=key, reverse=True)
+    active = len({r["Employee ID"] for r in data if r["status"] == "Active"})
+    return page(ATT, title="Login history", data=data, days=days, d=d, q=request.args.get("emp", ""), active=active)
+
+NOTIF = """<div class="head"><div><h1>Notifications</h1>
+<p class="mut">Employee login / logout alerts with the exact time, newest first (latest 200). New ones are in bold.</p></div>
+<a class="btnl" href="/admin/attendance">Login history</a></div>
+<table><tr><th>Time</th><th>Employee</th><th>Event</th></tr>
+{% for r in data %}<tr{% if r.new %} style="font-weight:600"{% endif %}><td>{{r['Time']}}</td>
+<td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
+<td><span class="pill {{'in' if r['Event']=='Logged in' else 'out'}}">{{r['Event']}}</span></td></tr>
+{% else %}<tr><td colspan="3">No notifications yet.</td></tr>{% endfor %}</table>"""
+
+@app.route("/admin/notifications")
+@need("admin")
+def admin_notifications():
+    data = rows("Notifications")
+    for r in data: r["new"] = str(r.get("Seen", "")).strip() != "Yes"
+    fresh = [r for r in data if r["new"]]
+    if fresh:                                              # opening the page marks them as read
+        book().worksheet("Notifications").batch_update(
+            [{"range": f"F{r['_row']}", "values": [["Yes"]]} for r in fresh], value_input_option="RAW")
+        _notif_cache[1] = None
+    data.sort(key=_nid, reverse=True)
+    return page(NOTIF, title="Notifications", data=data[:200])
+
+@app.route("/admin/notify/poll")
+@need("admin")
+def admin_notify_poll():
+    """Polled by the admin's browser every 15s: unread count + any alerts newer than `since`."""
+    data = notif_rows()
+    since = request.args.get("since", "0")
+    since = int(since) if since.isdigit() else 0
+    last = max((_nid(r) for r in data), default=0)
+    items = [] if request.args.get("first") == "1" else \
+            [dict(id=str(_nid(r)), text=note_text(r)) for r in sorted(data, key=_nid) if _nid(r) > since]
+    return jsonify(unseen=sum(1 for r in data if str(r.get("Seen", "")).strip() != "Yes"),
+                   last=str(max(last, since)), items=items)
+
 # ---------------------------------------------------------------- employee
 @app.route("/employee/login", methods=["GET", "POST"])
 def employee_login():
@@ -448,9 +642,11 @@ def employee_login():
         u = request.form["u"].strip().lower()
         for e in rows("Employees"):
             if u in (str(e["Employee ID"]).lower(), str(e["Email"]).lower()) and eq(request.form["p"], e["Password"]):
+                track_logout()      # closes a previous session in this browser, if any
                 session.clear()
                 session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"],
                                designation=str(e.get("Designation", "")))
+                track_login(session["emp_id"], session["name"], session["band"])
                 return redirect("/employee")
         flash("Wrong username or password.")
     return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee")

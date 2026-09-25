@@ -1178,7 +1178,7 @@ SUMMARY = """<div class="head"><div><h1>Pivot Chart</h1>
 <form class="grid" method="get" style="margin:0"><input type="month" name="month" value="{{month if month!='all' else ''}}">
 <button class="primary">Show</button><a href="/admin/summary?month=all">All time</a></form>
 <label style="margin:0;display:flex;align-items:center;gap:6px">Group by
-<select id="groupBy" onchange="renderPivot()"><option value="band">Band</option><option value="designation">Designation</option></select></label>
+<select id="groupBy" onchange="renderPivot()"><option value="band">Band</option><option value="designation">Designation</option><option value="employee">Employee</option></select></label>
 </div></div>
 <div class="card no-print"><canvas id="pivotChart" height="100"></canvas></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
@@ -1203,7 +1203,7 @@ SUMMARY = """<div class="head"><div><h1>Pivot Chart</h1>
       },
       options: {
         responsive: true,
-        plugins: {legend: {position: 'top'}, title: {display: true, text: 'Attendance vs Productivity by ' + (g === 'band' ? 'Band' : 'Designation')}},
+        plugins: {legend: {position: 'top'}, title: {display: true, text: 'Attendance vs Productivity by ' + (g === 'band' ? 'Band' : g === 'designation' ? 'Designation' : 'Employee')}},
         scales: {y: {beginAtZero: true, max: 100}}
       }
     });
@@ -1303,6 +1303,7 @@ def admin_summary():
         start, end = month_range(month); label = start.strftime("%B %Y")
     emps = rows("Employees")
     rep = report(emps, subs, leaves, start, end)
+    rep.sort(key=lambda r: str(r["name"]))
     # Missed-entries list is intentionally NOT shown on the Overview page any more;
     # it lives only on the dedicated "Missed entries" page (/admin/missed).
     pivot_band = pivot_by(rep, lambda r: r["band"])
@@ -1312,6 +1313,8 @@ def admin_summary():
                   att=[p["att"] for p in pivot_band], pct=[p["pct"] for p in pivot_band]),
         designation=dict(labels=[str(p["label"]) for p in pivot_desig],
                          att=[p["att"] for p in pivot_desig], pct=[p["pct"] for p in pivot_desig]),
+        employee=dict(labels=[f"{r['id']} - {r['name']}" for r in rep],
+                     att=[r["att"] for r in rep], pct=[r["pct"] for r in rep]),
     )
     return page(SUMMARY, title="Pivot Chart", month=month, label=label, pivot_chart=pivot_chart)
 

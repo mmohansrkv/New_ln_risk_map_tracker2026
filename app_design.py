@@ -366,7 +366,10 @@ tbody tr{transition:background .15s ease}tbody tr:hover{background:#f7f8fd}
 .tabs a:hover{background:#eef0ff}.tabs a.on{background:var(--pri);color:#fff;border-color:var(--pri)}
 .pill{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;background:#eceffa;color:var(--mut)}
 .pill.in{background:#e3f6ec;color:#146c43}.pill.out{background:#fdeaea;color:#a52a2a}.pill.act{background:#fff4e5;color:#7a4b00}
-.nb{display:none;margin-left:8px;min-width:18px;padding:1px 6px;border-radius:9px;background:#e5484d;color:#fff;font-size:11px;text-align:center}
+.nb{display:none;margin-left:8px;min-width:18px;padding:1px 6px;border-radius:9px;background:#e5484d;color:#fff;font-size:11px;text-align:center;position:relative;cursor:default}
+.nb::after{content:attr(data-tip);position:absolute;bottom:130%;left:50%;transform:translateX(-50%);background:#e5484d;color:#fff;padding:5px 10px;border-radius:6px;font-size:11px;font-weight:normal;white-space:nowrap;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .15s ease;box-shadow:0 4px 12px #0004;z-index:10}
+.nb::before{content:"";position:absolute;bottom:100%;left:50%;transform:translateX(-50%) translateY(4px);border:5px solid transparent;border-top-color:#e5484d;opacity:0;visibility:hidden;transition:opacity .15s ease}
+.nb:hover::after,.nb:hover::before{opacity:1;visibility:visible}
 #toasts{position:fixed;top:16px;right:16px;z-index:99;display:flex;flex-direction:column;gap:8px;max-width:340px}
 .toast{background:#1c2340;color:#fff;padding:12px 16px;border-radius:10px;font-size:14px;box-shadow:0 8px 24px #0004;animation:fadeInUp .3s ease}
 @media print{ #toasts{display:none}}
@@ -382,7 +385,8 @@ tbody tr{transition:background .15s ease}tbody tr:hover{background:#f7f8fd}
 (function(){var since="0",first=1;
 function badge(n){var a=document.querySelector('aside a[href="/admin/employee-info"]');if(!a)return;
  var b=a.querySelector('.nb');if(!b){b=document.createElement('span');b.className='nb';a.appendChild(b)}
- b.textContent=n;b.style.display=n>0?'inline-block':'none'}
+ b.textContent=n;b.style.display=n>0?'inline-block':'none';
+ b.setAttribute('data-tip',n+' unseen login/logout notification'+(n==1?'':'s'))}
 function toast(t){var d=document.createElement('div');d.className='toast';d.textContent=t;
  document.getElementById('toasts').appendChild(d);setTimeout(function(){d.remove()},10000)}
 function poll(){fetch('/admin/notify/poll?since='+since+'&first='+first,{credentials:'same-origin'})

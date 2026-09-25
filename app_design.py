@@ -60,8 +60,6 @@ HEADERS = {
     "Attendance": ["Session ID", "Date", "Employee ID", "Employee name", "Band",
                    "Login time", "Logout time", "Duration", "Logout type"],
     "Notifications": ["Notification ID", "Time", "Employee ID", "Employee name", "Event", "Seen"],
-    # Which employees' names are highlighted red across the Admin pages (set from Employee Info).
-    "Flags": ["Employee ID", "Flagged"],
 }
 PERSONAL_FIELDS = ["Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                     "Emergency no", "Personal Email ID", "Office Email ID"]
@@ -141,16 +139,6 @@ def _key(x): return str(x).strip().upper()
 def desig_map():
     """{EMPLOYEE ID (normalised): Designation} read live from the Employees sheet."""
     return {_key(e["Employee ID"]): str(e.get("Designation", "")).strip() for e in rows("Employees")}
-
-def flagged_ids():
-    """Normalised Employee IDs currently highlighted red (set on Admin -> Employee Info)."""
-    return {_key(r["Employee ID"]) for r in rows("Flags") if str(r.get("Flagged", "")).strip().lower() == "yes"}
-
-def is_flagged(eid):
-    """True if this employee's name should show in red everywhere it appears in Admin."""
-    return _key(eid) in flagged_ids()
-
-app.jinja_env.globals["is_flagged"] = is_flagged
 
 def find_designation(emp_id, name="", band=""):
     """Designation for an employee: matched by Employee ID; if the ID is not found,
@@ -420,7 +408,9 @@ tbody tr{transition:background .15s ease}tbody tr:hover{background:#f7f8fd}
 (function(){var since="0",first=1;
 function badge(n){var a=document.querySelector('aside a[href="/admin/employee-info"]');if(!a)return;
  var b=a.querySelector('.nb');if(!b){b=document.createElement('span');b.className='nb';a.appendChild(b)}
- b.textContent=n;b.style.display=n>0?'inline-block':'none'}
+ b.textContent=n;b.style.display=n>0?'inline-block':'none';
+ var tip=n>0?('Red means '+n+' unseen employee login/logout notification(s)'):'';
+ a.title=tip;b.title=tip}
 function toast(t){var d=document.createElement('div');d.className='toast';d.textContent=t;
  document.getElementById('toasts').appendChild(d);setTimeout(function(){d.remove()},10000)}
 function poll(){fetch('/admin/notify/poll?since='+since+'&first='+first,{credentials:'same-origin'})
@@ -433,8 +423,7 @@ poll();setInterval(poll,15000)})();
 NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"),
               ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
-              ("/admin/employee-info", "Employee Info"), ("/admin/productivity-info", "Productivity Info"),
-              ("/admin/attendance", "Login History")],
+              ("/admin/employee-info", "Employee Info"), ("/admin/attendance", "Login History")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave"), ("/employee/profile", "Personal details")],
 }
 
@@ -458,7 +447,7 @@ TABLE = """<div class="card"><h2>{{title}}</h2>
 {% if missing %}<p class="mut">&#9888; {{missing}} employee(s) have no Designation yet. Use Edit to set it; it then fills in automatically on their daily entry page.</p>{% endif %}
 {% if locked %}<p class="mut">Personal details are managed on the Personal details page. Office Email ID follows the login Email.</p>{% endif %}</div>
 <table><tr>{% for h in heads %}<th>{{h}}</th>{% endfor %}<th></th></tr>
-{% for r in data %}<tr>{% for h in heads %}<td>{% if h=='Name' and kind=='employees' and is_flagged(r['Employee ID']) %}<span style="color:#c62828">{{r[h]}}</span>{% else %}{{r[h]}}{% endif %}</td>{% endfor %}
+{% for r in data %}<tr>{% for h in heads %}<td>{{r[h]}}</td>{% endfor %}
 <td class="act"><a href="/admin/{{kind}}/{{r['_row']}}">Edit</a>
 <form method="post" action="/admin/{{kind}}/{{r['_row']}}/delete" onsubmit="return confirm('Delete?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="9">No records yet.</td></tr>{% endfor %}</table>"""
@@ -470,7 +459,7 @@ EDIT = """<div class="card"><h2>Edit {{title}}</h2><form method="post" class="gr
 
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th><th>Designation</th>{% endif %}
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Productivity</th><th></th></tr>
-{% for s in subs %}<tr><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; {% if is_flagged(s.emp_id) %}<span style="color:#c62828">{{s.emp_name}}</span>{% else %}{{s.emp_name}}{% endif %}</td><td>{{s.designation}}</td>{% endif %}
+{% for s in subs %}<tr><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; {{s.emp_name}}</td><td>{{s.designation}}</td>{% endif %}
 <td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td><td>{{ 'Weekend - not counted' if s.off else (s.pct ~ '%') }}</td>
 <td class="act"><a href="/entry/{{s.id}}/view">View</a><a href="/entry/{{s.id}}">Edit</a>
 <form method="post" action="/entry/{{s.id}}/delete" onsubmit="return confirm('Delete this entry?')"><button class="danger">Delete</button></form></td></tr>
@@ -624,18 +613,26 @@ ATT = """<div class="head"><div><h1>Login history</h1>
 <div class="kpi"><span>Sessions shown</span><b>{{data|length}}</b></div></div>
 <h2>Daily summary</h2>
 <table><tr><th>Date</th><th>User</th><th>First login</th><th>Last logout</th><th>Logins</th><th>Logouts</th><th>Auto logouts</th><th>Time logged in</th></tr>
-{% for g in days %}<tr><td>{{g.date}}</td><td>{{g.id}} &middot; {% if is_flagged(g.id) %}<span style="color:#c62828">{{g.name}}</span>{% else %}{{g.name}}{% endif %}</td><td>{{g.first or '-'}}</td>
+{% for g in days %}<tr><td>{{g.date}}</td><td>{{g.emp}}</td><td>{{g.first or '-'}}</td>
 <td>{% if g.active %}<span class="pill act">Still logged in</span>{% else %}{{g.last or '-'}}{% endif %}</td>
 <td>{{g.logins}}</td><td>{{g.logouts}}</td><td>{{g.auto_logouts}}</td><td>{{g.total}}</td></tr>
 {% else %}<tr><td colspan="8">No login records for this selection.</td></tr>{% endfor %}</table>
 <h2>All sessions</h2>
 <table><tr><th>Date</th><th>User</th><th>Role</th><th>Login</th><th>Logout</th><th>Logout type</th><th>Duration</th></tr>
-{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {% if is_flagged(r['Employee ID']) %}<span style="color:#c62828">{{r['Employee name']}}</span>{% else %}{{r['Employee name']}}{% endif %}</td>
+{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
 <td>{{ 'Admin' if r['Employee ID']=='ADMIN' else 'Employee (' ~ r['Band'] ~ ')' }}</td>
 <td>{{r['Login time'] or '-'}}</td><td>{% if r.status=='Active' %}<span class="pill act">Still logged in</span>{% else %}{{r.out}}{% endif %}</td>
 <td>{% if r.status=='Logged out' %}<span class="pill {{'in' if r.ltype=='Manual' else 'out'}}">{{r.ltype}}</span>{% else %}-{% endif %}</td>
 <td>{{r['Duration'] or '-'}}</td></tr>
-{% else %}<tr><td colspan="7">No login records for this selection.</td></tr>{% endfor %}</table>"""
+{% else %}<tr><td colspan="7">No login records for this selection.</td></tr>{% endfor %}</table>
+<h2>Productivity Info</h2>
+<p class="mut">All employee login records for {{prod_label}}.</p>
+<table><tr><th>Date</th><th>Employee</th><th>Login</th><th>Logout</th><th>Logout type</th><th>Duration</th></tr>
+{% for r in prod %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
+<td>{{r['Login time'] or '-'}}</td><td>{% if r.status=='Active' %}<span class="pill act">Still logged in</span>{% else %}{{r.out}}{% endif %}</td>
+<td>{% if r.status=='Logged out' %}<span class="pill {{'in' if r.ltype=='Manual' else 'out'}}">{{r.ltype}}</span>{% else %}-{% endif %}</td>
+<td>{{r['Duration'] or '-'}}</td></tr>
+{% else %}<tr><td colspan="6">No employee login records this month.</td></tr>{% endfor %}</table>"""
 
 def att_prepare(data, today):
     """Adds status fields to attendance rows; returns (daily summary, sessions newest-first, #active).
@@ -650,8 +647,7 @@ def att_prepare(data, today):
     days = {}
     for r in sorted(data, key=key):                        # oldest first, so "last" = latest logout
         g = days.setdefault((r["Date"], str(r["Employee ID"])), dict(
-            date=r["Date"], id=str(r["Employee ID"]), name=r["Employee name"],
-            emp=f"{r['Employee ID']} · {r['Employee name']}", first="", last="",
+            date=r["Date"], emp=f"{r['Employee ID']} · {r['Employee name']}", first="", last="",
             sessions=0, secs=0, active=False, logins=0, logouts=0, auto_logouts=0))
         g["sessions"] += 1; g["secs"] += _secs(r["Duration"])
         if str(r["Login time"]).strip():
@@ -677,47 +673,21 @@ def admin_attendance():
     data = [r for r in rows("Attendance") if (not d or r["Date"] == d) and
             (not q or q in str(r["Employee ID"]).lower() or q in str(r["Employee name"]).lower())]
     days, data, active = att_prepare(data, today)
-    return page(ATT, title="Login history", data=data, days=days, d=d, q=request.args.get("emp", ""), active=active)
-
-# ---------------------------------------------------------------- admin: Productivity Info
-PRODUCTIVITY_INFO = """<div class="head"><div><h1>Productivity Info</h1>
-<p class="mut">{{label}} &middot; login history for all employees this month, kept as its own log separate from the Admin's overall Login History.</p></div>
-<a class="btnl no-print" href="/admin/attendance">Full Login History</a></div>
-<div class="kpis"><div class="kpi"><span>Currently logged in</span><b>{{active}}</b></div>
-<div class="kpi"><span>Sessions this month</span><b>{{data|length}}</b></div></div>
-<h2>Daily summary</h2>
-<table><tr><th>Date</th><th>Employee</th><th>First login</th><th>Last logout</th><th>Logins</th><th>Logouts</th><th>Auto logouts</th><th>Time logged in</th></tr>
-{% for g in days %}<tr><td>{{g.date}}</td><td>{{g.id}} &middot; {% if is_flagged(g.id) %}<span style="color:#c62828">{{g.name}}</span>{% else %}{{g.name}}{% endif %}</td><td>{{g.first or '-'}}</td>
-<td>{% if g.active %}<span class="pill act">Still logged in</span>{% else %}{{g.last or '-'}}{% endif %}</td>
-<td>{{g.logins}}</td><td>{{g.logouts}}</td><td>{{g.auto_logouts}}</td><td>{{g.total}}</td></tr>
-{% else %}<tr><td colspan="8">No login records this month.</td></tr>{% endfor %}</table>
-<h2>All sessions</h2>
-<table><tr><th>Date</th><th>Employee</th><th>Band</th><th>Login</th><th>Logout</th><th>Logout type</th><th>Duration</th></tr>
-{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {% if is_flagged(r['Employee ID']) %}<span style="color:#c62828">{{r['Employee name']}}</span>{% else %}{{r['Employee name']}}{% endif %}</td>
-<td>{{r['Band']}}</td>
-<td>{{r['Login time'] or '-'}}</td><td>{% if r.status=='Active' %}<span class="pill act">Still logged in</span>{% else %}{{r.out}}{% endif %}</td>
-<td>{% if r.status=='Logged out' %}<span class="pill {{'in' if r.ltype=='Manual' else 'out'}}">{{r.ltype}}</span>{% else %}-{% endif %}</td>
-<td>{{r['Duration'] or '-'}}</td></tr>
-{% else %}<tr><td colspan="7">No login records this month.</td></tr>{% endfor %}</table>"""
-
-@app.route("/admin/productivity-info")
-@need("admin")
-def admin_productivity_info():
-    """Employee-only login history for the current calendar month, kept separate from
-    the full Login History page (which covers Admin too and every date)."""
-    today = today_local()
-    month = today.strftime("%Y-%m")
-    data = [r for r in rows("Attendance") if str(r["Employee ID"]) != "ADMIN" and str(r["Date"]).startswith(month)]
-    days, data, active = att_prepare(data, str(today))
-    return page(PRODUCTIVITY_INFO, title="Productivity Info", data=data, days=days, active=active,
-                label=today.strftime("%B %Y"))
+    # "Productivity Info" log: every employee (not Admin) login record for the current month.
+    month = today_local().strftime("%Y-%m")
+    prod = [r for r in rows("Attendance")
+            if str(r["Employee ID"]) != "ADMIN" and str(r["Date"]).startswith(month)]
+    _, prod, _ = att_prepare(prod, today)
+    prod_label = today_local().strftime("%B %Y")
+    return page(ATT, title="Login history", data=data, days=days, d=d, q=request.args.get("emp", ""),
+                active=active, prod=prod, prod_label=prod_label)
 
 NOTIF = """<div class="head"><div><h1>Notifications</h1>
 <p class="mut">Employee login / logout alerts with the exact time, newest first (latest 200). New ones are in bold.</p></div>
 <a class="btnl" href="/admin/attendance">Login history</a></div>
 <table><tr><th>Time</th><th>Employee</th><th>Event</th></tr>
 {% for r in data %}<tr{% if r.new %} style="font-weight:600"{% endif %}><td>{{r['Time']}}</td>
-<td>{{r['Employee ID']}} &middot; {% if is_flagged(r['Employee ID']) %}<span style="color:#c62828">{{r['Employee name']}}</span>{% else %}{{r['Employee name']}}{% endif %}</td>
+<td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
 <td><span class="pill {{'in' if r['Event']=='Logged in' else 'out'}}">{{r['Event']}}</span></td></tr>
 {% else %}<tr><td colspan="3">No notifications yet.</td></tr>{% endfor %}</table>"""
 
@@ -756,15 +726,13 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">Click 
 <button class="primary">Search</button><a href="/admin/employee-info">Reset</a></form></div>
 <table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Band</th></tr>
 {% for e in emps %}<tr><td>{{e['Employee ID']}}</td>
-<td><a href="/admin/employee-info/{{e['Employee ID']|urlencode}}"><b{% if is_flagged(e['Employee ID']) %} style="color:#c62828"{% endif %}>{{e['Name']}}</b></a></td>
+<td><a href="/admin/employee-info/{{e['Employee ID']|urlencode}}"><b>{{e['Name']}}</b></a></td>
 <td>{{e['Designation']}}</td><td>{{e['Band']}}</td></tr>
 {% else %}<tr><td colspan="4">No employees found.</td></tr>{% endfor %}</table>"""
 
-EMP_HEAD = """<div class="head"><div><h1{% if is_flagged(emp['Employee ID']) %} style="color:#c62828"{% endif %}>{{emp['Name']}}</h1>
+EMP_HEAD = """<div class="head"><div><h1>{{emp['Name']}}</h1>
 <p class="mut">{{emp['Employee ID']}} &middot; {{emp['Designation'] or 'No designation'}} &middot; Band {{emp['Band']}}</p></div>
-<div class="act no-print"><form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/flag">
-<button class="{{'danger' if is_flagged(emp['Employee ID']) else 'btnl'}}">{{'Remove red highlight' if is_flagged(emp['Employee ID']) else 'Highlight name red'}}</button></form>
-<a href="/admin/employee-info">&larr; All employees</a></div></div>
+<a href="/admin/employee-info">&larr; All employees</a></div>
 <div class="tabs no-print">{% for k,l in tabs %}<a href="/admin/employee-info/{{emp['Employee ID']|urlencode}}?tab={{k}}"
 class="{{'on' if k==tab else ''}}">{{l}}</a>{% endfor %}</div>"""
 
@@ -894,20 +862,6 @@ def admin_employee_leave_delete(eid, row):
     if not r or _key(r["Employee ID"]) != _key(emp["Employee ID"]): abort(404)
     book().worksheet("Leave").delete_rows(row)
     flash("Leave deleted."); return redirect(f"/admin/employee-info/{eid}?tab=leave")
-
-@app.route("/admin/employee-info/<eid>/flag", methods=["POST"])
-@need("admin")
-def admin_employee_flag(eid):
-    """Toggle whether this employee's name is highlighted red everywhere it's shown in Admin."""
-    emp = emp_or_404(eid); eid = str(emp["Employee ID"])
-    cur = next((r for r in rows("Flags") if _key(r["Employee ID"]) == _key(eid)), None)
-    now_red = not (cur and str(cur.get("Flagged", "")).strip().lower() == "yes")
-    if cur:
-        book().worksheet("Flags").update(range_name=f"B{cur['_row']}", values=[["Yes" if now_red else ""]])
-    else:
-        book().worksheet("Flags").append_row([eid, "Yes" if now_red else ""], value_input_option="RAW")
-    flash("Name highlighted red." if now_red else "Red highlight removed.")
-    return redirect(request.referrer or f"/admin/employee-info/{eid}")
 
 # ---------------------------------------------------------------- employee
 @app.route("/employee/login", methods=["GET", "POST"])
@@ -1090,7 +1044,7 @@ SUMMARY = """<div class="head"><div><h1>Overview</h1>
 <button type="button" class="btnl" onclick="window.print()">&#128438; Print</button></div></div>""" + KPI + """
 <table><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Productivity</th></tr>
-{% for r in rep %}<tr><td>{{r.id}} &middot; {% if is_flagged(r.id) %}<span style="color:#c62828">{{r.name}}</span>{% else %}{{r.name}}{% endif %}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>
+{% for r in rep %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>
 <td>{{r.att}}%<i class="bar {{r.att|tone}}"><u style="width:{{r.att}}%"></u></i></td>
 <td>{{r.prod|g}}</td><td>{{r.non|g}}</td>
 <td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td></tr>
@@ -1113,7 +1067,7 @@ LEAVE_ADMIN = """<div class="head"><h1>Leave log</h1></div>
 <label>From date<input type="date" name="d1" required></label><label>To date<input type="date" name="d2" required></label>
 <label>Reason<input name="reason" placeholder="Reason"></label><button class="primary">Add leave</button></form></div>
 <table><tr><th>Date</th><th>Employee</th><th>Designation</th><th>Band</th><th>Reason</th><th>Applied at</th><th></th></tr>
-{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {% if is_flagged(r['Employee ID']) %}<span style="color:#c62828">{{r['Employee name']}}</span>{% else %}{{r['Employee name']}}{% endif %}</td><td>{{r['Designation']}}</td><td>{{r['Band']}}</td>
+{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td><td>{{r['Designation']}}</td><td>{{r['Band']}}</td>
 <td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td><td class="act"><a href="/admin/leave/{{r['_row']}}">Edit</a>
 <form method="post" action="/admin/leave/{{r['_row']}}/delete" onsubmit="return confirm('Delete?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="7">No leave records.</td></tr>{% endfor %}</table>"""
@@ -1123,7 +1077,7 @@ PERSONAL_VIEW = """<div class="head"><div><h1>Personal details</h1>
 <button type="button" class="btnl no-print" onclick="window.print()">&#128438; Print</button></div>
 <table><tr><th>Emp ID</th><th>Name</th><th>Address Line_1</th><th>Address Line_2</th><th>City</th><th>PIN</th>
 <th>Phone Number</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID <small>(login)</small></th><th></th></tr>
-{% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td>{% if is_flagged(e['Employee ID']) %}<span style="color:#c62828">{{e['Name']}}</span>{% else %}{{e['Name']}}{% endif %}</td><td>{{e['Address Line_1']}}</td><td>{{e['Address Line_2']}}</td>
+{% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td>{{e['Name']}}</td><td>{{e['Address Line_1']}}</td><td>{{e['Address Line_2']}}</td>
 <td>{{e['City']}}</td><td>{{e['PIN']}}</td><td>{{e['Phone Number']}}</td><td>{{e['Emergency no']}}</td>
 <td>{{e['Personal Email ID']}}</td><td>{{e['Email']}}</td><td class="act"><a href="/admin/personal/{{e['_row']}}">Edit</a></td></tr>
 {% else %}<tr><td colspan="11">No employees yet.</td></tr>{% endfor %}</table>"""
@@ -1187,7 +1141,7 @@ MISSED = """<div class="head"><div><h1>Missed entries</h1>
 <div class="kpis"><div class="kpi"><span>Missed entries</span><b>{{data|length}}</b></div>
 <div class="kpi"><span>Employees affected</span><b>{{n_emp}}</b></div></div>
 <table><tr><th>Date</th><th>Day</th><th>Employee</th><th>Designation</th><th>Band</th></tr>
-{% for r in data %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}} &middot; {% if is_flagged(r.id) %}<span style="color:#c62828">{{r.name}}</span>{% else %}{{r.name}}{% endif %}</td><td>{{r.designation}}</td><td>{{r.band}}</td></tr>
+{% for r in data %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td></tr>
 {% else %}<tr><td colspan="5">No missed entries.</td></tr>{% endfor %}</table>"""
 
 PROFILE = """<div class="card"><h2>Personal details</h2>

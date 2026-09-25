@@ -419,7 +419,8 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"),
               ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/attendance", "Login History")],
-    "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave"), ("/employee/profile", "Personal details")],
+    "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave"), ("/employee/profile", "Personal details"),
+                 ("/employee/productivity", "Productivity Info")],
 }
 
 def page(body, title="Productivity Tracker", **ctx):
@@ -895,20 +896,6 @@ def employee_home():
     body, ctx = form_page(sub, "/employee/save", "Daily productivity entry")
     all_mine = [s for s in load_subs() if s["emp_id"] == session["emp_id"]]
     mine = [s for s in all_mine if s["date"] == today]
-    month = today[:7]                                   # e.g. 2026-09
-    month_subs = sorted((s for s in all_mine if str(s["date"]).startswith(month)),
-                        key=lambda s: s["date"], reverse=True)
-    counted = [s for s in month_subs if not s["off"]]     # weekly-off entries are not calculated
-    m_count = len(counted)
-    m_prod = sum(s["prod"] for s in counted)
-    m_non = sum(s["non"] for s in counted)
-    month_html = (
-        '<h2>This month (' + today_local().strftime("%B %Y") + ')</h2>'
-        '<div class="totals">Entries: <b>{{m_count}}</b> &middot; '
-        'Productive: <b>{{m_prod|g}}</b> hrs &middot; '
-        'Non-productive: <b>{{m_non|g}}</b> hrs &middot; '
-        'Total: <b>{{(m_prod + m_non)|g}}</b> hrs</div>'
-        + LIST.replace("in subs", "in msubs"))
     first = today_local().replace(day=1)
     lv = rows("Leave"); t0 = today_local()
     k = report([my_emp()], all_mine, lv, first, t0)[0]
@@ -916,10 +903,34 @@ def employee_home():
     pend = bool(missing_dates(session["emp_id"], all_mine, lv, t0, t0))
     profile_incomplete = any(not str(my_emp_row().get(f, "")).strip() for f in EDITABLE_PERSONAL)
     extra = [("Present days", k["present"]), ("Leave days", k["leave"])]
-    return page(EMP_TOP + EMP_ALERT + body + '<h2>Submitted today</h2>' + LIST + month_html,
-                title="Daily productivity", missed=missed, pend=pend, subs=mine, msubs=month_subs, m_count=m_count, m_prod=m_prod, m_non=m_non,
+    return page(EMP_TOP + EMP_ALERT + body + '<h2>Submitted today</h2>' + LIST,
+                title="Daily productivity", missed=missed, pend=pend, subs=mine,
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
                 a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete, **ctx)
+
+@app.route("/employee/productivity")
+@need("employee")
+def employee_productivity():
+    """Productivity Info: this employee's current-month submissions. The month always follows
+    today's date automatically, so this page never needs a month picker."""
+    today = today_local()
+    all_mine = [s for s in load_subs() if s["emp_id"] == session["emp_id"]]
+    month = str(today)[:7]                              # e.g. 2026-09
+    month_subs = sorted((s for s in all_mine if str(s["date"]).startswith(month)),
+                        key=lambda s: s["date"], reverse=True)
+    counted = [s for s in month_subs if not s["off"]]    # weekly-off entries are not calculated
+    m_count = len(counted)
+    m_prod = sum(s["prod"] for s in counted)
+    m_non = sum(s["non"] for s in counted)
+    body = (
+        '<div class="head"><h1>Productivity Info</h1></div>'
+        '<h2>This month (' + today.strftime("%B %Y") + ')</h2>'
+        '<div class="totals">Entries: <b>{{m_count}}</b> &middot; '
+        'Productive: <b>{{m_prod|g}}</b> hrs &middot; '
+        'Non-productive: <b>{{m_non|g}}</b> hrs &middot; '
+        'Total: <b>{{(m_prod + m_non)|g}}</b> hrs</div>'
+        + LIST.replace("in subs", "in msubs"))
+    return page(body, title="Productivity Info", msubs=month_subs, m_count=m_count, m_prod=m_prod, m_non=m_non)
 
 @app.route("/employee/save", methods=["POST"])
 @need("employee")

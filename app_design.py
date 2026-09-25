@@ -258,14 +258,16 @@ def _log_logout(sid, emp_id, name, band, now):
     notify(emp_id, name, "Logged out", now)
 
 def track_login(emp_id, name, band):
-    """Start the day's clock: called right after a successful employee login."""
+    """Start the day's clock: called right after a successful login (Admin or Employee)."""
     session["att_id"] = uuid.uuid4().hex[:12]
+    session["att_eid"], session["att_name"], session["att_band"] = emp_id, name, band
     _bg(_log_login, session["att_id"], emp_id, name, band, now_local())
 
 def track_logout():
-    """Save the logout time (no-op if the current session is not an employee session)."""
-    if session.get("role") == "employee" and session.get("att_id"):
-        _bg(_log_logout, session["att_id"], session["emp_id"], session["name"], session["band"], now_local())
+    """Save the logout time for whoever is currently logged in (Admin or Employee); no-op otherwise."""
+    if session.get("att_id"):
+        _bg(_log_logout, session["att_id"], session.get("att_eid", "ADMIN"),
+            session.get("att_name", "Admin"), session.get("att_band", "-"), now_local())
         session.pop("att_id", None)
 
 # ---------------------------------------------------------------- auth helpers
@@ -289,7 +291,8 @@ BASE = """<!doctype html><html><head><meta charset="utf-8">
 <style>
 :root{--ink:#1c2340;--mut:#6b7390;--pri:#4f46e5;--line:#e6e9f2}
 *{box-sizing:border-box}
-body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f3f5fb;color:var(--ink)}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f3f5fb;color:var(--ink);animation:pageFade .4s ease}
+@keyframes pageFade{from{opacity:0}to{opacity:1}}
 .app{display:flex;min-height:100vh}
 aside{width:220px;background:#1c2340;color:#fff;padding:20px 12px;display:flex;flex-direction:column;gap:4px;flex:none}
 .brand{font-weight:600;font-size:17px;padding:0 10px 16px}.brand small{display:block;font-weight:400;color:#9aa3c7;font-size:12px}
@@ -303,16 +306,20 @@ main{flex:1;padding:24px 28px;min-width:0;animation:fadeInUp .45s cubic-bezier(.
 h1{font-size:22px;margin:0}h2{font-size:17px;margin:22px 0 10px}h3{font-size:15px;margin:14px 0 6px}
 .head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
 .mut{color:var(--mut);margin:2px 0 0;font-size:13px}
-.card{background:#fff;padding:18px;border-radius:14px;border:1px solid var(--line);margin-bottom:16px;transition:box-shadow .2s ease,transform .2s ease}
+.card{background:#fff;padding:18px;border-radius:14px;border:1px solid var(--line);margin-bottom:16px;transition:box-shadow .2s ease,transform .2s ease;animation:fadeInUp .4s cubic-bezier(.22,1,.36,1) backwards}
 .card:hover{box-shadow:0 8px 22px #1c234014;transform:translateY(-1px)}
 input,select,button{padding:8px 10px;border:1px solid #cfd5e6;border-radius:8px;font-size:14px;margin:3px;background:#fff;color:var(--ink);transition:border-color .2s ease,box-shadow .2s ease}
 input:focus,select:focus{outline:2px solid #c7c4fb;border-color:var(--pri)}
 input[readonly]{background:#f1f3fa}
-button{cursor:pointer;transition:transform .15s ease,box-shadow .2s ease,background .2s ease}
-button:active{transform:scale(.97)}
-.primary,.btnl{background:var(--pri);color:#fff;border:0;padding:9px 18px;border-radius:8px;text-decoration:none;font-size:14px;display:inline-block;cursor:pointer;transition:background .2s ease,box-shadow .2s ease,transform .15s ease}
-.primary:hover,.btnl:hover{background:#4338ca;box-shadow:0 4px 14px #4f46e540;transform:translateY(-1px)}
+button,.primary,.btnl{cursor:pointer;transition:transform .18s cubic-bezier(.34,1.56,.64,1),box-shadow .2s ease,background .2s ease,color .2s ease,border-color .2s ease;position:relative}
+button:hover,.primary:hover,.btnl:hover{transform:translateY(-2px);box-shadow:0 6px 16px #1c234026}
+button:active,.primary:active,.btnl:active{transform:translateY(0) scale(.95);box-shadow:0 2px 6px #1c234022;transition-duration:.08s}
+button:focus-visible,.primary:focus-visible,.btnl:focus-visible{outline:2px solid var(--pri);outline-offset:2px}
+.primary,.btnl{background:var(--pri);color:#fff;border:0;padding:9px 18px;border-radius:8px;text-decoration:none;font-size:14px;display:inline-block}
+.primary:hover,.btnl:hover{background:#4338ca}
 .danger{color:#c62828;border-color:#f3c1c1}
+.danger:hover{background:#fdeaea;border-color:#e5484d;box-shadow:0 6px 16px #e5484d26}
+@media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 .grid,.r{display:flex;flex-wrap:wrap;gap:6px;align-items:end}.grid label{display:flex;flex-direction:column;font-size:12px;color:var(--mut)}
 table{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
 th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}
@@ -333,8 +340,15 @@ tbody tr{transition:background .15s ease}tbody tr:hover{background:#f7f8fd}
 @media print{aside,.me,.flash,.warn,form,.btnl,.no-print{display:none!important}main{padding:0;animation:none}body{background:#fff}
 .card{border:0;padding:0}table{border:1px solid #000}th,td{border-color:#000}.kpi{border:1px solid #000}}
 @media(max-width:800px){.app{flex-direction:column}aside{width:auto;flex-direction:row;flex-wrap:wrap;align-items:center}.me{order:99;margin:0 0 0 auto;border:0;padding:0}main{padding:16px}}
-.lg{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:linear-gradient(135deg,#c9b8f6 0%,#fbd3e2 45%,#b9d2f8 100%)}
-.win{position:relative;width:min(880px,100%);box-shadow:0 20px 50px #5b3f9a33;border-radius:14px}
+.lg{position:relative;overflow:hidden;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:linear-gradient(135deg,#c9b8f6 0%,#fbd3e2 45%,#b9d2f8 100%);animation:fadeInUp .5s cubic-bezier(.22,1,.36,1)}
+.blob{position:absolute;border-radius:50%;filter:blur(2px);opacity:.55;pointer-events:none;will-change:transform;z-index:0}
+.blob.b1{width:340px;height:340px;left:-90px;top:-70px;background:radial-gradient(circle at 35% 35%,#fff9,#8b6fe8 70%);animation:blobFloat1 13s ease-in-out infinite}
+.blob.b2{width:260px;height:260px;right:-70px;bottom:-60px;background:radial-gradient(circle at 35% 35%,#fff9,#f2789a 70%);animation:blobFloat2 16s ease-in-out infinite}
+.blob.b3{width:150px;height:150px;right:12%;top:8%;background:radial-gradient(circle at 35% 35%,#fffb,#7fb7f2 70%);animation:blobFloat3 10s ease-in-out infinite}
+@keyframes blobFloat1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(30px,25px) scale(1.08)}}
+@keyframes blobFloat2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-25px,-20px) scale(1.1)}}
+@keyframes blobFloat3{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-18px,16px) scale(.92)}}
+.win{position:relative;z-index:1;width:min(880px,100%);box-shadow:0 20px 50px #5b3f9a33;border-radius:14px;animation:fadeInUp .6s .1s cubic-bezier(.22,1,.36,1) backwards}
 .wbar{background:#f6a5a5;height:28px;border-radius:14px 14px 0 0;display:flex;align-items:center;gap:6px;padding:0 12px}
 .wbar i{width:9px;height:9px;border-radius:50%;background:#fff}
 .wbody{min-height:440px;border-radius:0 0 14px 14px;display:flex;align-items:center;justify-content:center;padding:32px;background:url(/static/login_bg.jpg) center/cover,linear-gradient(115deg,#4a2a7a 0%,#b4487c 40%,#f29a63 62%,#8b45a8 100%)}
@@ -344,7 +358,8 @@ tbody tr{transition:background .15s ease}tbody tr:hover{background:#f7f8fd}
 .lcard p{margin:0 0 14px;color:var(--mut);font-size:13px}
 .lcard input{width:100%;margin:4px 0;border:1px solid #f08c8c;border-radius:8px;padding:10px}
 .lcard button{width:100%;background:#f58a8a;color:#fff;border:0;border-radius:20px;padding:11px;margin:12px 0 0;font-size:15px}
-.orb{object-fit:cover;position:absolute;left:-50px;bottom:-50px;width:230px;height:230px;border-radius:50%;border:6px solid #fff;background:#fff center/cover no-repeat;box-shadow:0 10px 30px #0003}
+.orb{object-fit:cover;position:absolute;left:-50px;bottom:-50px;width:230px;height:230px;border-radius:50%;border:6px solid #fff;background:#fff center/cover no-repeat;box-shadow:0 10px 30px #0003;will-change:transform;animation:orbFloat 4.5s ease-in-out infinite}
+@keyframes orbFloat{0%,100%{transform:translateY(0) rotate(0deg)}50%{transform:translateY(-14px) rotate(-3deg)}}
 @media(max-width:800px){.orb{display:none}.wbody{padding:20px 10px}}
 .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 18px}
 .tabs a{padding:8px 14px;border-radius:8px;background:#fff;border:1px solid var(--line);color:var(--ink);text-decoration:none;font-size:14px;transition:background .2s ease}
@@ -362,7 +377,7 @@ tbody tr{transition:background .15s ease}tbody tr:hover{background:#f7f8fd}
 {% for h,l,on in nav %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endfor %}
 </aside>
 <main>{% for m in get_flashed_messages() %}<p class="flash">{{m}}</p>{% endfor %}{{body|safe}}</main></div>
-{% else %}<div class="lg">{% for m in get_flashed_messages() %}<p class="flash" style="background:#fff">{{m}}</p>{% endfor %}{{body|safe}}</div>{% endif %}
+{% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for m in get_flashed_messages() %}<p class="flash" style="background:#fff">{{m}}</p>{% endfor %}{{body|safe}}</div>{% endif %}
 {% if session.role=='admin' %}<div id="toasts"></div><script>
 (function(){var since="0",first=1;
 function badge(n){var a=document.querySelector('aside a[href="/admin/employee-info"]');if(!a)return;
@@ -380,7 +395,7 @@ poll();setInterval(poll,15000)})();
 NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"),
               ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
-              ("/admin/employee-info", "Employee Info")],
+              ("/admin/employee-info", "Employee Info"), ("/admin/attendance", "Login History")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Apply leave"), ("/employee/profile", "Personal details")],
 }
 
@@ -492,7 +507,9 @@ def logout():
 def admin_login():
     if request.method == "POST":
         if eq(request.form["u"], ADMIN_USER) and eq(request.form["p"], ADMIN_PASS):
+            track_logout()      # closes a previous session in this browser, if any
             session.clear(); session.update(role="admin", name="Admin")
+            track_login("ADMIN", "Admin", "-")
             return redirect("/admin/summary")
         flash("Wrong username or password.")
     return page(LOGIN, title="Admin login", ph="Admin username", role="admin")
@@ -560,21 +577,22 @@ def admin_log():
 
 # ---------------------------------------------------------------- admin: login history + notifications
 ATT = """<div class="head"><div><h1>Login history</h1>
-<p class="mut">{{'All dates' if not d else d}} &middot; recorded automatically when employees log in and out.</p></div>
+<p class="mut">{{'All dates' if not d else d}} &middot; system login and logout time for every user - Admin and Employees - recorded automatically.</p></div>
 <form class="grid no-print" method="get"><label>Date<input type="date" name="date" value="{{d}}"></label>
-<label>Employee ID / name<input name="emp" value="{{q}}"></label>
+<label>ID / name<input name="emp" value="{{q}}" placeholder="Employee ID / name, or Admin"></label>
 <button class="primary">Filter</button><a href="/admin/attendance">Today</a><a href="/admin/attendance?date=">All dates</a></form></div>
 <div class="kpis"><div class="kpi"><span>Currently logged in</span><b>{{active}}</b></div>
 <div class="kpi"><span>Sessions shown</span><b>{{data|length}}</b></div></div>
 <h2>Daily summary</h2>
-<table><tr><th>Date</th><th>Employee</th><th>First login</th><th>Last logout</th><th>Sessions</th><th>Time logged in</th></tr>
+<table><tr><th>Date</th><th>User</th><th>First login</th><th>Last logout</th><th>Sessions</th><th>Time logged in</th></tr>
 {% for g in days %}<tr><td>{{g.date}}</td><td>{{g.emp}}</td><td>{{g.first or '-'}}</td>
 <td>{% if g.active %}<span class="pill act">Still logged in</span>{% else %}{{g.last or '-'}}{% endif %}</td>
 <td>{{g.sessions}}</td><td>{{g.total}}</td></tr>
 {% else %}<tr><td colspan="6">No login records for this selection.</td></tr>{% endfor %}</table>
 <h2>All sessions</h2>
-<table><tr><th>Date</th><th>Employee</th><th>Band</th><th>Login</th><th>Logout</th><th>Duration</th></tr>
-{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td><td>{{r['Band']}}</td>
+<table><tr><th>Date</th><th>User</th><th>Role</th><th>Login</th><th>Logout</th><th>Duration</th></tr>
+{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
+<td>{{ 'Admin' if r['Employee ID']=='ADMIN' else 'Employee (' ~ r['Band'] ~ ')' }}</td>
 <td>{{r['Login time'] or '-'}}</td><td>{% if r.status=='Active' %}<span class="pill act">Still logged in</span>{% else %}{{r.out}}{% endif %}</td>
 <td>{{r['Duration'] or '-'}}</td></tr>
 {% else %}<tr><td colspan="6">No login records for this selection.</td></tr>{% endfor %}</table>"""

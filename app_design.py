@@ -2,12 +2,12 @@
 Admin link:    /admin/login
 Employee link: /employee/login
 """
-import os, uuid, hmac, time, random, threading, datetime as dt
+import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
 from functools import wraps
 import gspread
 from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
-from flask import Flask, request, redirect, session, render_template_string, flash, abort, jsonify, has_request_context
+from flask import Flask, request, redirect, session, render_template_string, flash, abort, jsonify, has_request_context, Response
 
 from zoneinfo import ZoneInfo
 # The server clock is often UTC. All app times use this timezone instead (set APP_TZ to change it).
@@ -505,6 +505,24 @@ tbody tr{transition:background .15s ease}
 .toast{background:#1c2340;color:#fff;padding:12px 16px;border-radius:10px;font-size:14px;box-shadow:0 8px 24px #0004;animation:fadeInUp .3s ease}
 @media print{ #toasts{display:none}}
 
+/* ================= Print / export controls ================= */
+.pbtn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:38px;padding:0 18px;margin:3px;line-height:1;font-size:14px;font-weight:500;white-space:nowrap;border-radius:8px}
+.ov-head{align-items:flex-start}
+.ov-tools{display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-left:auto}
+.ov-tools .grid{align-items:center;justify-content:flex-end}
+.exp{position:relative;display:inline-block}
+.exp summary{list-style:none;cursor:pointer;user-select:none}
+.exp summary::-webkit-details-marker{display:none}
+.exp .menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;min-width:280px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:6px;box-shadow:0 18px 36px -10px #1c234055,0 4px 10px #1c23401a;animation:fadeInUp .18s ease}
+.exp .menu a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;color:var(--ink);text-decoration:none;font-size:14px;transition:background .15s ease}
+.exp .menu a:hover{background:#eef0ff}
+.exp .menu hr{border:0;border-top:1px solid var(--line);margin:4px 6px}
+.exp .menu small{display:block;color:var(--mut);font-size:12px}
+.loghead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.loghead h2{margin:0}
+.rep-title{margin:0 0 4px}.rep-meta{color:var(--mut);font-size:13px;margin:0 0 14px}
+.rep-tools{display:flex;gap:8px;align-items:center;margin-bottom:14px}
+@media print{.exp,.rep-tools,.ov-tools{display:none!important}.rep-title{font-size:20px}table{font-size:11px}thead{display:table-header-group}tr{page-break-inside:avoid}}
 /* ================= Productivity-pending marquee ================= */
 .mq{position:relative;overflow:hidden;border-radius:12px;margin-bottom:16px;background:linear-gradient(180deg,#fff8ec,#ffecc9);border:1px solid #f4c977;color:#7a4b00;font-weight:600;box-shadow:0 1px 0 #fff inset,0 3px 0 #f0c37a88,0 12px 22px -8px #b7791f44;contain:content}
 .mq-track{display:flex;width:max-content;animation:mqScroll 30s linear infinite;will-change:transform}
@@ -781,17 +799,132 @@ def admin_delete(kind, row):
     ws_of(KINDS.get(kind) or abort(404)).delete_rows(row); invalidate_cache(KINDS.get(kind))
     flash("Deleted."); return redirect(f"/admin/{kind}")
 
+LOG_TOP = """<div class="card"><div class="loghead"><h2>Productivity log</h2>
+<details class="exp no-print"><summary class="btnl pbtn">&#128438; Print / Export &#9662;</summary>
+<div class="menu">
+<a href="/admin/log/report?period=month&print=1&emp={{emp|urlencode}}" target="_blank">&#128438;<span>Print current month report<small>{{month_label}}</small></span></a>
+<a href="/admin/log/report?period=week&print=1&emp={{emp|urlencode}}" target="_blank">&#128438;<span>Print weekly report<small>{{week_label}}</small></span></a>
+<hr>
+<a href="/admin/log/export?period=month&emp={{emp|urlencode}}">&#128196;<span>Download Excel &mdash; current month<small>.xlsx &middot; {{month_label}}</small></span></a>
+<a href="/admin/log/export?period=week&emp={{emp|urlencode}}">&#128196;<span>Download Excel &mdash; weekly<small>.xlsx &middot; {{week_label}}</small></span></a>
+</div></details></div>
+{% if emp %}<p class="mut">Reports below are limited to employee filter: <b>{{emp}}</b></p>{% endif %}
+<form class="grid"><label>Date<input type="date" name="date" value="{{request.args.get('date','')}}"></label>
+<label>Employee ID / name<input name="emp" value="{{request.args.get('emp','')}}"></label>
+<button class="primary pbtn">Filter</button> <a href="/admin/log">Clear</a></form></div>"""
+
+def period_range(period, on=None):
+    """(start, end, label) for the month or Monday-Sunday week containing `on` (default today)."""
+    try: d = dt.date.fromisoformat(on) if on else today_local()
+    except ValueError: d = today_local()
+    if period == "week":
+        st = d - dt.timedelta(days=d.weekday()); en = st + dt.timedelta(days=6)
+        return st, en, f"Week {st.strftime('%d %b')} - {en.strftime('%d %b %Y')}"
+    st = d.replace(day=1); en = (st.replace(day=28) + dt.timedelta(days=4)).replace(day=1) - dt.timedelta(days=1)
+    return st, en, st.strftime("%B %Y")
+
+def log_report_data(period, emp_q="", on=None):
+    st, en, label = period_range(period, on)
+    q = (emp_q or "").strip().lower()
+    subs = [s for s in load_subs() if str(st) <= str(s["date"]) <= str(en)
+            and (not q or q in (str(s["emp_id"]).lower(), str(s["emp_name"]).lower()) or q in str(s["emp_name"]).lower())]
+    subs.sort(key=lambda s: (s["date"], str(s["emp_name"]).lower()))
+    day = lambda d: dt.date.fromisoformat(str(d)).strftime("%a") if str(d)[:4].isdigit() else ""
+    summary, detail = [], []
+    for s in subs:
+        pct = "Weekend - not counted" if s["off"] else s["pct"]
+        summary.append([s["date"], day(s["date"]), s["emp_id"], s["emp_name"], s["designation"], s["band"],
+                        s["prod"], s["non"], s["total"], pct])
+        base = [s["date"], day(s["date"]), s["emp_id"], s["emp_name"], s["designation"], s["band"]]
+        for p_ in s["procs"]:
+            detail.append(base + ["Process", p_["name"], p_["desc"], p_["hour"], p_["count"], p_["target"],
+                                  "" if p_["pct"] is None else p_["pct"]])
+        for n_ in s["notes"]:
+            detail.append(base + ["Note", n_["desc"], "", n_["hour"], "", "", ""])
+    return dict(start=st, end=en, label=label, subs=subs, summary=summary, detail=detail, emp=emp_q)
+
+SUMMARY_HEADS = ["Date", "Day", "Employee ID", "Employee name", "Designation", "Band",
+                 "Productive hrs", "Non-productive hrs", "Total hrs", "Productivity %"]
+DETAIL_HEADS = ["Date", "Day", "Employee ID", "Employee name", "Designation", "Band", "Type",
+                "Process / Note", "Description", "Hours", "Count", "Target count", "Achievement %"]
+
+LOG_REPORT = """<div class="rep-tools no-print"><button type="button" class="btnl pbtn" onclick="window.print()">&#128438; Print</button>
+<a class="btnl pbtn" style="background:#22a06b;box-shadow:0 4px 0 #17734d" href="/admin/log/export?period={{period}}&emp={{emp|urlencode}}">&#128196; Download Excel</a>
+<a href="/admin/log{% if emp %}?emp={{emp|urlencode}}{% endif %}">&larr; Back to log</a></div>
+<h1 class="rep-title">Productivity Log &mdash; {{'Weekly' if period=='week' else 'Monthly'}} report</h1>
+<p class="rep-meta">{{label}}{% if emp %} &middot; Employee filter: {{emp}}{% endif %} &middot; Generated {{now}}</p>
+<div class="totals">Entries: <b>{{summary|length}}</b> &middot; Productive: <b>{{tp|g}}</b> hrs &middot; Non-productive: <b>{{tn|g}}</b> hrs &middot; Total: <b>{{(tp+tn)|g}}</b> hrs</div>
+<h2>Daily summary</h2>
+<table><tr>{% for h in sh %}<th>{{h}}</th>{% endfor %}</tr>
+{% for r in summary %}<tr>{% for v in r %}<td>{% if loop.index in (7,8,9) %}{{v|g}}{% elif loop.last and v is number %}{{v}}%{% else %}{{v}}{% endif %}</td>{% endfor %}</tr>
+{% else %}<tr><td colspan="10">No productivity entries for this period.</td></tr>{% endfor %}</table>
+<h2>Entry details</h2>
+<table><tr>{% for h in dh %}<th>{{h}}</th>{% endfor %}</tr>
+{% for r in detail %}<tr>{% for v in r %}<td>{% if loop.index in (10,11,12) and v != '' %}{{v|g}}{% elif loop.last and v != '' %}{{v}}%{% else %}{{v}}{% endif %}</td>{% endfor %}</tr>
+{% else %}<tr><td colspan="13">No details for this period.</td></tr>{% endfor %}</table>
+{% if autoprint %}<script>window.addEventListener('load',function(){setTimeout(function(){window.print()},350)})</script>{% endif %}"""
+
 @app.route("/admin/log")
 @need("admin")
 def admin_log():
     d, e = request.args.get("date", ""), request.args.get("emp", "").strip().lower()
     subs = [s for s in load_subs() if (not d or s["date"] == d) and
             (not e or e in (str(s["emp_id"]).lower(), str(s["emp_name"]).lower()))]
-    f = ('<div class="card"><h2>Productivity log</h2><form class="grid">'
-         '<label>Date<input type="date" name="date" value="{{request.args.get("date","")}}"></label>'
-         '<label>Employee ID / name<input name="emp" value="{{request.args.get("emp","")}}"></label>'
-         '<button class="primary">Filter</button> <a href="/admin/log">Clear</a></form></div>')
-    return page(f + LIST, title="Productivity log", subs=subs)
+    return page(LOG_TOP + LIST, title="Productivity log", subs=subs, emp=request.args.get("emp", "").strip(),
+                month_label=period_range("month")[2], week_label=period_range("week")[2])
+
+@app.route("/admin/log/report")
+@need("admin")
+def admin_log_report():
+    period = "week" if request.args.get("period") == "week" else "month"
+    r = log_report_data(period, request.args.get("emp", ""), request.args.get("on"))
+    tp = sum(x[6] for x in r["summary"] if x[9] != "Weekend - not counted")
+    tn = sum(x[7] for x in r["summary"] if x[9] != "Weekend - not counted")
+    return page(LOG_REPORT, title="Productivity report", period=period, label=r["label"], emp=r["emp"],
+                summary=r["summary"], detail=r["detail"], sh=SUMMARY_HEADS, dh=DETAIL_HEADS, tp=tp, tn=tn,
+                now=now_local().strftime("%Y-%m-%d %H:%M"), autoprint=request.args.get("print") == "1")
+
+@app.route("/admin/log/export")
+@need("admin")
+def admin_log_export():
+    period = "week" if request.args.get("period") == "week" else "month"
+    r = log_report_data(period, request.args.get("emp", ""), request.args.get("on"))
+    tag = ("week_" + str(r["start"])) if period == "week" else str(r["start"])[:7]
+    fname = f"Productivity_Log_{tag}"
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+    except ImportError:      # openpyxl not installed: still give a file Excel opens
+        buf = io.StringIO(); w = csv.writer(buf)
+        w.writerow([f"Productivity Log - {r['label']}"]); w.writerow(SUMMARY_HEADS); w.writerows(r["summary"])
+        w.writerow([]); w.writerow(DETAIL_HEADS); w.writerows(r["detail"])
+        return Response("\ufeff" + buf.getvalue(), mimetype="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="{fname}.csv"'})
+    wb = Workbook()
+    hfill = PatternFill("solid", fgColor="4F46E5"); thin = Side(style="thin", color="D9DCEB")
+    def sheet(ws, title, heads, data, widths, numcols):
+        ws.title = title
+        ws.append([f"Productivity Log - {r['label']}" + (f"  |  Filter: {r['emp']}" if r["emp"] else "")])
+        ws["A1"].font = Font(bold=True, size=13); ws.append([])
+        ws.append(heads)
+        for c in ws[3]:
+            c.font = Font(bold=True, color="FFFFFF"); c.fill = hfill
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        for row in data:
+            ws.append([("" if v is None else v) for v in row])
+        for row in ws.iter_rows(min_row=4, max_row=ws.max_row):
+            for c in row:
+                c.border = Border(top=thin, bottom=thin, left=thin, right=thin)
+                if c.column in numcols: c.alignment = Alignment(horizontal="right")
+        for i, wd in enumerate(widths, start=1): ws.column_dimensions[get_column_letter(i)].width = wd
+        ws.freeze_panes = "A4"
+        if data: ws.auto_filter.ref = f"A3:{get_column_letter(len(heads))}{ws.max_row}"
+    sheet(wb.active, "Daily summary", SUMMARY_HEADS, r["summary"], [12, 6, 12, 22, 20, 8, 14, 18, 10, 22], {7, 8, 9, 10})
+    sheet(wb.create_sheet(), "Entry details", DETAIL_HEADS, r["detail"], [12, 6, 12, 22, 20, 8, 10, 26, 30, 8, 8, 12, 14], {10, 11, 12, 13})
+    out = io.BytesIO(); wb.save(out)
+    return Response(out.getvalue(), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}.xlsx"'})
 
 # ---------------------------------------------------------------- admin: notifications
 NOTIF = """<div class="head"><div><h1>Notifications</h1>
@@ -1241,12 +1374,12 @@ EMP_TOP = """<div class="head hero"><div class="welcome"><h1 class="wt"><span cl
 <p class="mut wsub"><span class="seg">{{today}}</span>{% if session.designation %}<span class="dot">&middot;</span><span class="seg">{{session.designation}}</span>{% endif %}<span class="dot">&middot;</span><span class="seg">Band {{session.band}}</span><span class="dot">&middot;</span><span class="seg">{{month_label}} summary</span>
 {% if today_perm %}<span class="dot">&middot;</span>Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div></div>""" + KPI
 
-SUMMARY = """<div class="head"><div><h1>Overview</h1>
+SUMMARY = """<div class="head ov-head"><div><h1>Overview</h1>
 <p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; 8 hrs per present day (capped at 100%).</p></div>
-<div class="no-print" style="display:flex;gap:8px;align-items:center">
+<div class="ov-tools no-print">
+<button type="button" class="btnl pbtn" onclick="window.print()" title="Print this overview"><span aria-hidden="true">&#128438;</span> Print</button>
 <form class="grid" method="get" style="margin:0"><input type="month" name="month" value="{{month if month!='all' else ''}}">
-<button class="primary">Show</button><a href="/admin/summary?month=all">All time</a></form>
-<button type="button" class="btnl" onclick="window.print()">&#128438; Print</button></div></div>""" + KPI + """
+<button class="primary pbtn">Show</button><a href="/admin/summary?month=all">All time</a></form></div></div>""" + KPI + """
 <table><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Productivity</th></tr>
 {% for r in rep %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>

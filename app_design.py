@@ -510,6 +510,20 @@ tbody tr{transition:background .15s ease}
 .ov-head{align-items:flex-start}
 .ov-tools{display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-left:auto}
 .ov-tools .grid{align-items:center;justify-content:flex-end}
+/* Overview: compact, animated Print / Show buttons */
+.ov-tools .pbtn{height:30px;padding:0 13px;font-size:13px;gap:5px;margin:2px;border-radius:7px;overflow:hidden;box-shadow:0 3px 0 #3730a3,0 6px 10px -4px #4f46e566,inset 0 1px 0 #ffffff45;animation:btnPop .45s cubic-bezier(.34,1.56,.64,1) backwards}
+.ov-tools .grid .pbtn{animation-delay:.08s}
+.ov-tools .grid input[type=month]{height:30px;padding:0 8px;font-size:13px;margin:2px}
+.ov-tools .grid a{font-size:13px}
+.ov-tools .pbtn::after{content:"";position:absolute;top:0;left:0;width:45%;height:100%;background:linear-gradient(100deg,transparent,#ffffff66,transparent);transform:translate3d(-130%,0,0) skewX(-20deg);pointer-events:none}
+.ov-tools .pbtn:hover::after{transform:translate3d(330%,0,0) skewX(-20deg);transition:transform .7s ease}
+.ov-tools .pbtn:hover{transform:translateY(-2px);box-shadow:0 5px 0 #3730a3,0 10px 14px -6px #4f46e577,inset 0 1px 0 #ffffff45}
+.ov-tools .pbtn:active{transform:translateY(2px) scale(.96);box-shadow:0 1px 0 #3730a3,inset 0 1px 0 #ffffff30}
+.ov-tools .pbtn span[aria-hidden]{display:inline-block;transform-origin:50% 80%}
+.ov-tools .pbtn:hover span[aria-hidden]{animation:printWiggle .55s ease-in-out}
+@keyframes btnPop{from{opacity:0;transform:translate3d(0,-8px,0) scale(.85)}to{opacity:1;transform:translate3d(0,0,0) scale(1)}}
+@keyframes printWiggle{0%,100%{transform:rotate(0)}25%{transform:rotate(-14deg) translateY(-1px)}60%{transform:rotate(10deg)}}
+@media(prefers-reduced-motion:reduce){.ov-tools .pbtn::after{display:none}.ov-tools .pbtn span[aria-hidden]{animation:none!important}}
 .exp{position:relative;display:inline-block}
 .exp summary{list-style:none;cursor:pointer;user-select:none}
 .exp summary::-webkit-details-marker{display:none}

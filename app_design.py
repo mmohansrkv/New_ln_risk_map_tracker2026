@@ -1182,10 +1182,35 @@ KPI = """<div class="kpis">
 <div class="kpi"><span>{{lab2}}</span><b>{{a2}}%</b><i class="bar {{a2|tone}}"><u style="width:{{[a2,100]|min}}%"></u></i></div>
 {% for l,v in extra %}<div class="kpi"><span>{{l}}</span><b>{{v}}</b></div>{% endfor %}</div>"""
 
-EMP_TOP = """<div class="head"><div><h1>Hello, {{session.name}}</h1>
-<p class="mut">{{today}} &middot; {% if session.designation %}{{session.designation}} &middot; {% endif %}Band {{session.band}} &middot; {{month_label}} summary
-{% if today_perm %}&middot; Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div>
-<div><a class="primary" href="/employee/leave">Leave &amp; Permission</a></div></div>""" + KPI
+EMP_TOP = """<style>
+.welcome h1{margin:0;position:relative;display:inline-block;overflow:hidden;animation:wIn .8s cubic-bezier(.22,1,.36,1) both}
+.welcome h1::after{content:"";position:absolute;inset:0;background:linear-gradient(105deg,transparent 35%,#ffffffb0 50%,transparent 65%);transform:translateX(-120%);animation:wShine 4.5s ease-in-out 1.2s infinite;pointer-events:none}
+.welcome .wl{display:inline-block;opacity:0;animation:wIn .7s cubic-bezier(.22,1,.36,1) forwards}
+.welcome .wl:nth-of-type(1){animation-delay:.25s}.welcome .wl:nth-of-type(2){animation-delay:.4s}.welcome .wl:nth-of-type(3){animation-delay:.55s}
+.welcome .wl:nth-of-type(4){animation-delay:.7s}.welcome .wl:nth-of-type(5){animation-delay:.85s}
+@keyframes wIn{from{opacity:0;transform:translateX(-28px)}to{opacity:1;transform:none}}
+@keyframes wShine{0%,60%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
+.kpis{perspective:900px}
+.kpi{transform-style:preserve-3d;will-change:transform;position:relative;overflow:hidden;
+ background:linear-gradient(145deg,#fff,#f1f3ff);
+ box-shadow:0 1px 0 #fff inset,0 2px 4px #1c234010,0 12px 24px -8px #4f46e533;
+ transition:transform .18s ease-out,box-shadow .25s ease}
+.kpi::before{content:"";position:absolute;left:0;top:0;right:0;height:3px;background:linear-gradient(90deg,#4f46e5,#22a6f0)}
+.kpi:hover{box-shadow:0 1px 0 #fff inset,0 4px 8px #1c234014,0 22px 36px -10px #4f46e55e}
+@media (prefers-reduced-motion:reduce){.welcome h1,.welcome .wl{animation:none;opacity:1}.welcome h1::after{display:none}.kpi{transition:none}}
+</style>
+<div class="head"><div class="welcome"><h1>Hello, {{session.name}}</h1>
+<p class="mut"><span class="wl">{{today}}</span> <span class="wl">&middot; {% if session.designation %}{{session.designation}}{% else %}Employee{% endif %}</span> <span class="wl">&middot; Band {{session.band}}</span> <span class="wl">&middot; {{month_label}} summary</span>
+{% if today_perm %}<span class="wl">&middot; Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span></span>{% endif %}</p></div>
+<div><a class="primary" href="/employee/leave">Leave &amp; Permission</a></div></div>
+<script>
+(function(){if(matchMedia('(prefers-reduced-motion: reduce)').matches||!matchMedia('(hover: hover)').matches)return;
+ document.querySelectorAll('.kpi').forEach(function(el){var raf=0,ev;
+  el.addEventListener('pointermove',function(e){ev=e;if(raf)return;raf=requestAnimationFrame(function(){raf=0;
+   var r=el.getBoundingClientRect(),x=(ev.clientX-r.left)/r.width-.5,y=(ev.clientY-r.top)/r.height-.5;
+   el.style.transform='rotateY('+(x*10).toFixed(2)+'deg) rotateX('+(-y*10).toFixed(2)+'deg) translateZ(6px)'})});
+  el.addEventListener('pointerleave',function(){el.style.transform=''})})})();
+</script>""" + KPI
 
 SUMMARY = """<div class="head"><div><h1>Overview</h1>
 <p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; 8 hrs per present day (capped at 100%).</p></div>
@@ -1325,6 +1350,10 @@ PROFILE = """<div class="card"><h2>Personal details</h2>
 <label>Emergency no<input name="Emergency no" value="{{emp['Emergency no']}}"></label>
 <label>Personal Email ID<input type="email" name="Personal Email ID" value="{{emp['Personal Email ID']}}"></label>
 <label>Office Email ID<input value="{{emp['Email']}}" readonly></label>
+<h3 style="grid-column:1/-1;margin:14px 0 0">Change password <span class="mut" style="font-weight:400;font-size:13px">(leave blank to keep your current password)</span></h3>
+<label>Current password<input type="password" name="cur_pw" autocomplete="current-password"></label>
+<label>New password<input type="password" name="new_pw" minlength="6" autocomplete="new-password"></label>
+<label>Confirm new password<input type="password" name="new_pw2" minlength="6" autocomplete="new-password"></label>
 <button class="primary">Save</button></form></div>"""
 
 @app.route("/admin/missed")
@@ -1391,9 +1420,16 @@ def employee_profile():
         for f in EDITABLE_PERSONAL:
             vals[heads.index(f)] = request.form.get(f, "").strip()
         vals[heads.index("Office Email ID")] = str(emp.get("Email", ""))
+        cur, new, new2 = (request.form.get(k, "") for k in ("cur_pw", "new_pw", "new_pw2"))
+        pw_changed = False
+        if cur or new or new2:
+            if not eq(cur, emp.get("Password", "")): flash("Current password is incorrect. Nothing was saved."); return redirect("/employee/profile")
+            if len(new) < 6: flash("New password must be at least 6 characters. Nothing was saved."); return redirect("/employee/profile")
+            if new != new2: flash("New password and confirmation do not match. Nothing was saved."); return redirect("/employee/profile")
+            vals[heads.index("Password")] = new; pw_changed = True
         ws_of("Employees").update(range_name=f"A{emp['_row']}", values=[vals])
         invalidate_cache("Employees")
-        flash("Profile updated.")
+        flash("Profile and password updated." if pw_changed else "Profile updated.")
         return redirect("/employee/profile")
     return page(PROFILE, title="Personal details", emp=emp)
 

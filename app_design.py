@@ -296,18 +296,45 @@ def get_sub(sid):
     if session["role"] == "employee" and s["emp_id"] != session["emp_id"]: abort(403)
     return s
 
-def parse_form():
-    g = request.form.getlist
-    procs = [(n, num(h), num(c), d.strip()) for n, h, c, d in zip(g("pn"), g("ph"), g("pc"), g("pd")) if num(h) > 0]
+def approved_perm_hours(emp_id, date):
+    """Approved permission hours for one employee on one date (they reduce the hours that must be logged)."""
+    return sum(num(r.get("Hours")) for r in rows("Permissions")
+               if str(r.get("Employee ID")) == str(emp_id) and str(r.get("Date")) == str(date)
+               and str(r.get("Status", "")).strip() == "Approved")
+
+def required_hours(emp_id, date):
+    """Hours that must be logged for a day to be complete: the 8-hour working day minus approved permission."""
+    return max(float(DAY_HOURS) - approved_perm_hours(emp_id, date), 0.0)
+
+def parse_form(emp_id):
+    f = request.form; g = f.getlist
+    date = (f.get("date") or "").strip()
+    err = None
+    try: d = dt.date.fromisoformat(date)
+    except ValueError: d = None
+    rows_p = list(zip(g("pn"), g("ph"), g("pc"), g("pd")))
+    procs = [(n, num(h), num(c), desc.strip()) for n, h, c, desc in rows_p]
     notes = [(t.strip(), num(h)) for t, h in zip(g("nd"), g("nh")) if num(h) > 0]
     tot = sum(p[1] for p in procs) + sum(n[1] for n in notes)
-    err = None
-    half = any(num(h) <= 0 and (num(c) > 0 or d.strip()) for _, h, c, d in zip(g("pn"), g("ph"), g("pc"), g("pd"))) or \
-           any(num(h) <= 0 and t.strip() for t, h in zip(g("nd"), g("nh")))
-    if half: err = "Please enter the Hour for every process / note row you filled in - a row without hours is not saved."
-    elif not procs and not notes: err = "Add at least one process or note with hours."
+    half = any(num(h) <= 0 and t.strip() for t, h in zip(g("nd"), g("nh")))
+    if d is None: err = "Please choose a valid date."
+    elif session.get("role") == "employee" and d > today_local():
+        err = "Future dates are not allowed. You can only add or update entries for today or earlier dates."
+    elif not procs: err = "Add at least one process entry."
+    elif any(not str(n).strip() or not str(h).strip() or not str(c).strip() or not desc.strip() or num(h) <= 0
+             for n, h, c, desc in rows_p):
+        err = "All Process Entry fields (Process, Hour, Count and Description) are mandatory - please fill every field before saving."
+    elif half: err = "Please enter the Hour for every note you filled in - a note without hours is not saved."
     elif tot > day_limit(): err = f"Total {tot:g} hrs is more than {day_limit():g} hrs."
-    return request.form.get("date") or str(today_local()), procs, notes, err
+    else:
+        need_h = required_hours(emp_id, date)
+        if tot + 1e-9 < need_h:
+            err = (f"Entry incomplete: {tot:g} of the required {need_h:g} working hours logged "
+                   f"({need_h - tot:g} hrs remaining). Complete all {need_h:g} hours before saving.")
+    return date, procs, notes, err
+
+def duplicate_entry(emp_id, date, skip_sid=None):
+    return any(s_["emp_id"] == str(emp_id) and s_["date"] == date and s_["id"] != skip_sid for s_ in load_subs())
 
 def write_sub(sid, date, emp, procs, notes):
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
@@ -491,6 +518,8 @@ tbody tr{transition:background .15s ease}
 .bar{display:block;height:6px;background:#eceffa;border-radius:3px;overflow:hidden;min-width:70px;margin-top:4px}
 .bar u{display:block;height:100%;background:#22a06b;transition:width .5s ease}.bar.a u{background:#e8a317}.bar.r u{background:#e5484d}
 .flash{background:#eef0ff;border:1px solid #d6d9ff;padding:10px 14px;border-radius:10px;animation:fadeInUp .35s ease}
+.flash.err{background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;font-weight:600}
+.flash.err::before{content:"\\26A0  "}
 .warn{background:#fff4e5;border:1px solid #ffd59a;color:#7a4b00;padding:12px 16px;border-radius:10px;margin-bottom:16px;font-size:14px;animation:fadeInUp .35s ease}
 .warn div{margin-top:4px}
 .totals{background:#eef0ff;padding:10px 14px;border-radius:10px;margin:12px 0}
@@ -641,16 +670,14 @@ table{box-shadow:0 1px 0 #fff inset,0 14px 28px -14px #1c234040}
 @media(max-width:800px){.win{transform:none!important}.lcard{transform:none}}
 @media(prefers-reduced-motion:reduce){.win{transform:none!important}.kpi:hover{transform:none}}
 </style></head><body>
-{% if session.role %}<div class="app"><aside class="{{'emp' if session.role=='employee' else ''}}">
+{% if session.role %}<div class="app"><aside class="emp">
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
-{% if session.role!='employee' %}<div class="me"><span>{{session.name}}</span><a href="/logout">Logout</a></div>{% endif %}
 {% for h,l,on in nav %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endfor %}
-{% if session.role=='employee' %}<div class="prof"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div>
-{% if session.designation %}<div class="prof-sub">{{session.designation}}</div>{% endif %}<div class="prof-sub">{{session.emp_id}} &middot; Band {{session.band}}</div></div></div>
-<a class="prof-out" href="/logout">Logout</a></div>{% endif %}
+<div class="prof"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
+<a class="prof-out" href="/logout">Logout</a></div>
 </aside>
-<main>{% for m in get_flashed_messages() %}<p class="flash">{{m}}</p>{% endfor %}{{body|safe}}</main></div>
-{% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for m in get_flashed_messages() %}<p class="flash" style="background:#fff">{{m}}</p>{% endfor %}{{body|safe}}</div>{% endif %}
+<main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}{{body|safe}}</main></div>
+{% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}</div>{% endif %}
 {% if session.role=='admin' %}<div id="toasts"></div><script>
 (function(){var since="0",first=1;
 function toast(t){var d=document.createElement('div');d.className='toast';d.textContent=t;
@@ -677,7 +704,9 @@ def page(body, title="Productivity Tracker", **ctx):
     nav = [(h, l, p == h or (h != "/employee" and p.startswith(h + "/")))
            for h, l in NAVS.get(session.get("role"), [])]
     side_avatar = ""
-    if session.get("role") == "employee":
+    if session.get("role") == "admin":
+        side_avatar = render_template_string(AVATAR3D, gender="male", initials="A")
+    elif session.get("role") == "employee":
         try:
             g = gender_of(my_emp_row())
         except Exception:                      # never break a page just because the avatar could not load
@@ -756,36 +785,54 @@ LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th
 FORM = """<div class="card"><h2>{{heading}}</h2>
 <form method="post" action="{{action}}">
 <div class="grid">
-<label>Date<input type="date" name="date" value="{{sub.date}}" required></label>
+<label>Date<input type="date" name="date" value="{{sub.date}}" {% if maxdate %}max="{{maxdate}}"{% endif %} required></label>
 <label>Designation<input value="{{sub.designation}}" placeholder="Not set - ask admin" readonly></label>
 <label>Band<input value="{{sub.band}}" readonly></label>
 <label>Employee ID<input value="{{sub.emp_id}}" readonly></label>
 <label>Employee name<input value="{{sub.emp_name}}" readonly></label></div>
-<h3>Process entries</h3><div id="procs"></div>
+<h3>Process entries <span class="mut">(all fields required)</span></h3><div id="procs"></div>
 <button type="button" onclick="addProc()">+ Add process</button>
 <h3>Notes</h3><div id="notes"></div>
 <button type="button" onclick="addNote()">+ Add note</button>
 <div class="totals">Total day: <b>{{day|g}}</b> hrs &middot; Productive: <b id="tp">0</b> hrs &middot;
 Non-productive: <b id="tn">0</b> hrs &middot; Balance: <b id="tb">{{day|g}}</b> hrs &middot;
-Productivity: <b id="tpct">0</b>% <span class="mut">({{target|g}} productive hrs = 100%, target set by Admin)</span></div>
+Productivity: <b id="tpct">0</b>% &middot; <b id="tstat"></b> <span class="mut">({{target|g}} productive hrs = 100%, target set by Admin)</span></div>
+<div id="formerr" class="flash err" style="display:none" role="alert"></div>
 <button class="primary">Save</button></form></div>
 <script>
+const WORK={{workday|g}}, PERM={{perm|tojson}}, MAXD={{maxdate|tojson}};
 const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}};
 const E=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function row(h){const d=document.createElement('div');d.className='r';
  d.innerHTML=h+'<button type="button" class="danger" onclick="this.parentNode.remove();calc()">X</button>';return d}
 function addProc(p){p=p||{};document.getElementById('procs').appendChild(row(
- '<select name="pn" onchange="calc()">'+P.map(n=>'<option '+(n==p.name?'selected':'')+'>'+E(n)+'</option>').join('')+'</select>'+
- '<input name="ph" type="number" step="0.25" min="0" placeholder="Hour" value="'+(p.hour||'')+'" oninput="calc()">'+
- '<input name="pc" type="number" min="0" placeholder="Count" value="'+(p.count||'')+'" oninput="calc()">'+
- '<input name="pd" placeholder="Description" size="28" value="'+E(p.desc)+'">'));calc()}
+ '<select name="pn" required onchange="calc()">'+P.map(n=>'<option '+(n==p.name?'selected':'')+'>'+E(n)+'</option>').join('')+'</select>'+
+ '<input name="ph" type="number" step="0.25" min="0.25" required placeholder="Hour *" value="'+(p.hour||'')+'" oninput="calc()">'+
+ '<input name="pc" type="number" min="0" required placeholder="Count *" value="'+(p.count||'')+'" oninput="calc()">'+
+ '<input name="pd" required placeholder="Description *" size="28" value="'+E(p.desc)+'">'));calc()}
 function addNote(n){n=n||{};document.getElementById('notes').appendChild(row(
  '<input name="nd" placeholder="Description" size="30" value="'+E(n.desc)+'">'+
  '<input name="nh" type="number" step="0.25" min="0" placeholder="Hour" value="'+(n.hour||'')+'" oninput="calc()">'));calc()}
+function reqHrs(){const d=document.querySelector('[name=date]').value;return Math.max(WORK-(PERM[d]||0),0)}
 function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e.value||0),0);
  const p=s('[name=ph]'),n=s('[name=nh]'),b=DAY-p-n;
  tp.textContent=p;tn.textContent=n;tb.textContent=b;tb.style.color=b<0?'red':'';
- tpct.textContent=Math.min(Math.round(p/TGT*100),100)}
+ tpct.textContent=Math.min(Math.round(p/TGT*100),100);
+ const r=reqHrs(),left=Math.round((r-p-n)*100)/100;
+ tstat.textContent=left>0?('Required '+r+' hrs - '+left+' hrs remaining'):('Required '+r+' hrs - complete');
+ tstat.style.color=left>0?'#b45309':'#15803d'}
+document.querySelector('[name=date]').addEventListener('change',calc);
+function showErr(m){formerr.textContent=m;formerr.style.display='block';formerr.scrollIntoView({behavior:'smooth',block:'center'})}
+document.querySelector('form[action="{{action}}"]').addEventListener('submit',function(e){
+ formerr.style.display='none';
+ const d=document.querySelector('[name=date]').value;
+ if(MAXD&&d>MAXD){e.preventDefault();return showErr('Future dates are not allowed. Choose today or an earlier date.')}
+ if(!document.querySelector('[name=pn]')){e.preventDefault();return showErr('Add at least one process entry.')}
+ const bad=[...document.querySelectorAll('#procs [name]')].some(x=>!String(x.value).trim());
+ if(bad){e.preventDefault();return showErr('All Process Entry fields are mandatory - fill every field before saving.')}
+ const t=[...document.querySelectorAll('[name=ph],[name=nh]')].reduce((a,x)=>a+(+x.value||0),0),r=reqHrs();
+ if(t+1e-9<r){e.preventDefault();showErr('Entry incomplete: '+t+' of the required '+r+' working hours logged. Complete all '+r+' hours before saving.')}
+});
 {{sub.procs|tojson}}.forEach(addProc);{{sub.notes|tojson}}.forEach(addNote);
 </script>"""
 
@@ -1357,7 +1404,13 @@ def form_page(sub, action, heading):
     procs = rows("Processes")
     names = [r["Process name"] for r in procs]
     tph = {r["Process name"]: num(r["Target count / hour"]) for r in procs}
-    return FORM, dict(sub=sub, action=action, heading=heading, names=names, tph=tph, day=day_limit(), target=target_hours())
+    perm = {}
+    for r in rows("Permissions"):
+        if str(r.get("Employee ID")) == str(sub.get("emp_id")) and str(r.get("Status", "")).strip() == "Approved":
+            perm[str(r.get("Date"))] = perm.get(str(r.get("Date")), 0) + num(r.get("Hours"))
+    maxdate = str(today_local()) if session.get("role") == "employee" else ""
+    return FORM, dict(sub=sub, action=action, heading=heading, names=names, tph=tph, day=day_limit(), target=target_hours(),
+                      workday=float(DAY_HOURS), perm=perm, maxdate=maxdate)
 
 def gender_of(emp):
     g = str(emp.get("Gender", "")).strip().lower()
@@ -1434,9 +1487,11 @@ def employee_productivity():
 @app.route("/employee/save", methods=["POST"])
 @need("employee")
 def employee_save():
-    date, procs, notes, err = parse_form()
+    date, procs, notes, err = parse_form(session["emp_id"])
+    if not err and duplicate_entry(session["emp_id"], date):
+        err = f"You have already submitted an entry for {date}. Edit the existing entry instead of submitting the same date again."
     if err:
-        flash(err); return redirect("/employee")
+        flash(err, "error"); return redirect("/employee")
     write_sub(uuid.uuid4().hex[:10], date, (session["band"], session["emp_id"], session["name"]), procs, notes)
     flash("Saved." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else "")); return redirect("/employee")
 
@@ -1445,9 +1500,11 @@ def employee_save():
 def entry_edit(sid):
     s = get_sub(sid)
     if request.method == "POST":
-        date, procs, notes, err = parse_form()
+        date, procs, notes, err = parse_form(s["emp_id"])
+        if not err and duplicate_entry(s["emp_id"], date, skip_sid=sid):
+            err = f"An entry for {date} already exists. Choose a different date or edit that entry."
         if err:
-            flash(err); return redirect(request.path)
+            flash(err, "error"); return redirect(request.path)
         delete_rows(s["rows"])
         write_sub(sid, date, (s["band"], s["emp_id"], s["emp_name"]), procs, notes)
         flash("Updated." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else "")); return redirect(home())

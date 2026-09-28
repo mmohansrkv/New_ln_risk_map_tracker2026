@@ -71,6 +71,14 @@ PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", 
                     "Emergency no", "Personal Email ID", "Office Email ID"]
 # Office Email ID is not typed by anyone: it always mirrors the employee's login Email.
 EDITABLE_PERSONAL = [f for f in PERSONAL_FIELDS if f != "Office Email ID"]
+# Address Line_2 (flat / landmark / area) is genuinely optional, so a blank one must not make a profile
+# "incomplete". Everything else the employee can edit is required.
+OPTIONAL_PERSONAL = {"Address Line_2"}
+REQUIRED_PERSONAL = [f for f in EDITABLE_PERSONAL if f not in OPTIONAL_PERSONAL]
+
+def missing_personal(emp_row):
+    """Names of the required personal details that are actually blank (empty list = complete)."""
+    return [f for f in REQUIRED_PERSONAL if not str(emp_row.get(f) or "").strip()]
 # Columns shown on Admin -> Employees, in this display order (personal fields live on the
 # Personal details pages). Display order != sheet column order, so reads/writes map by name.
 LIST_HEADERS = {"Employees": ["Employee ID", "Name", "Designation", "Band", "Email", "Password"]}
@@ -572,7 +580,15 @@ tbody tr{transition:background .15s ease}
 .av-l{position:absolute;inset:0;width:100%;height:100%;transform:translateZ(var(--z,0px));pointer-events:none}
 .av-l:first-child{border-radius:50%;box-shadow:0 12px 22px -8px #4f46e577,0 0 0 3px #fff}
 @keyframes avSway{0%,100%{transform:rotateX(2deg) rotateY(-11deg) translateY(0)}50%{transform:rotateX(-2deg) rotateY(11deg) translateY(-3px)}}
-@media(max-width:800px){.av3d{width:72px;height:72px}.wflex{gap:12px}}
+/* employee profile block in the left panel */
+.prof{margin-bottom:14px;padding:4px 10px 16px;border-bottom:1px solid #2b3560;display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px}
+.prof .av3d{width:112px;height:112px;margin:6px 0 10px}
+.prof-name{font-size:16px;font-weight:600;color:#fff;letter-spacing:.2px;text-shadow:0 2px 6px #0006;word-break:break-word}
+.prof-out{padding:5px 18px;color:#fff;background:#2b3560;border-radius:7px;font-size:13px;transition:background .2s ease,transform .15s ease}
+.prof-out:hover{background:#e5484d;transform:translateY(-1px)}
+@media print{.prof{display:none!important}}
+@media(max-width:800px){.av3d{width:72px;height:72px}.wflex{gap:12px}
+.prof{order:99;margin:0 0 0 auto;border:0;padding:0;flex-direction:row;gap:10px}.prof .av3d{width:44px;height:44px;margin:0}.prof-name{font-size:13px}}
 @media(prefers-reduced-motion:reduce){.av-stage{animation:none!important}}
 /* ================= Professional 3D look (Admin, Employee, Login) ================= */
 body{background:radial-gradient(1100px 520px at 8% -8%,#e7eaff 0%,transparent 60%),radial-gradient(900px 480px at 100% 0%,#f4e9ff 0%,transparent 55%),#f3f5fb}
@@ -603,7 +619,8 @@ table{box-shadow:0 1px 0 #fff inset,0 14px 28px -14px #1c234040}
 </style></head><body>
 {% if session.role %}<div class="app"><aside>
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
-<div class="me"><span>{{session.name}}</span><a href="/logout">Logout</a></div>
+{% if session.role=='employee' %}<div class="prof">{{side_avatar|safe}}<div class="prof-name">{{session.name}}</div><a class="prof-out" href="/logout">Logout</a></div>
+{% else %}<div class="me"><span>{{session.name}}</span><a href="/logout">Logout</a></div>{% endif %}
 {% for h,l,on in nav %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endfor %}
 </aside>
 <main>{% for m in get_flashed_messages() %}<p class="flash">{{m}}</p>{% endfor %}{{body|safe}}</main></div>
@@ -633,7 +650,15 @@ def page(body, title="Productivity Tracker", **ctx):
     p = request.path
     nav = [(h, l, p == h or (h != "/employee" and p.startswith(h + "/")))
            for h, l in NAVS.get(session.get("role"), [])]
-    return render_template_string(BASE, body=render_template_string(body, **ctx), title=title, nav=nav)
+    side_avatar = ""
+    if session.get("role") == "employee":
+        try:
+            g = gender_of(my_emp_row())
+        except Exception:                      # never break a page just because the avatar could not load
+            g = ""
+        side_avatar = render_template_string(AVATAR3D, gender=g, initials=initials_of(session.get("name", "")))
+    return render_template_string(BASE, body=render_template_string(body, **ctx), title=title, nav=nav,
+                                  side_avatar=side_avatar)
 
 
 LOGIN = """<div class="win"><div class="wbar"><i></i><i></i><i></i></div>
@@ -1332,7 +1357,8 @@ def employee_home():
     missed = missing_dates(session["emp_id"], all_mine, lv, first, t0 - dt.timedelta(days=1))
     pend = bool(missing_dates(session["emp_id"], all_mine, lv, t0, t0))
     emp_row = my_emp_row()
-    profile_incomplete = any(not str(emp_row.get(f, "")).strip() for f in EDITABLE_PERSONAL)
+    missing_fields = missing_personal(emp_row)
+    profile_incomplete = bool(missing_fields)
     extra = [("Present days", k["present"]), ("Leave days", k["leave"])]
     today_perm = next((r for r in rows("Permissions")
                        if str(r["Employee ID"]) == session["emp_id"] and r["Date"] == today), None)
@@ -1340,8 +1366,7 @@ def employee_home():
     return page(EMP_MARQUEE + EMP_TOP + EMP_ALERT + body + '<h2>Submitted today</h2>' + LIST,
                 title="Daily productivity", missed=missed, pend=pend, subs=mine,
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
-                a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete,
-                gender=gender_of(emp_row), initials=initials_of(session["name"]),
+                a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete, missing_fields=missing_fields,
                 today_perm=today_perm, perm_limit=PERMISSION_MONTHLY_LIMIT, perm_used=perm_used,
                 perm_remaining=round(PERMISSION_MONTHLY_LIMIT - perm_used, 2), **ctx)
 
@@ -1558,7 +1583,7 @@ EMP_MARQUEE = """{% if missed or pend %}{% set msg %}&#9888; Productivity entry 
 </div></div>{% endif %}"""
 
 EMP_ALERT = """{% if profile_incomplete %}<div class="warn"><b>&#9888; Personal details incomplete</b>
-<div>Please <a href="/employee/profile">complete your personal details</a>.</div></div>{% endif %}"""
+<div>Please <a href="/employee/profile">complete your personal details</a>{% if missing_fields %} &mdash; missing: {{ missing_fields|join(', ') }}{% endif %}.</div></div>{% endif %}"""
 
 ADMIN_ALERT = """{% if miss or pend %}<div class="warn"><b>&#9888; Missed entries - {{mlabel}}</b>
 {% for r in miss %}<div>{{r.id}} &middot; {{r.name}}: {{r.days|length}} day(s) - {{r.days|join(', ')}}</div>{% endfor %}
@@ -1594,7 +1619,7 @@ AVATAR3D = """<div class="av3d" role="img" aria-label="{{ (gender|capitalize) if
 </div></div>
 <script>
 (function(){var a=document.querySelector('.av3d');if(!a||!window.requestAnimationFrame)return;
-var w=a.closest('.welcome')||a,raf=0,px=0,py=0;
+var w=a.closest('aside')||a,raf=0,px=0,py=0;
 w.addEventListener('pointermove',function(e){var r=a.getBoundingClientRect();
 px=(e.clientX-(r.left+r.width/2))/260;py=(e.clientY-(r.top+r.height/2))/160;
 if(raf)return;raf=requestAnimationFrame(function(){raf=0;a.classList.add('live');
@@ -1604,7 +1629,7 @@ w.addEventListener('pointerleave',function(){a.classList.remove('live');a.style.
 })();
 </script>"""
 
-EMP_TOP = """<div class="head hero"><div class="welcome wflex">""" + AVATAR3D + """<div class="wtxt"><h1 class="wt"><span class="wt-hi">Hello,</span> <span class="wt-name">{{session.name}}</span></h1>
+EMP_TOP = """<div class="head hero"><div class="welcome wflex"><div class="wtxt"><h1 class="wt"><span class="wt-hi">Hello,</span> <span class="wt-name">{{session.name}}</span></h1>
 <p class="mut wsub"><span class="seg">{{today}}</span>{% if session.designation %}<span class="dot">&middot;</span><span class="seg">{{session.designation}}</span>{% endif %}<span class="dot">&middot;</span><span class="seg">Band {{session.band}}</span><span class="dot">&middot;</span><span class="seg">{{month_label}} summary</span>
 {% if today_perm %}<span class="dot">&middot;</span>Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div></div></div>""" + KPI
 

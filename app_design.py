@@ -52,11 +52,12 @@ PHOTOS = {
 HEADERS = {
     "Employees": ["Employee ID", "Name", "Band", "Email", "Password",
                   "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
-                  "Emergency no", "Personal Email ID", "Office Email ID", "Designation", "Profile updated at"],
+                  "Emergency no", "Personal Email ID", "Office Email ID", "Designation", "Profile updated at", "Gender"],
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
-    "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at"],
+    "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at",
+              "Status", "Reviewed at", "Reviewed by"],
     "Permissions": ["Permission ID", "Date", "Employee ID", "Employee name", "Band", "Hours", "Reason",
                      "Applied at", "Status", "Reviewed at", "Reviewed by"],
     "Holidays": ["Date", "Name"],
@@ -65,7 +66,7 @@ HEADERS = {
                    "Login time", "Logout time", "Duration", "Logout type"],
     "Notifications": ["Notification ID", "Time", "Employee ID", "Employee name", "Event", "Seen"],
 }
-PERSONAL_FIELDS = ["Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
+PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                     "Emergency no", "Personal Email ID", "Office Email ID"]
 # Office Email ID is not typed by anyone: it always mirrors the employee's login Email.
 EDITABLE_PERSONAL = [f for f in PERSONAL_FIELDS if f != "Office Email ID"]
@@ -73,7 +74,7 @@ EDITABLE_PERSONAL = [f for f in PERSONAL_FIELDS if f != "Office Email ID"]
 # Personal details pages). Display order != sheet column order, so reads/writes map by name.
 LIST_HEADERS = {"Employees": ["Employee ID", "Name", "Designation", "Band", "Email", "Password"]}
 def list_heads(sheet): return LIST_HEADERS.get(sheet, HEADERS[sheet])
-OPTIONAL_FIELDS = set(PERSONAL_FIELDS)   # not required when admin adds/edits an employee
+OPTIONAL_FIELDS = set(PERSONAL_FIELDS) | {"Status", "Reviewed at", "Reviewed by"}   # not required when admin adds/edits an employee
 LOCKED_FIELDS = {}   # nothing locked: admin can add/edit personal details; employees can also edit their own via /employee/profile
 KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave", "holidays": "Holidays"}
 
@@ -560,6 +561,17 @@ tbody tr{transition:background .15s ease}
 @keyframes shimmer{from{background-position:0 0}to{background-position:-200% 0}}
 @keyframes sweep{0%,55%{background-position:120% 0}100%{background-position:-120% 0}}
 @media(prefers-reduced-motion:reduce){.wt-name,.wsub .seg{animation:none!important;opacity:1}}
+/* ================= 3D profile avatar (CSS 3D layers: light on CPU, transform-only animation) ================= */
+.wflex{display:flex;align-items:center;gap:18px}.wtxt{min-width:0}
+.av3d{position:relative;flex:none;width:96px;height:96px;perspective:520px;margin-bottom:6px}
+.av3d::after{content:"";position:absolute;left:14%;right:14%;bottom:-8px;height:10px;border-radius:50%;background:radial-gradient(#1c234055,transparent 70%)}
+.av-stage{position:relative;width:100%;height:100%;transform-style:preserve-3d;animation:avSway 7s ease-in-out infinite;will-change:transform}
+.av3d.live .av-stage{animation:none;transform:rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));transition:transform .14s linear}
+.av-l{position:absolute;inset:0;width:100%;height:100%;transform:translateZ(var(--z,0px));pointer-events:none}
+.av-l:first-child{border-radius:50%;box-shadow:0 12px 22px -8px #4f46e577,0 0 0 3px #fff}
+@keyframes avSway{0%,100%{transform:rotateX(2deg) rotateY(-11deg) translateY(0)}50%{transform:rotateX(-2deg) rotateY(11deg) translateY(-3px)}}
+@media(max-width:800px){.av3d{width:72px;height:72px}.wflex{gap:12px}}
+@media(prefers-reduced-motion:reduce){.av-stage{animation:none!important}}
 /* ================= Professional 3D look (Admin, Employee, Login) ================= */
 body{background:radial-gradient(1100px 520px at 8% -8%,#e7eaff 0%,transparent 60%),radial-gradient(900px 480px at 100% 0%,#f4e9ff 0%,transparent 55%),#f3f5fb}
 aside{background:linear-gradient(180deg,#252f5c 0%,#1c2340 55%,#151b34 100%);box-shadow:10px 0 28px -8px #1c234055,inset -1px 0 0 #ffffff14;position:relative;z-index:2}
@@ -944,7 +956,7 @@ def admin_log_export():
 
 # ---------------------------------------------------------------- admin: Leave & Permission Log (all employees)
 LP_LOG = """<div class="head"><div><h1>Leave &amp; Permission Log</h1>
-<p class="mut">{{label}} &middot; every employee's leave and permission requests with dates, duration, reason and approval status. Leave is recorded as soon as it is applied; permission requests need approval.</p></div></div>
+<p class="mut">{{label}} &middot; every employee's leave and permission requests with dates, duration, reason and approval status. Both leave and permission requests need admin approval - use Approve / Reject in the Action column (a decision can be changed later).</p></div></div>
 <div class="kpis">
 <div class="kpi"><span>Leave requests</span><b>{{n_leave}}</b></div>
 <div class="kpi"><span>Leave days</span><b>{{leave_days}}</b></div>
@@ -955,7 +967,7 @@ LP_LOG = """<div class="head"><div><h1>Leave &amp; Permission Log</h1>
 <label>Month<input type="month" name="month" value="{{month if month!='all' else ''}}"></label>
 <label>Employee ID / name<input name="emp" value="{{emp}}" placeholder="Search"></label>
 <label>Type<select name="type">{% for v,l in [('','All'),('leave','Leave'),('permission','Permission')] %}<option value="{{v}}" {{'selected' if v==typ else ''}}>{{l}}</option>{% endfor %}</select></label>
-<label>Status<select name="status">{% for v in ['','Pending','Approved','Rejected','Recorded'] %}<option value="{{v}}" {{'selected' if v==status else ''}}>{{v or 'All'}}</option>{% endfor %}</select></label>
+<label>Status<select name="status">{% for v in ['','Pending','Approved','Rejected'] %}<option value="{{v}}" {{'selected' if v==status else ''}}>{{v or 'All'}}</option>{% endfor %}</select></label>
 <button class="primary pbtn">Filter</button><a href="/admin/leave-permission?month=all">All time</a><a href="/admin/leave-permission">This month</a>
 <button type="button" class="btnl pbtn" onclick="window.print()">&#128438; Print</button></form></div>
 <div style="overflow-x:auto"><table><tr><th>Type</th><th>Employee</th><th>Designation</th><th>Band</th><th>From</th><th>To</th><th>Duration</th>
@@ -963,13 +975,33 @@ LP_LOG = """<div class="head"><div><h1>Leave &amp; Permission Log</h1>
 {% for r in rows %}<tr><td><span class="pill {{'act' if r.type=='Permission' else ''}}">{{r.type}}</span></td>
 <td><a href="/admin/employee-info/{{r.eid|urlencode}}?tab=leave">{{r.eid}} &middot; {{r.name}}</a></td><td>{{r.desig}}</td><td>{{r.band}}</td>
 <td>{{r.start}}</td><td>{{r.end}}</td><td>{{r.dur}}</td><td>{{r.reason}}</td><td>{{r.applied}}</td>
-<td><span class="pill {{r.status|ppill if r.status!='Recorded' else 'in'}}">{{r.status}}</span></td>
+<td><span class="pill {{r.status|ppill}}">{{r.status}}</span></td>
 <td>{% if r.reviewed %}{{r.reviewed}}{% if r.by %} &middot; {{r.by}}{% endif %}{% else %}-{% endif %}</td>
-<td class="act no-print">{% if r.type=='Permission' and r.status=='Pending' %}
-<form method="post" action="/admin/employee-info/{{r.eid|urlencode}}/permission/{{r.row}}/approve"><input type="hidden" name="next" value="{{here}}"><button class="primary">Approve</button></form>
-<form method="post" action="/admin/employee-info/{{r.eid|urlencode}}/permission/{{r.row}}/reject"><input type="hidden" name="next" value="{{here}}"><button class="danger">Reject</button></form>
-{% else %}-{% endif %}</td></tr>
+<td class="act no-print">{% set perm = r.type=='Permission' %}
+{% if r.status!='Approved' %}<form method="post" action="{{ ('/admin/employee-info/' ~ (r.eid|urlencode) ~ '/permission/' ~ r.row ~ '/approve') if perm else '/admin/leave-permission/leave-review' }}">{% if not perm %}<input type="hidden" name="eid" value="{{r.eid}}"><input type="hidden" name="rows" value="{{r.lrows}}"><input type="hidden" name="status" value="Approved">{% endif %}<input type="hidden" name="next" value="{{here}}"><button class="primary">Approve</button></form>{% endif %}
+{% if r.status!='Rejected' %}<form method="post" action="{{ ('/admin/employee-info/' ~ (r.eid|urlencode) ~ '/permission/' ~ r.row ~ '/reject') if perm else '/admin/leave-permission/leave-review' }}" onsubmit="return confirm('Reject this request?')">{% if not perm %}<input type="hidden" name="eid" value="{{r.eid}}"><input type="hidden" name="rows" value="{{r.lrows}}"><input type="hidden" name="status" value="Rejected">{% endif %}<input type="hidden" name="next" value="{{here}}"><button class="danger">Reject</button></form>{% endif %}</td></tr>
 {% else %}<tr><td colspan="12">No leave or permission records found.</td></tr>{% endfor %}</table></div>"""
+
+@app.route("/admin/leave-permission/leave-review", methods=["POST"])
+@need("admin")
+def admin_leave_review():
+    """Approve / reject one leave request (all the day-rows that were applied together)."""
+    status = request.form.get("status", "")
+    eid = request.form.get("eid", "")
+    want = {int(x) for x in request.form.get("rows", "").split(",") if x.strip().isdigit()}
+    if status not in ("Approved", "Rejected") or not want: abort(400)
+    mine = [r for r in rows("Leave") if r["_row"] in want and _key(r["Employee ID"]) == _key(eid)]
+    if not mine:
+        flash("Leave request not found - the employee may have cancelled it.")
+    else:
+        now = now_local().strftime("%Y-%m-%d %H:%M:%S")
+        _with_retry(ws_of("Leave").batch_update,
+                    [{"range": f"G{r['_row']}:I{r['_row']}", "values": [[status, now, "Admin"]]} for r in mine],
+                    value_input_option="RAW")
+        invalidate_cache("Leave")
+        flash(f"Leave request {status.lower()} ({len(mine)} day{'s' if len(mine) != 1 else ''}).")
+    nxt = request.form.get("next", "")
+    return redirect(nxt if nxt.startswith("/admin/") else "/admin/leave-permission")
 
 def _leave_runs(leaves):
     """One row per leave request: consecutive days added together (same employee, applied-at and reason) are merged."""
@@ -981,7 +1013,7 @@ def _leave_runs(leaves):
         items.sort(key=lambda x: str(x["Date"])); run = []
         def flush():
             if run:
-                out.append((run[0], run[-1], len(run), applied, reason))
+                out.append((run[0], run[-1], len(run), applied, reason, [x["_row"] for x in run]))
         for it in items:
             try: ok = run and dt.date.fromisoformat(str(it["Date"])) - dt.date.fromisoformat(str(run[-1]["Date"])) == dt.timedelta(days=1)
             except ValueError: ok = False
@@ -1008,11 +1040,12 @@ def admin_leave_permission():
     def match(r): return not q or q in str(r["eid"]).lower() or q in str(r["name"]).lower()
     out = []
     if typ in ("", "leave"):
-        for first, last, n, applied, reason in _leave_runs(rows("Leave")):
+        for first, last, n, applied, reason, lrows in _leave_runs(rows("Leave")):
             if str(last["Date"]) < m0 or str(first["Date"]) > m1: continue
             r = dict(who(first["Employee ID"], first["Employee name"], first["Band"]), type="Leave",
                      start=first["Date"], end=last["Date"], dur=f"{n} day{'s' if n != 1 else ''}", days=n, hrs=0,
-                     reason=reason, applied=applied, status="Recorded", reviewed="", by="", row=first["_row"])
+                     reason=reason, applied=applied, status=leave_status(first), reviewed=first.get("Reviewed at", ""),
+                     by=first.get("Reviewed by", ""), row=first["_row"], lrows=",".join(map(str, lrows)))
             if match(r): out.append(r)
     if typ in ("", "permission"):
         for x in rows("Permissions"):
@@ -1028,9 +1061,9 @@ def admin_leave_permission():
     perm = [r for r in out if r["type"] == "Permission"]
     return page(LP_LOG, title="Leave & Permission Log", rows=out, month=month, label=label, emp=request.args.get("emp", ""),
                 typ=typ, status=status, here=request.full_path.rstrip("?"),
-                n_leave=sum(r["type"] == "Leave" for r in out), leave_days=sum(r["days"] for r in out),
+                n_leave=sum(r["type"] == "Leave" for r in out), leave_days=sum(r["days"] for r in out if r["status"] != "Rejected"),
                 n_perm=len(perm), perm_hrs=sum(r["hrs"] for r in perm if r["status"] == "Approved"),
-                n_pending=sum(r["status"] == "Pending" for r in perm))
+                n_pending=sum(r["status"] == "Pending" for r in out))
 
 # ---------------------------------------------------------------- admin: notifications
 NOTIF = """<div class="head"><div><h1>Notifications</h1>
@@ -1102,11 +1135,13 @@ T_MISSED = """<form class="grid no-print" method="get"><input type="hidden" name
 T_LEAVE = """<div class="card no-print"><h2>Add leave</h2><form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/leave" class="grid">
 <label>From date<input type="date" name="d1" required></label><label>To date<input type="date" name="d2" required></label>
 <label>Reason<input name="reason" placeholder="Reason"></label><button class="primary">Add leave</button></form></div>
-<table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th class="no-print"></th></tr>
-{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
-<td class="act no-print"><form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/leave/{{r['_row']}}/delete"
+<table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th><th>Reviewed at</th><th class="no-print"></th></tr>
+{% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
+<td><span class="pill {{st|ppill}}">{{st}}</span></td><td>{{r['Reviewed at'] or '-'}}</td>
+<td class="act no-print">{% if st!='Approved' %}<form method="post" action="/admin/leave-permission/leave-review"><input type="hidden" name="eid" value="{{emp['Employee ID']}}"><input type="hidden" name="rows" value="{{r['_row']}}"><input type="hidden" name="status" value="Approved"><input type="hidden" name="next" value="/admin/employee-info/{{emp['Employee ID']|urlencode}}?tab=leave"><button class="primary">Approve</button></form>{% endif %}
+{% if st!='Rejected' %}<form method="post" action="/admin/leave-permission/leave-review" onsubmit="return confirm('Reject this leave?')"><input type="hidden" name="eid" value="{{emp['Employee ID']}}"><input type="hidden" name="rows" value="{{r['_row']}}"><input type="hidden" name="status" value="Rejected"><input type="hidden" name="next" value="/admin/employee-info/{{emp['Employee ID']|urlencode}}?tab=leave"><button class="danger">Reject</button></form>{% endif %}<form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/leave/{{r['_row']}}/delete"
 onsubmit="return confirm('Delete this leave?')"><button class="danger">Delete</button></form></td></tr>
-{% else %}<tr><td colspan="4">No leave records.</td></tr>{% endfor %}</table>
+{% else %}<tr><td colspan="6">No leave records.</td></tr>{% endfor %}</table>
 <h2>Permission requests</h2>
 <p class="mut">Employees can apply for permission only for the current day, up to {{PERMISSION_MONTHLY_LIMIT|g}} hrs total per month. Review pending requests below.</p>
 <table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th><th>Reviewed at</th><th class="no-print"></th></tr>
@@ -1201,7 +1236,7 @@ def admin_employee_detail(eid):
 def admin_employee_leave_add(eid):
     emp = emp_or_404(eid)
     try:
-        flash(f"{add_leave(emp, request.form['d1'], request.form['d2'], request.form['reason'].strip())} leave day(s) added.")
+        flash(f"{add_leave(emp, request.form['d1'], request.form['d2'], request.form['reason'].strip(), status="Approved")} leave day(s) added.")
     except (ValueError, TypeError) as e:
         flash(str(e))
     return redirect(f"/admin/employee-info/{eid}?tab=leave")
@@ -1260,6 +1295,14 @@ def form_page(sub, action, heading):
     tph = {r["Process name"]: num(r["Target count / hour"]) for r in procs}
     return FORM, dict(sub=sub, action=action, heading=heading, names=names, tph=tph, day=DAY_HOURS)
 
+def gender_of(emp):
+    g = str(emp.get("Gender", "")).strip().lower()
+    return "male" if g in ("male", "m", "man", "boy") else ("female" if g in ("female", "f", "woman", "girl") else "")
+
+def initials_of(name):
+    parts = str(name).replace(".", " ").split()
+    return "".join(p[0] for p in parts[:2]).upper() or "?"
+
 @app.route("/employee")
 @need("employee")
 def employee_home():
@@ -1276,7 +1319,8 @@ def employee_home():
     k = report([my_emp()], all_mine, lv, first, t0)[0]
     missed = missing_dates(session["emp_id"], all_mine, lv, first, t0 - dt.timedelta(days=1))
     pend = bool(missing_dates(session["emp_id"], all_mine, lv, t0, t0))
-    profile_incomplete = any(not str(my_emp_row().get(f, "")).strip() for f in EDITABLE_PERSONAL)
+    emp_row = my_emp_row()
+    profile_incomplete = any(not str(emp_row.get(f, "")).strip() for f in EDITABLE_PERSONAL)
     extra = [("Present days", k["present"]), ("Leave days", k["leave"])]
     today_perm = next((r for r in rows("Permissions")
                        if str(r["Employee ID"]) == session["emp_id"] and r["Date"] == today), None)
@@ -1285,6 +1329,7 @@ def employee_home():
                 title="Daily productivity", missed=missed, pend=pend, subs=mine,
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
                 a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete,
+                gender=gender_of(emp_row), initials=initials_of(session["name"]),
                 today_perm=today_perm, perm_limit=PERMISSION_MONTHLY_LIMIT, perm_used=perm_used,
                 perm_remaining=round(PERMISSION_MONTHLY_LIMIT - perm_used, 2), **ctx)
 
@@ -1377,6 +1422,7 @@ def month_range(m):
 def report(employees, subs, leaves, start, end):
     wd, a, b, out = workdays(start, end), str(start), str(end), []
     perms = rows("Permissions")     # fetched once, filtered per employee below
+    leaves = live_leaves(leaves)    # rejected leave does not count
     for e in employees:
         eid = str(e["Employee ID"])
         mine = [s for s in subs if str(s["emp_id"]) == eid and a <= s["date"] <= b and not s["off"]]
@@ -1394,14 +1440,25 @@ def report(employees, subs, leaves, start, end):
                         prod=prod_hrs, non=sum(s["non"] for s in mine), perm=perm_hrs))
     return out
 
-def add_leave(emp, d1, d2, reason):
+def leave_status(l):
+    """Status of a Leave row. Rows saved before the approval feature have no status: treated as Approved."""
+    return str(l.get("Status", "")).strip() or "Approved"
+
+def live_leaves(leaves):
+    """Leave rows that count in attendance / missed-entry calculations (Rejected leave does not)."""
+    return [l for l in leaves if leave_status(l) != "Rejected"]
+app.jinja_env.filters["lstatus"] = leave_status
+
+def add_leave(emp, d1, d2, reason, status="Pending"):
+    """Employees' leave starts as Pending (admin approves/rejects); leave added by admin is Approved."""
     a, b = dt.date.fromisoformat(d1), dt.date.fromisoformat(d2)
     if b < a or (b - a).days > 31:
         raise ValueError("Choose a valid date range (max 31 days).")
     eid = str(emp["Employee ID"])
-    have = {l["Date"] for l in rows("Leave") if str(l["Employee ID"]) == eid}
+    have = {l["Date"] for l in live_leaves(rows("Leave")) if str(l["Employee ID"]) == eid}
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
-    new = [[str(a + dt.timedelta(days=i)), eid, emp["Name"], emp["Band"], reason or "Leave", now]
+    new = [[str(a + dt.timedelta(days=i)), eid, emp["Name"], emp["Band"], reason or "Leave", now, status,
+           now if status != "Pending" else "", "Admin" if status != "Pending" else ""]
            for i in range((b - a).days + 1)]
     new = [r for r in new if r[0] not in have]
     if new: ws_of("Leave").append_rows(new, value_input_option="RAW"); invalidate_cache("Leave")
@@ -1447,6 +1504,7 @@ app.jinja_env.filters["ppill"] = permission_pill
 def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
     """Working days (Mon-Sat) in start..end with no entry and no leave."""
     eid = str(eid)
+    leaves = live_leaves(leaves)
     done = {s["date"] for s in subs if str(s["emp_id"]) == eid} | \
            {l["Date"] for l in leaves if str(l["Employee ID"]) == eid}
     out, d = [], start
@@ -1477,9 +1535,43 @@ KPI = """<div class="kpis">
 <div class="kpi"><span>{{lab2}}</span><b>{{a2}}%</b><i class="bar {{a2|tone}}"><u style="width:{{[a2,100]|min}}%"></u></i></div>
 {% for l,v in extra %}<div class="kpi"><span>{{l}}</span><b>{{v}}</b></div>{% endfor %}</div>"""
 
-EMP_TOP = """<div class="head hero"><div class="welcome"><h1 class="wt"><span class="wt-hi">Hello,</span> <span class="wt-name">{{session.name}}</span></h1>
+AVATAR3D = """<div class="av3d" role="img" aria-label="{{ (gender|capitalize) if gender else 'Employee' }} profile picture"><div class="av-stage">
+{% set c = ('#fce7f3','#f9a8d4','#c026d3') if gender=='female' else (('#dbeafe','#93c5fd','#4f46e5') if gender=='male' else ('#ccfbf1','#5eead4','#0d9488')) %}
+<svg class="av-l" style="--z:0px" viewBox="0 0 200 200" aria-hidden="true"><defs><radialGradient id="avbg" cx="35%" cy="28%" r="85%"><stop offset="0" stop-color="{{c[0]}}"/><stop offset=".55" stop-color="{{c[1]}}"/><stop offset="1" stop-color="{{c[2]}}"/></radialGradient></defs><circle cx="100" cy="100" r="98" fill="url(#avbg)"/><ellipse cx="70" cy="48" rx="46" ry="20" fill="#fff" opacity=".3" transform="rotate(-24 70 48)"/></svg>
+{% if gender %}
+{% if gender=='female' %}<svg class="av-l" style="--z:10px" viewBox="0 0 200 200" aria-hidden="true"><defs><clipPath id="avc1"><circle cx="100" cy="100" r="98"/></clipPath><linearGradient id="avh1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6b3a4f"/><stop offset="1" stop-color="#3b1f2f"/></linearGradient></defs><g clip-path="url(#avc1)"><path d="M60 92 C54 46 84 30 102 30 C130 30 148 52 140 96 C146 128 150 156 140 176 L60 176 C50 156 54 126 60 92 Z" fill="url(#avh1)"/></g></svg>{% endif %}
+<svg class="av-l" style="--z:20px" viewBox="0 0 200 200" aria-hidden="true"><defs><clipPath id="avc2"><circle cx="100" cy="100" r="98"/></clipPath><linearGradient id="avb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{{ '#ec4899' if gender=='female' else '#34418a' }}"/><stop offset="1" stop-color="{{ '#9d174d' if gender=='female' else '#1b2350' }}"/></linearGradient></defs><g clip-path="url(#avc2)"><path d="M14 204 C14 160 54 144 100 144 C146 144 186 160 186 204 Z" fill="url(#avb)"/><path d="M87 112 h26 v34 q-13 11 -26 0 z" fill="#dda774"/>
+{% if gender=='male' %}<path d="M80 144 L100 180 L120 144 Z" fill="#fff"/><path d="M80 144 L100 180 L68 172 Z" fill="#1b2350"/><path d="M120 144 L100 180 L132 172 Z" fill="#1b2350"/><path d="M96 152 h8 l3 26 -7 8 -7 -8 z" fill="#6366f1"/>{% else %}<path d="M84 144 Q100 178 116 144 Z" fill="#f0bd93"/>{% endif %}</g></svg>
+<svg class="av-l" style="--z:34px" viewBox="0 0 200 200" aria-hidden="true"><defs><linearGradient id="avf" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe3c4"/><stop offset="1" stop-color="#f0b587"/></linearGradient></defs>
+<ellipse cx="66" cy="94" rx="5" ry="8" fill="#e6b088"/><ellipse cx="134" cy="94" rx="5" ry="8" fill="#e6b088"/>
+<ellipse cx="100" cy="90" rx="33" ry="38" fill="url(#avf)"/>
+<ellipse cx="78" cy="106" rx="7" ry="4" fill="#f19a8a" opacity=".35"/><ellipse cx="122" cy="106" rx="7" ry="4" fill="#f19a8a" opacity=".35"/>
+<ellipse cx="87" cy="93" rx="3.6" ry="4.4" fill="#2b2440"/><ellipse cx="113" cy="93" rx="3.6" ry="4.4" fill="#2b2440"/>
+<circle cx="88.3" cy="91.4" r="1.3" fill="#fff"/><circle cx="114.3" cy="91.4" r="1.3" fill="#fff"/>
+<path d="M80 83 q7 -5 14 -1 M106 82 q7 -4 14 1" stroke="#3a2b3f" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+<path d="M100 97 q-3 9 1 11" stroke="#c98d63" stroke-width="2" fill="none" stroke-linecap="round"/>
+<path d="M89 113 q11 9 22 0" stroke="#b4534b" stroke-width="2.6" fill="none" stroke-linecap="round"/></svg>
+<svg class="av-l" style="--z:46px" viewBox="0 0 200 200" aria-hidden="true"><defs><linearGradient id="avh2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="{{ '#7a4560' if gender=='female' else '#3d3260' }}"/><stop offset="1" stop-color="{{ '#3b1f2f' if gender=='female' else '#1f1a38' }}"/></linearGradient></defs>
+{% if gender=='female' %}<path d="M65 94 C60 52 84 40 102 40 C128 40 142 58 135 94 C128 72 114 62 96 66 C82 70 70 78 65 94 Z" fill="url(#avh2)"/>{% else %}<path d="M65 90 C60 50 86 38 104 40 C130 42 142 60 135 90 C131 74 124 66 104 64 C86 64 71 72 65 90 Z" fill="url(#avh2)"/>{% endif %}</svg>
+{% else %}
+<svg class="av-l" style="--z:26px" viewBox="0 0 200 200" aria-hidden="true"><text x="100" y="124" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="78" font-weight="700" fill="#fff">{{initials}}</text></svg>
+{% endif %}
+</div></div>
+<script>
+(function(){var a=document.querySelector('.av3d');if(!a||!window.requestAnimationFrame)return;
+var w=a.closest('.welcome')||a,raf=0,px=0,py=0;
+w.addEventListener('pointermove',function(e){var r=a.getBoundingClientRect();
+px=(e.clientX-(r.left+r.width/2))/260;py=(e.clientY-(r.top+r.height/2))/160;
+if(raf)return;raf=requestAnimationFrame(function(){raf=0;a.classList.add('live');
+a.style.setProperty('--ry',Math.max(-24,Math.min(24,px*24))+'deg');
+a.style.setProperty('--rx',Math.max(-16,Math.min(16,-py*16))+'deg')})});
+w.addEventListener('pointerleave',function(){a.classList.remove('live');a.style.removeProperty('--ry');a.style.removeProperty('--rx')});
+})();
+</script>"""
+
+EMP_TOP = """<div class="head hero"><div class="welcome wflex">""" + AVATAR3D + """<div class="wtxt"><h1 class="wt"><span class="wt-hi">Hello,</span> <span class="wt-name">{{session.name}}</span></h1>
 <p class="mut wsub"><span class="seg">{{today}}</span>{% if session.designation %}<span class="dot">&middot;</span><span class="seg">{{session.designation}}</span>{% endif %}<span class="dot">&middot;</span><span class="seg">Band {{session.band}}</span><span class="dot">&middot;</span><span class="seg">{{month_label}} summary</span>
-{% if today_perm %}<span class="dot">&middot;</span>Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div></div>""" + KPI
+{% if today_perm %}<span class="dot">&middot;</span>Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div></div></div>""" + KPI
 
 SUMMARY = """<div class="head ov-head"><div><h1>Overview</h1>
 <p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; 8 hrs per present day (capped at 100%).</p></div>
@@ -1502,10 +1594,11 @@ LEAVE_EMP = """<div class="head"><h1>Leave &amp; Permission</h1><a href="/employ
 <label>To date<input type="date" name="d2" value="{{today}}" required></label>
 <label>Reason<input name="reason" size="30" placeholder="Reason"></label>
 <button class="primary">Submit leave</button></form></div>
-<h2>My leave days</h2><table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th></th></tr>
-{% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
-<td><form method="post" action="/employee/leave/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this leave?')"><button class="danger">Cancel</button></form></td></tr>
-{% else %}<tr><td colspan="4">No leave yet.</td></tr>{% endfor %}</table>
+<h2>My leave days</h2><table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
+{% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
+<td><span class="pill {{st|ppill}}">{{st}}</span></td>
+<td>{% if st=='Pending' %}<form method="post" action="/employee/leave/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this leave?')"><button class="danger">Cancel</button></form>{% else %}-{% endif %}</td></tr>
+{% else %}<tr><td colspan="5">No leave yet.</td></tr>{% endfor %}</table>
 
 <div class="card"><h2>Apply permission</h2><p class="mut">Permission can only be applied for today ({{today}}) - use it if you need to arrive late, leave early, or step out during work hours. One request per day, up to {{perm_limit|g}} hrs total per month.</p>
 <div class="kpis"><div class="kpi"><span>Monthly limit</span><b>{{perm_limit|g}} hrs</b></div>
@@ -1536,12 +1629,12 @@ LEAVE_ADMIN = """<div class="head"><h1>Leave log</h1></div>
 PERSONAL_VIEW = """<div class="head"><div><h1>Personal details</h1>
 <p class="mut">Admin can edit any employee's details; employees can also update their own from their Personal details page.</p></div>
 <button type="button" class="btnl no-print" onclick="window.print()">&#128438; Print</button></div>
-<table><tr><th>Emp ID</th><th>Name</th><th>Address Line_1</th><th>Address Line_2</th><th>City</th><th>PIN</th>
+<table><tr><th>Emp ID</th><th>Name</th><th>Gender</th><th>Address Line_1</th><th>Address Line_2</th><th>City</th><th>PIN</th>
 <th>Phone Number</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID <small>(login)</small></th><th>Last updated</th><th></th></tr>
-{% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td>{{e['Name']}}</td><td>{{e['Address Line_1']}}</td><td>{{e['Address Line_2']}}</td>
+{% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td>{{e['Name']}}</td><td>{{e['Gender']}}</td><td>{{e['Address Line_1']}}</td><td>{{e['Address Line_2']}}</td>
 <td>{{e['City']}}</td><td>{{e['PIN']}}</td><td>{{e['Phone Number']}}</td><td>{{e['Emergency no']}}</td>
 <td>{{e['Personal Email ID']}}</td><td>{{e['Email']}}</td><td>{{e['Profile updated at'] or '-'}}</td><td class="act"><a href="/admin/personal/{{e['_row']}}">Edit</a></td></tr>
-{% else %}<tr><td colspan="12">No employees yet.</td></tr>{% endfor %}</table>"""
+{% else %}<tr><td colspan="13">No employees yet.</td></tr>{% endfor %}</table>"""
 
 @app.route("/admin/personal")
 @need("admin")
@@ -1553,7 +1646,7 @@ PERSONAL_EDIT = """<div class="card"><h2>Edit personal details</h2>
 <form method="post" class="grid">
 <label>Emp ID<input value="{{emp['Employee ID']}}" readonly></label>
 <label>Name<input value="{{emp['Name']}}" readonly></label>
-{% for f in fields %}<label>{{f}}<input {% if f.endswith('Email ID') %}type="email" {% endif %}name="{{f}}" value="{{emp[f]}}"></label>{% endfor %}
+{% for f in fields %}{% if f=='Gender' %}<label>Gender<select name="Gender"><option value="">Select</option>{% for g in ['Male','Female'] %}<option {{'selected' if (emp.get('Gender') or '')|lower==g|lower else ''}}>{{g}}</option>{% endfor %}</select></label>{% else %}<label>{{f}}<input {% if f.endswith('Email ID') %}type="email" {% endif %}name="{{f}}" value="{{emp[f]}}"></label>{% endif %}{% endfor %}
 <label>Office Email ID<input value="{{emp['Email']}}" readonly></label>
 <button class="primary">Save</button> <a href="/admin/personal">Cancel</a></form>
 <p class="mut">Office Email ID is linked to the employee's login email. To change it, edit the Email on the Employees page.</p></div>"""
@@ -1607,6 +1700,7 @@ PROFILE = """<div class="card"><h2>Personal details</h2>
 <form method="post" class="grid">
 <label>Emp ID<input value="{{emp['Employee ID']}}" readonly></label>
 <label>Name<input value="{{emp['Name']}}" readonly></label>
+<label>Gender<select name="Gender"><option value="">Select</option>{% for g in ['Male','Female'] %}<option {{'selected' if (emp.get('Gender') or '')|lower==g|lower else ''}}>{{g}}</option>{% endfor %}</select></label>
 <label>Address Line_1<input name="Address Line_1" value="{{emp['Address Line_1']}}"></label>
 <label>Address Line_2<input name="Address Line_2" value="{{emp['Address Line_2']}}"></label>
 <label>City<input name="City" value="{{emp['City']}}"></label>
@@ -1661,7 +1755,7 @@ def admin_leave():
     if request.method == "POST":
         emp = next((e for e in emps if str(e["Employee ID"]) == request.form["emp"]), None)
         try:
-            flash(f"{add_leave(emp, request.form['d1'], request.form['d2'], request.form['reason'].strip())} leave day(s) added.")
+            flash(f"{add_leave(emp, request.form['d1'], request.form['d2'], request.form['reason'].strip(), status="Approved")} leave day(s) added.")
         except (ValueError, TypeError) as e:
             flash(str(e))
         return redirect("/admin/leave")
@@ -1732,7 +1826,7 @@ def employee_password():
 def employee_leave():
     if request.method == "POST":
         try:
-            flash(f"{add_leave(my_emp(), request.form['d1'], request.form['d2'], request.form['reason'].strip())} leave day(s) added.")
+            flash(f"{add_leave(my_emp(), request.form['d1'], request.form['d2'], request.form['reason'].strip())} leave day(s) submitted - waiting for admin approval.")
         except ValueError as e:
             flash(str(e))
         return redirect("/employee/leave")
@@ -1751,6 +1845,8 @@ def employee_leave():
 def employee_leave_delete(row):
     r = next((r for r in rows("Leave") if r["_row"] == row), None)
     if not r or str(r["Employee ID"]) != session["emp_id"]: abort(403)
+    if leave_status(r) != "Pending":
+        flash("Only pending leave can be cancelled."); return redirect("/employee/leave")
     ws_of("Leave").delete_rows(row)
     invalidate_cache("Leave")
     flash("Leave cancelled."); return redirect("/employee/leave")

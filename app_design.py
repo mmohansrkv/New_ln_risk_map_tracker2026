@@ -608,6 +608,7 @@ poll();setInterval(poll,15000)})();
 NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"),
               ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
+              ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
@@ -940,6 +941,97 @@ def admin_log_export():
     return Response(out.getvalue(), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{fname}.xlsx"'})
 
+
+# ---------------------------------------------------------------- admin: Leave & Permission Log (all employees)
+LP_LOG = """<div class="head"><div><h1>Leave &amp; Permission Log</h1>
+<p class="mut">{{label}} &middot; every employee's leave and permission requests with dates, duration, reason and approval status. Leave is recorded as soon as it is applied; permission requests need approval.</p></div></div>
+<div class="kpis">
+<div class="kpi"><span>Leave requests</span><b>{{n_leave}}</b></div>
+<div class="kpi"><span>Leave days</span><b>{{leave_days}}</b></div>
+<div class="kpi"><span>Permission requests</span><b>{{n_perm}}</b></div>
+<div class="kpi"><span>Approved permission hrs</span><b>{{perm_hrs|g}}</b></div>
+<div class="kpi"><span>Pending approval</span><b>{{n_pending}}</b></div></div>
+<div class="card no-print"><form method="get" class="grid">
+<label>Month<input type="month" name="month" value="{{month if month!='all' else ''}}"></label>
+<label>Employee ID / name<input name="emp" value="{{emp}}" placeholder="Search"></label>
+<label>Type<select name="type">{% for v,l in [('','All'),('leave','Leave'),('permission','Permission')] %}<option value="{{v}}" {{'selected' if v==typ else ''}}>{{l}}</option>{% endfor %}</select></label>
+<label>Status<select name="status">{% for v in ['','Pending','Approved','Rejected','Recorded'] %}<option value="{{v}}" {{'selected' if v==status else ''}}>{{v or 'All'}}</option>{% endfor %}</select></label>
+<button class="primary pbtn">Filter</button><a href="/admin/leave-permission?month=all">All time</a><a href="/admin/leave-permission">This month</a>
+<button type="button" class="btnl pbtn" onclick="window.print()">&#128438; Print</button></form></div>
+<div style="overflow-x:auto"><table><tr><th>Type</th><th>Employee</th><th>Designation</th><th>Band</th><th>From</th><th>To</th><th>Duration</th>
+<th>Reason</th><th>Applied at</th><th>Status</th><th>Reviewed</th><th class="no-print">Action</th></tr>
+{% for r in rows %}<tr><td><span class="pill {{'act' if r.type=='Permission' else ''}}">{{r.type}}</span></td>
+<td><a href="/admin/employee-info/{{r.eid|urlencode}}?tab=leave">{{r.eid}} &middot; {{r.name}}</a></td><td>{{r.desig}}</td><td>{{r.band}}</td>
+<td>{{r.start}}</td><td>{{r.end}}</td><td>{{r.dur}}</td><td>{{r.reason}}</td><td>{{r.applied}}</td>
+<td><span class="pill {{r.status|ppill if r.status!='Recorded' else 'in'}}">{{r.status}}</span></td>
+<td>{% if r.reviewed %}{{r.reviewed}}{% if r.by %} &middot; {{r.by}}{% endif %}{% else %}-{% endif %}</td>
+<td class="act no-print">{% if r.type=='Permission' and r.status=='Pending' %}
+<form method="post" action="/admin/employee-info/{{r.eid|urlencode}}/permission/{{r.row}}/approve"><input type="hidden" name="next" value="{{here}}"><button class="primary">Approve</button></form>
+<form method="post" action="/admin/employee-info/{{r.eid|urlencode}}/permission/{{r.row}}/reject"><input type="hidden" name="next" value="{{here}}"><button class="danger">Reject</button></form>
+{% else %}-{% endif %}</td></tr>
+{% else %}<tr><td colspan="12">No leave or permission records found.</td></tr>{% endfor %}</table></div>"""
+
+def _leave_runs(leaves):
+    """One row per leave request: consecutive days added together (same employee, applied-at and reason) are merged."""
+    groups = {}
+    for l in leaves:
+        groups.setdefault((_key(l["Employee ID"]), str(l.get("Applied at", "")), str(l.get("Reason", ""))), []).append(l)
+    out = []
+    for (_, applied, reason), items in groups.items():
+        items.sort(key=lambda x: str(x["Date"])); run = []
+        def flush():
+            if run:
+                out.append((run[0], run[-1], len(run), applied, reason))
+        for it in items:
+            try: ok = run and dt.date.fromisoformat(str(it["Date"])) - dt.date.fromisoformat(str(run[-1]["Date"])) == dt.timedelta(days=1)
+            except ValueError: ok = False
+            if run and not ok: flush(); run = []
+            run.append(it)
+        flush()
+    return out
+
+@app.route("/admin/leave-permission")
+@need("admin")
+def admin_leave_permission():
+    today = today_local()
+    month = request.args.get("month") or today.strftime("%Y-%m")
+    q = request.args.get("emp", "").strip().lower()
+    typ, status = request.args.get("type", ""), request.args.get("status", "")
+    if month == "all": m0, m1, label = "0000-00-00", "9999-99-99", "All time"
+    else:
+        st, _ = month_range(month); m0 = str(st)
+        m1 = str((st.replace(day=28) + dt.timedelta(days=4)).replace(day=1) - dt.timedelta(days=1)); label = st.strftime("%B %Y")
+    emps = {_key(e["Employee ID"]): e for e in rows("Employees")}
+    def who(eid, name, band):
+        e = emps.get(_key(eid), {})
+        return dict(eid=str(eid), name=name, band=band, desig=str(e.get("Designation", "")).strip())
+    def match(r): return not q or q in str(r["eid"]).lower() or q in str(r["name"]).lower()
+    out = []
+    if typ in ("", "leave"):
+        for first, last, n, applied, reason in _leave_runs(rows("Leave")):
+            if str(last["Date"]) < m0 or str(first["Date"]) > m1: continue
+            r = dict(who(first["Employee ID"], first["Employee name"], first["Band"]), type="Leave",
+                     start=first["Date"], end=last["Date"], dur=f"{n} day{'s' if n != 1 else ''}", days=n, hrs=0,
+                     reason=reason, applied=applied, status="Recorded", reviewed="", by="", row=first["_row"])
+            if match(r): out.append(r)
+    if typ in ("", "permission"):
+        for x in rows("Permissions"):
+            if not (m0 <= str(x["Date"]) <= m1): continue
+            hrs = num(x.get("Hours"))
+            r = dict(who(x["Employee ID"], x["Employee name"], x["Band"]), type="Permission", start=x["Date"], end=x["Date"],
+                     dur=f"{hrs:g} hr{'s' if hrs != 1 else ''}", days=0, hrs=hrs, reason=x.get("Reason", ""),
+                     applied=x.get("Applied at", ""), status=str(x.get("Status", "")).strip() or "Pending",
+                     reviewed=x.get("Reviewed at", ""), by=x.get("Reviewed by", ""), row=x["_row"])
+            if match(r): out.append(r)
+    if status: out = [r for r in out if r["status"] == status]
+    out.sort(key=lambda r: (str(r["start"]), str(r["applied"])), reverse=True)
+    perm = [r for r in out if r["type"] == "Permission"]
+    return page(LP_LOG, title="Leave & Permission Log", rows=out, month=month, label=label, emp=request.args.get("emp", ""),
+                typ=typ, status=status, here=request.full_path.rstrip("?"),
+                n_leave=sum(r["type"] == "Leave" for r in out), leave_days=sum(r["days"] for r in out),
+                n_perm=len(perm), perm_hrs=sum(r["hrs"] for r in perm if r["status"] == "Approved"),
+                n_pending=sum(r["status"] == "Pending" for r in perm))
+
 # ---------------------------------------------------------------- admin: notifications
 NOTIF = """<div class="head"><div><h1>Notifications</h1>
 <p class="mut">Employee login / logout alerts with the exact time, newest first (latest 200). New ones are in bold.</p></div></div>
@@ -1133,7 +1225,8 @@ def _review_permission(eid, row, status):
                                            values=[[status, now, "Admin"]], value_input_option="RAW")
     invalidate_cache("Permissions")
     flash(f"Permission request {status.lower()}.")
-    return redirect(f"/admin/employee-info/{eid}?tab=leave")
+    nxt = request.form.get("next", "")
+    return redirect(nxt if nxt.startswith("/admin/") else f"/admin/employee-info/{eid}?tab=leave")
 
 @app.route("/admin/employee-info/<eid>/permission/<int:row>/approve", methods=["POST"])
 @need("admin")

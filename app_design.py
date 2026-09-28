@@ -7,7 +7,7 @@ from functools import wraps
 import gspread
 from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
-from flask import Flask, request, redirect, session, render_template_string, flash, abort, jsonify
+from flask import Flask, request, redirect, session, render_template_string, flash, abort, jsonify, has_request_context
 
 from zoneinfo import ZoneInfo
 # The server clock is often UTC. All app times use this timezone instead (set APP_TZ to change it).
@@ -52,7 +52,7 @@ PHOTOS = {
 HEADERS = {
     "Employees": ["Employee ID", "Name", "Band", "Email", "Password",
                   "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
-                  "Emergency no", "Personal Email ID", "Office Email ID", "Designation"],
+                  "Emergency no", "Personal Email ID", "Office Email ID", "Designation", "Profile updated at"],
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
@@ -172,6 +172,13 @@ _rows_cache = {}
 _rows_cache_lock = threading.Lock()
 
 def invalidate_cache(name=None):
+    # SAVE FIX: with several server workers each has its own cache, so after a save the redirect could
+    # land on another worker still holding the old rows (looked like "not saved"). Mark this user's
+    # session so their next reads go straight to the sheet.
+    try:
+        if has_request_context(): session["fresh_until"] = time.time() + 10
+    except Exception:
+        pass
     with _rows_cache_lock:
         if name is None:
             _rows_cache.clear()
@@ -180,9 +187,11 @@ def invalidate_cache(name=None):
 
 def rows(name):
     now = time.monotonic()
+    try: bypass = has_request_context() and session.get("fresh_until", 0) > time.time()
+    except Exception: bypass = False
     with _rows_cache_lock:
         cached = _rows_cache.get(name)
-        if cached and now - cached[0] < _ROWS_CACHE_TTL:
+        if cached and not bypass and now - cached[0] < _ROWS_CACHE_TTL:
             return [dict(r) for r in cached[1]]
 
     recs = _with_retry(ws_of(name).get_all_records, numericise_ignore=["all"])
@@ -264,7 +273,10 @@ def parse_form():
     notes = [(t.strip(), num(h)) for t, h in zip(g("nd"), g("nh")) if num(h) > 0]
     tot = sum(p[1] for p in procs) + sum(n[1] for n in notes)
     err = None
-    if not procs and not notes: err = "Add at least one process or note with hours."
+    half = any(num(h) <= 0 and (num(c) > 0 or d.strip()) for _, h, c, d in zip(g("pn"), g("ph"), g("pc"), g("pd"))) or \
+           any(num(h) <= 0 and t.strip() for t, h in zip(g("nd"), g("nh")))
+    if half: err = "Please enter the Hour for every process / note row you filled in - a row without hours is not saved."
+    elif not procs and not notes: err = "Add at least one process or note with hours."
     elif tot > DAY_HOURS: err = f"Total {tot:g} hrs is more than {DAY_HOURS} hrs."
     return request.form.get("date") or str(today_local()), procs, notes, err
 
@@ -492,6 +504,56 @@ tbody tr{transition:background .15s ease}
 #toasts{position:fixed;top:16px;right:16px;z-index:99;display:flex;flex-direction:column;gap:8px;max-width:340px}
 .toast{background:#1c2340;color:#fff;padding:12px 16px;border-radius:10px;font-size:14px;box-shadow:0 8px 24px #0004;animation:fadeInUp .3s ease}
 @media print{ #toasts{display:none}}
+
+/* ================= Productivity-pending marquee ================= */
+.mq{position:relative;overflow:hidden;border-radius:12px;margin-bottom:16px;background:linear-gradient(180deg,#fff8ec,#ffecc9);border:1px solid #f4c977;color:#7a4b00;font-weight:600;box-shadow:0 1px 0 #fff inset,0 3px 0 #f0c37a88,0 12px 22px -8px #b7791f44;contain:content}
+.mq-track{display:flex;width:max-content;animation:mqScroll 30s linear infinite;will-change:transform}
+.mq:hover .mq-track{animation-play-state:paused}
+.mq-group{display:flex;flex:none;min-width:100vw;justify-content:space-around}
+.mq-item{display:inline-flex;align-items:center;padding:11px 48px 11px 0;white-space:nowrap;font-size:14px}
+@keyframes mqScroll{from{transform:translate3d(0,0,0)}to{transform:translate3d(-50%,0,0)}}
+@media(prefers-reduced-motion:reduce){.mq-track{animation:none!important;width:auto;flex-wrap:wrap}.mq-group[aria-hidden]{display:none}.mq-group{min-width:0}.mq-item{white-space:normal}}
+/* ================= Animated welcome line ================= */
+.hero{display:block}
+.welcome{padding:16px 22px;border-radius:16px;background:linear-gradient(135deg,#fff 0%,#eef0ff 100%);border:1px solid #e2e6f3;box-shadow:0 1px 0 #fff inset,0 4px 0 #dfe3f7,0 18px 30px -14px #4f46e544}
+.wt{font-size:26px;letter-spacing:-.2px;animation:none}
+.wt-hi{display:inline-block;animation:segIn .6s cubic-bezier(.22,1,.36,1) both}
+.wt-name{display:inline-block;background:linear-gradient(90deg,#4f46e5,#c026d3,#0ea5e9,#4f46e5);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:segIn .7s .12s cubic-bezier(.22,1,.36,1) both,shimmer 7s linear infinite}
+.wsub{margin-top:6px;font-size:14px}
+.wsub .seg{display:inline-block;background:linear-gradient(100deg,#5b6384 35%,#4f46e5 50%,#5b6384 65%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:segIn .6s cubic-bezier(.22,1,.36,1) both,sweep 6s ease-in-out infinite}
+.wsub .dot{display:inline-block;margin:0 8px;color:#a3aac6;animation:segIn .6s ease both}
+.wsub .seg:nth-of-type(1){animation-delay:.25s,.9s}.wsub .seg:nth-of-type(2){animation-delay:.4s,1.1s}
+.wsub .seg:nth-of-type(3){animation-delay:.55s,1.3s}.wsub .seg:nth-of-type(4){animation-delay:.7s,1.5s}
+@keyframes segIn{from{opacity:0;transform:translate3d(0,12px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+@keyframes shimmer{from{background-position:0 0}to{background-position:-200% 0}}
+@keyframes sweep{0%,55%{background-position:120% 0}100%{background-position:-120% 0}}
+@media(prefers-reduced-motion:reduce){.wt-name,.wsub .seg{animation:none!important;opacity:1}}
+/* ================= Professional 3D look (Admin, Employee, Login) ================= */
+body{background:radial-gradient(1100px 520px at 8% -8%,#e7eaff 0%,transparent 60%),radial-gradient(900px 480px at 100% 0%,#f4e9ff 0%,transparent 55%),#f3f5fb}
+aside{background:linear-gradient(180deg,#252f5c 0%,#1c2340 55%,#151b34 100%);box-shadow:10px 0 28px -8px #1c234055,inset -1px 0 0 #ffffff14;position:relative;z-index:2}
+.brand{text-shadow:0 2px 6px #0006}
+aside a.on{background:linear-gradient(180deg,#6d70f5,#4f46e5);box-shadow:0 3px 0 #3730a3,0 10px 16px -4px #4f46e577,inset 0 1px 0 #ffffff45;transform:translateY(-1px)}
+.card{border-color:#e2e6f3;box-shadow:0 1px 0 #fff inset,0 2px 4px #1c23400d,0 14px 28px -12px #1c234030}
+.card:hover{transform:translateY(-3px);box-shadow:0 1px 0 #fff inset,0 4px 8px #1c234012,0 24px 40px -14px #1c234040}
+.kpis{perspective:900px}
+.kpi{background:linear-gradient(160deg,#fff 0%,#f4f5ff 100%);border-color:#e2e6f3;box-shadow:0 1px 0 #fff inset,0 3px 0 #e3e6f6,0 16px 26px -12px #1c234040;transition:transform .25s ease,box-shadow .25s ease}
+.kpi:hover{transform:rotateX(5deg) rotateY(-6deg) translateY(-4px);box-shadow:0 1px 0 #fff inset,0 5px 0 #d9ddf3,0 26px 36px -14px #1c234055}
+table{box-shadow:0 1px 0 #fff inset,0 14px 28px -14px #1c234040}
+.primary,.btnl{background:linear-gradient(180deg,#6d70f5,#4f46e5);box-shadow:0 4px 0 #3730a3,0 10px 16px -6px #4f46e566,inset 0 1px 0 #ffffff45}
+.primary:hover,.btnl:hover{background:linear-gradient(180deg,#7a7df8,#5249ea);transform:translateY(-2px);box-shadow:0 6px 0 #3730a3,0 16px 22px -8px #4f46e577,inset 0 1px 0 #ffffff45}
+.primary:active,.btnl:active{transform:translateY(3px) scale(.99);box-shadow:0 1px 0 #3730a3,0 3px 6px #4f46e544,inset 0 1px 0 #ffffff30}
+.warn,.flash{box-shadow:0 1px 0 #fff inset,0 10px 18px -10px #1c234033}
+/* login page */
+.lg{perspective:1400px}
+.win{transform-style:preserve-3d;transform:rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));transition:transform .2s ease-out;will-change:transform;box-shadow:0 34px 60px -16px #3b1f7a66,0 18px 34px -18px #0007}
+.wbody{transform-style:preserve-3d}
+.wbar{transform:translateZ(12px);box-shadow:0 4px 10px #0002}
+.lcard{transform:translateZ(46px);box-shadow:0 1px 0 #fff inset,0 30px 46px -14px #0006,0 8px 14px -6px #0003}
+.lcard button{box-shadow:0 4px 0 #d46a6a,0 10px 16px -6px #d46a6a88,inset 0 1px 0 #ffffff55}
+.lcard button:active{box-shadow:0 1px 0 #d46a6a}
+.blob{box-shadow:inset -20px -24px 42px #0000002e,inset 14px 14px 30px #ffffff66,0 34px 44px -24px #0000004a}
+@media(max-width:800px){.win{transform:none!important}.lcard{transform:none}}
+@media(prefers-reduced-motion:reduce){.win{transform:none!important}.kpi:hover{transform:none}}
 </style></head><body>
 {% if session.role %}<div class="app"><aside>
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
@@ -550,6 +612,20 @@ LOGIN = """<div class="win"><div class="wbar"><i></i><i></i><i></i></div>
     setTimeout(function(){ span.remove(); }, 900);
   }
   var u = document.getElementById('login_u'), p = document.getElementById('login_p');
+  var w = document.querySelector('.win'), lg = document.querySelector('.lg');
+  if (w && lg && window.matchMedia('(hover:hover) and (pointer:fine)').matches &&
+      !window.matchMedia('(prefers-reduced-motion:reduce)').matches) {
+    var raf = 0, rx = 0, ry = 0;
+    lg.addEventListener('mousemove', function(e){
+      var r = lg.getBoundingClientRect();
+      ry = ((e.clientX - r.left) / r.width - .5) * 10;
+      rx = -((e.clientY - r.top) / r.height - .5) * 8;
+      if (!raf) raf = requestAnimationFrame(function(){
+        raf = 0; w.style.setProperty('--rx', rx.toFixed(2) + 'deg'); w.style.setProperty('--ry', ry.toFixed(2) + 'deg');
+      });
+    }, {passive: true});
+    lg.addEventListener('mouseleave', function(){ w.style.setProperty('--rx', '0deg'); w.style.setProperty('--ry', '0deg'); });
+  }
   if (u) u.addEventListener('input', function(){ animate(u, false); });
   if (p) p.addEventListener('input', function(){ animate(p, true); });
 })();
@@ -692,7 +768,7 @@ def admin_edit(kind, row):
         for h, v in zip(heads, vals): full[HEADERS[sheet].index(h)] = v
         if sheet == "Employees":   # office email follows the login email
             full[HEADERS[sheet].index("Office Email ID")] = vals[heads.index("Email")]
-        ws.update(range_name=f"A{row}", values=[full])
+        ws.update(range_name=f"A{row}", values=[full], value_input_option="RAW"); invalidate_cache(sheet)
         flash("Updated."); return redirect(f"/admin/{kind}")
     cur = ws.row_values(row); cur += [""] * (len(HEADERS[sheet]) - len(cur))
     vals = [cur[HEADERS[sheet].index(h)] for h in heads]
@@ -723,7 +799,7 @@ NOTIF = """<div class="head"><div><h1>Notifications</h1>
 <table><tr><th>Time</th><th>Employee</th><th>Event</th></tr>
 {% for r in data %}<tr{% if r.new %} style="font-weight:600"{% endif %}><td>{{r['Time']}}</td>
 <td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
-<td><span class="pill {{'in' if r['Event']=='Logged in' else 'out'}}">{{r['Event']}}</span></td></tr>
+<td><span class="pill {{'in' if r['Event']=='Logged in' else ('out' if r['Event'].startswith('Logged out') else 'act')}}">{{r['Event']}}</span></td></tr>
 {% else %}<tr><td colspan="3">No notifications yet.</td></tr>{% endfor %}</table>"""
 
 @app.route("/admin/notifications")
@@ -811,7 +887,7 @@ T_HOLIDAYS = """<p class="mut">Company holidays (they apply to every employee). 
 T_NOTIF = """<p class="mut">Login / logout alerts for this employee, newest first (latest 200).</p>
 <table><tr><th>Time</th><th>Event</th></tr>
 {% for r in data %}<tr{% if r.new %} style="font-weight:600"{% endif %}><td>{{r['Time']}}</td>
-<td><span class="pill {{'in' if r['Event']=='Logged in' else 'out'}}">{{r['Event']}}</span></td></tr>
+<td><span class="pill {{'in' if r['Event']=='Logged in' else ('out' if r['Event'].startswith('Logged out') else 'act')}}">{{r['Event']}}</span></td></tr>
 {% else %}<tr><td colspan="2">No notifications yet.</td></tr>{% endfor %}</table>"""
 
 @app.route("/admin/employee-info")
@@ -841,7 +917,7 @@ def admin_employee_detail(eid):
     if tab == "personal":
         fields = [("Employee ID", emp["Employee ID"]), ("Name", emp["Name"]), ("Designation", emp.get("Designation", "")),
                   ("Band", emp["Band"])] + [(f, emp.get(f, "")) for f in EDITABLE_PERSONAL] + \
-                 [("Office Email ID", emp.get("Email", ""))]
+                 [("Office Email ID", emp.get("Email", "")), ("Last updated", emp.get("Profile updated at", ""))]
         body = T_PERSONAL; ctx["fields"] = fields
     elif tab == "missed":
         subs = [s for s in load_subs() if _key(s["emp_id"]) == _key(eid)]
@@ -965,7 +1041,7 @@ def employee_home():
     today_perm = next((r for r in rows("Permissions")
                        if str(r["Employee ID"]) == session["emp_id"] and r["Date"] == today), None)
     perm_used = permission_hours_used(session["emp_id"], today[:7])
-    return page(EMP_TOP + EMP_ALERT + body + '<h2>Submitted today</h2>' + LIST,
+    return page(EMP_MARQUEE + EMP_TOP + EMP_ALERT + body + '<h2>Submitted today</h2>' + LIST,
                 title="Daily productivity", missed=missed, pend=pend, subs=mine,
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
                 a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete,
@@ -1140,11 +1216,15 @@ def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
         d += dt.timedelta(days=1)
     return out
 
-EMP_ALERT = """{% if missed or pend %}<div class="warn"><b>&#9888; Productivity entry pending</b>
-{% if missed %}<div>You missed the entry for {{missed|length}} day(s) this month: {{missed|join(', ')}}.
-Pick that date in the form below and submit, or apply leave.</div>{% endif %}
-{% if pend %}<div>Today's entry is not submitted yet.</div>{% endif %}</div>{% endif %}
-{% if profile_incomplete %}<div class="warn"><b>&#9888; Personal details incomplete</b>
+EMP_MARQUEE = """{% if missed or pend %}{% set msg %}&#9888; Productivity entry pending &mdash;
+{% if missed %} You missed the entry for {{missed|length}} day(s) this month: {{missed|join(', ')}}. Pick that date in the form below and submit, or apply leave.{% endif %}
+{% if pend %} Today's entry is not submitted yet.{% endif %}{% endset %}
+<div class="mq" role="status"><div class="mq-track">
+<div class="mq-group">{% for i in range(4) %}<span class="mq-item">{{msg}}</span>{% endfor %}</div>
+<div class="mq-group" aria-hidden="true">{% for i in range(4) %}<span class="mq-item">{{msg}}</span>{% endfor %}</div>
+</div></div>{% endif %}"""
+
+EMP_ALERT = """{% if profile_incomplete %}<div class="warn"><b>&#9888; Personal details incomplete</b>
 <div>Please <a href="/employee/profile">complete your personal details</a>.</div></div>{% endif %}"""
 
 ADMIN_ALERT = """{% if miss or pend %}<div class="warn"><b>&#9888; Missed entries - {{mlabel}}</b>
@@ -1157,10 +1237,9 @@ KPI = """<div class="kpis">
 <div class="kpi"><span>{{lab2}}</span><b>{{a2}}%</b><i class="bar {{a2|tone}}"><u style="width:{{[a2,100]|min}}%"></u></i></div>
 {% for l,v in extra %}<div class="kpi"><span>{{l}}</span><b>{{v}}</b></div>{% endfor %}</div>"""
 
-EMP_TOP = """<div class="head"><div><h1>Hello, {{session.name}}</h1>
-<p class="mut">{{today}} &middot; {% if session.designation %}{{session.designation}} &middot; {% endif %}Band {{session.band}} &middot; {{month_label}} summary
-{% if today_perm %}&middot; Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div>
-<div><a class="primary" href="/employee/leave">Leave &amp; Permission</a></div></div>""" + KPI
+EMP_TOP = """<div class="head hero"><div class="welcome"><h1 class="wt"><span class="wt-hi">Hello,</span> <span class="wt-name">{{session.name}}</span></h1>
+<p class="mut wsub"><span class="seg">{{today}}</span>{% if session.designation %}<span class="dot">&middot;</span><span class="seg">{{session.designation}}</span>{% endif %}<span class="dot">&middot;</span><span class="seg">Band {{session.band}}</span><span class="dot">&middot;</span><span class="seg">{{month_label}} summary</span>
+{% if today_perm %}<span class="dot">&middot;</span>Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div></div>""" + KPI
 
 SUMMARY = """<div class="head"><div><h1>Overview</h1>
 <p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; 8 hrs per present day (capped at 100%).</p></div>
@@ -1218,11 +1297,11 @@ PERSONAL_VIEW = """<div class="head"><div><h1>Personal details</h1>
 <p class="mut">Admin can edit any employee's details; employees can also update their own from their Personal details page.</p></div>
 <button type="button" class="btnl no-print" onclick="window.print()">&#128438; Print</button></div>
 <table><tr><th>Emp ID</th><th>Name</th><th>Address Line_1</th><th>Address Line_2</th><th>City</th><th>PIN</th>
-<th>Phone Number</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID <small>(login)</small></th><th></th></tr>
+<th>Phone Number</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID <small>(login)</small></th><th>Last updated</th><th></th></tr>
 {% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td>{{e['Name']}}</td><td>{{e['Address Line_1']}}</td><td>{{e['Address Line_2']}}</td>
 <td>{{e['City']}}</td><td>{{e['PIN']}}</td><td>{{e['Phone Number']}}</td><td>{{e['Emergency no']}}</td>
-<td>{{e['Personal Email ID']}}</td><td>{{e['Email']}}</td><td class="act"><a href="/admin/personal/{{e['_row']}}">Edit</a></td></tr>
-{% else %}<tr><td colspan="11">No employees yet.</td></tr>{% endfor %}</table>"""
+<td>{{e['Personal Email ID']}}</td><td>{{e['Email']}}</td><td>{{e['Profile updated at'] or '-'}}</td><td class="act"><a href="/admin/personal/{{e['_row']}}">Edit</a></td></tr>
+{% else %}<tr><td colspan="12">No employees yet.</td></tr>{% endfor %}</table>"""
 
 @app.route("/admin/personal")
 @need("admin")
@@ -1246,13 +1325,9 @@ def admin_personal_edit(row):
     emp = next((e for e in rows("Employees") if e["_row"] == row), None)
     if not emp: abort(404)
     if request.method == "POST":
-        vals = [str(emp.get(h, "")) for h in heads]
-        for f in EDITABLE_PERSONAL:
-            vals[heads.index(f)] = request.form.get(f, "").strip()
-        vals[heads.index("Office Email ID")] = str(emp.get("Email", ""))
-        ws_of("Employees").update(range_name=f"A{row}", values=[vals])
-        invalidate_cache("Employees")
-        flash("Updated."); return redirect("/admin/personal")
+        ok = save_employee_row(row, emp["Employee ID"], {f: request.form.get(f, "").strip() for f in EDITABLE_PERSONAL})
+        flash("Updated." if ok else "Could not save - the employee list changed. Please reopen and try again.")
+        return redirect("/admin/personal")
     return page(PERSONAL_EDIT, title="Personal details", emp=emp, fields=EDITABLE_PERSONAL)
 
 @app.route("/admin/summary")
@@ -1300,7 +1375,15 @@ PROFILE = """<div class="card"><h2>Personal details</h2>
 <label>Emergency no<input name="Emergency no" value="{{emp['Emergency no']}}"></label>
 <label>Personal Email ID<input type="email" name="Personal Email ID" value="{{emp['Personal Email ID']}}"></label>
 <label>Office Email ID<input value="{{emp['Email']}}" readonly></label>
-<button class="primary">Save</button></form></div>"""
+<button class="primary">Save</button></form>
+<p class="mut" style="margin-top:10px">Last updated: {{emp['Profile updated at'] or '-'}}</p></div>
+<div class="card"><h2>Change password</h2>
+<p class="mut">Enter your current password, then choose a new one (at least 6 characters). Use the new password next time you log in.</p>
+<form method="post" action="/employee/password" class="grid" autocomplete="off">
+<label>Current password<input type="password" name="current" required autocomplete="current-password"></label>
+<label>New password<input type="password" name="new" minlength="6" required autocomplete="new-password"></label>
+<label>Confirm new password<input type="password" name="confirm" minlength="6" required autocomplete="new-password"></label>
+<button class="primary">Change password</button></form></div>"""
 
 @app.route("/admin/missed")
 @need("admin")
@@ -1356,21 +1439,53 @@ def my_emp_row():
     if not r: abort(404)
     return r
 
+def save_employee_row(row, emp_id, changes):
+    """Write changes to one Employees row. Re-reads the row fresh from the sheet (so nothing another
+    person just changed is overwritten), writes RAW (so IDs, passwords, phone numbers and PINs are
+    stored exactly as typed - leading zeros kept), and stamps 'Profile updated at'.
+    Returns False if that row no longer belongs to emp_id."""
+    heads = HEADERS["Employees"]
+    ws = ws_of("Employees")
+    cur = ws.row_values(row); cur += [""] * (len(heads) - len(cur))
+    if _key(cur[heads.index("Employee ID")]) != _key(emp_id):
+        invalidate_cache("Employees"); return False
+    for k, v in changes.items(): cur[heads.index(k)] = v
+    cur[heads.index("Office Email ID")] = cur[heads.index("Email")]      # always mirrors the login email
+    cur[heads.index("Profile updated at")] = now_local().strftime("%Y-%m-%d %H:%M:%S")
+    _with_retry(ws.update, range_name=f"A{row}", values=[cur[:len(heads)]], value_input_option="RAW")
+    invalidate_cache("Employees")
+    return True
+
 @app.route("/employee/profile", methods=["GET", "POST"])
 @need("employee")
 def employee_profile():
     emp = my_emp_row()
     if request.method == "POST":
-        heads = HEADERS["Employees"]
-        vals = [str(emp.get(h, "")) for h in heads]
-        for f in EDITABLE_PERSONAL:
-            vals[heads.index(f)] = request.form.get(f, "").strip()
-        vals[heads.index("Office Email ID")] = str(emp.get("Email", ""))
-        ws_of("Employees").update(range_name=f"A{emp['_row']}", values=[vals])
-        invalidate_cache("Employees")
-        flash("Profile updated.")
+        ok = save_employee_row(emp["_row"], session["emp_id"],
+                               {f: request.form.get(f, "").strip() for f in EDITABLE_PERSONAL})
+        if ok:
+            _bg(notify, session["emp_id"], session["name"], "Updated personal details", now_local())
+            flash("Profile updated. Admin can now see your latest details.")
+        else:
+            flash("Could not save - please reload the page and try again.")
         return redirect("/employee/profile")
     return page(PROFILE, title="Personal details", emp=emp)
+
+@app.route("/employee/password", methods=["POST"])
+@need("employee")
+def employee_password():
+    emp = my_emp_row()
+    cur, new, conf = (request.form.get(k, "") for k in ("current", "new", "confirm"))
+    if not eq(cur, emp["Password"]): flash("Current password is incorrect.")
+    elif len(new) < 6: flash("New password must be at least 6 characters.")
+    elif new != conf: flash("New password and confirmation do not match.")
+    elif eq(new, cur): flash("New password must be different from the current one.")
+    elif save_employee_row(emp["_row"], session["emp_id"], {"Password": new}):
+        _bg(notify, session["emp_id"], session["name"], "Changed password", now_local())
+        flash("Password changed. Use it the next time you log in.")
+    else:
+        flash("Could not change the password - please reload the page and try again.")
+    return redirect("/employee/profile")
 
 @app.route("/employee/leave", methods=["GET", "POST"])
 @need("employee")

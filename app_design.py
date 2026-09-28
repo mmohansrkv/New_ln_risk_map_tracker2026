@@ -1494,13 +1494,82 @@ def initials_of(name):
     return "".join(p[0] for p in parts[:2]).upper() or "?"
 
 WELCOME = """<style>
-.wl{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#c9b8f6 0%,#fbd3e2 45%,#b9d2f8 100%);animation:fadeInUp .5s ease}
-.wl-card{background:#fff;border-radius:16px;padding:34px 46px;text-align:center;box-shadow:0 20px 50px #0003;animation:fadeInUp .6s cubic-bezier(.22,1,.36,1)}
-.wl-card h1{font-size:26px;margin:0 0 6px;color:#4f46e5}.wl-card p{margin:0;color:var(--mut);font-size:13px}
+.wl{position:fixed;inset:0;z-index:9999;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:linear-gradient(135deg,#c9b8f6 0%,#fbd3e2 45%,#b9d2f8 100%)}
+.wl-card{position:absolute;inset:0;margin:auto;width:max-content;height:max-content;max-width:90vw;background:#fff;border-radius:16px;padding:34px 46px;text-align:center;box-shadow:0 20px 50px #0003;animation:wlPop .7s cubic-bezier(.22,1,.36,1) both;transition:opacity .5s ease,transform .5s ease}
+.wl-card h1{font-size:28px;margin:0 0 6px;color:#4f46e5}.wl-card p{margin:0;color:#6b7280;font-size:13px}
+.wl-card.off{opacity:0;transform:scale(.9);pointer-events:none}
+@keyframes wlPop{from{opacity:0;transform:translateY(14px) scale(.94)}to{opacity:1;transform:none}}
+.sc{position:absolute;inset:0;opacity:0;transition:opacity .6s ease;background:radial-gradient(ellipse at 50% 0%,#fff6 0%,transparent 60%),linear-gradient(180deg,#8fb4f7 0%,#c9b8f6 55%,#fbd3e2 100%)}
+.sc.on{opacity:1}
+.sc-title{position:absolute;top:5vh;left:0;right:0;text-align:center;z-index:5;color:#fff;text-shadow:0 3px 12px #4f46e5aa}
+.sc-title b{display:block;font-size:min(5vw,44px)}.sc-title span{font-size:min(2.4vw,18px);opacity:.95}
+.sc-skip{position:absolute;right:18px;bottom:14px;z-index:6;color:#fff;font-size:12px;text-decoration:none;opacity:.8;background:#0002;padding:4px 10px;border-radius:12px}
+.cam{position:absolute;inset:0;perspective:1100px;font-size:min(2.3vw,3.7vh);display:flex;align-items:center;justify-content:center;padding-top:8vh}
+.tilt{position:relative;width:0;height:0;transform-style:preserve-3d;transform:rotateX(-20deg)}
+.ring{position:absolute;left:0;top:0;transform-style:preserve-3d;animation:ringSpin 14s linear infinite}
+@keyframes ringSpin{to{transform:rotateY(360deg)}}
+.floor{position:absolute;width:38em;height:38em;left:-19em;top:-19em;border-radius:50%;transform:rotateX(90deg);
+ background:radial-gradient(circle,#fff 0 8%,transparent 8.5%),repeating-conic-gradient(#ffd166 0 15deg,#ff8fab 15deg 30deg,#6ee7b7 30deg 45deg,#7dd3fc 45deg 60deg);box-shadow:0 0 0 .6em #fff8,0 0 4em #4f46e588}
+.pos{position:absolute;left:0;top:0;transform-style:preserve-3d;transform:rotateY(var(--a)) translateZ(13em)}
+.shadow{position:absolute;left:-1.8em;top:-1.1em;width:3.6em;height:2.2em;border-radius:50%;background:#0003;transform:rotateX(90deg)}
+.bill{position:absolute;left:0;top:0;transform-style:preserve-3d;animation:unspin 14s linear infinite}
+@keyframes unspin{from{transform:rotateY(calc(var(--a) * -1))}to{transform:rotateY(calc(var(--a) * -1 - 360deg))}}
+.jump{position:absolute;left:0;top:0;animation:hop .72s ease-in-out infinite;animation-delay:calc(var(--i) * -.13s)}
+@keyframes hop{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.8em)}}
+.fig{position:absolute;left:-2em;top:-7.2em;width:4em;height:7.2em}
+.head{position:absolute;left:.6em;top:0;width:2.8em;height:2.8em;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffe6cf,#f5b98a);box-shadow:inset -.2em -.3em .5em #0002}
+.head::before{content:"";position:absolute;left:-.05em;top:-.15em;width:2.9em;height:1.4em;border-radius:1.5em 1.5em .3em .3em;background:var(--h)}
+.head::after{content:"";position:absolute;left:.7em;top:1.2em;width:.4em;height:.4em;border-radius:50%;background:#222;box-shadow:.95em 0 #222}
+.mouth{position:absolute;left:.95em;top:1.85em;width:.9em;height:.45em;border-radius:0 0 .9em .9em;background:#b3364a}
+.torso{position:absolute;left:.4em;top:2.7em;width:3.2em;height:2.7em;border-radius:1.2em 1.2em .6em .6em;background:linear-gradient(160deg,var(--c),var(--d));box-shadow:inset -.3em -.3em .6em #0003}
+.arm{position:absolute;top:3em;width:.8em;height:2.3em;border-radius:.5em;background:var(--c);transform-origin:50% .3em}
+.arm.l{left:-.2em;animation:waveL .5s ease-in-out infinite alternate;animation-delay:calc(var(--i) * -.1s)}
+.arm.r{right:-.2em;animation:waveR .5s ease-in-out infinite alternate;animation-delay:calc(var(--i) * -.1s)}
+@keyframes waveL{from{transform:rotate(150deg)}to{transform:rotate(200deg)}}
+@keyframes waveR{from{transform:rotate(-150deg)}to{transform:rotate(-200deg)}}
+.leg{position:absolute;top:5.3em;width:1em;height:1.9em;border-radius:.4em .4em .6em .6em;background:#3b3f5c}
+.leg.l{left:.9em}.leg.r{right:.9em}
+.bspin{position:absolute;left:0;top:0;transform-style:preserve-3d;animation:ringSpin 1.9s linear infinite}
+.bpos{position:absolute;left:0;top:0;transform:translateZ(13em);transform-style:preserve-3d}
+.ball{position:absolute;left:-.9em;top:-6em;width:1.8em;height:1.8em;border-radius:50%;background:radial-gradient(circle at 32% 30%,#fff,#ff5d5d 45%,#b91c1c);box-shadow:0 .5em 1em #0004;animation:bball .95s ease-in-out infinite}
+@keyframes bball{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.4em)}}
+.cf{position:absolute;top:-6vh;width:10px;height:14px;opacity:.9;animation:cfFall linear infinite}
+@keyframes cfFall{to{transform:translate3d(var(--dx),110vh,0) rotate(720deg)}}
 </style>
-<div class="wl"><div class="wl-card"><h1>Welcome, {{session.name}}</h1><p>Taking you to your page&hellip;</p></div></div>
-<script>setTimeout(function(){window.location.replace('/employee')},2000)</script>
-<noscript><meta http-equiv="refresh" content="2;url=/employee"></noscript>"""
+<div class="wl" id="wl">
+ <div class="wl-card" id="wlCard"><h1>Welcome, {{session.name}}</h1><p>Getting your workspace ready&hellip;</p></div>
+ <div class="sc" id="wlScene" aria-hidden="true">
+  <div class="sc-title"><b>Welcome, {{session.name}}!</b><span>Let&rsquo;s play together as a team</span></div>
+  <div class="cam"><div class="tilt"><div class="ring">
+   <div class="floor"></div>
+   {% for c in [('#ef4444','#b91c1c','#3b2314'),('#3b82f6','#1d4ed8','#111827'),('#22c55e','#15803d','#7c2d12'),('#f59e0b','#b45309','#1f2937'),('#a855f7','#7e22ce','#422006'),('#ec4899','#be185d','#0f172a')] %}
+   <div class="pos" style="--a:{{loop.index0*60}}deg;--i:{{loop.index0}};--c:{{c[0]}};--d:{{c[1]}};--h:{{c[2]}}">
+    <div class="shadow"></div>
+    <div class="bill"><div class="jump"><div class="fig">
+     <div class="leg l"></div><div class="leg r"></div>
+     <div class="arm l"></div><div class="arm r"></div>
+     <div class="torso"></div>
+     <div class="head"><div class="mouth"></div></div>
+    </div></div></div>
+   </div>
+   {% endfor %}
+   <div class="bspin"><div class="bpos"><div class="ball"></div></div></div>
+  </div></div></div>
+  <a class="sc-skip" href="/employee">Skip &rsaquo;</a>
+ </div>
+</div>
+<script>
+(function(){
+ var sc=document.getElementById('wlScene'),card=document.getElementById('wlCard'),colors=['#ffd166','#ff8fab','#6ee7b7','#7dd3fc','#c4b5fd','#fff'];
+ for(var i=0;i<36;i++){var d=document.createElement('i');d.className='cf';
+  d.style.left=(Math.random()*100)+'vw';d.style.background=colors[i%colors.length];
+  d.style.setProperty('--dx',((Math.random()-.5)*160)+'px');
+  d.style.animationDuration=(2.2+Math.random()*2.4)+'s';d.style.animationDelay=(Math.random()*3)+'s';sc.appendChild(d)}
+ setTimeout(function(){card.classList.add('off');sc.classList.add('on')},2000);      /* welcome message, then scene */
+ setTimeout(function(){window.location.replace('/employee')},7000);                   /* 5-second scene, then Employee page */
+})();
+</script>
+<noscript><meta http-equiv="refresh" content="7;url=/employee"></noscript>"""
 
 @app.route("/employee/welcome")
 @need("employee")

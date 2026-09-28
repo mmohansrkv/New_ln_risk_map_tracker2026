@@ -691,6 +691,47 @@ table th{font-weight:600!important;color:var(--mut)}
 table td b,table td a,table td .pill,table td small,table th small{font-size:inherit!important}
 table .pill{padding:1px 8px!important;font-size:11px!important}
 table td small,table th small{font-size:10.5px!important}
+/* ================= Login pages: HD 3D scene + show-password ================= */
+.wbody{position:relative}
+.win.admin .wbody{background:radial-gradient(900px 420px at 20% 0%,#3b5bdb55,transparent 60%),linear-gradient(120deg,#0b1230 0%,#182a6b 48%,#4f46e5 100%)}
+.win.employee .wbody{background:radial-gradient(900px 420px at 80% 0%,#ffb37066,transparent 60%),linear-gradient(120deg,#3b1f6e 0%,#a3407f 48%,#f29a63 100%)}
+.lcard{position:relative;z-index:2}
+.scene{position:absolute;inset:0;overflow:hidden;border-radius:0 0 14px 14px;pointer-events:none;contain:layout paint;z-index:0}
+.scene.admin{--c1:#7c9cffcc;--c2:#4f46e544;--g:#8ea8ff;--r:#a5b4fc}
+.scene.employee{--c1:#ffc98acc;--c2:#f0609a44;--g:#ffd0a1;--r:#ffe1c2}
+.gfw{position:absolute;left:0;right:0;bottom:0;height:60%;perspective:520px;overflow:hidden}
+.gf{position:absolute;left:-60%;right:-60%;bottom:0;height:220%;transform-origin:50% 100%;transform:rotateX(72deg);overflow:hidden}
+.gf::before{content:"";position:absolute;left:0;right:0;top:-64px;bottom:0;background-image:linear-gradient(var(--g) 1.5px,transparent 1.5px),linear-gradient(90deg,var(--g) 1.5px,transparent 1.5px);background-size:64px 64px;opacity:.45;animation:gridMove 2.4s linear infinite;will-change:transform}
+@keyframes gridMove{to{transform:translate3d(0,64px,0)}}
+.gfw::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,#0000 0%,#0000 35%,#00000055 100%)}
+.gfw::before{content:"";position:absolute;left:0;right:0;top:0;height:45%;z-index:1;background:linear-gradient(180deg,var(--vt,#0b1230) 0%,transparent 100%);opacity:.55}
+.fl{position:absolute;perspective:700px;animation:bob var(--bt,7s) ease-in-out infinite;animation-delay:var(--d,0s);will-change:transform}
+@keyframes bob{0%,100%{transform:translate3d(0,0,0)}50%{transform:translate3d(0,-16px,0)}}
+.cube{position:relative;width:var(--s);height:var(--s);transform-style:preserve-3d;animation:cubeSpin var(--t,16s) linear infinite;will-change:transform}
+.cube i{position:absolute;inset:0;border:1px solid #ffffffa0;background:linear-gradient(135deg,var(--c1),var(--c2));box-shadow:inset 0 0 20px #ffffff66,0 0 18px #ffffff22}
+.cube i:nth-child(1){transform:translateZ(calc(var(--s) / 2))}
+.cube i:nth-child(2){transform:rotateY(90deg) translateZ(calc(var(--s) / 2))}
+.cube i:nth-child(3){transform:rotateY(180deg) translateZ(calc(var(--s) / 2))}
+.cube i:nth-child(4){transform:rotateY(-90deg) translateZ(calc(var(--s) / 2))}
+.cube i:nth-child(5){transform:rotateX(90deg) translateZ(calc(var(--s) / 2))}
+.cube i:nth-child(6){transform:rotateX(-90deg) translateZ(calc(var(--s) / 2))}
+@keyframes cubeSpin{from{transform:rotateX(-20deg) rotateY(0deg)}to{transform:rotateX(340deg) rotateY(360deg)}}
+.ring3d{width:var(--s);height:var(--s);border-radius:50%;border:5px solid var(--r);box-shadow:0 0 22px var(--r),inset 0 0 18px #ffffff66;animation:ringSpin3 var(--t,10s) linear infinite;will-change:transform}
+@keyframes ringSpin3{from{transform:rotateX(65deg) rotateY(0deg)}to{transform:rotateX(65deg) rotateY(360deg)}}
+.sph{width:var(--s);height:var(--s);border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff 0%,var(--g) 38%,var(--c2) 100%);box-shadow:inset -8px -10px 20px #0004,0 14px 28px -8px #0005}
+.scene .sheen{position:absolute;inset:0;background:radial-gradient(600px 240px at 50% -10%,#ffffff2e,transparent 70%)}
+.lcard{box-shadow:0 1px 0 #fff inset,0 30px 60px -16px #0009,0 0 0 1px #ffffff55,0 0 44px -6px #ffffff55}
+.lcard .field.pw input{padding-right:78px}
+.lcard .pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:auto;margin:0;padding:5px 8px;border:0;border-radius:8px;background:transparent;color:#6b5fc7;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:5px;cursor:pointer;box-shadow:none;transition:background .15s ease,color .15s ease}
+.lcard .pw-toggle:hover{background:#f1efff;transform:translateY(-50%);box-shadow:none;color:#4338ca}
+.lcard .pw-toggle:active{transform:translateY(-50%) scale(.96);box-shadow:none}
+.lcard .pw-toggle:focus-visible{outline:2px solid #6d70f5;outline-offset:1px}
+.pw-toggle svg{width:16px;height:16px;flex:none}
+.pw-toggle .eye-off{display:none}
+.pw-toggle[aria-pressed="true"] .eye{display:none}.pw-toggle[aria-pressed="true"] .eye-off{display:inline}
+.lcard .field.pw .fly-letter{right:84px}
+@media(max-width:800px){.scene .hm{display:none}}
+@media(prefers-reduced-motion:reduce){.scene *,.scene *::before{animation:none!important}}
 </style></head><body>
 {% if session.role %}<div class="app"><aside class="emp">
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
@@ -738,11 +779,25 @@ def page(body, title="Productivity Tracker", **ctx):
                                   side_avatar=side_avatar)
 
 
-LOGIN = """<div class="win"><div class="wbar"><i></i><i></i><i></i></div>
-<div class="wbody"><div class="lcard">{% if role=='admin' %}<div class="lav">{{admin_avatar|safe}}</div>{% endif %}<h2>Welcome back</h2><p>{{title}}</p>
+LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></div>
+<div class="wbody"><div class="scene {{role}}" aria-hidden="true"><div class="sheen"></div>
+<div class="gfw"><div class="gf"></div></div>
+<div class="fl" style="left:5%;top:12%;--s:62px;--bt:8s"><div class="cube" style="--s:62px;--t:18s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+<div class="fl" style="right:6%;top:9%;--s:46px;--bt:6.5s;--d:-2s"><div class="cube" style="--s:46px;--t:13s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+<div class="fl hm" style="right:9%;bottom:14%;--s:74px;--bt:9s;--d:-4s"><div class="cube" style="--s:74px;--t:22s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+<div class="fl" style="left:8%;bottom:10%;--bt:7.5s;--d:-1s"><div class="ring3d" style="--s:84px;--t:11s"></div></div>
+<div class="fl hm" style="right:24%;top:5%;--bt:9s;--d:-3s"><div class="ring3d" style="--s:54px;--t:8s"></div></div>
+<div class="fl" style="left:22%;top:6%;--bt:6s;--d:-2.5s"><div class="sph" style="--s:26px"></div></div>
+<div class="fl hm" style="right:5%;top:46%;--bt:7s;--d:-1.5s"><div class="sph" style="--s:34px"></div></div>
+<div class="fl hm" style="left:4%;top:48%;--bt:8s;--d:-5s"><div class="sph" style="--s:20px"></div></div></div>
+<div class="lcard">{% if role=='admin' %}<div class="lav">{{admin_avatar|safe}}</div>{% endif %}<h2>Welcome back</h2><p>{{title}}</p>
 <form method="post">
 <div class="field"><input id="login_u" name="u" placeholder="{{ph}}" required autofocus autocomplete="off"></div>
-<div class="field"><input id="login_p" name="p" type="password" placeholder="Password" required autocomplete="off"></div>
+<div class="field pw"><input id="login_p" name="p" type="password" placeholder="Password" required autocomplete="off">
+<button type="button" class="pw-toggle" id="pw_toggle" aria-pressed="false" aria-label="Show password" title="Show password">
+<svg class="eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+<svg class="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.9 10.9 0 0 1 12 19c-7 0-11-7-11-7a19.8 19.8 0 0 1 5.1-5.9M9.9 4.2A10.6 10.6 0 0 1 12 5c7 0 11 7 11 7a19.7 19.7 0 0 1-3.2 4.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>
+<span class="pw-t">Show</span></button></div>
 <button>Log in</button></form></div></div>{% if role!='admin' %}<img class="orb" src="/photo/{{role}}" alt="">{% endif %}</div>
 <script>
 (function(){
@@ -776,7 +831,20 @@ LOGIN = """<div class="win"><div class="wbar"><i></i><i></i><i></i></div>
     lg.addEventListener('mouseleave', function(){ w.style.setProperty('--rx', '0deg'); w.style.setProperty('--ry', '0deg'); });
   }
   if (u) u.addEventListener('input', function(){ animate(u, false); });
-  if (p) p.addEventListener('input', function(){ animate(p, true); });
+  if (p) p.addEventListener('input', function(){ animate(p, p.type === 'password'); });
+  var tg = document.getElementById('pw_toggle');
+  if (tg && p) {
+    tg.addEventListener('mousedown', function(e){ e.preventDefault(); });   // keep focus/caret in the password box
+    tg.addEventListener('click', function(){
+      var show = p.type === 'password';
+      p.type = show ? 'text' : 'password';
+      tg.setAttribute('aria-pressed', show ? 'true' : 'false');
+      tg.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+      tg.title = show ? 'Hide password' : 'Show password';
+      tg.querySelector('.pw-t').textContent = show ? 'Hide' : 'Show';
+      p.focus();
+    });
+  }
 })();
 </script>"""
 

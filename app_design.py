@@ -20,6 +20,7 @@ CREDS_FILE = os.getenv("GOOGLE_CREDS", "credentials.json")
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
 ADMIN_PASS = os.getenv("ADMIN_PASS", "admin123")   # change this!
 DAY_HOURS = 8
+LEAVE_MONTHLY_LIMIT = 2        # days of leave an employee may apply for per calendar month
 PERMISSION_MONTHLY_LIMIT = 2   # hrs of permission an employee may apply for per calendar month
 WEEKOFF = (5, 6)   # weekly off days: 5 = Saturday, 6 = Sunday - working week is Monday-Friday.
 # Idle minutes of no activity before the system automatically logs someone out (recorded as "Auto (Inactivity)").
@@ -89,6 +90,7 @@ def _handle_sheets_api_error(e):
 app.secret_key = os.getenv("SECRET_KEY", "change-me")
 app.jinja_env.filters["g"] = lambda x: "%g" % (float(x) if str(x).strip() else 0)
 app.jinja_env.globals["PERMISSION_MONTHLY_LIMIT"] = PERMISSION_MONTHLY_LIMIT
+app.jinja_env.globals["LEAVE_MONTHLY_LIMIT"] = LEAVE_MONTHLY_LIMIT
 
 @app.before_request
 def _idle_auto_logout():
@@ -1132,7 +1134,12 @@ T_MISSED = """<form class="grid no-print" method="get"><input type="hidden" name
 {% for r in data %}<tr><td>{{r.date}}</td><td>{{r.day}}</td></tr>
 {% else %}<tr><td colspan="2">No missed entries.</td></tr>{% endfor %}</table>"""
 
-T_LEAVE = """<div class="card no-print"><h2>Add leave</h2><form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/leave" class="grid">
+T_LEAVE = """<p class="mut">This month's balance (working days / hours used against the monthly allowance; leave added here by admin does not count against the employee's limit).</p>
+<div class="kpis"><div class="kpi"><span>Leave used / limit</span><b>{{leave_used|g}} / {{LEAVE_MONTHLY_LIMIT|g}} day(s)</b></div>
+<div class="kpi"><span>Leave remaining</span><b>{{leave_remaining|g}} day(s)</b></div>
+<div class="kpi"><span>Permission used / limit</span><b>{{perm_used|g}} / {{PERMISSION_MONTHLY_LIMIT|g}} hrs</b></div>
+<div class="kpi"><span>Permission remaining</span><b>{{perm_remaining|g}} hrs</b></div></div>
+<div class="card no-print"><h2>Add leave</h2><form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/leave" class="grid">
 <label>From date<input type="date" name="d1" required></label><label>To date<input type="date" name="d2" required></label>
 <label>Reason<input name="reason" placeholder="Reason"></label><button class="primary">Add leave</button></form></div>
 <table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th><th>Reviewed at</th><th class="no-print"></th></tr>
@@ -1212,7 +1219,12 @@ def admin_employee_detail(eid):
                       key=lambda r: r["Date"], reverse=True)
         perms = sorted((r for r in rows("Permissions") if _key(r["Employee ID"]) == _key(eid)),
                        key=lambda r: r["Applied at"], reverse=True)
-        body = T_LEAVE; ctx["data"] = data; ctx["perms"] = perms
+        cur_month = today.strftime("%Y-%m")
+        lv_used = leave_days_used(eid, cur_month)
+        perm_used = permission_hours_used(eid, cur_month)
+        body = T_LEAVE; ctx.update(data=data, perms=perms,
+            leave_used=lv_used, leave_remaining=max(LEAVE_MONTHLY_LIMIT - lv_used, 0),
+            perm_used=perm_used, perm_remaining=round(PERMISSION_MONTHLY_LIMIT - perm_used, 2))
     elif tab == "holidays":
         data = sorted(rows("Holidays"), key=lambda r: str(r["Date"]), reverse=True)
         for r in data:
@@ -1449,11 +1461,23 @@ def live_leaves(leaves):
     return [l for l in leaves if leave_status(l) != "Rejected"]
 app.jinja_env.filters["lstatus"] = leave_status
 
-def add_leave(emp, d1, d2, reason, status="Pending"):
-    """Employees' leave starts as Pending (admin approves/rejects); leave added by admin is Approved."""
+def leave_days_used(eid, month):
+    """Working (non weekly-off, non-holiday) leave days already applied for (Pending + Approved;
+    Rejected doesn't count) by this employee in the given month ('YYYY-MM')."""
+    eid = str(eid)
+    return sum(1 for r in rows("Leave")
+               if str(r["Employee ID"]) == eid and str(r["Date"]).startswith(month)
+               and leave_status(r) != "Rejected" and not is_off(r["Date"]))
+
+def add_leave(emp, d1, d2, reason, status="Pending", enforce_limit=None):
+    """Employees' leave starts as Pending (admin approves/rejects); leave added by admin is Approved.
+    Self-service (Pending) requests are capped at LEAVE_MONTHLY_LIMIT working days per calendar month
+    (Pending + Approved count against the limit); admin-added leave is not capped unless requested."""
     a, b = dt.date.fromisoformat(d1), dt.date.fromisoformat(d2)
     if b < a or (b - a).days > 31:
         raise ValueError("Choose a valid date range (max 31 days).")
+    if enforce_limit is None:
+        enforce_limit = (status == "Pending")
     eid = str(emp["Employee ID"])
     have = {l["Date"] for l in live_leaves(rows("Leave")) if str(l["Employee ID"]) == eid}
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
@@ -1461,6 +1485,17 @@ def add_leave(emp, d1, d2, reason, status="Pending"):
            now if status != "Pending" else "", "Admin" if status != "Pending" else ""]
            for i in range((b - a).days + 1)]
     new = [r for r in new if r[0] not in have]
+    if enforce_limit and new:
+        added_by_month = {}
+        for r in new:
+            if not is_off(r[0]):
+                added_by_month[r[0][:7]] = added_by_month.get(r[0][:7], 0) + 1
+        for month, add_days in added_by_month.items():
+            used = leave_days_used(eid, month)
+            if used + add_days > LEAVE_MONTHLY_LIMIT:
+                remaining = max(LEAVE_MONTHLY_LIMIT - used, 0)
+                raise ValueError(f"Monthly leave limit is {LEAVE_MONTHLY_LIMIT:g} day(s). "
+                                  f"You have {remaining:g} day(s) remaining for {month}.")
     if new: ws_of("Leave").append_rows(new, value_input_option="RAW"); invalidate_cache("Leave")
     return len(new)
 
@@ -1589,7 +1624,11 @@ SUMMARY = """<div class="head ov-head"><div><h1>Overview</h1>
 
 LEAVE_EMP = """<div class="head"><h1>Leave &amp; Permission</h1><a href="/employee">Back to daily entry</a></div>
 
-<div class="card"><h2>Apply leave</h2><form method="post" action="/employee/leave" class="grid">
+<div class="card"><h2>Apply leave</h2><p class="mut">Up to {{leave_limit|g}} working day(s) of leave per calendar month (weekly-offs and holidays don't count against the limit).</p>
+<div class="kpis"><div class="kpi"><span>Monthly limit</span><b>{{leave_limit|g}} day(s)</b></div>
+<div class="kpi"><span>Used this month</span><b>{{leave_used|g}} day(s)</b></div>
+<div class="kpi"><span>Remaining</span><b>{{leave_remaining|g}} day(s)</b></div></div>
+<form method="post" action="/employee/leave" class="grid">
 <label>From date<input type="date" name="d1" value="{{today}}" required></label>
 <label>To date<input type="date" name="d2" value="{{today}}" required></label>
 <label>Reason<input name="reason" size="30" placeholder="Reason"></label>
@@ -1836,9 +1875,12 @@ def employee_leave():
                        key=lambda r: r["Applied at"], reverse=True)
     month = str(today_local())[:7]
     used = permission_hours_used(session["emp_id"], month)
+    lv_used = leave_days_used(session["emp_id"], month)
     return page(LEAVE_EMP, title="Leave & Permission", data=data, perm_data=perm_data, today=str(today_local()),
                 perm_limit=PERMISSION_MONTHLY_LIMIT, perm_used=used,
-                perm_remaining=round(PERMISSION_MONTHLY_LIMIT - used, 2))
+                perm_remaining=round(PERMISSION_MONTHLY_LIMIT - used, 2),
+                leave_limit=LEAVE_MONTHLY_LIMIT, leave_used=lv_used,
+                leave_remaining=max(LEAVE_MONTHLY_LIMIT - lv_used, 0))
 
 @app.route("/employee/leave/<int:row>/delete", methods=["POST"])
 @need("employee")

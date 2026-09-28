@@ -461,6 +461,11 @@ tbody tr{transition:background .15s ease}
 .flash{background:#eef0ff;border:1px solid #d6d9ff;padding:10px 14px;border-radius:10px;animation:fadeInUp .35s ease}
 .warn{background:#fff4e5;border:1px solid #ffd59a;color:#7a4b00;padding:12px 16px;border-radius:10px;margin-bottom:16px;font-size:14px;animation:fadeInUp .35s ease}
 .warn div{margin-top:4px}
+.warn-slide{border-left:5px solid #f59e0b;will-change:transform;
+ animation:slideInSide .7s cubic-bezier(.22,1,.36,1) both,nudgeSide 4s ease-in-out 1.2s infinite}
+@keyframes slideInSide{from{opacity:0;transform:translateX(-60px)}to{opacity:1;transform:translateX(0)}}
+@keyframes nudgeSide{0%,80%,100%{transform:translateX(0)}86%{transform:translateX(8px)}92%{transform:translateX(0)}96%{transform:translateX(4px)}}
+@media (prefers-reduced-motion:reduce){.warn-slide{animation:none}}
 .totals{background:#eef0ff;padding:10px 14px;border-radius:10px;margin:12px 0}
 .act{display:flex;gap:8px;align-items:center}.act form{margin:0}.act a{color:var(--pri);text-decoration:none;transition:color .2s ease}.act a:hover{color:#4338ca}
 @keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
@@ -588,8 +593,8 @@ LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th
 <form method="post" action="/entry/{{s.id}}/delete" onsubmit="return confirm('Delete this entry?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="8">Nothing yet.</td></tr>{% endfor %}</table>"""
 
-FORM = """<div class="card"><h2>{{heading}}</h2>
-<form method="post" action="{{action}}">
+FORM = """<div class="card" id="fc" style="transition:background .3s,border-color .3s"><h2>{{heading}}</h2>
+<form method="post" action="{{action}}" id="ef" oninput="calc()" onchange="calc()">
 <div class="grid">
 <label>Date<input type="date" name="date" value="{{sub.date}}" required></label>
 <label>Designation<input value="{{sub.designation}}" placeholder="Not set - ask admin" readonly></label>
@@ -603,7 +608,8 @@ FORM = """<div class="card"><h2>{{heading}}</h2>
 <div class="totals">Total day: <b>{{day}}</b> hrs &middot; Productive: <b id="tp">0</b> hrs &middot;
 Non-productive: <b id="tn">0</b> hrs &middot; Balance: <b id="tb">{{day}}</b> hrs &middot;
 Productivity: <b id="tpct">0</b>% <span class="mut">({{day}} productive hrs = 100%)</span></div>
-<button class="primary">Save</button></form></div>
+<div id="st" style="margin:10px 0;font-weight:600"></div>
+<button class="primary" id="sv" disabled>Save</button></form></div>
 <script>
 const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day}};
 const E=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -620,7 +626,17 @@ function addNote(n){n=n||{};document.getElementById('notes').appendChild(row(
 function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e.value||0),0);
  const p=s('[name=ph]'),n=s('[name=nh]'),b=DAY-p-n;
  tp.textContent=p;tn.textContent=n;tb.textContent=b;tb.style.color=b<0?'red':'';
- tpct.textContent=Math.min(Math.round(p/DAY*100),100)}
+ tpct.textContent=Math.min(Math.round(p/DAY*100),100);
+ const rs=[...document.querySelectorAll('#procs .r')];let met=rs.length>0,tg=0,ct=0;
+ rs.forEach(r=>{const nm=r.querySelector('[name=pn]').value,h=+r.querySelector('[name=ph]').value||0,c=+r.querySelector('[name=pc]').value||0,t=h*(T[nm]||0);
+  if(c<t)met=false;tg+=t;ct+=c});
+ const fc=document.getElementById('fc'),st=document.getElementById('st');
+ fc.style.background=met?'#e6f7ea':'#fdeaea';fc.style.borderColor=met?'#2e9e4f':'#d64545';
+ st.style.color=met?'#1e7a3a':'#b42323';
+ st.textContent=met?'Target completed ('+ct+' / '+Math.round(tg*100)/100+' count)':
+  (rs.length?'Target not completed ('+ct+' / '+Math.round(tg*100)/100+' count) - complete the hourly target':'Add a process entry and complete the hourly target');
+ const has=rs.length>0||document.querySelectorAll('#notes .r').length>0;
+ document.getElementById('sv').disabled=!(has&&document.getElementById('ef').checkValidity())}
 {{sub.procs|tojson}}.forEach(addProc);{{sub.notes|tojson}}.forEach(addNote);
 </script>"""
 
@@ -1149,7 +1165,7 @@ def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
         d += dt.timedelta(days=1)
     return out
 
-EMP_ALERT = """{% if missed or pend %}<div class="warn"><b>&#9888; Productivity entry pending</b>
+EMP_ALERT = """{% if missed or pend %}<div class="warn warn-slide"><b>&#9888; Productivity entry pending</b>
 {% if missed %}<div>You missed the entry for {{missed|length}} day(s) this month: {{missed|join(', ')}}.
 Pick that date in the form below and submit, or apply leave.</div>{% endif %}
 {% if pend %}<div>Today's entry is not submitted yet.</div>{% endif %}</div>{% endif %}

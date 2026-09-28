@@ -19,25 +19,7 @@ SHEET_ID = os.getenv("SHEET_ID", "1zh_W-ZDLEa3XZCt_a0iw8m5V8VxrUg3pj55FG0ZFJJg")
 CREDS_FILE = os.getenv("GOOGLE_CREDS", "credentials.json")
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
 ADMIN_PASS = os.getenv("ADMIN_PASS", "admin123")   # change this!
-DAY_HOURS = 8                  # maximum hours an employee can log in one day (entry cap)
-TARGET_KEY = "Daily productivity target (hrs)"   # row name in the 'Settings' sheet
-
-def target_hours():
-    """Daily productivity target in hours, set by Admin (Overview page -> Settings sheet).
-    Productivity % = productive hours / this target. Falls back to DAY_HOURS until admin sets one."""
-    try:
-        for r in rows("Settings"):
-            if str(r.get("Setting", "")).strip() == TARGET_KEY:
-                v = float(str(r.get("Value", "")).strip())
-                if 0 < v <= DAY_HOURS: return v
-    except Exception:
-        pass
-    return float(DAY_HOURS)
-
-def mood_ctx(hours, tgt):
-    """Happy / sad state for the 3D face icon: happy once productive hours reach the target."""
-    ok = hours >= tgt - 1e-9
-    return ("happy", "Target achieved!") if ok else ("sad", "Below target: %g of %g hrs" % (hours, tgt))
+DAY_HOURS = 8
 LEAVE_MONTHLY_LIMIT = 2        # days of leave an employee may apply for per calendar month
 PERMISSION_MONTHLY_LIMIT = 2   # hrs of permission an employee may apply for per calendar month
 WEEKOFF = (5, 6)   # weekly off days: 5 = Saturday, 6 = Sunday - working week is Monday-Friday.
@@ -80,8 +62,8 @@ HEADERS = {
     "Permissions": ["Permission ID", "Date", "Employee ID", "Employee name", "Band", "Hours", "Reason",
                      "Applied at", "Status", "Reviewed at", "Reviewed by"],
     "Holidays": ["Date", "Name"],
-    # Admin-controlled settings (e.g. the daily productivity target). One row per setting.
-    "Settings": ["Setting", "Value"],
+    # Admin-editable settings (currently: the daily productivity target in hours)
+    "Settings": ["Key", "Value"],
     # Background login/logout tracking (never shown to employees)
     "Attendance": ["Session ID", "Date", "Employee ID", "Employee name", "Band",
                    "Login time", "Logout time", "Duration", "Logout type"],
@@ -237,6 +219,21 @@ def num(x):
     try: return float(x)
     except (TypeError, ValueError): return 0.0
 
+TARGET_KEY = "Daily productivity target (hours)"
+def target_hours():
+    """Daily productivity target in hours, set by Admin (Overview page). Productivity % = productive hrs / this.
+    Falls back to DAY_HOURS until Admin sets one."""
+    try:
+        r = next((r for r in rows("Settings") if str(r.get("Key", "")).strip() == TARGET_KEY), None)
+        v = float(str(r.get("Value", "")).strip()) if r else 0.0
+    except Exception:
+        v = 0.0
+    return v if 0 < v <= 24 else float(DAY_HOURS)
+
+def day_limit():
+    """Most hours one day's entry may total: the normal working day, or the target if Admin set it higher."""
+    return max(float(DAY_HOURS), target_hours())
+
 def eq(a, b):
     return hmac.compare_digest(str(a).encode(), str(b).encode())
 
@@ -264,10 +261,10 @@ def find_designation(emp_id, name="", band=""):
     return str(e.get("Designation", "")).strip() if e else ""
 
 def load_subs():
+    T = target_hours()
     dm = desig_map()
     tph = {r["Process name"]: num(r["Target count / hour"]) for r in rows("Processes")}
     subs = {}
-    tgt = target_hours()
     for r in rows("Productivity log"):
         s = subs.setdefault(r["Submission ID"], dict(
             id=r["Submission ID"], date=r["Date"], band=r["Band"], emp_id=r["Employee ID"],
@@ -289,8 +286,7 @@ def load_subs():
         s["non"] = sum(n["hour"] for n in s["notes"])
         s["total"] = s["prod"] + s["non"]
         s["earned"] = sum(p["earned"] for p in s["procs"])     # hours' worth of standard output
-        s["pct"] = min(round(s["prod"] / tgt * 100), 100) if tgt else 0   # target hrs (set by admin) = 100%
-        s["met"] = s["prod"] >= tgt - 1e-9                                 # daily target achieved?
+        s["pct"] = min(round(s["prod"] / T * 100), 100) if T else 0  # target hrs (set by Admin) logged = 100%
         s["off"] = is_off(s["date"])                            # weekly-off entry: saved, not counted
     return sorted(subs.values(), key=lambda s: s["date"], reverse=True)
 
@@ -310,7 +306,7 @@ def parse_form():
            any(num(h) <= 0 and t.strip() for t, h in zip(g("nd"), g("nh")))
     if half: err = "Please enter the Hour for every process / note row you filled in - a row without hours is not saved."
     elif not procs and not notes: err = "Add at least one process or note with hours."
-    elif tot > DAY_HOURS: err = f"Total {tot:g} hrs is more than {DAY_HOURS} hrs."
+    elif tot > day_limit(): err = f"Total {tot:g} hrs is more than {day_limit():g} hrs."
     return request.form.get("date") or str(today_local()), procs, notes, err
 
 def write_sub(sid, date, emp, procs, notes):
@@ -517,6 +513,8 @@ tbody tr{transition:background .15s ease}
 .wbody{min-height:440px;border-radius:0 0 14px 14px;display:flex;align-items:center;justify-content:center;padding:32px;background:url(/static/login_bg.jpg) center/cover,linear-gradient(115deg,#4a2a7a 0%,#b4487c 40%,#f29a63 62%,#8b45a8 100%)}
 .lcard{background:#fff;border-radius:12px;padding:26px 28px;width:340px;max-width:100%;text-align:center;box-shadow:0 10px 30px #0003}
 .lcard img{width:112px;border-radius:22px}
+.lav{display:flex;justify-content:center;margin:0 0 8px}
+.lav .av3d{width:124px;height:124px;margin:0 0 8px}
 .lcard h2{font-family:Georgia,serif;color:#5b4fb0;font-size:27px;margin:8px 0 2px}
 .lcard p{margin:0 0 14px;color:var(--mut);font-size:13px}
 .lcard input{width:100%;margin:4px 0;border:1px solid #f08c8c;border-radius:8px;padding:10px;transition:box-shadow .15s ease,border-color .15s ease}
@@ -571,11 +569,11 @@ tbody tr{transition:background .15s ease}
 .rep-tools{display:flex;gap:8px;align-items:center;margin-bottom:14px}
 @media print{.exp,.rep-tools,.ov-tools{display:none!important}.rep-title{font-size:20px}table{font-size:11px}thead{display:table-header-group}tr{page-break-inside:avoid}}
 /* ================= Productivity-pending marquee ================= */
-.mq{position:sticky;top:8px;z-index:6;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent);mask-image:linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent);border-radius:12px;margin-bottom:16px;background:linear-gradient(180deg,#fff8ec,#ffecc9);border:1px solid #f4c977;color:#7a4b00;font-weight:600;box-shadow:0 1px 0 #fff inset,0 3px 0 #f0c37a88,0 12px 22px -8px #b7791f44;contain:content}
-.mq-track{display:flex;width:max-content;animation:mqScroll 60s linear infinite;will-change:transform}
+.mq{position:sticky;top:8px;z-index:6;overflow:hidden;border-radius:12px;margin-bottom:16px;background:linear-gradient(180deg,#fff8ec,#ffecc9);border:1px solid #f4c977;color:#7a4b00;font-weight:600;box-shadow:0 1px 0 #fff inset,0 3px 0 #f0c37a88,0 12px 22px -8px #b7791f44;contain:content}
+.mq-track{display:flex;width:max-content;animation:mqScroll 44s linear infinite;will-change:transform;backface-visibility:hidden}
 .mq:hover .mq-track{animation-play-state:paused}
-.mq-group{display:flex;flex:none}
-.mq-item{display:inline-flex;align-items:center;padding:12px 70px 12px 0;white-space:nowrap;font-size:14px}
+.mq-group{display:flex;flex:none;min-width:100vw;justify-content:space-around}
+.mq-item{display:inline-flex;align-items:center;padding:12px 64px 12px 0;white-space:nowrap;font-size:14px}
 @keyframes mqScroll{from{transform:translate3d(0,0,0)}to{transform:translate3d(-50%,0,0)}}
 @media(prefers-reduced-motion:reduce){.mq-track{animation:none!important;width:auto;flex-wrap:wrap}.mq-group[aria-hidden]{display:none}.mq-group{min-width:0}.mq-item{white-space:normal}}
 /* ================= Animated welcome line ================= */
@@ -603,14 +601,18 @@ tbody tr{transition:background .15s ease}
 .av-l:first-child{border-radius:50%;box-shadow:0 12px 22px -8px #4f46e577,0 0 0 3px #fff}
 @keyframes avSway{0%,100%{transform:rotateX(2deg) rotateY(-11deg) translateY(0)}50%{transform:rotateX(-2deg) rotateY(11deg) translateY(-3px)}}
 /* employee profile block in the left panel */
-.prof{margin-bottom:14px;padding:4px 10px 16px;border-bottom:1px solid #2b3560;display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px}
-.prof .av3d{width:112px;height:112px;margin:6px 0 10px}
-.prof-name{font-size:16px;font-weight:600;color:#fff;letter-spacing:.2px;text-shadow:0 2px 6px #0006;word-break:break-word}
-.prof-out{padding:5px 18px;color:#fff;background:#2b3560;border-radius:7px;font-size:13px;transition:background .2s ease,transform .15s ease}
+aside.emp{position:sticky;top:0;height:100vh;overflow-y:auto;align-self:flex-start}
+.prof{margin-top:auto;padding:14px 4px 6px;border-top:1px solid #2b3560;display:flex;flex-direction:column;gap:10px}
+.prof-row{display:flex;align-items:center;gap:12px}
+.prof-info{min-width:0;text-align:left}
+.prof .av3d{width:84px;height:84px;margin:0 0 6px}
+.prof-name{font-size:14.5px;font-weight:600;color:#fff;letter-spacing:.2px;text-shadow:0 2px 6px #0006;word-break:break-word;line-height:1.25}
+.prof-sub{font-size:12px;color:#9aa3c7;line-height:1.4;margin-top:2px;word-break:break-word}
+.prof-out{display:block;text-align:center;padding:6px 18px;color:#fff;background:#2b3560;border-radius:7px;font-size:13px;transition:background .2s ease,transform .15s ease}
 .prof-out:hover{background:#e5484d;transform:translateY(-1px)}
 @media print{.prof{display:none!important}}
 @media(max-width:800px){.av3d{width:72px;height:72px}.wflex{gap:12px}
-.prof{order:99;margin:0 0 0 auto;border:0;padding:0;flex-direction:row;gap:10px}.prof .av3d{width:44px;height:44px;margin:0}.prof-name{font-size:13px}}
+aside.emp{position:static;height:auto;overflow:visible;align-self:auto}.prof-sub{display:none}.prof-row{gap:8px}.prof{order:99;margin:0 0 0 auto;border:0;padding:0;flex-direction:row;gap:10px}.prof .av3d{width:44px;height:44px;margin:0}.prof-name{font-size:13px}}
 @media(prefers-reduced-motion:reduce){.av-stage{animation:none!important}}
 /* ================= Professional 3D look (Admin, Employee, Login) ================= */
 body{background:radial-gradient(1100px 520px at 8% -8%,#e7eaff 0%,transparent 60%),radial-gradient(900px 480px at 100% 0%,#f4e9ff 0%,transparent 55%),#f3f5fb}
@@ -638,34 +640,14 @@ table{box-shadow:0 1px 0 #fff inset,0 14px 28px -14px #1c234040}
 .blob{box-shadow:inset -20px -24px 42px #0000002e,inset 14px 14px 30px #ffffff66,0 34px 44px -24px #0000004a}
 @media(max-width:800px){.win{transform:none!important}.lcard{transform:none}}
 @media(prefers-reduced-motion:reduce){.win{transform:none!important}.kpi:hover{transform:none}}
-/* ================= 3D happy / sad productivity icon ================= */
-.hd-mood{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.mood3d{position:relative;display:inline-block;width:48px;height:48px;perspective:240px;flex:none;margin-bottom:6px}
-.mood3d::after{content:"";position:absolute;left:14%;right:14%;bottom:-8px;height:8px;border-radius:50%;background:radial-gradient(#1c234066,transparent 70%);animation:moodShadow 3.2s ease-in-out infinite}
-.mood-stage{position:relative;display:block;width:100%;height:100%;transform-style:preserve-3d;will-change:transform}
-.mood-l{position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible;transform:translateZ(var(--z,0px));pointer-events:none;filter:drop-shadow(0 6px 5px #1c234030)}
-.mood-l:first-child{filter:drop-shadow(0 8px 7px #1c234040)}
-.mood3d.happy .mood-stage{animation:moodHappy 3.2s ease-in-out infinite}
-.mood3d.sad .mood-stage{animation:moodSad 5s ease-in-out infinite}
-.mood3d .f-sad,.mood3d .m-base-s{display:none}
-.mood3d.sad .f-sad,.mood3d.sad .m-base-s{display:inline}
-.mood3d.sad .f-happy,.mood3d.sad .m-base-h{display:none}
-.mood3d.pop{animation:moodPop .5s cubic-bezier(.22,1,.36,1)}
-.m-tear{transform-box:fill-box;transform-origin:50% 0;animation:moodTear 2.6s ease-in infinite}
-.mood-txt{font-size:13px;font-weight:600;letter-spacing:.1px}
-.mood-txt.happy{color:#15803d}.mood-txt.sad{color:#b45309}
-@keyframes moodHappy{0%,100%{transform:translateY(0) rotateX(4deg) rotateY(-24deg) scale(1)}25%{transform:translateY(-7px) rotateX(-2deg) rotateY(0deg) scale(1.07)}50%{transform:translateY(0) rotateX(4deg) rotateY(24deg) scale(1)}75%{transform:translateY(-7px) rotateX(-2deg) rotateY(0deg) scale(1.07)}}
-@keyframes moodSad{0%,100%{transform:translateY(0) rotateX(12deg) rotateY(-14deg)}50%{transform:translateY(3px) rotateX(18deg) rotateY(14deg)}}
-@keyframes moodShadow{0%,100%{transform:scale(1);opacity:.9}25%,75%{transform:scale(.78);opacity:.55}50%{transform:scale(1);opacity:.9}}
-@keyframes moodTear{0%{transform:translateY(0) scale(.5);opacity:0}15%{transform:translateY(1px) scale(1);opacity:1}80%{opacity:1}100%{transform:translateY(26px) scale(1);opacity:0}}
-@keyframes moodPop{0%{transform:scale(.4)}60%{transform:scale(1.18)}100%{transform:scale(1)}}
-@media(prefers-reduced-motion:reduce){.mood3d .mood-stage,.mood3d::after,.m-tear,.mood3d.pop{animation:none!important}.mood-stage{transform:rotateY(-10deg)}}
 </style></head><body>
-{% if session.role %}<div class="app"><aside>
+{% if session.role %}<div class="app"><aside class="{{'emp' if session.role=='employee' else ''}}">
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
-{% if session.role=='employee' %}<div class="prof">{{side_avatar|safe}}<div class="prof-name">{{session.name}}</div><a class="prof-out" href="/logout">Logout</a></div>
-{% else %}<div class="me"><span>{{session.name}}</span><a href="/logout">Logout</a></div>{% endif %}
+{% if session.role!='employee' %}<div class="me"><span>{{session.name}}</span><a href="/logout">Logout</a></div>{% endif %}
 {% for h,l,on in nav %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endfor %}
+{% if session.role=='employee' %}<div class="prof"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div>
+{% if session.designation %}<div class="prof-sub">{{session.designation}}</div>{% endif %}<div class="prof-sub">{{session.emp_id}} &middot; Band {{session.band}}</div></div></div>
+<a class="prof-out" href="/logout">Logout</a></div>{% endif %}
 </aside>
 <main>{% for m in get_flashed_messages() %}<p class="flash">{{m}}</p>{% endfor %}{{body|safe}}</main></div>
 {% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for m in get_flashed_messages() %}<p class="flash" style="background:#fff">{{m}}</p>{% endfor %}{{body|safe}}</div>{% endif %}
@@ -706,11 +688,11 @@ def page(body, title="Productivity Tracker", **ctx):
 
 
 LOGIN = """<div class="win"><div class="wbar"><i></i><i></i><i></i></div>
-<div class="wbody"><div class="lcard"><h2>Welcome back</h2><p>{{title}}</p>
+<div class="wbody"><div class="lcard">{% if role=='admin' %}<div class="lav">{{admin_avatar|safe}}</div>{% endif %}<h2>Welcome back</h2><p>{{title}}</p>
 <form method="post">
 <div class="field"><input id="login_u" name="u" placeholder="{{ph}}" required autofocus autocomplete="off"></div>
 <div class="field"><input id="login_p" name="p" type="password" placeholder="Password" required autocomplete="off"></div>
-<button>Log in</button></form></div></div><img class="orb" src="/photo/{{role}}" alt=""></div>
+<button>Log in</button></form></div></div>{% if role!='admin' %}<img class="orb" src="/photo/{{role}}" alt="">{% endif %}</div>
 <script>
 (function(){
   function animate(input, masked){
@@ -771,23 +753,7 @@ LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th
 <form method="post" action="/entry/{{s.id}}/delete" onsubmit="return confirm('Delete this entry?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="8">Nothing yet.</td></tr>{% endfor %}</table>"""
 
-MOOD_HTML = """<span class="mood3d {{mood}}" id="mood" role="img" aria-label="{{mood_text}}"><span class="mood-stage">
-<svg class="mood-l" style="--z:0px" viewBox="0 0 100 100" aria-hidden="true"><defs>
-<radialGradient id="mgH" cx="35%" cy="28%" r="80%"><stop offset="0" stop-color="#fff6b0"/><stop offset=".55" stop-color="#ffcf3f"/><stop offset="1" stop-color="#f59e0b"/></radialGradient>
-<radialGradient id="mgS" cx="35%" cy="28%" r="80%"><stop offset="0" stop-color="#e0e7ff"/><stop offset=".55" stop-color="#93a4f5"/><stop offset="1" stop-color="#5b5fd6"/></radialGradient></defs>
-<circle class="m-base-h" cx="50" cy="50" r="47" fill="url(#mgH)"/><circle class="m-base-s" cx="50" cy="50" r="47" fill="url(#mgS)"/></svg>
-<svg class="mood-l" style="--z:5px" viewBox="0 0 100 100" aria-hidden="true"><ellipse cx="34" cy="24" rx="20" ry="10" fill="#fff" opacity=".38" transform="rotate(-24 34 24)"/></svg>
-<svg class="mood-l" style="--z:11px" viewBox="0 0 100 100" aria-hidden="true">
-<g class="f-happy"><path d="M25 43 Q33 32 41 43" fill="none" stroke="#7c3a00" stroke-width="5" stroke-linecap="round"/><path d="M59 43 Q67 32 75 43" fill="none" stroke="#7c3a00" stroke-width="5" stroke-linecap="round"/>
-<path d="M27 56 Q50 90 73 56 Z" fill="#7c3a00" stroke="#7c3a00" stroke-width="3" stroke-linejoin="round"/><path d="M36 64 Q50 74 64 64 Q50 69 36 64 Z" fill="#fff"/>
-<circle cx="24" cy="58" r="7" fill="#fb7185" opacity=".55"/><circle cx="76" cy="58" r="7" fill="#fb7185" opacity=".55"/></g>
-<g class="f-sad"><circle cx="34" cy="46" r="5.5" fill="#1e1b4b"/><circle cx="66" cy="46" r="5.5" fill="#1e1b4b"/>
-<path d="M24 34 L43 40" stroke="#1e1b4b" stroke-width="4" stroke-linecap="round"/><path d="M76 34 L57 40" stroke="#1e1b4b" stroke-width="4" stroke-linecap="round"/>
-<path d="M33 74 Q50 58 67 74" fill="none" stroke="#1e1b4b" stroke-width="5" stroke-linecap="round"/>
-<path class="m-tear" d="M31 54 Q26 63 31 66 Q36 63 31 54 Z" fill="#7dd3fc" stroke="#0ea5e9" stroke-width="1"/></g></svg>
-</span></span><small class="mood-txt {{mood}}" id="moodtxt">{{mood_text}}</small>"""
-
-FORM = """<div class="card"><h2 class="hd-mood">{{heading}}{% if mood %}""" + MOOD_HTML + """{% endif %}</h2>
+FORM = """<div class="card"><h2>{{heading}}</h2>
 <form method="post" action="{{action}}">
 <div class="grid">
 <label>Date<input type="date" name="date" value="{{sub.date}}" required></label>
@@ -799,12 +765,12 @@ FORM = """<div class="card"><h2 class="hd-mood">{{heading}}{% if mood %}""" + MO
 <button type="button" onclick="addProc()">+ Add process</button>
 <h3>Notes</h3><div id="notes"></div>
 <button type="button" onclick="addNote()">+ Add note</button>
-<div class="totals">Total day: <b>{{day}}</b> hrs &middot; Productive: <b id="tp">0</b> hrs &middot;
-Non-productive: <b id="tn">0</b> hrs &middot; Balance: <b id="tb">{{day}}</b> hrs &middot;
-Productivity: <b id="tpct">0</b>% <span class="mut">({{target|g}} productive hrs = 100%)</span></div>
+<div class="totals">Total day: <b>{{day|g}}</b> hrs &middot; Productive: <b id="tp">0</b> hrs &middot;
+Non-productive: <b id="tn">0</b> hrs &middot; Balance: <b id="tb">{{day|g}}</b> hrs &middot;
+Productivity: <b id="tpct">0</b>% <span class="mut">({{target|g}} productive hrs = 100%, target set by Admin)</span></div>
 <button class="primary">Save</button></form></div>
 <script>
-const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day}}, TGT={{target}}, SAVED={{saved_prod}};
+const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}};
 const E=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function row(h){const d=document.createElement('div');d.className='r';
  d.innerHTML=h+'<button type="button" class="danger" onclick="this.parentNode.remove();calc()">X</button>';return d}
@@ -819,12 +785,7 @@ function addNote(n){n=n||{};document.getElementById('notes').appendChild(row(
 function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e.value||0),0);
  const p=s('[name=ph]'),n=s('[name=nh]'),b=DAY-p-n;
  tp.textContent=p;tn.textContent=n;tb.textContent=b;tb.style.color=b<0?'red':'';
- tpct.textContent=Math.min(Math.round(p/TGT*100),100);
- const m=document.getElementById('mood');
- if(m){const tot=SAVED+p,ok=tot>=TGT-1e-9,cls=ok?'happy':'sad',t=document.getElementById('moodtxt'),
-  txt=ok?'Target achieved!':'Below target: '+(+tot.toFixed(2))+' of '+TGT+' hrs';
-  if(!m.classList.contains(cls)){m.classList.remove('happy','sad','pop');t.classList.remove('happy','sad');void m.offsetWidth;m.classList.add(cls,'pop');t.classList.add(cls)}
-  m.setAttribute('aria-label',txt);t.textContent=txt}}
+ tpct.textContent=Math.min(Math.round(p/TGT*100),100)}
 {{sub.procs|tojson}}.forEach(addProc);{{sub.notes|tojson}}.forEach(addNote);
 </script>"""
 
@@ -833,7 +794,7 @@ VIEW = """<div class="card"><h2>{{s.date}} &middot; {{s.emp_name}} ({{s.emp_id}}
 {% for p in s.procs %}<tr><td>{{p.name}}</td><td>{{p.desc}}</td><td>{{p.hour|g}}</td><td>{{p.count|g}}</td><td>{{p.target|g}}</td>
 <td>{{ (p.pct ~ '%') if p.pct is not none else '-' }}</td></tr>{% endfor %}</table><br>
 <table><tr><th>Notes</th><th>Hour</th></tr>{% for n in s.notes %}<tr><td>{{n.desc}}</td><td>{{n.hour|g}}</td></tr>{% endfor %}</table>
-<div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day}} hrs &middot; {% if s.off %}<b>Weekend entry - not counted</b>{% else %}Productivity: <b>{{s.pct}}%</b> ({{target|g}} hrs = 100%){% endif %}</div>
+<div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day|g}} hrs &middot; {% if s.off %}<b>Weekend entry - not counted</b>{% else %}Productivity: <b>{{s.pct}}%</b> ({{target|g}} hrs = 100%){% endif %}</div>
 <a href="{{back}}">Back</a></div>"""
 
 # ---------------------------------------------------------------- routes: common
@@ -867,7 +828,8 @@ def admin_login():
             track_login("ADMIN", "Admin", "-")
             return redirect("/admin/summary")
         flash("Wrong username or password.")
-    return page(LOGIN, title="Admin login", ph="Admin username", role="admin")
+    return page(LOGIN, title="Admin login", ph="Admin username", role="admin",
+                admin_avatar=render_template_string(AVATAR3D, gender="male", initials="A"))
 
 @app.route("/admin")
 @need("admin")
@@ -1391,14 +1353,11 @@ def employee_login():
         flash("Wrong username or password.")
     return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee")
 
-def form_page(sub, action, heading, saved_prod=0, show_mood=False):
+def form_page(sub, action, heading):
     procs = rows("Processes")
     names = [r["Process name"] for r in procs]
     tph = {r["Process name"]: num(r["Target count / hour"]) for r in procs}
-    tgt = target_hours()
-    mood, mood_text = mood_ctx(saved_prod, tgt) if show_mood else ("", "")
-    return FORM, dict(sub=sub, action=action, heading=heading, names=names, tph=tph, day=DAY_HOURS,
-                      target=tgt, saved_prod=saved_prod, mood=mood, mood_text=mood_text)
+    return FORM, dict(sub=sub, action=action, heading=heading, names=names, tph=tph, day=day_limit(), target=target_hours())
 
 def gender_of(emp):
     g = str(emp.get("Gender", "")).strip().lower()
@@ -1416,11 +1375,9 @@ def employee_home():
     sub = dict(date=today, band=session["band"], designation=session["designation"],
                emp_id=session["emp_id"], emp_name=session["name"],
                procs=[{}], notes=[{}])
+    body, ctx = form_page(sub, "/employee/save", "Daily productivity entry")
     all_mine = [s for s in load_subs() if s["emp_id"] == session["emp_id"]]
     mine = [s for s in all_mine if s["date"] == today]
-    # 3D happy/sad icon beside the heading: today's saved productive hours vs the admin's daily target
-    body, ctx = form_page(sub, "/employee/save", "Daily productivity entry",
-                          saved_prod=sum(s["prod"] for s in mine), show_mood=not is_off(today))
     first = today_local().replace(day=1)
     lv = rows("Leave"); t0 = today_local()
     k = report([my_emp()], all_mine, lv, first, t0)[0]
@@ -1500,7 +1457,7 @@ def entry_edit(sid):
 @app.route("/entry/<sid>/view")
 @need()
 def entry_view(sid):
-    return page(VIEW, title="Entry", s=get_sub(sid), day=DAY_HOURS, target=target_hours(), back=home())
+    return page(VIEW, title="Entry", s=get_sub(sid), day=day_limit(), target=target_hours(), back=home())
 
 @app.route("/entry/<sid>/delete", methods=["POST"])
 @need()
@@ -1528,7 +1485,7 @@ def month_range(m):
 
 def report(employees, subs, leaves, start, end):
     wd, a, b, out = workdays(start, end), str(start), str(end), []
-    tgt = target_hours()
+    T = target_hours()
     perms = rows("Permissions")     # fetched once, filtered per employee below
     leaves = live_leaves(leaves)    # rejected leave does not count
     for e in employees:
@@ -1540,7 +1497,7 @@ def report(employees, subs, leaves, start, end):
                        if str(r["Employee ID"]) == eid and a <= str(r["Date"]) <= b
                        and str(r.get("Status", "")).strip() == "Approved")
         prod_hrs = sum(s["prod"] for s in mine) + perm_hrs   # approved permission hours count toward productivity
-        base = len(days) * tgt                           # admin's daily target per present day = 100%
+        base = len(days) * T                             # target hrs (set by Admin) per present day = 100%
         out.append(dict(id=eid, name=e["Name"], band=e["Band"], designation=e.get("Designation", ""), present=len(days), leave=len(lv),
                         absent=max(wd - len(days | lv), 0), wd=wd,
                         att=min(round(len(days) / wd * 100), 100) if wd else 0,
@@ -1648,11 +1605,10 @@ def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
 EMP_MARQUEE = """{% if missed or pend %}{% set msg %}&#9888; Productivity entry pending &mdash;
 {% if missed %} You missed the entry for {{missed|length}} day(s) this month: {{missed|join(', ')}}. Pick that date in the form below and submit, or apply leave.{% endif %}
 {% if pend %} Today's entry is not submitted yet.{% endif %}{% endset %}
-{# constant slow speed (~55px/s) whatever the message length; enough copies per group to always fill wide screens #}
-{% set iw = (msg|striptags|trim|length) * 8 + 70 %}{% set n = [(2400 / iw)|round(0, 'ceil')|int, 2]|max %}
-<div class="mq" role="status"><div class="mq-track" style="animation-duration:{{ (n * iw / 55)|round|int }}s">
-<div class="mq-group">{% for i in range(n) %}<span class="mq-item">{{msg}}</span>{% endfor %}</div>
-<div class="mq-group" aria-hidden="true">{% for i in range(n) %}<span class="mq-item">{{msg}}</span>{% endfor %}</div>
+{% set dur = [44, ((msg|striptags|length) * 0.3)|int]|max %}
+<div class="mq" role="status"><div class="mq-track" style="animation-duration:{{dur}}s">
+<div class="mq-group"><span class="mq-item">{{msg}}</span></div>
+<div class="mq-group" aria-hidden="true"><span class="mq-item">{{msg}}</span></div>
 </div></div>{% endif %}"""
 
 EMP_ALERT = """{% if profile_incomplete %}<div class="warn"><b>&#9888; Personal details incomplete</b>
@@ -1692,7 +1648,7 @@ AVATAR3D = """<div class="av3d" role="img" aria-label="{{ (gender|capitalize) if
 </div></div>
 <script>
 (function(){var a=document.querySelector('.av3d');if(!a||!window.requestAnimationFrame)return;
-var w=a.closest('aside')||a,raf=0,px=0,py=0;
+var w=a.closest('aside')||a.closest('.lg')||a,raf=0,px=0,py=0;
 w.addEventListener('pointermove',function(e){var r=a.getBoundingClientRect();
 px=(e.clientX-(r.left+r.width/2))/260;py=(e.clientY-(r.top+r.height/2))/160;
 if(raf)return;raf=requestAnimationFrame(function(){raf=0;a.classList.add('live');
@@ -1707,11 +1663,16 @@ EMP_TOP = """<div class="head hero"><div class="welcome wflex"><div class="wtxt"
 {% if today_perm %}<span class="dot">&middot;</span>Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div></div></div>""" + KPI
 
 SUMMARY = """<div class="head ov-head"><div><h1>Overview</h1>
-<p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; {{target|g}} hrs (daily target set by admin) per present day (capped at 100%).</p></div>
+<p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; the daily target of {{target|g}} hrs per present day (capped at 100%).</p></div>
 <div class="ov-tools no-print">
 <button type="button" class="btnl pbtn" onclick="window.print()" title="Print this overview"><span aria-hidden="true">&#128438;</span> Print</button>
 <form class="grid" method="get" style="margin:0"><input type="month" name="month" value="{{month if month!='all' else ''}}">
-<button class="primary pbtn">Show</button><a href="/admin/summary?month=all">All time</a></form></div></div>""" + KPI + """
+<button class="primary pbtn">Show</button><a href="/admin/summary?month=all">All time</a></form></div></div>
+<div class="card no-print"><h2>Daily productivity target</h2>
+<form method="post" action="/admin/settings/target" class="grid">
+<label>Target (hours per day)<input type="number" name="target" step="0.25" min="0.5" max="24" value="{{target|g}}" required></label>
+<button class="primary">Save target</button></form>
+<p class="mut">Every employee's Productivity % = productive hours &divide; this target. Currently <b>{{target|g}} hrs</b> = 100%. Changing it recalculates all productivity figures.</p></div>""" + KPI + """
 <table><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Productivity</th></tr>
 {% for r in rep %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>
@@ -1800,27 +1761,6 @@ def admin_personal_edit(row):
         return redirect("/admin/personal")
     return page(PERSONAL_EDIT, title="Personal details", emp=emp, fields=EDITABLE_PERSONAL)
 
-TARGET_CARD = """<div class="card no-print target-card"><h2>Daily productivity target</h2>
-<p class="mut">Employees' Productivity % = productive hours logged &divide; this target. Currently <b>{{target|g}}</b> hrs per day.
-A happy icon shows on the employee's entry page when the target is met, a sad one when it is not.</p>
-<form method="post" action="/admin/target" class="grid">
-<label>Target hours per day<input type="number" name="target" step="0.25" min="0.25" max="{{day_max}}" value="{{target|g}}" required></label>
-<button class="primary">Save target</button></form></div>"""
-
-@app.route("/admin/target", methods=["POST"])
-@need("admin")
-def admin_set_target():
-    try: v = float(request.form.get("target", "").strip())
-    except ValueError: v = 0
-    if not (0 < v <= DAY_HOURS):
-        flash(f"Enter a target between 0.25 and {DAY_HOURS:g} hours."); return redirect("/admin/summary")
-    ws = ws_of("Settings")
-    cur = next((r for r in rows("Settings") if str(r.get("Setting", "")).strip() == TARGET_KEY), None)
-    if cur: ws.update(range_name=f"B{cur['_row']}", values=[["%g" % v]], value_input_option="RAW")
-    else: ws.append_row([TARGET_KEY, "%g" % v], value_input_option="RAW")
-    invalidate_cache("Settings")
-    flash(f"Daily productivity target set to {v:g} hrs."); return redirect("/admin/summary")
-
 @app.route("/admin/summary")
 @need("admin")
 def admin_summary():
@@ -1839,9 +1779,26 @@ def admin_summary():
     extra = [("Employees", len(rep)), ("Total leave days", sum(r["leave"] for r in rep))]
     # Missed-entries list is intentionally NOT shown on the Overview page any more;
     # it lives only on the dedicated "Missed entries" page (/admin/missed).
-    return page(SUMMARY + TARGET_CARD, title="Overview", target=target_hours(), day_max=DAY_HOURS,
-                rep=rep, month=month, label=label, wd=workdays(start, end),
-                lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra)
+    return page(SUMMARY, title="Overview", rep=rep, month=month, label=label, wd=workdays(start, end),
+                lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra, target=target_hours())
+
+@app.route("/admin/settings/target", methods=["POST"])
+@need("admin")
+def admin_set_target():
+    try:
+        v = round(float(request.form.get("target", "").strip()), 2)
+        if not 0.5 <= v <= 24: raise ValueError
+    except ValueError:
+        flash("Enter a daily target between 0.5 and 24 hours."); return redirect("/admin/summary")
+    ws = ws_of("Settings")
+    keys = ws.col_values(1)
+    if TARGET_KEY in keys:
+        ws.update(range_name=f"B{keys.index(TARGET_KEY) + 1}", values=[[v]], value_input_option="RAW")
+    else:
+        ws.append_row([TARGET_KEY, v], value_input_option="RAW")
+    invalidate_cache("Settings")
+    flash(f"Daily productivity target set to {v:g} hrs. Productivity % now uses this target.")
+    return redirect("/admin/summary")
 
 MISSED = """<div class="head"><div><h1>Missed entries</h1>
 <p class="mut">{{label}} &middot; Working days (weekly off excluded) with no productivity entry and no leave. Today is not included.</p></div>

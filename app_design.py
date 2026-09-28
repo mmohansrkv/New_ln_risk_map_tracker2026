@@ -260,12 +260,21 @@ def get_sub(sid):
 
 def parse_form():
     g = request.form.getlist
-    procs = [(n, num(h), num(c), d.strip()) for n, h, c, d in zip(g("pn"), g("ph"), g("pc"), g("pd")) if num(h) > 0]
-    notes = [(t.strip(), num(h)) for t, h in zip(g("nd"), g("nh")) if num(h) > 0]
+    raw = list(zip(g("pn"), g("ph"), g("pc"), g("pd")))
+    procs, err = [], None
+    for n, h, c, d in raw:
+        n, h, c, d = (n or "").strip(), (h or "").strip(), (c or "").strip(), (d or "").strip()
+        if not n and not h and not c and not d:
+            continue   # a fully blank spare row from the UI - just ignore it
+        if not n or not h or num(h) <= 0 or not c or not d:
+            err = "Process / Description, Hour, Count and Description are all required for every process entry."
+            break
+        procs.append((n, num(h), num(c), d))
+    notes = [] if err else [(t.strip(), num(h)) for t, h in zip(g("nd"), g("nh")) if num(h) > 0]
     tot = sum(p[1] for p in procs) + sum(n[1] for n in notes)
-    err = None
-    if not procs and not notes: err = "Add at least one process or note with hours."
-    elif tot > DAY_HOURS: err = f"Total {tot:g} hrs is more than {DAY_HOURS} hrs."
+    if not err:
+        if not procs and not notes: err = "Add at least one process or note with hours."
+        elif tot > DAY_HOURS: err = f"Total {tot:g} hrs is more than {DAY_HOURS} hrs."
     return request.form.get("date") or str(today_local()), procs, notes, err
 
 def write_sub(sid, date, emp, procs, notes):
@@ -579,8 +588,8 @@ LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th
 <form method="post" action="/entry/{{s.id}}/delete" onsubmit="return confirm('Delete this entry?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="8">Nothing yet.</td></tr>{% endfor %}</table>"""
 
-FORM = """<div class="card"><h2>{{heading}}</h2>
-<form method="post" action="{{action}}">
+FORM = """<div class="card" id="fc" style="transition:background .3s,border-color .3s"><h2>{{heading}}</h2>
+<form method="post" action="{{action}}" id="ef" oninput="calc()" onchange="calc()">
 <div class="grid">
 <label>Date<input type="date" name="date" value="{{sub.date}}" required></label>
 <label>Designation<input value="{{sub.designation}}" placeholder="Not set - ask admin" readonly></label>
@@ -594,24 +603,35 @@ FORM = """<div class="card"><h2>{{heading}}</h2>
 <div class="totals">Total day: <b>{{day}}</b> hrs &middot; Productive: <b id="tp">0</b> hrs &middot;
 Non-productive: <b id="tn">0</b> hrs &middot; Balance: <b id="tb">{{day}}</b> hrs &middot;
 Productivity: <b id="tpct">0</b>% <span class="mut">({{day}} productive hrs = 100%)</span></div>
-<button class="primary">Save</button></form></div>
+<div id="st" style="margin:10px 0;font-weight:600"></div>
+<button class="primary" id="sv" disabled>Save</button></form></div>
 <script>
 const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day}};
 const E=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function row(h){const d=document.createElement('div');d.className='r';
  d.innerHTML=h+'<button type="button" class="danger" onclick="this.parentNode.remove();calc()">X</button>';return d}
 function addProc(p){p=p||{};document.getElementById('procs').appendChild(row(
- '<select name="pn" onchange="calc()">'+P.map(n=>'<option '+(n==p.name?'selected':'')+'>'+E(n)+'</option>').join('')+'</select>'+
- '<input name="ph" type="number" step="0.25" min="0" placeholder="Hour" value="'+(p.hour||'')+'" oninput="calc()">'+
- '<input name="pc" type="number" min="0" placeholder="Count" value="'+(p.count||'')+'" oninput="calc()">'+
- '<input name="pd" placeholder="Description" size="28" value="'+E(p.desc)+'">'));calc()}
+ '<select name="pn" onchange="calc()" required>'+P.map(n=>'<option '+(n==p.name?'selected':'')+'>'+E(n)+'</option>').join('')+'</select>'+
+ '<input name="ph" type="number" step="0.25" min="0.01" placeholder="Hour" value="'+(p.hour||'')+'" oninput="calc()" required>'+
+ '<input name="pc" type="number" min="0" placeholder="Count" value="'+(p.count||'')+'" oninput="calc()" required>'+
+ '<input name="pd" placeholder="Description" size="28" value="'+E(p.desc)+'" required>'));calc()}
 function addNote(n){n=n||{};document.getElementById('notes').appendChild(row(
  '<input name="nd" placeholder="Description" size="30" value="'+E(n.desc)+'">'+
  '<input name="nh" type="number" step="0.25" min="0" placeholder="Hour" value="'+(n.hour||'')+'" oninput="calc()">'));calc()}
 function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e.value||0),0);
  const p=s('[name=ph]'),n=s('[name=nh]'),b=DAY-p-n;
  tp.textContent=p;tn.textContent=n;tb.textContent=b;tb.style.color=b<0?'red':'';
- tpct.textContent=Math.min(Math.round(p/DAY*100),100)}
+ tpct.textContent=Math.min(Math.round(p/DAY*100),100);
+ const rs=[...document.querySelectorAll('#procs .r')];let met=rs.length>0,tg=0,ct=0;
+ rs.forEach(r=>{const nm=r.querySelector('[name=pn]').value,h=+r.querySelector('[name=ph]').value||0,c=+r.querySelector('[name=pc]').value||0,t=h*(T[nm]||0);
+  if(c<t)met=false;tg+=t;ct+=c});
+ const fc=document.getElementById('fc'),st=document.getElementById('st');
+ fc.style.background=met?'#e6f7ea':'#fdeaea';fc.style.borderColor=met?'#2e9e4f':'#d64545';
+ st.style.color=met?'#1e7a3a':'#b42323';
+ st.textContent=met?'Target completed ('+ct+' / '+Math.round(tg*100)/100+' count)':
+  (rs.length?'Target not completed ('+ct+' / '+Math.round(tg*100)/100+' count) - complete the hourly target':'Add a process entry and complete the hourly target');
+ const has=rs.length>0||document.querySelectorAll('#notes .r').length>0;
+ document.getElementById('sv').disabled=!(has&&document.getElementById('ef').checkValidity())}
 {{sub.procs|tojson}}.forEach(addProc);{{sub.notes|tojson}}.forEach(addNote);
 </script>"""
 

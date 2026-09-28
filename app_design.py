@@ -617,9 +617,9 @@ function row(h){const d=document.createElement('div');d.className='r';
  d.innerHTML=h+'<button type="button" class="danger" onclick="this.parentNode.remove();calc()">X</button>';return d}
 function addProc(p){p=p||{};document.getElementById('procs').appendChild(row(
  '<select name="pn" onchange="calc()" required>'+P.map(n=>'<option '+(n==p.name?'selected':'')+'>'+E(n)+'</option>').join('')+'</select>'+
- '<input name="ph" type="number" step="0.25" min="0.01" placeholder="Hour" value="'+(p.hour||'')+'" oninput="calc()" required>'+
+ '<input name="ph" type="number" step="0.25" min="0.25" placeholder="Hour" value="'+(p.hour||'')+'" oninput="calc()" required>'+
  '<input name="pc" type="number" min="0" placeholder="Count" value="'+(p.count||'')+'" oninput="calc()" required>'+
- '<input name="pd" placeholder="Description" size="28" value="'+E(p.desc)+'" required>'));calc()}
+ '<input name="pd" placeholder="Description" size="28" value="'+E(p.desc)+'" required pattern=".*\\S.*" title="Description is required">'));calc()}
 function addNote(n){n=n||{};document.getElementById('notes').appendChild(row(
  '<input name="nd" placeholder="Description" size="30" value="'+E(n.desc)+'">'+
  '<input name="nh" type="number" step="0.25" min="0" placeholder="Hour" value="'+(n.hour||'')+'" oninput="calc()">'));calc()}

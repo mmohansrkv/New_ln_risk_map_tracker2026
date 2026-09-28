@@ -1907,12 +1907,19 @@ SUMMARY = """<div class="head ov-head"><div><h1>Overview</h1>
 <td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td></tr>
 {% else %}<tr><td colspan="9">No employees yet.</td></tr>{% endfor %}</table>"""
 
-LEAVE_EMP = """<div class="head"><h1>Leave &amp; Permission</h1><a href="/employee">Back to daily entry</a></div>
+LEAVE_EMP = """<style>
+.lp{font-size:12px}
+.lp h1{font-size:18px}.lp h2{font-size:14px;margin:12px 0 6px}
+.lp .mut,.lp p{font-size:11.5px;margin:2px 0 6px}
+.lp label,.lp input,.lp button,.lp select{font-size:12px}
+.lp input,.lp button{padding:5px 8px}
+.lp .card{padding:12px 14px}
+.lpsum{list-style:none;margin:6px 0 10px;padding:8px 12px;display:flex;flex-wrap:wrap;gap:4px 22px;background:#f7f8fc;border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--mut)}
+.lpsum li{margin:0;line-height:1.4}.lpsum b{color:var(--ink);font-size:12px;font-weight:600}
+</style><div class="lp"><div class="head"><h1>Leave &amp; Permission</h1><a href="/employee">Back to daily entry</a></div>
 
 <div class="card"><h2>Apply leave</h2><p class="mut">Up to {{leave_limit|g}} working day(s) of leave per calendar month (weekly-offs and holidays don't count against the limit).</p>
-<div class="kpis"><div class="kpi"><span>Monthly limit</span><b>{{leave_limit|g}} day(s)</b></div>
-<div class="kpi"><span>Used this month</span><b>{{leave_used|g}} day(s)</b></div>
-<div class="kpi"><span>Remaining</span><b>{{leave_remaining|g}} day(s)</b></div></div>
+<ul class="lpsum"><li>Monthly Limit: <b>{{leave_limit|g}} day(s)</b></li><li>Used This Month: <b>{{leave_used|g}} day(s)</b></li><li>Remaining: <b>{{leave_remaining|g}} day(s)</b></li></ul>
 <form method="post" action="/employee/leave" class="grid">
 <label>From date<input type="date" name="d1" value="{{today}}" required></label>
 <label>To date<input type="date" name="d2" value="{{today}}" required></label>
@@ -1926,9 +1933,7 @@ LEAVE_EMP = """<div class="head"><h1>Leave &amp; Permission</h1><a href="/employ
 {% else %}<tr><td colspan="5">No leave yet.</td></tr>{% endfor %}</table>
 
 <div class="card"><h2>Apply permission</h2><p class="mut">Permission can only be applied for today ({{today}}) - use it if you need to arrive late, leave early, or step out during work hours. One request per day, up to {{perm_limit|g}} hrs total per month.</p>
-<div class="kpis"><div class="kpi"><span>Monthly limit</span><b>{{perm_limit|g}} hrs</b></div>
-<div class="kpi"><span>Used this month</span><b>{{perm_used|g}} hrs</b></div>
-<div class="kpi"><span>Remaining</span><b>{{perm_remaining|g}} hrs</b></div></div>
+<ul class="lpsum"><li>Monthly Limit: <b>{{perm_limit|g}} hrs</b></li><li>Used This Month: <b>{{perm_used|g}} hrs</b></li><li>Remaining: <b>{{perm_remaining|g}} hrs</b></li></ul>
 <form method="post" action="/employee/permission" class="grid">
 <label>Date<input value="{{today}}" readonly></label>
 <label>Hours<input type="number" name="hours" step="0.25" min="0.25" max="{{perm_limit}}" placeholder="e.g. 1" required></label>
@@ -1938,7 +1943,7 @@ LEAVE_EMP = """<div class="head"><h1>Leave &amp; Permission</h1><a href="/employ
 {% for r in perm_data %}<tr><td>{{r['Date']}}</td><td>{{r['Hours']|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
 <td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td>
 <td>{% if r['Status']=='Pending' %}<form method="post" action="/employee/permission/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this request?')"><button class="danger">Cancel</button></form>{% else %}-{% endif %}</td></tr>
-{% else %}<tr><td colspan="6">No permission requests yet.</td></tr>{% endfor %}</table>"""
+{% else %}<tr><td colspan="6">No permission requests yet.</td></tr>{% endfor %}</table></div>"""
 
 LEAVE_ADMIN = """<div class="head"><h1>Leave log</h1></div>
 <div class="card"><form method="post" class="grid">

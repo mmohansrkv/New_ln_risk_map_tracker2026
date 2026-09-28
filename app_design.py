@@ -685,6 +685,12 @@ table{box-shadow:0 1px 0 #fff inset,0 14px 28px -14px #1c234040}
 .blob{box-shadow:inset -20px -24px 42px #0000002e,inset 14px 14px 30px #ffffff66,0 34px 44px -24px #0000004a}
 @media(max-width:800px){.win{transform:none!important}.lcard{transform:none}}
 @media(prefers-reduced-motion:reduce){.win{transform:none!important}.kpi:hover{transform:none}}
+/* ---- compact, consistent text size for all Employee & Admin logs/tables ---- */
+table th,table td{font-size:12px!important;line-height:1.3!important;padding:5px 8px!important;font-weight:400}
+table th{font-weight:600!important;color:var(--mut)}
+table td b,table td a,table td .pill,table td small,table th small{font-size:inherit!important}
+table .pill{padding:1px 8px!important;font-size:11px!important}
+table td small,table th small{font-size:10.5px!important}
 </style></head><body>
 {% if session.role %}<div class="app"><aside class="emp">
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
@@ -1463,7 +1469,7 @@ def employee_login():
                 session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"],
                                designation=str(e.get("Designation", "")))
                 track_login(session["emp_id"], session["name"], session["band"])
-                return redirect("/employee")
+                return redirect("/employee/welcome")
         flash("Wrong username or password.")
     return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee")
 
@@ -1486,6 +1492,20 @@ def gender_of(emp):
 def initials_of(name):
     parts = str(name).replace(".", " ").split()
     return "".join(p[0] for p in parts[:2]).upper() or "?"
+
+WELCOME = """<style>
+.wl{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#c9b8f6 0%,#fbd3e2 45%,#b9d2f8 100%);animation:fadeInUp .5s ease}
+.wl-card{background:#fff;border-radius:16px;padding:34px 46px;text-align:center;box-shadow:0 20px 50px #0003;animation:fadeInUp .6s cubic-bezier(.22,1,.36,1)}
+.wl-card h1{font-size:26px;margin:0 0 6px;color:#4f46e5}.wl-card p{margin:0;color:var(--mut);font-size:13px}
+</style>
+<div class="wl"><div class="wl-card"><h1>Welcome, {{session.name}}</h1><p>Taking you to your page&hellip;</p></div></div>
+<script>setTimeout(function(){window.location.replace('/employee')},2000)</script>
+<noscript><meta http-equiv="refresh" content="2;url=/employee"></noscript>"""
+
+@app.route("/employee/welcome")
+@need("employee")
+def employee_welcome():
+    return page(WELCOME, title="Welcome")
 
 @app.route("/employee")
 @need("employee")

@@ -26,21 +26,33 @@ WEEKOFF = (5, 6)   # weekly off days: 5 = Saturday, 6 = Sunday - working week is
 # Idle minutes of no activity before the system automatically logs someone out (recorded as "Auto (Inactivity)").
 SESSION_IDLE_MINUTES = int(os.getenv("SESSION_IDLE_MINUTES", "30"))
 
-_holidays_cache = None
-def holidays():
-    """Set of holiday date strings ('YYYY-MM-DD'), read from the 'Holidays' sheet."""
+_holidays_cache = None      # (fetched_at, {date: name}); reset whenever the Holidays sheet is written
+def holiday_map():
+    """{'YYYY-MM-DD': holiday name} read from the 'Holidays' sheet (short-lived cache so an admin change shows up quickly)."""
     global _holidays_cache
-    if _holidays_cache is None:
+    c = _holidays_cache
+    if c is None or time.monotonic() - c[0] > _ROWS_CACHE_TTL:
         try:
-            _holidays_cache = {str(r["Date"]).strip() for r in rows("Holidays") if r.get("Date")}
+            m = {str(r["Date"]).strip(): str(r.get("Name") or "").strip() for r in rows("Holidays") if r.get("Date")}
         except Exception:
-            _holidays_cache = set()
-    return _holidays_cache
+            m = c[1] if c else {}
+        c = _holidays_cache = (time.monotonic(), m)
+    return c[1]
+
+def holidays():
+    """Set of holiday date strings ('YYYY-MM-DD')."""
+    return set(holiday_map())
+
+def is_holiday(d):
+    return str(d).strip() in holiday_map()
+
+def holiday_name(d):
+    return holiday_map().get(str(d).strip(), "")
 
 def is_off(d):
     """True for weekly-off days AND declared holidays - both are excluded from working days."""
     ds = str(d)
-    if ds in holidays(): return True
+    if ds in holiday_map(): return True
     try: return dt.date.fromisoformat(ds).weekday() in WEEKOFF
     except ValueError: return False
 
@@ -192,6 +204,8 @@ def invalidate_cache(name=None):
         if has_request_context(): session["fresh_until"] = time.time() + 10
     except Exception:
         pass
+    global _holidays_cache
+    if name is None or name == "Holidays": _holidays_cache = None
     with _rows_cache_lock:
         if name is None:
             _rows_cache.clear()
@@ -320,6 +334,8 @@ def parse_form(emp_id):
     if d is None: err = "Please choose a valid date."
     elif session.get("role") == "employee" and d > today_local():
         err = "Future dates are not allowed. You can only add or update entries for today or earlier dates."
+    elif session.get("role") == "employee" and is_holiday(date):
+        err = f"{date} is a holiday{(' (' + holiday_name(date) + ')') if holiday_name(date) else ''}. Productivity entries cannot be submitted or updated for a holiday."
     elif not procs: err = "Add at least one process entry."
     elif any(not str(n).strip() or not str(h).strip() or not str(c).strip() or not desc.strip() or num(h) <= 0
              for n, h, c, desc in rows_p):
@@ -1057,31 +1073,44 @@ def admin_log_export():
 
 # ---------------------------------------------------------------- admin: Leave & Permission Log (all employees)
 LP_LOG = """<div class="head"><div><h1>Leave &amp; Permission Log</h1>
-<p class="mut">{{label}} &middot; every employee's leave and permission requests with dates, duration, reason and approval status. Both leave and permission requests need admin approval - use Approve / Reject in the Action column (a decision can be changed later).</p></div></div>
+<p class="mut">{{label}} &middot; every employee's leave and permission requests with dates, duration, reason and approval status. Both leave and permission requests need admin approval - use Approve / Reject in the Action column (a decision can be changed later). Holidays declared by admin are shown here too: employees cannot submit leave or productivity entries on a holiday, and holidays never reduce leave balance or count as missed entries.</p></div></div>
+<div class="card no-print"><h2>&#127774; Mark a Holiday</h2>
+<form method="post" action="/admin/leave-permission/holiday" class="grid">
+<input type="hidden" name="next" value="{{here}}">
+<label>From date<input type="date" name="d1" required></label>
+<label>To date (optional)<input type="date" name="d2"></label>
+<label>Holiday name<input name="name" placeholder="e.g. Diwali" required></label>
+<button class="primary">Mark as Holiday</button></form></div>
 <div class="kpis">
 <div class="kpi"><span>Leave requests</span><b>{{n_leave}}</b></div>
 <div class="kpi"><span>Leave days</span><b>{{leave_days}}</b></div>
 <div class="kpi"><span>Permission requests</span><b>{{n_perm}}</b></div>
 <div class="kpi"><span>Approved permission hrs</span><b>{{perm_hrs|g}}</b></div>
-<div class="kpi"><span>Pending approval</span><b>{{n_pending}}</b></div></div>
+<div class="kpi"><span>Pending approval</span><b>{{n_pending}}</b></div>
+<div class="kpi"><span>Holidays</span><b>{{n_hol}}</b></div></div>
 <div class="card no-print"><form method="get" class="grid">
 <label>Month<input type="month" name="month" value="{{month if month!='all' else ''}}"></label>
 <label>Employee ID / name<input name="emp" value="{{emp}}" placeholder="Search"></label>
-<label>Type<select name="type">{% for v,l in [('','All'),('leave','Leave'),('permission','Permission')] %}<option value="{{v}}" {{'selected' if v==typ else ''}}>{{l}}</option>{% endfor %}</select></label>
-<label>Status<select name="status">{% for v in ['','Pending','Approved','Rejected'] %}<option value="{{v}}" {{'selected' if v==status else ''}}>{{v or 'All'}}</option>{% endfor %}</select></label>
+<label>Type<select name="type">{% for v,l in [('','All'),('leave','Leave'),('permission','Permission'),('holiday','Holiday')] %}<option value="{{v}}" {{'selected' if v==typ else ''}}>{{l}}</option>{% endfor %}</select></label>
+<label>Status<select name="status">{% for v in ['','Pending','Approved','Rejected','Holiday'] %}<option value="{{v}}" {{'selected' if v==status else ''}}>{{v or 'All'}}</option>{% endfor %}</select></label>
 <button class="primary pbtn">Filter</button><a href="/admin/leave-permission?month=all">All time</a><a href="/admin/leave-permission">This month</a>
 <button type="button" class="btnl pbtn" onclick="window.print()">&#128438; Print</button></form></div>
 <div style="overflow-x:auto"><table><tr><th>Type</th><th>Employee</th><th>Designation</th><th>Band</th><th>From</th><th>To</th><th>Duration</th>
 <th>Reason</th><th>Applied at</th><th>Status</th><th>Reviewed</th><th class="no-print">Action</th></tr>
-{% for r in rows %}<tr><td><span class="pill {{'act' if r.type=='Permission' else ''}}">{{r.type}}</span></td>
+{% for r in rows %}{% if r.type=='Holiday' %}<tr style="background:rgba(245,158,11,.12)"><td><span class="pill act">&#127774; Holiday</span></td>
+<td colspan="3"><b>{{r.name}}</b> &middot; all employees</td>
+<td>{{r.start}}</td><td>{{r.end}}</td><td>1 day</td><td>Declared holiday - no leave / productivity entries; leave balance unaffected</td><td>-</td>
+<td><span class="pill act">Holiday</span></td><td>-</td>
+<td class="act no-print"><form method="post" action="/admin/leave-permission/holiday/delete" onsubmit="return confirm('Remove this holiday? Employees will be able to submit entries for this date again.')"><input type="hidden" name="date" value="{{r.start}}"><input type="hidden" name="next" value="{{here}}"><button class="danger">Remove</button></form></td></tr>
+{% else %}<tr><td><span class="pill {{'act' if r.type=='Permission' else ''}}">{{r.type}}</span></td>
 <td><a href="/admin/employee-info/{{r.eid|urlencode}}?tab=leave">{{r.eid}} &middot; {{r.name}}</a></td><td>{{r.desig}}</td><td>{{r.band}}</td>
 <td>{{r.start}}</td><td>{{r.end}}</td><td>{{r.dur}}</td><td>{{r.reason}}</td><td>{{r.applied}}</td>
 <td><span class="pill {{r.status|ppill}}">{{r.status}}</span></td>
 <td>{% if r.reviewed %}{{r.reviewed}}{% if r.by %} &middot; {{r.by}}{% endif %}{% else %}-{% endif %}</td>
 <td class="act no-print">{% set perm = r.type=='Permission' %}
 {% if r.status!='Approved' %}<form method="post" action="{{ ('/admin/employee-info/' ~ (r.eid|urlencode) ~ '/permission/' ~ r.row ~ '/approve') if perm else '/admin/leave-permission/leave-review' }}">{% if not perm %}<input type="hidden" name="eid" value="{{r.eid}}"><input type="hidden" name="rows" value="{{r.lrows}}"><input type="hidden" name="status" value="Approved">{% endif %}<input type="hidden" name="next" value="{{here}}"><button class="primary">Approve</button></form>{% endif %}
-{% if r.status!='Rejected' %}<form method="post" action="{{ ('/admin/employee-info/' ~ (r.eid|urlencode) ~ '/permission/' ~ r.row ~ '/reject') if perm else '/admin/leave-permission/leave-review' }}" onsubmit="return confirm('Reject this request?')">{% if not perm %}<input type="hidden" name="eid" value="{{r.eid}}"><input type="hidden" name="rows" value="{{r.lrows}}"><input type="hidden" name="status" value="Rejected">{% endif %}<input type="hidden" name="next" value="{{here}}"><button class="danger">Reject</button></form>{% endif %}</td></tr>
-{% else %}<tr><td colspan="12">No leave or permission records found.</td></tr>{% endfor %}</table></div>"""
+{% if r.status!='Rejected' %}<form method="post" action="{{ ('/admin/employee-info/' ~ (r.eid|urlencode) ~ '/permission/' ~ r.row ~ '/reject') if perm else '/admin/leave-permission/leave-review' }}" onsubmit="return confirm('Reject this request?')">{% if not perm %}<input type="hidden" name="eid" value="{{r.eid}}"><input type="hidden" name="rows" value="{{r.lrows}}"><input type="hidden" name="status" value="Rejected">{% endif %}<input type="hidden" name="next" value="{{here}}"><button class="danger">Reject</button></form>{% endif %}</td></tr>{% endif %}
+{% else %}<tr><td colspan="12">No leave, permission or holiday records found.</td></tr>{% endfor %}</table></div>"""
 
 @app.route("/admin/leave-permission/leave-review", methods=["POST"])
 @need("admin")
@@ -1157,6 +1186,12 @@ def admin_leave_permission():
                      applied=x.get("Applied at", ""), status=str(x.get("Status", "")).strip() or "Pending",
                      reviewed=x.get("Reviewed at", ""), by=x.get("Reviewed by", ""), row=x["_row"])
             if match(r): out.append(r)
+    if typ in ("", "holiday"):
+        for d, nm in holiday_map().items():
+            if not (m0 <= d <= m1): continue
+            r = dict(eid="", name=nm or "Holiday", band="", desig="", type="Holiday", start=d, end=d, dur="1 day", days=0, hrs=0,
+                     reason=nm, applied="", status="Holiday", reviewed="", by="", row=0, lrows="")
+            if not q or q in nm.lower(): out.append(r)
     if status: out = [r for r in out if r["status"] == status]
     out.sort(key=lambda r: (str(r["start"]), str(r["applied"])), reverse=True)
     perm = [r for r in out if r["type"] == "Permission"]
@@ -1164,7 +1199,38 @@ def admin_leave_permission():
                 typ=typ, status=status, here=request.full_path.rstrip("?"),
                 n_leave=sum(r["type"] == "Leave" for r in out), leave_days=sum(r["days"] for r in out if r["status"] != "Rejected"),
                 n_perm=len(perm), perm_hrs=sum(r["hrs"] for r in perm if r["status"] == "Approved"),
-                n_pending=sum(r["status"] == "Pending" for r in out))
+                n_pending=sum(r["status"] == "Pending" for r in out), n_hol=sum(r["type"] == "Holiday" for r in out))
+
+@app.route("/admin/leave-permission/holiday", methods=["POST"])
+@need("admin")
+def admin_holiday_add():
+    """Mark one date (or a range) as a holiday. Employees can no longer submit leave / productivity for it."""
+    nxt = request.form.get("next", "")
+    back = nxt if nxt.startswith("/admin/") else "/admin/leave-permission"
+    d1 = (request.form.get("d1") or "").strip(); d2 = (request.form.get("d2") or "").strip() or d1
+    name = (request.form.get("name") or "").strip() or "Holiday"
+    try:
+        a, b = dt.date.fromisoformat(d1), dt.date.fromisoformat(d2)
+        if b < a or (b - a).days > 31: raise ValueError
+    except ValueError:
+        flash("Choose a valid holiday date (or date range, max 31 days)."); return redirect(back)
+    have = holidays()
+    new = [[str(a + dt.timedelta(days=i)), name] for i in range((b - a).days + 1) if str(a + dt.timedelta(days=i)) not in have]
+    if new:
+        ws_of("Holidays").append_rows(new, value_input_option="RAW"); invalidate_cache("Holidays")
+    flash(f"{len(new)} holiday date(s) marked as '{name}'." if new else "Those dates are already holidays.")
+    return redirect(back)
+
+@app.route("/admin/leave-permission/holiday/delete", methods=["POST"])
+@need("admin")
+def admin_holiday_delete():
+    nxt = request.form.get("next", "")
+    date = (request.form.get("date") or "").strip()
+    hits = sorted((r["_row"] for r in rows("Holidays") if str(r.get("Date")).strip() == date), reverse=True)
+    for rw in hits: ws_of("Holidays").delete_rows(rw)
+    if hits: invalidate_cache("Holidays")
+    flash(f"Holiday on {date} removed." if hits else "Holiday not found.")
+    return redirect(nxt if nxt.startswith("/admin/") else "/admin/leave-permission")
 
 # ---------------------------------------------------------------- admin: notifications
 NOTIF = """<div class="head"><div><h1>Notifications</h1>
@@ -1347,7 +1413,8 @@ def admin_employee_detail(eid):
 def admin_employee_leave_add(eid):
     emp = emp_or_404(eid)
     try:
-        flash(f"{add_leave(emp, request.form['d1'], request.form['d2'], request.form['reason'].strip(), status="Approved")} leave day(s) added.")
+        leave_range_check(request.form['d1'], request.form['d2'])
+        flash(f"{add_leave(emp, request.form['d1'], request.form['d2'], request.form['reason'].strip(), status="Approved")} leave day(s) added (holiday dates are skipped).")
     except (ValueError, TypeError) as e:
         flash(str(e))
     return redirect(f"/admin/employee-info/{eid}?tab=leave")
@@ -1528,7 +1595,7 @@ app.jinja_env.filters["tone"] = lambda v: "" if v >= 90 else ("a" if v >= 75 els
 def workdays(start, end):          # Mon-Sat (Sunday = weekly off)
     n, d = 0, start
     while d <= end:
-        n += d.weekday() not in WEEKOFF
+        n += not is_off(d)          # weekly offs AND holidays are not working days
         d += dt.timedelta(days=1)
     return n
 
@@ -1594,7 +1661,7 @@ def add_leave(emp, d1, d2, reason, status="Pending", enforce_limit=None):
     new = [[str(a + dt.timedelta(days=i)), eid, emp["Name"], emp["Band"], reason or "Leave", now, status,
            now if status != "Pending" else "", "Admin" if status != "Pending" else ""]
            for i in range((b - a).days + 1)]
-    new = [r for r in new if r[0] not in have]
+    new = [r for r in new if r[0] not in have and not is_holiday(r[0])]   # nothing is recorded against a holiday
     if enforce_limit and new:
         added_by_month = {}
         for r in new:
@@ -1609,6 +1676,21 @@ def add_leave(emp, d1, d2, reason, status="Pending", enforce_limit=None):
     if new: ws_of("Leave").append_rows(new, value_input_option="RAW"); invalidate_cache("Leave")
     return len(new)
 
+def holidays_in_range(d1, d2):
+    """Sorted holiday dates between two ISO dates (inclusive)."""
+    try: a, b = dt.date.fromisoformat(d1), dt.date.fromisoformat(d2)
+    except ValueError: return []
+    return [str(a + dt.timedelta(days=i)) for i in range((b - a).days + 1) if is_holiday(a + dt.timedelta(days=i))]
+
+def leave_range_check(d1, d2):
+    """Raises if every day of the range is a holiday; returns the holiday dates that will be skipped."""
+    hol = holidays_in_range(d1, d2)
+    try: total = (dt.date.fromisoformat(d2) - dt.date.fromisoformat(d1)).days + 1
+    except ValueError: return hol
+    if hol and len(hol) >= total:
+        raise ValueError(f"{', '.join(hol)} {'is a holiday' if total == 1 else 'are holidays'} - leave cannot be applied for a holiday.")
+    return hol
+
 def permission_hours_used(eid, month):
     """Hours already applied for (Pending + Approved; Rejected doesn't count) by this employee
     in the given month ('YYYY-MM')."""
@@ -1621,6 +1703,8 @@ def add_permission(emp, reason, hours):
     """Employees may only apply for permission for the current day, once per day, and only up to
     PERMISSION_MONTHLY_LIMIT hrs total (Pending + Approved) per calendar month."""
     eid, date = str(emp["Employee ID"]), str(today_local())
+    if is_holiday(date):
+        raise ValueError(f"Today ({date}) is a holiday - permission cannot be applied for a holiday.")
     if any(str(r["Employee ID"]) == eid and r["Date"] == date for r in rows("Permissions")):
         raise ValueError("You have already applied for permission today.")
     try:
@@ -1647,14 +1731,14 @@ def permission_pill(status):
 app.jinja_env.filters["ppill"] = permission_pill
 
 def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
-    """Working days (Mon-Sat) in start..end with no entry and no leave."""
+    """Working days (weekly offs and holidays excluded) in start..end with no entry and no leave."""
     eid = str(eid)
     leaves = live_leaves(leaves)
     done = {s["date"] for s in subs if str(s["emp_id"]) == eid} | \
            {l["Date"] for l in leaves if str(l["Employee ID"]) == eid}
     out, d = [], start
     while d <= end:
-        if d.weekday() not in WEEKOFF and str(d) not in done:
+        if not is_off(d) and str(d) not in done:
             out.append(d.strftime(fmt))
         d += dt.timedelta(days=1)
     return out
@@ -1725,11 +1809,7 @@ SUMMARY = """<div class="head ov-head"><div><h1>Overview</h1>
 <button type="button" class="btnl pbtn" onclick="window.print()" title="Print this overview"><span aria-hidden="true">&#128438;</span> Print</button>
 <form class="grid" method="get" style="margin:0"><input type="month" name="month" value="{{month if month!='all' else ''}}">
 <button class="primary pbtn">Show</button><a href="/admin/summary?month=all">All time</a></form></div></div>
-<div class="card no-print"><h2>Daily productivity target</h2>
-<form method="post" action="/admin/settings/target" class="grid">
-<label>Target (hours per day)<input type="number" name="target" step="0.25" min="0.5" max="24" value="{{target|g}}" required></label>
-<button class="primary">Save target</button></form>
-<p class="mut">Every employee's Productivity % = productive hours &divide; this target. Currently <b>{{target|g}} hrs</b> = 100%. Changing it recalculates all productivity figures.</p></div>""" + KPI + """
+""" + KPI + """
 <table><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Productivity</th></tr>
 {% for r in rep %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>
@@ -1749,6 +1829,7 @@ LEAVE_EMP = """<div class="head"><h1>Leave &amp; Permission</h1><a href="/employ
 <label>To date<input type="date" name="d2" value="{{today}}" required></label>
 <label>Reason<input name="reason" size="30" placeholder="Reason"></label>
 <button class="primary">Submit leave</button></form></div>
+{% if hols %}<p class="mut">&#127774; <b>Upcoming holidays</b> (no leave, permission or productivity entry needed): {% for d,n in hols %}{{d}}{% if n %} - {{n}}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
 <h2>My leave days</h2><table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
 {% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
 <td><span class="pill {{st|ppill}}">{{st}}</span></td>
@@ -1928,7 +2009,8 @@ def admin_leave():
     if request.method == "POST":
         emp = next((e for e in emps if str(e["Employee ID"]) == request.form["emp"]), None)
         try:
-            flash(f"{add_leave(emp, request.form['d1'], request.form['d2'], request.form['reason'].strip(), status="Approved")} leave day(s) added.")
+            leave_range_check(request.form['d1'], request.form['d2'])
+            flash(f"{add_leave(emp, request.form['d1'], request.form['d2'], request.form['reason'].strip(), status="Approved")} leave day(s) added (holiday dates are skipped).")
         except (ValueError, TypeError) as e:
             flash(str(e))
         return redirect("/admin/leave")
@@ -1999,7 +2081,10 @@ def employee_password():
 def employee_leave():
     if request.method == "POST":
         try:
-            flash(f"{add_leave(my_emp(), request.form['d1'], request.form['d2'], request.form['reason'].strip())} leave day(s) submitted - waiting for admin approval.")
+            skipped = leave_range_check(request.form['d1'], request.form['d2'])
+            n = add_leave(my_emp(), request.form['d1'], request.form['d2'], request.form['reason'].strip())
+            flash(f"{n} leave day(s) submitted - waiting for admin approval." +
+                  (f" Holiday date(s) {', '.join(skipped)} were skipped (leave is not needed on a holiday)." if skipped else ""))
         except ValueError as e:
             flash(str(e))
         return redirect("/employee/leave")
@@ -2010,7 +2095,8 @@ def employee_leave():
     month = str(today_local())[:7]
     used = permission_hours_used(session["emp_id"], month)
     lv_used = leave_days_used(session["emp_id"], month)
-    return page(LEAVE_EMP, title="Leave & Permission", data=data, perm_data=perm_data, today=str(today_local()),
+    hols = sorted((d, n) for d, n in holiday_map().items() if d >= str(today_local()))[:10]
+    return page(LEAVE_EMP, title="Leave & Permission", hols=hols, data=data, perm_data=perm_data, today=str(today_local()),
                 perm_limit=PERMISSION_MONTHLY_LIMIT, perm_used=used,
                 perm_remaining=round(PERMISSION_MONTHLY_LIMIT - used, 2),
                 leave_limit=LEAVE_MONTHLY_LIMIT, leave_used=lv_used,

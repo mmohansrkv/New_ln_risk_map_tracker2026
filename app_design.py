@@ -461,11 +461,11 @@ tbody tr{transition:background .15s ease}
 .flash{background:#eef0ff;border:1px solid #d6d9ff;padding:10px 14px;border-radius:10px;animation:fadeInUp .35s ease}
 .warn{background:#fff4e5;border:1px solid #ffd59a;color:#7a4b00;padding:12px 16px;border-radius:10px;margin-bottom:16px;font-size:14px;animation:fadeInUp .35s ease}
 .warn div{margin-top:4px}
-.warn-slide{border-left:5px solid #f59e0b;will-change:transform;
- animation:slideInSide .7s cubic-bezier(.22,1,.36,1) both,nudgeSide 4s ease-in-out 1.2s infinite}
-@keyframes slideInSide{from{opacity:0;transform:translateX(-60px)}to{opacity:1;transform:translateX(0)}}
-@keyframes nudgeSide{0%,80%,100%{transform:translateX(0)}86%{transform:translateX(8px)}92%{transform:translateX(0)}96%{transform:translateX(4px)}}
-@media (prefers-reduced-motion:reduce){.warn-slide{animation:none}}
+.ticker{position:sticky;top:0;z-index:50;overflow:hidden;white-space:nowrap;background:#fff4e5;border:1px solid #ffd59a;border-left:5px solid #f59e0b;color:#7a4b00;border-radius:10px;margin-bottom:16px;padding:10px 0;font-size:14px;font-weight:500}
+.ticker-track{display:inline-block;padding-left:100%;will-change:transform;animation:tickerMove 22s linear infinite}
+.ticker:hover .ticker-track{animation-play-state:paused}
+@keyframes tickerMove{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+@media (prefers-reduced-motion:reduce){.ticker{white-space:normal;padding:10px 14px}.ticker-track{animation:none;padding-left:0}}
 .totals{background:#eef0ff;padding:10px 14px;border-radius:10px;margin:12px 0}
 .act{display:flex;gap:8px;align-items:center}.act form{margin:0}.act a{color:var(--pri);text-decoration:none;transition:color .2s ease}.act a:hover{color:#4338ca}
 @keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
@@ -990,7 +990,7 @@ def employee_home():
     today_perm = next((r for r in rows("Permissions")
                        if str(r["Employee ID"]) == session["emp_id"] and r["Date"] == today), None)
     perm_used = permission_hours_used(session["emp_id"], today[:7])
-    return page(EMP_TOP + EMP_ALERT + body + '<h2>Submitted today</h2>' + LIST,
+    return page(EMP_TICKER + EMP_TOP + EMP_ALERT + body + '<h2>Submitted today</h2>' + LIST,
                 title="Daily productivity", missed=missed, pend=pend, subs=mine,
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
                 a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete,
@@ -1165,11 +1165,11 @@ def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
         d += dt.timedelta(days=1)
     return out
 
-EMP_ALERT = """{% if missed or pend %}<div class="warn warn-slide"><b>&#9888; Productivity entry pending</b>
-{% if missed %}<div>You missed the entry for {{missed|length}} day(s) this month: {{missed|join(', ')}}.
-Pick that date in the form below and submit, or apply leave.</div>{% endif %}
-{% if pend %}<div>Today's entry is not submitted yet.</div>{% endif %}</div>{% endif %}
-{% if profile_incomplete %}<div class="warn"><b>&#9888; Personal details incomplete</b>
+EMP_TICKER = """{% if missed or pend %}<div class="ticker" role="alert"><div class="ticker-track"><span>&#9888; <b>Productivity entry pending</b>
+{% if missed %} &mdash; You missed the entry for {{missed|length}} day(s) this month: {{missed|join(', ')}}. Pick that date in the form below and submit, or apply leave.{% endif %}
+{% if pend %} &mdash; Today's entry is not submitted yet.{% endif %}</span></div></div>{% endif %}"""
+
+EMP_ALERT = """{% if profile_incomplete %}<div class="warn"><b>&#9888; Personal details incomplete</b>
 <div>Please <a href="/employee/profile">complete your personal details</a>.</div></div>{% endif %}"""
 
 ADMIN_ALERT = """{% if miss or pend %}<div class="warn"><b>&#9888; Missed entries - {{mlabel}}</b>

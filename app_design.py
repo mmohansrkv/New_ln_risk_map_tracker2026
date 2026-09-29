@@ -3229,8 +3229,17 @@ def mlog_valid(qs):
     for n, q in enumerate(good, 1): q["no"] = n
     return good
 
+_mlog_ttl = {}
+def _mlog_rows(name, fresh=False):
+    """Publish/access flags decide who sees the menu item, so they must not lag behind Admin's change on other server
+    workers (the general cache may serve data up to ROWS_STALE_TTL seconds old). Re-read at most every 3 seconds."""
+    c = _mlog_ttl.get(name)
+    if fresh or not c or time.monotonic() - c[0] > 3:
+        c = _mlog_ttl[name] = (time.monotonic(), _fetch_rows(name))
+    return [dict(r) for r in c[1]]
+
 def mlog_published(fresh=False):
-    src = _fetch_rows("Settings") if fresh else rows("Settings")
+    src = _mlog_rows("Settings", fresh)
     r = next((r for r in src if str(r.get("Key", "")).strip() == MLOG_PUB_KEY), None)
     return bool(r) and str(r.get("Value", "")).strip().lower() == "yes"
 
@@ -3243,7 +3252,7 @@ def mlog_set_published(on):
     invalidate_cache("Settings")
 
 def mlog_access_map(fresh=False):
-    src = _fetch_rows(MLOG_ACCESS) if fresh else rows(MLOG_ACCESS)
+    src = _mlog_rows(MLOG_ACCESS, fresh)
     return {_key(r["Employee ID"]): str(r.get("Enabled", "")).strip().lower() == "yes"
             for r in src if str(r.get("Employee ID", "")).strip()}
 
@@ -3297,6 +3306,7 @@ MLOG_ADMIN = MLOG_CSS + """<div class="head"><div><h1>""" + MLOG_SHEET + """</h1
 <div class="card"><h2>1. Publish <span class="pill {{'in' if pub else 'act'}}">{{'Published' if pub else 'Draft - hidden from all employees'}}</span></h2>
 <div class="totals">Questions in sheet: <b>{{qs|length}}</b> &middot; Ready to share: <b>{{ok}}</b> &middot; Need fixing: <b>{{bad}}</b>
 &middot; Employees with access: <b>{{granted}}</b> of {{emps|length}}</div>
+<p class="mut" style="margin:8px 0">Employees can view it right now: <b>{{'YES - ' ~ granted ~ ' employee(s)' if can_view else 'NO'}}</b>{% if not can_view %} &mdash; {{why}}{% endif %}</p>
 {% if bad %}<p class="flash err">{{bad}} question(s) are not valid (see the list below). They are never shown to employees, and the log cannot be published until they are fixed.</p>{% endif %}
 <form method="post" action="/admin/mlog/publish">
 {% if pub %}<button name="do" value="unpublish" onclick="return confirm('Hide the log from every employee?')">Unpublish</button>
@@ -3342,9 +3352,14 @@ def admin_mlog():
         for n in (MLOG_SHEET, MLOG_ACCESS, "Settings"): invalidate_cache(n)
     prefetch("Employees", "Settings", MLOG_SHEET, MLOG_ACCESS)
     qs = mlog_questions(); mlog_valid(qs); emps = _mlog_emps()      # mlog_valid numbers the valid ones for the preview
+    _ok = sum(1 for q in qs if not q["err"]); _gr = sum(1 for e in emps if e["on"]); _pub = mlog_published()
+    _mlog_can_view = _pub and _gr > 0 and _ok > 0
+    _mlog_why = ("it is not published yet (press Publish)" if not _pub else
+                 "no employee has been granted access (tick employees in section 2 and press Save)" if not _gr else
+                 "the sheet has no valid questions (check the Correct Answer column)")
     return page(MLOG_ADMIN, title=MLOG_SHEET, sheet=MLOG_SHEET, qs=qs, emps=emps, pub=mlog_published(),
                 ok=sum(1 for q in qs if not q["err"]), bad=sum(1 for q in qs if q["err"]),
-                granted=sum(1 for e in emps if e["on"]))
+                granted=sum(1 for e in emps if e["on"]), can_view=_mlog_can_view, why=_mlog_why)
 
 @app.route("/admin/mlog/publish", methods=["POST"])
 @need("admin")

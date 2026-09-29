@@ -985,10 +985,11 @@ poll();setInterval(poll,15000)})();
 </script>{% endif %}
 {% if session.role=='employee' %}<button id="bgm" type="button" aria-label="Turn background music off" title="Background music" hidden>&#128266;</button><script>
 (function(){
-/* Employee-only background music: lazy-loaded after the page is ready, low volume, looping.
-   Stops when the employee leaves the employee pages / logs out (the page unloads). */
+/* Employee-only background music: lazy-loaded after the page is ready, clearly audible, looping.
+   Never rendered for Admin. Stops when the employee leaves the employee pages / logs out (the page unloads). */
 var SRC="https://commons.wikimedia.org/wiki/Special:FilePath/Erik_Satie_-_gymnopedies_-_la_1_ere._lent_et_douloureux.ogg";
-var VOL=0.12,a=null,btn=document.getElementById('bgm'),muted=false,armed=false;
+var VOL=0.5,a=null,   /* default volume: comfortable but clearly audible (0 = silent, 1 = max) */
+    btn=document.getElementById('bgm'),muted=false,armed=false;
 function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
 function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
 function icon(){if(!btn)return;btn.innerHTML=muted?'&#128263;':'&#128266;';
@@ -1008,6 +1009,7 @@ function init(){
    muted=!muted;put('bgmMuted',muted?'1':'0');icon();if(muted)a.pause();else tryPlay()})}
  setInterval(savePos,4000);tryPlay();}
 window.addEventListener('pagehide',function(){savePos();if(a)a.pause()});
+document.addEventListener('click',function(e){var l=e.target.closest&&e.target.closest('a[href="/logout"]');if(l&&a){savePos();a.pause()}},true);   /* stop the moment Logout is clicked */
 window.addEventListener('pageshow',function(e){if(e.persisted&&a)tryPlay()});
 document.addEventListener('visibilitychange',function(){if(!a)return;if(document.hidden)a.pause();else tryPlay()});
 function start(){setTimeout(init,600)}   /* after load, so it never competes with the page itself */

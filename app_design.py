@@ -3189,26 +3189,43 @@ def _mlog_letter(v):
     m = re.fullmatch(r"(?:option\s*)?[\(\[]?\s*([A-Da-d])\s*[\)\]\.\:]?", str(v or "").strip(), re.I)
     return m.group(1).upper() if m else ""
 
+def _mlog_answer(v, opts):
+    """Correct Answer cell -> letter. Accepts C / c / 'C.' / '(c)' / 'Option C', a number 1-4, or the answer's own text."""
+    v = str(v or "").strip()
+    L = _mlog_letter(v)
+    if L: return L
+    if re.fullmatch(r"[1-4]", v): return MLOG_LETTERS[int(v) - 1]
+    clean = v
+    for c in MLOG_TICKS: clean = clean.replace(c, "")
+    clean = _MLOG_PREFIX.sub("", clean.strip()).strip().lower()
+    hit = [o["letter"] for o in opts if clean and o["text"].strip().lower() == clean]
+    return hit[0] if len(hit) == 1 else ""
+
+def _mlog_norm(r):
+    """Header names are matched ignoring case and stray spaces ('correct answer ', 'a' ...)."""
+    return {re.sub(r"\s+", " ", str(k)).strip().lower(): v for k, v in r.items()}
+
 def _mlog_parse(recs):
     """Sheet rows -> [{row, q, opts:[{letter,text,correct}], err}]. err is '' only for a valid question:
     it has text, at least 2 options and a Correct Answer letter that points at a filled option."""
     out = []
-    for r in recs:
-        q = str(r.get("Question", "")).strip()
+    for r0 in recs:
+        r = _mlog_norm(r0)
+        q = str(r.get("question", "")).strip()
         opts, cell_ticks = [], []
         for L in MLOG_LETTERS:
-            raw = str(r.get(L, "")).strip()
+            raw = str(r.get(L.lower(), r.get("option " + L.lower(), ""))).strip()
             if not raw: continue
             if any(c in raw for c in MLOG_TICKS): cell_ticks.append(L)
             for c in MLOG_TICKS: raw = raw.replace(c, "")
             opts.append(dict(letter=L, text=_MLOG_PREFIX.sub("", raw.strip()).strip(), correct=False))
-        ans_raw = str(r.get("Correct Answer", "")).strip()
+        ans_raw = str(r.get("correct answer", r.get("correct", ""))).strip()
         if not q and not opts and not ans_raw: continue                  # blank row
-        ans = _mlog_letter(ans_raw)
+        ans = _mlog_answer(ans_raw, opts)
         have = {o["letter"] for o in opts}
         if not q: err = "Question text is missing"
         elif len(opts) < 2: err = "Needs at least 2 answer options"
-        elif ans_raw and not ans: err = f"Correct Answer '{ans_raw}' is not a letter A-D"
+        elif ans_raw and not ans: err = f"Correct Answer '{ans_raw}' is not A, B, C or D"
         elif len(cell_ticks) > 1: err = "More than one option carries a tick - only ONE is allowed"
         elif ans and cell_ticks and ans != cell_ticks[0]: err = f"Correct Answer says {ans} but the tick is on option {cell_ticks[0]}"
         elif not ans and not cell_ticks: err = "Correct Answer column is empty (enter A, B, C or D)"
@@ -3217,7 +3234,7 @@ def _mlog_parse(recs):
             err = "" if ans in have else f"Correct Answer {ans} points to an empty option"
             if not err:
                 for o in opts: o["correct"] = (o["letter"] == ans)
-        out.append(dict(row=r.get("_row", ""), q=q, opts=opts, err=err))
+        out.append(dict(row=r0.get("_row", ""), q=q, opts=opts, err=err))
     return out
 
 def mlog_questions(fresh=False):
@@ -3307,7 +3324,8 @@ MLOG_ADMIN = MLOG_CSS + """<div class="head"><div><h1>""" + MLOG_SHEET + """</h1
 <div class="totals">Questions in sheet: <b>{{qs|length}}</b> &middot; Ready to share: <b>{{ok}}</b> &middot; Need fixing: <b>{{bad}}</b>
 &middot; Employees with access: <b>{{granted}}</b> of {{emps|length}}</div>
 <p class="mut" style="margin:8px 0">Employees can view it right now: <b>{{'YES - ' ~ granted ~ ' employee(s)' if can_view else 'NO'}}</b>{% if not can_view %} &mdash; {{why}}{% endif %}</p>
-{% if bad %}<p class="flash err">{{bad}} question(s) are not valid (see the list below). They are never shown to employees, and the log cannot be published until they are fixed.</p>{% endif %}
+{% if bad %}<p class="flash err">{{bad}} question(s) are not valid (see the list below). They are never shown to employees, and the log cannot be published until they are fixed.
+{% for msg, n in probs %}<br>&bull; <b>{{n}}</b> row(s): {{msg}}{% endfor %}</p>{% endif %}
 <form method="post" action="/admin/mlog/publish">
 {% if pub %}<button name="do" value="unpublish" onclick="return confirm('Hide the log from every employee?')">Unpublish</button>
 <span class="mut">Employees who have access can view it now.</span>
@@ -3352,6 +3370,8 @@ def admin_mlog():
         for n in (MLOG_SHEET, MLOG_ACCESS, "Settings"): invalidate_cache(n)
     prefetch("Employees", "Settings", MLOG_SHEET, MLOG_ACCESS)
     qs = mlog_questions(); mlog_valid(qs); emps = _mlog_emps()      # mlog_valid numbers the valid ones for the preview
+    from collections import Counter
+    _probs = Counter(q["err"] for q in qs if q["err"]).most_common(3)
     _ok = sum(1 for q in qs if not q["err"]); _gr = sum(1 for e in emps if e["on"]); _pub = mlog_published()
     _mlog_can_view = _pub and _gr > 0 and _ok > 0
     _mlog_why = ("it is not published yet (press Publish)" if not _pub else
@@ -3359,7 +3379,7 @@ def admin_mlog():
                  "the sheet has no valid questions (check the Correct Answer column)")
     return page(MLOG_ADMIN, title=MLOG_SHEET, sheet=MLOG_SHEET, qs=qs, emps=emps, pub=mlog_published(),
                 ok=sum(1 for q in qs if not q["err"]), bad=sum(1 for q in qs if q["err"]),
-                granted=sum(1 for e in emps if e["on"]), can_view=_mlog_can_view, why=_mlog_why)
+                granted=sum(1 for e in emps if e["on"]), can_view=_mlog_can_view, why=_mlog_why, probs=_probs)
 
 @app.route("/admin/mlog/publish", methods=["POST"])
 @need("admin")

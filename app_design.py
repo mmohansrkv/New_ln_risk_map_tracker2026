@@ -1609,6 +1609,10 @@ WELCOME = """<style>
 @keyframes waveR{from{transform:rotate(-150deg)}to{transform:rotate(-200deg)}}
 .leg{position:absolute;top:5.3em;width:1em;height:1.9em;border-radius:.4em .4em .6em .6em;background:#3b3f5c}
 .leg.l{left:.9em}.leg.r{right:.9em}
+/* female team: longer hair + a skirt over the legs | male team: short hair, plain legs (default) */
+.fig.female .head::before{height:1.55em;border-radius:1.5em 1.5em 45% 45%}
+.fig.female .head::after{box-shadow:.95em 0 #222,-.05em .95em #222,1em .95em #222}
+.fig.female .torso::after{content:"";position:absolute;left:-.35em;bottom:-1em;width:3.9em;height:1.3em;border-radius:0 0 1.6em 1.6em;background:linear-gradient(160deg,var(--c),var(--d))}
 .bspin{position:absolute;left:0;top:0;transform-style:preserve-3d;animation:ringSpin 1.9s linear infinite}
 .bpos{position:absolute;left:0;top:0;transform:translateZ(13em);transform-style:preserve-3d}
 .ball{position:absolute;left:-.9em;top:-6em;width:1.8em;height:1.8em;border-radius:50%;background:radial-gradient(circle at 32% 30%,#fff,#ff5d5d 45%,#b91c1c);box-shadow:0 .5em 1em #0004;animation:bball .95s ease-in-out infinite}
@@ -1623,7 +1627,7 @@ WELCOME = """<style>
   {% for c in [('#ef4444','#b91c1c','#3b2314'),('#3b82f6','#1d4ed8','#111827'),('#22c55e','#15803d','#7c2d12'),('#f59e0b','#b45309','#1f2937'),('#a855f7','#7e22ce','#422006'),('#ec4899','#be185d','#0f172a')] %}
   <div class="pos" style="--a:{{loop.index0*60}}deg;--i:{{loop.index0}};--c:{{c[0]}};--d:{{c[1]}};--h:{{c[2]}}">
    <div class="shadow"></div>
-   <div class="bill"><div class="jump"><div class="fig">
+   <div class="bill"><div class="jump"><div class="fig {{wl_gender}}">
     <div class="leg l"></div><div class="leg r"></div>
     <div class="arm l"></div><div class="arm r"></div>
     <div class="torso"></div>
@@ -1688,14 +1692,16 @@ WELCOME = """<style>
 @app.route("/admin/welcome")
 @need("admin")
 def admin_welcome():
-    return page(WELCOME, title="Welcome")
-
-
+    return page(WELCOME, title="Welcome", wl_gender="male")
 
 @app.route("/employee/welcome")
 @need("employee")
 def employee_welcome():
-    return page(WELCOME, title="Welcome")
+    try:
+        g = gender_of(my_emp_row())
+    except Exception:
+        g = ""
+    return page(WELCOME, title="Welcome", wl_gender=g or "male")
 
 @app.route("/employee")
 @need("employee")

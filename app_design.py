@@ -1652,8 +1652,33 @@ WELCOME = """<style>
  }
  for(var k=0;k<5;k++) petal();                        /* a few on screen right away */
  var spawn=setInterval(petal,1000);                    /* a new flower every 1 second */
- setTimeout(function(){                                /* welcome (3D team + flowers) for 2s, then move on */
+
+ var WL_MS=2000;                                       /* total time the welcome page is shown */
+ var ac=null,master=null;
+ try{                                                   /* soft background music, synth-generated (no audio file to load) */
+  var AC=window.AudioContext||window.webkitAudioContext;
+  if(AC){
+   ac=new AC();
+   master=ac.createGain(); master.gain.value=0; master.connect(ac.destination);
+   var now=ac.currentTime, fadeIn=.25, fadeOut=.35, end=now+WL_MS/1000;
+   master.gain.linearRampToValueAtTime(.16, now+fadeIn);              // gentle fade in
+   master.gain.setValueAtTime(.16, Math.max(now+fadeIn, end-fadeOut));
+   master.gain.linearRampToValueAtTime(0, end);                       // fade out right as the page ends
+   var chord=[261.63,329.63,392.00,523.25];                           // C major, light & upbeat
+   chord.forEach(function(freq,idx){
+    var o=ac.createOscillator(),g=ac.createGain();
+    o.type='sine'; o.frequency.value=freq;
+    g.gain.value=idx===0?.9:.55;
+    o.connect(g); g.connect(master);
+    o.start(now); o.stop(end+.05);
+   });
+   if(ac.state==='suspended') ac.resume().catch(function(){});
+  }
+ }catch(e){ /* Web Audio unavailable/blocked - animation still runs fine without BGM */ }
+
+ setTimeout(function(){                                /* welcome (3D team + flowers + BGM) for 2s, then move on */
   clearInterval(spawn);
+  if(ac){ try{ master.gain.cancelScheduledValues(ac.currentTime); master.gain.value=0; ac.close(); }catch(e){} }
   window.location.replace({{ ('/admin/summary' if session.role=='admin' else '/employee') | tojson }});
  },2000);
 })();

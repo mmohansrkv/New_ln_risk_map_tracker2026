@@ -10,6 +10,9 @@ Access rules (Update59):
     page; a signed-in admin who opens an employee URL is sent to the Admin dashboard.
   * Audit Log (Update60): Admin ticks the exact PROCESSES each employee may audit. The employee sees only
     their OWN data: Productivity (only the ticked processes) and Attendance, as two separate sections.
+  * Audit Log (Update61): Admin's Audit Log is PROCESS-FIRST: pick a process -> the employees who worked on it are
+    found automatically -> Productivity, Productivity %, Attendance and audit details are shown. The old
+    employee-wise list + access control stays under 'By Employee / Access'. Employees are unchanged (own data, ticked processes only).
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -2868,10 +2871,15 @@ def _aud_breakdown(lines, names):
     for a in agg.values(): a["pct"] = round(a["count"] / a["target"] * 100) if a["target"] else None
     return list(agg.values())
 
+TABS_CONST = """<div class="tabs no-print"><a href="/admin/audit" class="{{'on' if view=='process' else ''}}">By Process</a>
+<a href="/admin/audit?view=employee" class="{{'on' if view=='employee' else ''}}">By Employee / Access</a></div>
+"""
 AUD_LIST = """<div class="head"><div><h1>Audit Log</h1>
 <p class="mut">{% if admin %}Employee-wise productivity and attendance. For each employee you can see the processes they work on and tick exactly which processes they may audit.{% else %}Your productivity (for the processes Admin selected) and your attendance.{% endif %}</p></div></div>
-<form class="grid no-print" method="get"><input name="q" value="{{q}}" placeholder="Search employee ID or name">
-<input type="month" name="month" value="{{month}}"><button class="primary">Show</button><a href="{{base}}">Reset</a></form>
+<div class="tabs no-print"><a href="/admin/audit" class="{{'on' if view=='process' else ''}}">By Process</a>
+<a href="/admin/audit?view=employee" class="{{'on' if view=='employee' else ''}}">By Employee / Access</a></div>
+<form class="grid no-print" method="get"><input type="hidden" name="view" value="employee"><input name="q" value="{{q}}" placeholder="Search employee ID or name">
+<input type="month" name="month" value="{{month}}"><button class="primary">Show</button><a href="{{base}}?view=employee">Reset</a></form>
 <p class="mut">Period: <b>{{label}}</b></p>
 <table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Attendance</th><th>Productivity</th>
 {% if admin %}<th>Processes worked</th><th>Audit Log access</th><th>Processes allowed</th>{% endif %}<th></th></tr>
@@ -2887,9 +2895,9 @@ AUD_LIST = """<div class="head"><div><h1>Audit Log</h1>
 
 AUD_HEAD = """<div class="head"><div><h1>{{'Audit Log' if not admin else emp.Name}}</h1>
 <p class="mut">{{emp.id}} &middot; {{emp.desig or 'No designation'}} &middot; Band {{emp.band}}{% if not admin %} &middot; {{emp.Name}}{% endif %}</p></div>
-{% if admin %}<a href="{{base}}">&larr; All employees</a>{% endif %}</div>
-<div class="tabs no-print">{% for k,l in tabs %}<a href="{{base}}/{{emp.id|urlencode}}?tab={{k}}&month={{month}}" class="{{'on' if k==tab else ''}}">{{l}}</a>{% endfor %}</div>
-{% if tab != 'access' %}<form class="grid no-print" method="get"><input type="hidden" name="tab" value="{{tab}}">
+{% if admin and process %}<a href="{{base}}?process={{process|urlencode}}&month={{month}}">&larr; {{process}} employees</a>{% elif admin %}<a href="{{base}}?view=employee">&larr; All employees</a>{% endif %}</div>
+<div class="tabs no-print">{% for k,l in tabs %}<a href="{{base}}/{{emp.id|urlencode}}?tab={{k}}&month={{month}}{% if process %}&process={{process|urlencode}}{% endif %}" class="{{'on' if k==tab else ''}}">{{l}}</a>{% endfor %}</div>
+{% if tab != 'access' %}<form class="grid no-print" method="get"><input type="hidden" name="tab" value="{{tab}}">{% if process %}<input type="hidden" name="process" value="{{process}}">{% endif %}
 <input type="month" name="month" value="{{month}}"><button class="primary">Show</button></form>
 <p class="mut">Period: <b>{{label}}</b></p>{% endif %}"""
 
@@ -2903,6 +2911,11 @@ AUD_PROD = """<div class="totals">Working days: <b>{{k.wd}}</b> &middot; Present
 
 AUD_ATT = """<div class="totals">Working days: <b>{{k.wd}}</b> &middot; Present: <b>{{k.present}}</b> &middot; Leave: <b>{{k.leave}}</b>
 &middot; Absent: <b>{{k.absent}}</b> &middot; Attendance: <b>{{k.att}}%</b></div>
+<h2>Daily attendance</h2>
+<table><tr><th>Date</th><th>Status</th><th>Login</th><th>Logout</th><th>Duration</th><th>Details</th></tr>
+{% for d in days %}<tr><td>{{d.date}}</td><td><span class="pill {{'in' if d.status=='Present' else 'out'}}">{{d.status}}</span></td>
+<td>{{d.login|t12 or '-'}}</td><td>{{d.logout|t12 or '-'}}</td><td>{{d.dur or '-'}}</td><td>{{d.note or '-'}}</td></tr>
+{% else %}<tr><td colspan="6">No days in this period.</td></tr>{% endfor %}</table>
 <h2>Login / logout history</h2>
 <table><tr><th>Date</th><th>Login</th><th>Logout</th><th>Duration</th><th>Logout type</th></tr>
 {% for r in sess %}<tr><td>{{r['Date']}}</td><td>{{r['Login time']|t12 or '-'}}</td><td>{{r['Logout time']|t12 or '-'}}</td>
@@ -2910,7 +2923,7 @@ AUD_ATT = """<div class="totals">Working days: <b>{{k.wd}}</b> &middot; Present:
 {% else %}<tr><td colspan="5">No login records for this period.</td></tr>{% endfor %}</table>"""
 
 AUD_PROC = """{% if not allowed %}<div class="card"><p>Admin has not granted you access to any process yet.</p></div>{% else %}
-<p class="mut">Productivity for the process(es) Admin selected for you: <b>{{allowed|join(', ')}}</b></p>
+<p class="mut">{% if admin %}Productivity for process: {% else %}Productivity for the process(es) Admin selected for you: {% endif %}<b>{{allowed|join(', ')}}</b></p>
 <h2>Productivity by process</h2>
 <table><tr><th>Process</th><th>Hours</th><th>Count</th><th>Target count</th><th>Achievement</th></tr>
 {% for b in bd %}<tr><td>{{b.name}}</td><td>{{b.hour|g}}</td><td>{{b.count|g}}</td><td>{{b.target|g}}</td><td>{{ (b.pct ~ '%') if b.pct is not none else '-' }}</td></tr>{% endfor %}</table>
@@ -2933,6 +2946,108 @@ tick none and the Audit Log disappears. No process is ever included automaticall
 <button class="primary">Save permission</button> <a href="{{base}}">Cancel</a>
 {% if acc.updated %}<p class="mut">Last saved: {{acc.updated|t12}}</p>{% endif %}</form></div>"""
 
+
+def _aud_att_days(eid, subs, sess, start, end):
+    """One row per calendar day in the period: Present / Leave / Holiday / Weekly off / Absent + first login, last logout."""
+    present = {s["date"] for s in subs if not s["off"] and str(start) <= str(s["date"]) <= str(end)}
+    leave = {str(l["Date"]): leave_status(l) for l in live_leaves(rows("Leave")) if _key(l["Employee ID"]) == _key(eid)}
+    by = {}
+    for r in sess: by.setdefault(str(r["Date"]), []).append(r)
+    out, d = [], start
+    while d <= end:
+        ds = str(d); ss = sorted(by.get(ds, []), key=lambda r: str(r["Login time"]))
+        note = ""
+        if ds in present: st = "Present"
+        elif ds in leave: st, note = "Leave", leave[ds] + " leave"
+        elif ds in holiday_map(): st, note = "Holiday", holiday_name(ds)
+        elif is_off(d): st = "Weekly off"
+        elif d < today_local(): st = "Absent"
+        else: st = "-"
+        if ss:
+            note = (note + " · " if note else "") + f"{len(ss)} login{'s' if len(ss) > 1 else ''}"
+        out.append(dict(date=ds, status=st, note=note,
+                        login=ss[0]["Login time"] if ss else "",
+                        logout=ss[-1]["Logout time"] if ss else "",
+                        dur=", ".join(str(r["Duration"]) for r in ss if r.get("Duration"))))
+        d += dt.timedelta(days=1)
+    return out[::-1]
+
+AUD_PROCESS = """<div class="head"><div><h1>Audit Log</h1>
+<p class="mut">Select a process. The employees who worked on it are found automatically, with their productivity, productivity % and attendance.</p></div></div>
+""" + TABS_CONST + """<form class="grid no-print" method="get"><select name="process" onchange="this.form.submit()">
+<option value="">- Select process -</option>{% for p in procs %}<option value="{{p}}" {{'selected' if p==sel}}>{{p}}</option>{% endfor %}</select>
+<input type="month" name="month" value="{{month}}">
+{% if sel %}<input name="q" value="{{q}}" placeholder="Search employee ID or name">{% endif %}
+<button class="primary">Show</button><a href="{{base}}">Reset</a></form>
+<p class="mut">Period: <b>{{label}}</b> &middot; Daily target: <b>{{T|g}} hrs</b></p>
+{% if not sel %}
+<h2>Available processes</h2>
+<table><tr><th>Process</th><th>Employees who worked</th><th>Total hours</th><th>Entries</th><th></th></tr>
+{% for r in overview %}<tr><td><b>{{r.name}}</b></td><td>{{r.emps}}</td><td>{{r.hour|g}}</td><td>{{r.entries}}</td>
+<td class="act"><a href="{{base}}?process={{r.name|urlencode}}&month={{month}}">Open audit</a></td></tr>
+{% else %}<tr><td colspan="5">No processes exist yet. Add them under Processes.</td></tr>{% endfor %}</table>
+{% else %}
+<div class="totals">Process: <b>{{sel}}</b> &middot; Employees: <b>{{rows|length}}</b> &middot; Total hours: <b>{{tot_hour|g}}</b>
+&middot; Total count: <b>{{tot_count|g}}</b></div>
+<table><tr><th>Employee ID</th><th>Employee</th><th>Process</th><th>Productivity (hrs)</th><th>Avg hrs / day</th><th>Productivity %</th>
+<th>Count / Target</th><th>Achievement</th><th>Attendance</th><th>Audit access</th><th></th></tr>
+{% for r in rows %}<tr><td>{{r.id}}</td><td><a href="{{base}}/{{r.id|urlencode}}?process={{sel|urlencode}}&month={{month}}"><b>{{r.name}}</b></a><br><span class="mut">{{r.desig}}</span></td>
+<td>{{sel}}</td><td>{{r.hour|g}} hrs<br><span class="mut">{{r.days}} day{{'' if r.days==1 else 's'}}, {{r.entries}} entr{{'y' if r.entries==1 else 'ies'}}</span></td>
+<td>{{r.avg|g}}</td><td><b>{{r.pct}}%</b></td>
+<td>{{r.count|g}} / {{r.target|g}}</td><td>{{ (r.ach ~ '%') if r.ach is not none else '-' }}</td>
+<td>{{r.status}}<br><span class="mut">Present {{r.present}} &middot; Leave {{r.leave}} &middot; Absent {{r.absent}} &middot; {{r.att}}%</span></td>
+<td><span class="pill {{'in' if r.granted else 'out'}}">{{'Granted' if r.granted else 'Not granted'}}</span></td>
+<td class="act"><a href="{{base}}/{{r.id|urlencode}}?process={{sel|urlencode}}&month={{month}}">Productivity</a>
+<a href="{{base}}/{{r.id|urlencode}}?tab=attendance&process={{sel|urlencode}}&month={{month}}">Attendance</a></td></tr>
+{% else %}<tr><td colspan="11">No employee worked on {{sel}} in this period{% if q %} matching your search{% endif %}.</td></tr>{% endfor %}</table>
+<p class="mut">Productivity % = average hours per worked day on this process &divide; the daily target hours. Achievement = count &divide; target count for the hours logged.
+Attendance is for the whole period (a day with an entry is Present). &ldquo;Audit access&rdquo; shows whether this employee may view their own audit data for this process.</p>{% endif %}"""
+
+def _audit_process_view(base):
+    prefetch("Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays", "Audit Access")
+    month, start, end = _aud_month()
+    a, b = str(start), str(end)
+    procs = audit_process_names()
+    sel = request.args.get("process", "").strip()
+    if sel not in procs: sel = ""
+    q = request.args.get("q", "").strip().lower()
+    T = target_hours()
+    subs = load_subs()
+    emap = {_key(e["Employee ID"]): e for e in rows("Employees")}
+    agg = {}          # process -> {employee key: totals}
+    for sub in subs:
+        if sub["off"] or not (a <= str(sub["date"]) <= b): continue
+        for pr in sub["procs"]:
+            e = agg.setdefault(pr["name"], {}).setdefault(_key(sub["emp_id"]), dict(
+                id=str(sub["emp_id"]), name=sub["emp_name"], hour=0.0, count=0.0, target=0.0, days=set(), entries=0))
+            e["hour"] += pr["hour"]; e["count"] += pr["count"]; e["target"] += pr["target"] or 0
+            e["days"].add(sub["date"]); e["entries"] += 1
+    ctx = dict(base=base, view="process", procs=procs, sel=sel, q=request.args.get("q", ""), month=month,
+               label=start.strftime("%B %Y"), T=T)
+    if not sel:
+        ctx["overview"] = [dict(name=p, emps=len(agg.get(p, {})), hour=sum(e["hour"] for e in agg.get(p, {}).values()),
+                                entries=sum(e["entries"] for e in agg.get(p, {}).values())) for p in procs]
+        return page(AUD_PROCESS, title="Audit Log", **ctx)
+    workers = [e for e in agg.get(sel, {}).values() if not q or q in e["id"].lower() or q in str(e["name"]).lower()]
+    people = [emap.get(_key(e["id"])) or dict(**{"Employee ID": e["id"], "Name": e["name"], "Band": ""}) for e in workers]
+    att = {_key(r["id"]): r for r in report(people, subs, rows("Leave"), start, end)}
+    amap = audit_access_map(); out = []
+    today = str(today_local())
+    for e in workers:
+        k = att[_key(e["id"])]; acc = amap.get(_key(e["id"]))
+        days = len(e["days"]); avg = e["hour"] / days if days else 0
+        emp = emap.get(_key(e["id"]), {})
+        status = "Present today" if today in e["days"] else ("Attendance recorded")
+        out.append(dict(id=e["id"], name=e["name"], desig=emp.get("Designation", ""), hour=round(e["hour"], 2), days=days,
+                        entries=e["entries"], avg=round(avg, 2), pct=min(round(avg / T * 100), 100) if T else 0,
+                        count=round(e["count"], 2), target=round(e["target"], 1),
+                        ach=round(e["count"] / e["target"] * 100) if e["target"] else None,
+                        present=k["present"], leave=k["leave"], absent=k["absent"], att=k["att"], status=status,
+                        granted=bool(acc and audit_active(acc) and sel in acc["procs"])))
+    out.sort(key=lambda r: str(r["name"]).lower())
+    ctx.update(rows=out, tot_hour=sum(r["hour"] for r in out), tot_count=sum(r["count"] for r in out))
+    return page(AUD_PROCESS, title=f"Audit Log - {sel}", **ctx)
+
 def _audit_list(base, admin):
     prefetch("Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays", "Audit Access")
     month, start, end = _aud_month()
@@ -2944,7 +3059,7 @@ def _audit_list(base, admin):
         r["acc"] = amap.get(_key(r["id"]), dict(enabled=False, procs=[], raw="", legacy=False, updated=""))
         r["active"] = audit_active(r["acc"])
         r["worked"] = sorted(worked.get(_key(r["id"]), {}))
-    return page(AUD_LIST, title="Audit Log", rep=rep, base=base, admin=admin, q=request.args.get("q", ""),
+    return page(AUD_LIST, title="Audit Log", view="employee", rep=rep, base=base, admin=admin, q=request.args.get("q", ""),
                 month=month, label=start.strftime("%B %Y"))
 
 def _audit_detail(base, eid, admin, acc=None):
@@ -2957,7 +3072,9 @@ def _audit_detail(base, eid, admin, acc=None):
     if tab not in dict(tabs): tab = "productivity"
     month, start, end = _aud_month()
     view = dict(id=eid, Name=emp["Name"], desig=emp.get("Designation", ""), band=emp["Band"])   # never expose the password column
-    ctx = dict(emp=view, base=base, tabs=tabs, tab=tab, month=month, label=start.strftime("%B %Y"), admin=admin)
+    process = request.args.get("process", "").strip() if admin else ""
+    if process not in audit_process_names(): process = ""
+    ctx = dict(emp=view, base=base, tabs=tabs, tab=tab, month=month, label=start.strftime("%B %Y"), admin=admin, process=process)
     if tab == "access":
         subs = [s for s in load_subs(eid) if _key(s["emp_id"]) == _key(eid)]
         body = AUD_ACCESS
@@ -2971,7 +3088,11 @@ def _audit_detail(base, eid, admin, acc=None):
             sess = [r for r in rows("Attendance") if _key(r["Employee ID"]) == _key(eid)
                     and str(start) <= str(r["Date"]) <= str(end)]
             sess.sort(key=lambda r: (str(r["Date"]), str(r["Login time"])), reverse=True)
-            ctx.update(k=k, sess=sess)
+            ctx.update(k=k, sess=sess, days=_aud_att_days(eid, subs, sess, start, end))
+        elif admin and process:                      # Admin came from a process: only that process's lines
+            lines = [l for l in _aud_proc_rows(subs, start, end) if l["name"] == process]
+            body = AUD_PROC
+            ctx.update(allowed=[process], lines=lines, bd=_aud_breakdown(lines, [process]))
         elif admin:                                  # Admin sees the employee's complete productivity
             body = AUD_PROD
             ctx.update(k=k, subs=[s for s in subs if str(start) <= str(s["date"]) <= str(end)])
@@ -2985,7 +3106,9 @@ def _audit_detail(base, eid, admin, acc=None):
 # ---- Admin side
 @app.route("/admin/audit")
 @need("admin")
-def admin_audit(): return _audit_list("/admin/audit", True)
+def admin_audit():
+    if request.args.get("view") == "employee": return _audit_list("/admin/audit", True)
+    return _audit_process_view("/admin/audit")
 
 @app.route("/admin/audit/<eid>")
 @need("admin")

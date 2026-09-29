@@ -962,6 +962,9 @@ table td small,table th small{font-size:10.5px!important}
 #tgtBadge{display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;vertical-align:middle}
 #tgtBadge.met{background:#d9f7e3;color:#146c43}
 #tgtBadge.miss{background:#fbe0e0;color:#a52a2a}
+#bgm{position:fixed;right:14px;bottom:14px;z-index:60;width:38px;height:38px;border-radius:50%;border:1px solid var(--line,#d8dbe6);background:#fff;color:#1c2340;font-size:17px;line-height:1;cursor:pointer;box-shadow:0 2px 10px #0002;opacity:.85;padding:0}
+#bgm:hover{opacity:1}
+@media print{ #bgm{display:none}}
 </style></head><body>
 {% if session.role %}<div class="app"><aside class="emp">
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
@@ -979,6 +982,37 @@ function poll(){fetch('/admin/notify/poll?since='+since+'&first='+first,{credent
  .then(function(r){return r.json()}).then(function(j){
  j.items.forEach(function(i){toast(i.text)});since=j.last;first=0}).catch(function(){})}
 poll();setInterval(poll,15000)})();
+</script>{% endif %}
+{% if session.role=='employee' %}<button id="bgm" type="button" aria-label="Turn background music off" title="Background music" hidden>&#128266;</button><script>
+(function(){
+/* Employee-only background music: lazy-loaded after the page is ready, low volume, looping.
+   Stops when the employee leaves the employee pages / logs out (the page unloads). */
+var SRC="https://commons.wikimedia.org/wiki/Special:FilePath/Erik_Satie_-_gymnopedies_-_la_1_ere._lent_et_douloureux.ogg";
+var VOL=0.12,a=null,btn=document.getElementById('bgm'),muted=false,armed=false;
+function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+function icon(){if(!btn)return;btn.innerHTML=muted?'&#128263;':'&#128266;';
+ btn.setAttribute('aria-label',muted?'Turn background music on':'Turn background music off')}
+function tryPlay(){if(!a||muted)return;var p=a.play();if(p&&p.catch)p.catch(function(){arm()})}
+function arm(){if(armed)return;armed=true;   /* browsers block autoplay until the first click/key/touch */
+ var go=function(){['pointerdown','keydown','touchstart'].forEach(function(t){document.removeEventListener(t,go,true)});armed=false;tryPlay()};
+ ['pointerdown','keydown','touchstart'].forEach(function(t){document.addEventListener(t,go,true)})}
+function savePos(){if(a&&!isNaN(a.currentTime))put('bgmPos',String(a.currentTime))}
+function init(){
+ muted=get('bgmMuted')==='1';
+ a=new Audio();a.loop=true;a.volume=VOL;a.preload='auto';a.src=SRC;
+ var pos=parseFloat(get('bgmPos'));   /* continue from where the previous employee page stopped */
+ if(pos>0)a.addEventListener('loadedmetadata',function(){try{if(pos<a.duration)a.currentTime=pos}catch(e){}},{once:true});
+ a.addEventListener('error',function(){if(btn)btn.hidden=true});   /* source unreachable: stay silent, page unaffected */
+ if(btn){btn.hidden=false;icon();btn.addEventListener('click',function(){
+   muted=!muted;put('bgmMuted',muted?'1':'0');icon();if(muted)a.pause();else tryPlay()})}
+ setInterval(savePos,4000);tryPlay();}
+window.addEventListener('pagehide',function(){savePos();if(a)a.pause()});
+window.addEventListener('pageshow',function(e){if(e.persisted&&a)tryPlay()});
+document.addEventListener('visibilitychange',function(){if(!a)return;if(document.hidden)a.pause();else tryPlay()});
+function start(){setTimeout(init,600)}   /* after load, so it never competes with the page itself */
+if(document.readyState==='complete')start();else window.addEventListener('load',start);
+})();
 </script>{% endif %}
 </body></html>"""
 

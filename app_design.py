@@ -13,9 +13,18 @@ Access rules (Update59):
   * Audit Log (Update61): Admin's Audit Log is PROCESS-FIRST: pick a process -> the employees who worked on it are
     found automatically -> Productivity, Productivity %, Attendance and audit details are shown. The old
     employee-wise list + access control stays under 'By Employee / Access'. Employees are unchanged (own data, ticked processes only).
+  * மகிழ்ச்சி Log (Update62): new Admin section. Admin types/pastes questions into the "மகிழ்ச்சி Log" tab of the Google
+    Sheet (one row per question, options A-F, exactly ONE option carries a tick mark). Admin publishes it and ticks which
+    employees may view it (or grants/revokes everyone). Employees get a strictly READ-ONLY page showing the questions,
+    the options and the Admin-marked correct answer (already ticked); there is no write route for employees at all, and
+    the menu item / page exist only for employees who are granted access while the log is published.
+  * மகிழ்ச்சி Log (Update63): the sheet now uses the layout  Question | A | B | C | D | Correct Answer  (Correct Answer = the
+    letter A-D). The system puts the tick mark on the option named in that column. A tick typed inside an option cell
+    (e.g. "Pacific Ocean ✓") is still understood; if both are given they must agree. Access: Admin = full control (edit the
+    sheet, publish, grant/revoke); employee with access = view-only; employee without access = no menu item and 403.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
-import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
+import os, io, csv, re, uuid, hmac, time, random, threading, datetime as dt
 from functools import wraps
 import gspread
 from gspread.exceptions import APIError
@@ -90,6 +99,13 @@ PHOTOS = {
     "employee": "data:image/jpeg;base64,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",
 }
 
+# மகிழ்ச்சி Log sheets (names are what you see as tabs in the Google Sheet)
+MLOG_SHEET  = "மகிழ்ச்சி Log"                 # question bank Admin pastes into
+MLOG_ACCESS = "மகிழ்ச்சி Access"              # one row per employee: who may view it
+MLOG_PUB_KEY = "மகிழ்ச்சி Log published"      # row in the Settings sheet: Yes / No
+MLOG_LETTERS = "ABCD"
+MLOG_TICKS = "\u2713\u2714\u2705\u2611"        # tick marks accepted next to the correct answer (✓ ✔ ✅ ☑)
+
 HEADERS = {
     "Employees": ["Employee ID", "Name", "Band", "Email", "Password",
                   "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
@@ -111,6 +127,10 @@ HEADERS = {
                       "Section", "Action", "Details"],
     # Audit Log permissions set by Admin: one row per employee. Processes = the ticked process names "A | B | C".
     "Audit Access": ["Employee ID", "Employee name", "Enabled", "Processes", "Updated at", "Updated by"],
+    # மகிழ்ச்சி Log: one row per question; "Correct Answer" holds the letter (A-D) of the right option, which gets the tick.
+    MLOG_SHEET: ["Question"] + list(MLOG_LETTERS) + ["Correct Answer"],
+    # மகிழ்ச்சி Log sharing set by Admin: one row per employee (Enabled = Yes / No).
+    MLOG_ACCESS: ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
 }
 PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                     "Emergency no", "Personal Email ID", "Office Email ID"]
@@ -385,7 +405,7 @@ def rows(name):
             return [dict(r) for r in cached[1]]
     return [dict(r) for r in _fetch_rows(name)]
 
-EMP_PAGE_SHEETS = ("Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays")
+EMP_PAGE_SHEETS = ("Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays", MLOG_ACCESS)
 
 def warm_employee_cache():
     """Read every sheet the Employee dashboard needs, all at once."""
@@ -1107,7 +1127,8 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"),
               ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
               ("/admin/leave-permission", "Leave & Permission Log"),
-              ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log")],
+              ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log"),
+              ("/admin/mlog", MLOG_SHEET)],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
@@ -1119,6 +1140,10 @@ def page(body, title="Productivity Tracker", **ctx):
     if session.get("role") == "employee":
         try:      # Admin-controlled: the menu item exists only while Audit Log access is enabled for this employee
             if audit_active(audit_access(session.get("emp_id", ""))): items.append(("/employee/audit", "Audit Log"))
+        except Exception:
+            pass
+        try:      # Admin-controlled: shown only while the log is published AND this employee has been granted access
+            if mlog_visible(session.get("emp_id", "")): items.append(("/employee/mlog", MLOG_SHEET))
         except Exception:
             pass
     nav = [(h, l, p == h or (h != "/employee" and p.startswith(h + "/")))
@@ -3150,6 +3175,215 @@ def employee_audit(acc): return _audit_detail("/employee/audit", session["emp_id
 @need("employee")
 @audit_need
 def employee_audit_detail(acc, eid): return _audit_detail("/employee/audit", eid, False, acc)   # 403 unless it is their own ID
+
+# ================================================================ மகிழ்ச்சி Log (Question & Answer)
+# Admin: types/pastes questions into the "மகிழ்ச்சி Log" sheet tab. Row layout:
+#     Question | A | B | C | D | Correct Answer          e.g.  Which is the largest ocean? | Atlantic | Indian | Pacific | Arctic | C
+# The system shows the tick (✓) on the option whose letter is in "Correct Answer". (A tick typed inside an option cell
+# still works; if both are present they must agree.) Admin then publishes it and ticks which employees may view it.
+# Employees only ever READ.
+_MLOG_PREFIX = re.compile(r"^\s*[A-Da-d]\s*[\.\)\:]\s+")     # tolerate pasted "A. Atlantic Ocean" -> "Atlantic Ocean"
+
+def _mlog_letter(v):
+    """'c', 'C.', ' (c) ', 'Option C' -> 'C'; anything else -> ''."""
+    m = re.fullmatch(r"(?:option\s*)?[\(\[]?\s*([A-Da-d])\s*[\)\]\.\:]?", str(v or "").strip(), re.I)
+    return m.group(1).upper() if m else ""
+
+def _mlog_parse(recs):
+    """Sheet rows -> [{row, q, opts:[{letter,text,correct}], err}]. err is '' only for a valid question:
+    it has text, at least 2 options and a Correct Answer letter that points at a filled option."""
+    out = []
+    for r in recs:
+        q = str(r.get("Question", "")).strip()
+        opts, cell_ticks = [], []
+        for L in MLOG_LETTERS:
+            raw = str(r.get(L, "")).strip()
+            if not raw: continue
+            if any(c in raw for c in MLOG_TICKS): cell_ticks.append(L)
+            for c in MLOG_TICKS: raw = raw.replace(c, "")
+            opts.append(dict(letter=L, text=_MLOG_PREFIX.sub("", raw.strip()).strip(), correct=False))
+        ans_raw = str(r.get("Correct Answer", "")).strip()
+        if not q and not opts and not ans_raw: continue                  # blank row
+        ans = _mlog_letter(ans_raw)
+        have = {o["letter"] for o in opts}
+        if not q: err = "Question text is missing"
+        elif len(opts) < 2: err = "Needs at least 2 answer options"
+        elif ans_raw and not ans: err = f"Correct Answer '{ans_raw}' is not a letter A-D"
+        elif len(cell_ticks) > 1: err = "More than one option carries a tick - only ONE is allowed"
+        elif ans and cell_ticks and ans != cell_ticks[0]: err = f"Correct Answer says {ans} but the tick is on option {cell_ticks[0]}"
+        elif not ans and not cell_ticks: err = "Correct Answer column is empty (enter A, B, C or D)"
+        else:
+            ans = ans or cell_ticks[0]
+            err = "" if ans in have else f"Correct Answer {ans} points to an empty option"
+            if not err:
+                for o in opts: o["correct"] = (o["letter"] == ans)
+        out.append(dict(row=r.get("_row", ""), q=q, opts=opts, err=err))
+    return out
+
+def mlog_questions(fresh=False):
+    return _mlog_parse(_fetch_rows(MLOG_SHEET) if fresh else rows(MLOG_SHEET))
+
+def mlog_valid(qs):
+    """Only valid questions are ever shown to employees, numbered 1, 2, 3 ..."""
+    good = [q for q in qs if not q["err"]]
+    for n, q in enumerate(good, 1): q["no"] = n
+    return good
+
+def mlog_published(fresh=False):
+    src = _fetch_rows("Settings") if fresh else rows("Settings")
+    r = next((r for r in src if str(r.get("Key", "")).strip() == MLOG_PUB_KEY), None)
+    return bool(r) and str(r.get("Value", "")).strip().lower() == "yes"
+
+def mlog_set_published(on):
+    ws = ws_of("Settings")
+    keys = ws.col_values(1)
+    v = "Yes" if on else "No"
+    if MLOG_PUB_KEY in keys: ws.update(range_name=f"B{keys.index(MLOG_PUB_KEY) + 1}", values=[[v]], value_input_option="RAW")
+    else: ws.append_row([MLOG_PUB_KEY, v], value_input_option="RAW")
+    invalidate_cache("Settings")
+
+def mlog_access_map(fresh=False):
+    src = _fetch_rows(MLOG_ACCESS) if fresh else rows(MLOG_ACCESS)
+    return {_key(r["Employee ID"]): str(r.get("Enabled", "")).strip().lower() == "yes"
+            for r in src if str(r.get("Employee ID", "")).strip()}
+
+def mlog_visible(eid, fresh=False):
+    """True only while the log is published AND Admin has granted this employee access."""
+    if not str(eid).strip(): return False
+    return mlog_published(fresh) and mlog_access_map(fresh).get(_key(eid), False)
+
+def mlog_write_access(state):
+    """state = [(employee row, enabled bool)]. Updates/creates those employees' rows in ONE sheet write."""
+    ws = ws_of(MLOG_ACCESS)
+    data = [(list(r) + [""] * 5)[:5] for r in ws.get_all_values()[1:]]
+    at = {_key(r[0]): i for i, r in enumerate(data) if str(r[0]).strip()}
+    stamp = now_local().strftime("%Y-%m-%d %H:%M:%S")
+    for emp, on in state:
+        row = [str(emp["Employee ID"]), emp.get("Name", ""), "Yes" if on else "No", stamp, "Admin"]
+        k = _key(emp["Employee ID"])
+        if k in at: data[at[k]] = row
+        else: at[k] = len(data); data.append(row)
+    if data: ws.update(range_name="A2", values=data, value_input_option="RAW")
+    invalidate_cache(MLOG_ACCESS)
+
+def mlog_need(f):
+    """Employee-side guard, read fresh from the sheet so a revoke / unpublish takes effect on the very next click."""
+    @wraps(f)
+    def w(*a, **k):
+        if not mlog_visible(session.get("emp_id", ""), fresh=True): abort(403)
+        return f(*a, **k)
+    return w
+
+MLOG_CSS = """<style>
+.mq{margin:0 0 14px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:#fff}
+.mq h3{margin:0 0 10px;font-size:14px;line-height:1.5}
+.mq .opt{display:flex;gap:10px;align-items:center;padding:7px 12px;margin:5px 0;border:1px solid var(--line);border-radius:8px;background:#fafbff;font-size:13.5px}
+.mq .opt b{min-width:20px}
+.mq .opt.ok{background:#e3f6ec;border-color:#59b98a;color:#0f5132;font-weight:600}
+.mq .opt .tk{margin-left:auto;font-size:17px;color:#146c43}
+.mq.bad{border-color:#e0a0a0;background:#fff7f7}
+</style>"""
+
+MLOG_QBLOCK = """{% for q in items %}<div class="mq {{'bad' if q.err}}">
+<h3>{% if q.err %}<span class="pill out">Sheet row {{q.row}}</span> {% else %}{{q.no}}. {% endif %}{{q.q or '(no question text)'}}</h3>
+{% for o in q.opts %}<div class="opt {{'ok' if o.correct}}"><b>{{o.letter}}.</b> <span>{{o.text}}</span>{% if o.correct %}<span class="tk" title="Correct answer">&#10003;</span>{% endif %}</div>{% endfor %}
+{% if q.err %}<p class="mut" style="color:#a52a2a;margin:8px 0 0">&#9888; {{q.err}} &mdash; fix it in the sheet, then press &ldquo;Reload from sheet&rdquo;. Employees will not see this question.</p>{% endif %}
+</div>{% endfor %}"""
+
+MLOG_ADMIN = MLOG_CSS + """<div class="head"><div><h1>""" + MLOG_SHEET + """</h1>
+<p class="mut">Question &amp; answer log. Type or paste the questions into the <b>{{sheet}}</b> tab of the Google Sheet, publish it, and choose which employees may view it.</p></div>
+<a href="/admin/mlog?refresh=1">&#8635; Reload from sheet</a></div>
+
+<div class="card"><h2>1. Publish <span class="pill {{'in' if pub else 'act'}}">{{'Published' if pub else 'Draft - hidden from all employees'}}</span></h2>
+<div class="totals">Questions in sheet: <b>{{qs|length}}</b> &middot; Ready to share: <b>{{ok}}</b> &middot; Need fixing: <b>{{bad}}</b>
+&middot; Employees with access: <b>{{granted}}</b> of {{emps|length}}</div>
+{% if bad %}<p class="flash err">{{bad}} question(s) are not valid (see the list below). They are never shown to employees, and the log cannot be published until they are fixed.</p>{% endif %}
+<form method="post" action="/admin/mlog/publish">
+{% if pub %}<button name="do" value="unpublish" onclick="return confirm('Hide the log from every employee?')">Unpublish</button>
+<span class="mut">Employees who have access can view it now.</span>
+{% else %}<button class="primary" name="do" value="publish" {{'disabled' if bad or not ok}}>Publish {{sheet}}</button>
+<span class="mut">Employees can view it only after it is published <b>and</b> they are granted access below.</span>{% endif %}</form>
+<details style="margin-top:12px"><summary class="mut" style="cursor:pointer">How to enter questions in the Google Sheet</summary>
+<p class="mut">Use the <b>{{sheet}}</b> tab: one question per row. Put the answers in columns <b>A, B, C, D</b> and the letter of the right answer in
+<b>Correct Answer</b>. The system adds the tick (&#10003;) to that option automatically. A missing or invalid letter makes the question invalid.</p>
+<table><tr><th>Question</th><th>A</th><th>B</th><th>C</th><th>D</th><th>Correct Answer</th></tr>
+<tr><td>Which is the largest ocean on Earth?</td><td>Atlantic Ocean</td><td>Indian Ocean</td><td>Pacific Ocean</td><td>Arctic Ocean</td><td>C</td></tr></table></details></div>
+
+<div class="card"><h2>2. Who can view it</h2>
+<p class="mut">Tick the employees who may open the log, then save. You can change this at any time; a revoked employee loses access on their next click.
+Employees not ticked never see the menu item and get &ldquo;Forbidden&rdquo; if they open the address.</p>
+<form method="post" action="/admin/mlog/access">
+<table><tr><th style="width:70px">Access</th><th>Employee ID</th><th>Employee</th><th>Designation</th></tr>
+{% for e in emps %}<tr><td><input type="checkbox" name="emp" value="{{e.id}}" {{'checked' if e.on}}></td><td>{{e.id}}</td><td>{{e.name}}</td><td>{{e.desig or '-'}}</td></tr>
+{% else %}<tr><td colspan="4">No employees yet.</td></tr>{% endfor %}</table><br>
+<button class="primary" name="mode" value="save">Save selected employees</button>
+<button name="mode" value="all" onclick="return confirm('Give access to ALL employees?')">Grant all</button>
+<button name="mode" value="none" onclick="return confirm('Remove access from ALL employees?')">Revoke all</button></form></div>
+
+<div class="card"><h2>3. Preview <span class="mut">(exactly what employees will see; the tick marks the correct answer)</span></h2>
+{% if qs %}""" + MLOG_QBLOCK.replace("items", "qs") + """{% else %}<p class="mut">The sheet has no questions yet.</p>{% endif %}</div>"""
+
+MLOG_EMP = MLOG_CSS + """<div class="head"><div><h1>""" + MLOG_SHEET + """</h1>
+<p class="mut">Questions and answers shared by Admin. The correct answer is marked with &#10003;. This page is read-only.</p></div></div>
+{% if items %}<div class="totals">Questions: <b>{{items|length}}</b></div>""" + MLOG_QBLOCK + """
+{% else %}<div class="card"><p class="mut">There are no questions in the log yet.</p></div>{% endif %}"""
+
+def _mlog_emps():
+    amap = mlog_access_map()
+    out = [dict(id=str(e["Employee ID"]).strip(), name=e.get("Name", ""), desig=e.get("Designation", ""),
+                on=amap.get(_key(e["Employee ID"]), False), row=e)
+           for e in rows("Employees") if str(e.get("Employee ID", "")).strip()]
+    return sorted(out, key=lambda e: str(e["name"]).lower())
+
+@app.route("/admin/mlog")
+@need("admin")
+def admin_mlog():
+    if request.args.get("refresh"):
+        for n in (MLOG_SHEET, MLOG_ACCESS, "Settings"): invalidate_cache(n)
+    prefetch("Employees", "Settings", MLOG_SHEET, MLOG_ACCESS)
+    qs = mlog_questions(); mlog_valid(qs); emps = _mlog_emps()      # mlog_valid numbers the valid ones for the preview
+    return page(MLOG_ADMIN, title=MLOG_SHEET, sheet=MLOG_SHEET, qs=qs, emps=emps, pub=mlog_published(),
+                ok=sum(1 for q in qs if not q["err"]), bad=sum(1 for q in qs if q["err"]),
+                granted=sum(1 for e in emps if e["on"]))
+
+@app.route("/admin/mlog/publish", methods=["POST"])
+@need("admin")
+def admin_mlog_publish():
+    if request.form.get("do") == "unpublish":
+        mlog_set_published(False)
+        flash(f"{MLOG_SHEET} unpublished - no employee can see it now.")
+        return redirect("/admin/mlog")
+    qs = mlog_questions(fresh=True)                      # validate against the live sheet, not a cached copy
+    bad = [q for q in qs if q["err"]]
+    if bad:
+        flash("Cannot publish: fix sheet row(s) " + ", ".join(str(q["row"]) for q in bad) + " first (each question needs a Correct Answer letter A-D).", "error")
+    elif not qs:
+        flash("Cannot publish: the sheet has no questions yet.", "error")
+    else:
+        mlog_set_published(True)
+        flash(f"{MLOG_SHEET} published with {len(qs)} question(s). Only employees you have granted access can view it.")
+    return redirect("/admin/mlog")
+
+@app.route("/admin/mlog/access", methods=["POST"])
+@need("admin")
+def admin_mlog_access():
+    emps = _mlog_emps(); mode = request.form.get("mode", "save")
+    picked = {_key(x) for x in request.form.getlist("emp")}
+    if mode == "all": state = [(e["row"], True) for e in emps]
+    elif mode == "none": state = [(e["row"], False) for e in emps]
+    else: state = [(e["row"], _key(e["id"]) in picked) for e in emps]     # only real employees can be granted
+    mlog_write_access(state)
+    n = sum(1 for _, on in state if on)
+    flash(f"{MLOG_SHEET} access saved: {n} employee(s) can view it" + ("" if mlog_published() else " once it is published") + ".")
+    return redirect("/admin/mlog")
+
+# ---- Employee side: read-only. GET only - there is deliberately no route that accepts changes.
+@app.route("/employee/mlog")
+@need("employee")
+@mlog_need
+def employee_mlog():
+    return page(MLOG_EMP, title=MLOG_SHEET, items=mlog_valid(mlog_questions(fresh=True)))
+
 
 if __name__ == "__main__":
     # NOTE: Flask's built-in dev server (even with threaded=True) is still not

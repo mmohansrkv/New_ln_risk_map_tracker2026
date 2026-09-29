@@ -427,7 +427,7 @@ def _and_join(items):
     items = list(items)
     if len(items) <= 1: return items[0] if items else ""
     if len(items) == 2: return items[0] + " and " + items[1]
-    return ", ".join(items[:-1]) + " and " + items[-1]
+    return ", ".join(items[:-1]) + ", and " + items[-1]
 
 def notify(emp_id, name, event, now):
     _notif_cache[1] = None
@@ -439,6 +439,26 @@ def notif_rows():
     if _notif_cache[1] is None or time.time() - _notif_cache[0] > 8:
         _notif_cache[:] = [time.time(), rows("Notifications")]
     return _notif_cache[1]
+
+def update_entry(r):
+    """One Notifications-sheet row -> a 'who changed what' entry, or None for login/logout alerts."""
+    ev = str(r.get("Event", "")).strip()
+    name = str(r.get("Employee name", "")).strip() or str(r.get("Employee ID", ""))
+    if ev.startswith("Updated "):
+        head, _, det = ev.partition(" \u2013 ")
+        section, details = head[len("Updated "):].strip(), det.strip()
+        summary = f"{name} updated {section}" + (f" \u2013 {details}." if details else ".")
+    elif ev == "Changed password":
+        section, details, summary = "Account", "Password", f"{name} changed their password."
+    else:
+        return None
+    return dict(name=name, id=r.get("Employee ID", ""), time=r.get("Time", ""), section=section,
+                details=details or section, summary=summary, new=str(r.get("Seen", "")).strip() != "Yes")
+
+def update_log(limit=200):
+    """Employee 'details updated' entries for the admin's Notifications log, newest first."""
+    out = [e for e in (update_entry(r) for r in sorted(notif_rows(), key=_nid, reverse=True)) if e]
+    return out[:limit]
 
 def note_text(r):
     return f"{r['Employee name']} ({r['Employee ID']}) {str(r['Event']).lower()} at {r['Time']}"
@@ -1432,14 +1452,24 @@ def admin_notify_poll():
 TABS = [("personal", "Personal Details"), ("missed", "Missed Entries"), ("leave", "Leave Log"),
         ("holidays", "Holidays"), ("notifications", "Notifications")]
 
-EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">Click an employee's name to open their details. A name in red has unseen login/logout notifications.</p></div>
-<form class="grid" method="get"><input name="q" placeholder="Search ID / name" value="{{q}}">
-<button class="primary">Search</button><a href="/admin/employee-info">Reset</a></form></div>
+EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if view=='notifications' %}A log of the details employees have updated, newest first (latest 200).{% else %}Click an employee's name to open their details. A name in red has unseen login/logout notifications.{% endif %}</p></div>
+{% if view!='notifications' %}<form class="grid" method="get"><input name="q" placeholder="Search ID / name" value="{{q}}">
+<button class="primary">Search</button><a href="/admin/employee-info">Reset</a></form>{% endif %}</div>
+<div class="tabs no-print"><a href="/admin/employee-info" class="{{'' if view=='notifications' else 'on'}}">Employees</a>
+<a href="/admin/employee-info?view=notifications" class="{{'on' if view=='notifications' else ''}}">Notifications{% if new_count %} ({{new_count}} new){% endif %}</a></div>
+{% if view=='notifications' %}
+<table><tr><th>Employee Name</th><th>Date &amp; Time</th><th>Details Updated</th><th>Summary</th></tr>
+{% for r in log %}<tr{% if r.new %} style="font-weight:600"{% endif %}>
+<td><a href="/admin/employee-info/{{r.id|urlencode}}">{{r.name}}</a></td><td>{{r.time}}</td>
+<td><span class="pill act">{{r.section}}</span> {{r.details}}</td><td>{{r.summary}}</td></tr>
+{% else %}<tr><td colspan="4">No employee updates yet.</td></tr>{% endfor %}</table>
+{% else %}
 <table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Band</th></tr>
 {% for e in emps %}<tr><td>{{e['Employee ID']}}</td>
 <td><a href="/admin/employee-info/{{e['Employee ID']|urlencode}}"><b{% if e.flag %} class="emp-flag" title="Red means this employee has unseen login/logout notifications"{% endif %}>{{e['Name']}}</b></a></td>
 <td>{{e['Designation']}}</td><td>{{e['Band']}}</td></tr>
-{% else %}<tr><td colspan="4">No employees found.</td></tr>{% endfor %}</table>"""
+{% else %}<tr><td colspan="4">No employees found.</td></tr>{% endfor %}</table>
+{% endif %}"""
 
 EMP_HEAD = """<div class="head"><div><h1>{{emp['Name']}}</h1>
 <p class="mut">{{emp['Employee ID']}} &middot; {{emp['Designation'] or 'No designation'}} &middot; Band {{emp['Band']}}</p></div>
@@ -1491,22 +1521,29 @@ T_HOLIDAYS = """<p class="mut">Company holidays (they apply to every employee). 
 {% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r.day}}</td><td>{{r['Name']}}</td></tr>
 {% else %}<tr><td colspan="3">No holidays declared.</td></tr>{% endfor %}</table>"""
 
-T_NOTIF = """<p class="mut">Login / logout alerts for this employee, newest first (latest 200).</p>
-<table><tr><th>Time</th><th>Event</th></tr>
+T_NOTIF = """<p class="mut">Login / logout alerts and profile updates for this employee, newest first (latest 200).</p>
+<table><tr><th>Date &amp; Time</th><th>Event</th><th>Summary</th></tr>
 {% for r in data %}<tr{% if r.new %} style="font-weight:600"{% endif %}><td>{{r['Time']}}</td>
-<td><span class="pill {{'in' if r['Event']=='Logged in' else ('out' if r['Event'].startswith('Logged out') else 'act')}}">{{r['Event']}}</span></td></tr>
-{% else %}<tr><td colspan="2">No notifications yet.</td></tr>{% endfor %}</table>"""
+<td><span class="pill {{'in' if r['Event']=='Logged in' else ('out' if r['Event'].startswith('Logged out') else 'act')}}">{{r['Event'].split(' \u2013 ')[0]}}</span></td>
+<td>{{r['Summary']}}</td></tr>
+{% else %}<tr><td colspan="3">No notifications yet.</td></tr>{% endfor %}</table>"""
 
 @app.route("/admin/employee-info")
 @need("admin")
 def admin_employee_info():
+    if request.args.get("view") == "notifications":
+        log = update_log()
+        return page(EMP_LIST, title="Employee Info", view="notifications", log=log,
+                    new_count=sum(1 for r in log if r["new"]), emps=[], q="")
     q = request.args.get("q", "").strip().lower()
     emps = [e for e in rows("Employees") if not q or q in str(e["Employee ID"]).lower() or q in str(e["Name"]).lower()]
     emps.sort(key=lambda e: str(e["Name"]).lower())
     # Employees with unseen login/logout notifications get their name highlighted in red.
     unseen_ids = {str(r["Employee ID"]) for r in rows("Notifications") if str(r.get("Seen", "")).strip() != "Yes"}
     for e in emps: e["flag"] = str(e["Employee ID"]) in unseen_ids
-    return page(EMP_LIST, title="Employee Info", emps=emps, q=request.args.get("q", ""))
+    log = update_log()
+    return page(EMP_LIST, title="Employee Info", view="employees", emps=emps, q=request.args.get("q", ""),
+                new_count=sum(1 for r in log if r["new"]))
 
 def emp_or_404(eid):
     e = next((e for e in rows("Employees") if _key(e["Employee ID"]) == _key(eid)), None)
@@ -1566,6 +1603,9 @@ def admin_employee_detail(eid):
                 [{"range": f"F{r['_row']}", "values": [["Yes"]]} for r in fresh], value_input_option="RAW")
             _notif_cache[1] = None
         data.sort(key=_nid, reverse=True)
+        for r in data:
+            u = update_entry(r)
+            r["Summary"] = u["summary"] if u else ""
         body = T_NOTIF; ctx["data"] = data[:200]
     return page(EMP_HEAD + body, title=emp["Name"], **ctx)
 

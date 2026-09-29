@@ -422,6 +422,13 @@ def _nid(r):
     v = str(r.get("Notification ID", ""))
     return int(v) if v.isdigit() else 0
 
+def _and_join(items):
+    """['Phone Number','Address'] -> 'Phone Number and Address'; 3+ items get an Oxford comma."""
+    items = list(items)
+    if len(items) <= 1: return items[0] if items else ""
+    if len(items) == 2: return items[0] + " and " + items[1]
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
 def notify(emp_id, name, event, now):
     _notif_cache[1] = None
     ws_of("Notifications").append_row(
@@ -2370,10 +2377,14 @@ def save_employee_row(row, emp_id, changes):
 def employee_profile():
     emp = my_emp_row()
     if request.method == "POST":
-        ok = save_employee_row(emp["_row"], session["emp_id"],
-                               {f: request.form.get(f, "").strip() for f in EMP_EDITABLE_PERSONAL})
+        changes = {f: request.form.get(f, "").strip() for f in EMP_EDITABLE_PERSONAL}
+        changed_fields = [f.replace("_", " ") for f in EMP_EDITABLE_PERSONAL
+                           if changes[f] != str(emp.get(f, "") or "").strip()]
+        ok = save_employee_row(emp["_row"], session["emp_id"], changes)
         if ok:
-            _bg(notify, session["emp_id"], session["name"], "Updated personal details", now_local())
+            if changed_fields:      # only log a notification when something was actually changed
+                _bg(notify, session["emp_id"], session["name"],
+                    "Updated Personal Details – " + _and_join(changed_fields), now_local())
             flash("Profile updated. Admin can now see your latest details.")
         else:
             flash("Could not save - please reload the page and try again.")

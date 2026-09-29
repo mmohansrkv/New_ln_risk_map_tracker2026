@@ -986,8 +986,7 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"),
               ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
               ("/admin/leave-permission", "Leave & Permission Log"),
-              ("/admin/employee-info", "Employee Info"),
-              ("/admin/notifications", "Notifications Log")],
+              ("/admin/employee-info", "Employee Info")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
@@ -1559,38 +1558,7 @@ def admin_holiday_delete():
     flash(f"Holiday on {date} removed." if hits else "Holiday not found.")
     return redirect(nxt if nxt.startswith("/admin/") else "/admin/leave-permission")
 
-# ---------------------------------------------------------------- admin: notifications
-NOTIF = """<div class="head"><div><h1>Notifications Log</h1>
-<p class="mut">Everything employees add, update or delete (Daily Productivity Entry, Leave &amp; Permission, Personal Details) plus login / logout alerts, newest first (latest 200). New ones are in bold.</p></div></div>
-<form class="grid no-print" method="get"><input name="q" placeholder="Search employee ID / name" value="{{q}}">
-<select name="section"><option value="">All sections</option>{% for x in sections %}<option value="{{x}}" {{'selected' if x==section else ''}}>{{x}}</option>{% endfor %}</select>
-<button class="primary">Filter</button><a href="/admin/notifications">Reset</a></form>
-<table><tr><th>Employee Name</th><th>Date &amp; Time</th><th>Section / Log</th><th>Action</th><th>Details</th></tr>
-{% for v in data %}<tr{% if v.new %} style="font-weight:600"{% endif %}>
-<td><a href="/admin/employee-info/{{v.id|urlencode}}">{{v.name}}</a></td><td>{{v.time|t12}}</td><td>{{v.section}}</td>
-<td><span class="pill {{'in' if v.action=='Logged in' else ('out' if v.action.startswith('Logged out') else ('out' if v.action=='Deleted' else 'act'))}}">{{v.action}}</span></td>
-<td>{{v.details or '-'}}</td></tr>
-{% else %}<tr><td colspan="5">No notifications found.</td></tr>{% endfor %}</table>"""
-
-NOTIF_SECTIONS = [SEC_PROD, SEC_LEAVE, SEC_PERSONAL, "Account", "Login / Logout"]
-
-@app.route("/admin/notifications")
-@need("admin")
-def admin_notifications():
-    q = request.args.get("q", "").strip().lower()
-    section = request.args.get("section", "")
-    data = sorted(rows("Notifications"), key=_nid, reverse=True)
-    views = [notif_view(r) for r in data]
-    views = [v for v in views if (not section or v["section"] == section)
-             and (not q or q in str(v["id"]).lower() or q in str(v["name"]).lower())][:200]
-    fresh = [v for v in views if v["new"]]
-    if fresh:                                              # opening the page marks the alerts shown as read
-        ws_of("Notifications").batch_update(
-            [{"range": f"F{v['row']}", "values": [["Yes"]]} for v in fresh], value_input_option="RAW")
-        _notif_cache[1] = None
-    return page(NOTIF, title="Notifications Log", data=views, q=request.args.get("q", ""),
-                section=section, sections=NOTIF_SECTIONS)
-
+# ---------------------------------------------------------------- admin: notifications (background alerts)
 @app.route("/admin/notify/poll")
 @need("admin")
 def admin_notify_poll():

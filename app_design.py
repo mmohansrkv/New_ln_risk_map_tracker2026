@@ -1650,12 +1650,13 @@ WELCOME = """<style>
 .tilt{position:relative;width:0;height:0;transform-style:preserve-3d;transform:rotateX(-20deg)}
 .ring{position:absolute;left:0;top:0;transform-style:preserve-3d;animation:ringSpin 14s linear infinite}
 @keyframes ringSpin{to{transform:rotateY(360deg)}}
-.floor{position:absolute;width:38em;height:38em;left:-19em;top:-19em;border-radius:50%;transform:rotateX(90deg);
- background:radial-gradient(circle,#fff 0 8%,transparent 8.5%),repeating-conic-gradient(#ffd166 0 15deg,#ff8fab 15deg 30deg,#6ee7b7 30deg 45deg,#7dd3fc 45deg 60deg);box-shadow:0 0 0 .6em #fff8,0 0 4em #4f46e588}
 .pos{position:absolute;left:0;top:0;transform-style:preserve-3d;transform:rotateY(var(--a)) translateZ(13em)}
-.shadow{position:absolute;left:-1.8em;top:-1.1em;width:3.6em;height:2.2em;border-radius:50%;background:#0003;transform:rotateX(90deg)}
 .bill{position:absolute;left:0;top:0;transform-style:preserve-3d;animation:unspin 14s linear infinite}
 @keyframes unspin{from{transform:rotateY(calc(var(--a) * -1))}to{transform:rotateY(calc(var(--a) * -1 - 360deg))}}
+/* -------- Employee welcome: 3D dancing team (unchanged) -------- */
+.floor{position:absolute;width:38em;height:38em;left:-19em;top:-19em;border-radius:50%;transform:rotateX(90deg);
+ background:radial-gradient(circle,#fff 0 8%,transparent 8.5%),repeating-conic-gradient(#ffd166 0 15deg,#ff8fab 15deg 30deg,#6ee7b7 30deg 45deg,#7dd3fc 45deg 60deg);box-shadow:0 0 0 .6em #fff8,0 0 4em #4f46e588}
+.shadow{position:absolute;left:-1.8em;top:-1.1em;width:3.6em;height:2.2em;border-radius:50%;background:#0003;transform:rotateX(90deg)}
 .jump{position:absolute;left:0;top:0;animation:hop .72s ease-in-out infinite;animation-delay:calc(var(--i) * -.13s)}
 @keyframes hop{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.8em)}}
 .fig{position:absolute;left:-2em;top:-7.2em;width:4em;height:7.2em}
@@ -1671,7 +1672,6 @@ WELCOME = """<style>
 @keyframes waveR{from{transform:rotate(-150deg)}to{transform:rotate(-200deg)}}
 .leg{position:absolute;top:5.3em;width:1em;height:1.9em;border-radius:.4em .4em .6em .6em;background:#3b3f5c}
 .leg.l{left:.9em}.leg.r{right:.9em}
-/* female team: longer hair + a skirt over the legs | male team: short hair, plain legs (default) */
 .fig.female .head::before{height:1.55em;border-radius:1.5em 1.5em 45% 45%}
 .fig.female .head::after{box-shadow:.95em 0 #222,-.05em .95em #222,1em .95em #222}
 .fig.female .torso::after{content:"";position:absolute;left:-.35em;bottom:-1em;width:3.9em;height:1.3em;border-radius:0 0 1.6em 1.6em;background:linear-gradient(160deg,var(--c),var(--d))}
@@ -1679,11 +1679,32 @@ WELCOME = """<style>
 .bpos{position:absolute;left:0;top:0;transform:translateZ(13em);transform-style:preserve-3d}
 .ball{position:absolute;left:-.9em;top:-6em;width:1.8em;height:1.8em;border-radius:50%;background:radial-gradient(circle at 32% 30%,#fff,#ff5d5d 45%,#b91c1c);box-shadow:0 .5em 1em #0004;animation:bball .95s ease-in-out infinite}
 @keyframes bball{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.4em)}}
+/* -------- Admin loading: lightweight 3D flying/falling flowers (replaces the team animation) -------- */
+.fring{position:absolute;left:0;top:0;transform-style:preserve-3d;animation:ringSpin 20s linear infinite}
+.fpos{position:absolute;left:0;top:0;transform-style:preserve-3d;transform:rotateY(var(--a)) translateZ(11em) translateY(var(--fy,0));animation:flFly 3.6s ease-in-out infinite;animation-delay:calc(var(--i) * -.5s)}
+@keyframes flFly{0%,100%{transform:rotateY(var(--a)) translateZ(11em) translateY(0)}50%{transform:rotateY(var(--a)) translateZ(11em) translateY(-1.1em)}}
+.fbill{position:absolute;left:0;top:0;transform-style:preserve-3d;animation:unspin 20s linear infinite,petSpin 7s linear infinite}
+@keyframes petSpin{to{transform:rotateZ(360deg)}}
+.flower3d{position:absolute;left:-1.7em;top:-1.7em;width:3.4em;height:3.4em}
+.petal{position:absolute;left:50%;top:50%;width:1.7em;height:1.05em;margin:-.52em 0 0 -.85em;border-radius:60% 60% 60% 60%/80% 80% 40% 40%;background:var(--pc);opacity:.96;transform-origin:50% 50%;box-shadow:inset 0 0 .3em #ffffff55}
+.core{position:absolute;left:50%;top:50%;width:1em;height:1em;margin:-.5em;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff9,#ffd166 70%);box-shadow:0 0 .35em #0003 inset}
 .flw{position:absolute;top:-8vh;left:0;will-change:transform,opacity;pointer-events:none;z-index:6;animation:flDrop linear forwards}
 @keyframes flDrop{0%{opacity:0;transform:translate3d(0,0,0) rotate(0deg)}8%{opacity:1}92%{opacity:1}100%{opacity:0;transform:translate3d(var(--dx),118vh,0) rotate(var(--rot))}}
 </style>
 <div class="wl" id="wl">
  <div class="wl-card" id="wlCard"><h1>Welcome, {{session.name}}</h1><p>Getting your workspace ready&hellip;</p></div>
+{% if session.role == 'admin' %}
+ <div class="cam"><div class="tilt"><div class="fring">
+  {% for pc in ['#ff6f91','#ffc75f','#f9f871','#845ec2','#00c9a7','#ff9671'] %}
+  <div class="fpos" style="--a:{{loop.index0*60}}deg;--i:{{loop.index0}}">
+   <div class="fbill"><div class="flower3d">
+    {% for k in range(6) %}<div class="petal" style="--pc:{{pc}};transform:rotate({{k*60}}deg) translateY(-.85em)"></div>{% endfor %}
+    <div class="core"></div>
+   </div></div>
+  </div>
+  {% endfor %}
+ </div></div></div>
+{% else %}
  <div class="cam"><div class="tilt"><div class="ring">
   <div class="floor"></div>
   {% for c in [('#ef4444','#b91c1c','#3b2314'),('#3b82f6','#1d4ed8','#111827'),('#22c55e','#15803d','#7c2d12'),('#f59e0b','#b45309','#1f2937'),('#a855f7','#7e22ce','#422006'),('#ec4899','#be185d','#0f172a')] %}
@@ -1699,12 +1720,14 @@ WELCOME = """<style>
   {% endfor %}
   <div class="bspin"><div class="bpos"><div class="ball"></div></div></div>
  </div></div></div>
+{% endif %}
 </div>
 <script>
 (function(){
+ var ROLE={{session.role|tojson}}, NAME={{session.name|tojson}};
  var wl=document.getElementById('wl');
  var petals=['#ffb6d0','#ffd1e6','#ffe38a','#c9b8f6','#fff'];
- function petal(){                                   /* one flower, falling top -> bottom */
+ function petal(){                                   /* one flower, falling top -> bottom (ambient, both pages) */
   var d=document.createElement('span'); d.className='flw';
   var s=10+Math.random()*8;
   d.style.left=(Math.random()*100)+'vw';
@@ -1720,31 +1743,46 @@ WELCOME = """<style>
  var spawn=setInterval(petal,1000);                    /* a new flower every 1 second */
 
  var WL_MS=2000;                                       /* total time the welcome page is shown */
- var ac=null,master=null;
- try{                                                   /* soft background music, synth-generated (no audio file to load) */
-  var AC=window.AudioContext||window.webkitAudioContext;
-  if(AC){
-   ac=new AC();
-   master=ac.createGain(); master.gain.value=0; master.connect(ac.destination);
-   var now=ac.currentTime, fadeIn=.25, fadeOut=.35, end=now+WL_MS/1000;
-   master.gain.linearRampToValueAtTime(.16, now+fadeIn);              // gentle fade in
-   master.gain.setValueAtTime(.16, Math.max(now+fadeIn, end-fadeOut));
-   master.gain.linearRampToValueAtTime(0, end);                       // fade out right as the page ends
-   var chord=[261.63,329.63,392.00,523.25];                           // C major, light & upbeat
-   chord.forEach(function(freq,idx){
-    var o=ac.createOscillator(),g=ac.createGain();
-    o.type='sine'; o.frequency.value=freq;
-    g.gain.value=idx===0?.9:.55;
-    o.connect(g); g.connect(master);
-    o.start(now); o.stop(end+.05);
-   });
-   if(ac.state==='suspended') ac.resume().catch(function(){});
-  }
- }catch(e){ /* Web Audio unavailable/blocked - animation still runs fine without BGM */ }
 
- setTimeout(function(){                                /* welcome (3D team + flowers + BGM) for 2s, then move on */
+ if(ROLE==='employee'){                                /* AI voice announcement - Employee welcome only, no BGM */
+  try{
+   if('speechSynthesis' in window){
+    var utter=new SpeechSynthesisUtterance('Welcome, ' + NAME);
+    utter.rate=1; utter.pitch=1.02; utter.volume=1;
+    window.speechSynthesis.cancel();                   // clear anything queued, then speak right away
+    window.speechSynthesis.speak(utter);
+   }
+  }catch(e){ /* speech unavailable/blocked - animation still runs fine without it */ }
+ }
+
+ var ac=null,master=null;
+ if(ROLE!=='employee'){
+  try{                                                  /* soft background music (Admin loading only), synth-generated */
+   var AC=window.AudioContext||window.webkitAudioContext;
+   if(AC){
+    ac=new AC();
+    master=ac.createGain(); master.gain.value=0; master.connect(ac.destination);
+    var now=ac.currentTime, fadeIn=.25, fadeOut=.35, end=now+WL_MS/1000;
+    master.gain.linearRampToValueAtTime(.16, now+fadeIn);
+    master.gain.setValueAtTime(.16, Math.max(now+fadeIn, end-fadeOut));
+    master.gain.linearRampToValueAtTime(0, end);
+    var chord=[261.63,329.63,392.00,523.25];
+    chord.forEach(function(freq,idx){
+     var o=ac.createOscillator(),g=ac.createGain();
+     o.type='sine'; o.frequency.value=freq;
+     g.gain.value=idx===0?.9:.55;
+     o.connect(g); g.connect(master);
+     o.start(now); o.stop(end+.05);
+    });
+    if(ac.state==='suspended') ac.resume().catch(function(){});
+   }
+  }catch(e){ /* Web Audio unavailable/blocked - animation still runs fine without BGM */ }
+ }
+
+ setTimeout(function(){                                /* welcome animation for 2s, then move on */
   clearInterval(spawn);
   if(ac){ try{ master.gain.cancelScheduledValues(ac.currentTime); master.gain.value=0; ac.close(); }catch(e){} }
+  if(ROLE==='employee' && 'speechSynthesis' in window){ try{ window.speechSynthesis.cancel(); }catch(e){} }
   window.location.replace({{ ('/admin/summary' if session.role=='admin' else '/employee') | tojson }});
  },2000);
 })();

@@ -17,8 +17,12 @@ def today_local(): return now_local().date()
 
 SHEET_ID = os.getenv("SHEET_ID", "1zh_W-ZDLEa3XZCt_a0iw8m5V8VxrUg3pj55FG0ZFJJg")
 CREDS_FILE = os.getenv("GOOGLE_CREDS", "credentials.json")
-ADMIN_USER = os.getenv("ADMIN_USER", "admin")
-ADMIN_PASS = os.getenv("ADMIN_PASS", "admin123")   # change this!
+ADMIN_USER = os.getenv("ADMIN_USER", "Admin_Mobius")
+# The fallback below only kicks in if the ADMIN_PASS environment variable is not set.
+# For real deployments, set ADMIN_PASS as a server/host environment variable (or a secrets
+# manager) instead of relying on this in-code fallback, so the password is never committed
+# to source control.
+ADMIN_PASS = os.getenv("ADMIN_PASS", "H*&hjuiAsi5")
 DAY_HOURS = 8
 LEAVE_MONTHLY_LIMIT = 2        # days of leave an employee may apply for per calendar month
 PERMISSION_MONTHLY_LIMIT = 2   # hrs of permission an employee may apply for per calendar month
@@ -750,6 +754,13 @@ table td small,table th small{font-size:10.5px!important}
 .kpis .kpi b{font-size:17px}
 .tabs a{font-size:12.5px;padding:6px 12px}
 .totals{font-size:12px}
+/* ---- Daily Productivity Entry: red/green box vs the Admin-set Target Count/Hour ---- */
+#entryCard{transition:background .35s ease,border-color .35s ease,box-shadow .35s ease;border:2px solid var(--line)}
+#entryCard.tgt-met{background:#f2fbf5;border-color:#22c55e;box-shadow:0 0 0 3px #22c55e26}
+#entryCard.tgt-miss{background:#fdf3f3;border-color:#ef4444;box-shadow:0 0 0 3px #ef444426}
+#tgtBadge{display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;vertical-align:middle}
+#tgtBadge.met{background:#d9f7e3;color:#146c43}
+#tgtBadge.miss{background:#fbe0e0;color:#a52a2a}
 </style></head><body>
 {% if session.role %}<div class="app"><aside class="emp">
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
@@ -890,7 +901,7 @@ LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th
 <form method="post" action="/entry/{{s.id}}/delete" onsubmit="return confirm('Delete this entry?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="8">Nothing yet.</td></tr>{% endfor %}</table>"""
 
-FORM = """<div class="card"><h2>{{heading}}</h2>
+FORM = """<div class="card" id="entryCard"><h2>{{heading}} <span id="tgtBadge"></span></h2>
 <form method="post" action="{{action}}">
 <div class="grid">
 <label>Date<input type="date" name="date" value="{{sub.date}}" {% if maxdate %}max="{{maxdate}}"{% endif %} required></label>
@@ -928,7 +939,19 @@ function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e
  tpct.textContent=Math.min(Math.round(p/TGT*100),100);
  const r=reqHrs(),left=Math.round((r-p-n)*100)/100;
  tstat.textContent=left>0?('Required '+r+' hrs - '+left+' hrs remaining'):('Required '+r+' hrs - complete');
- tstat.style.color=left>0?'#b45309':'#15803d'}
+ tstat.style.color=left>0?'#b45309':'#15803d';
+ const prows=[...document.querySelectorAll('#procs .r')];                 // Target Count/Hour check (Admin-set, per process)
+ const met=prows.length>0 && prows.every(row=>{
+  const rate=T[(row.querySelector('[name=pn]')||{}).value]||0;
+  const hr=+((row.querySelector('[name=ph]')||{}).value)||0;
+  const ct=+((row.querySelector('[name=pc]')||{}).value)||0;
+  const need=rate*hr;
+  return need<=0 || ct>=need;                                             // no target set for that process = counted as met
+ });
+ entryCard.classList.toggle('tgt-met',met);
+ entryCard.classList.toggle('tgt-miss',!met);
+ tgtBadge.textContent=met?'Target: Met':'Target: Not met';
+ tgtBadge.className=met?'met':'miss'}
 document.querySelector('[name=date]').addEventListener('change',calc);
 function showErr(m){formerr.textContent=m;formerr.style.display='block';formerr.scrollIntoView({behavior:'smooth',block:'center'})}
 document.querySelector('form[action="{{action}}"]').addEventListener('submit',function(e){

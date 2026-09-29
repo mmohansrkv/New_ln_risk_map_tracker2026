@@ -94,7 +94,8 @@ HEADERS = {
     # Background login/logout tracking (never shown to employees)
     "Attendance": ["Session ID", "Date", "Employee ID", "Employee name", "Band",
                    "Login time", "Logout time", "Duration", "Logout type"],
-    "Notifications": ["Notification ID", "Time", "Employee ID", "Employee name", "Event", "Seen"],
+    "Notifications": ["Notification ID", "Time", "Employee ID", "Employee name", "Event", "Seen",
+                      "Section", "Action", "Details"],
 }
 PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                     "Emergency no", "Personal Email ID", "Office Email ID"]
@@ -492,38 +493,123 @@ def _and_join(items):
     if len(items) == 2: return items[0] + " and " + items[1]
     return ", ".join(items[:-1]) + ", and " + items[-1]
 
-def notify(emp_id, name, event, now):
+def notify(emp_id, name, event, now, section="", action="", details=""):
+    """One row in the admin Notifications log. Login/logout alerts only use `event`; employee changes also
+    fill Section / Action / Details (kept in their own columns so the admin can read and filter them)."""
     _notif_cache[1] = None
+    if section and not event: event = f"{action} {section}".strip()
     ws_of("Notifications").append_row(
-        [str(int(time.time() * 1_000_000)), now.strftime("%Y-%m-%d " + TIME_FMT), emp_id, name, event, ""],
+        [str(int(time.time() * 1_000_000)), now.strftime("%Y-%m-%d " + TIME_FMT), emp_id, name, event, "",
+         section, action, str(details)[:1500]],
         value_input_option="RAW")
+
+SEC_PROD, SEC_LEAVE, SEC_PERSONAL = "Daily Productivity Entry", "Leave & Permission", "Personal Details"
+
+def log_change(section, action, details):
+    """Record what the logged-in EMPLOYEE just did (Added / Updated / Deleted) for the admin's Notifications log.
+    Runs in the background so the employee is never slowed down; admin's own edits are not logged here."""
+    if session.get("role") != "employee": return
+    _bg(notify, session["emp_id"], session["name"], "", now_local(), section, action, details)
+
+def _short(v, n=60):
+    v = str(v).strip()
+    return v if len(v) <= n else v[:n - 1] + "\u2026"
+
+def _fmt_num(x):
+    return "%g" % x if isinstance(x, (int, float)) else str(x)
+
+def _proc_txt(name, hour, count):
+    return f"{_short(name)} ({_fmt_num(hour)} hr, count {_fmt_num(count)})"
+
+def entry_added_details(date, procs, notes):
+    parts = [_proc_txt(n, h, c) for n, h, c, _d in procs]
+    parts += [f"Non-productive: {_short(t)} ({_fmt_num(h)} hr)" for t, h in notes]
+    return f"Entry {date}: " + "; ".join(parts)
+
+def entry_diff(old, date, procs, notes):
+    """What changed between a saved entry (old, from load_subs) and the edited form (procs / notes tuples).
+    Returns '' when nothing changed. Example: 'Count from 50 to 60 [Data Entry]'."""
+    ch = []
+    if str(old["date"]) != str(date): ch.append(f"Date from {old['date']} to {date}")
+    op = old["procs"]
+    for i in range(max(len(op), len(procs))):
+        if i < len(op) and i < len(procs):
+            o, (n, h, c, d) = op[i], procs[i]
+            tag = f" [{_short(n)}]"
+            if str(o["name"]).strip() != str(n).strip(): ch.append(f"Process from {_short(o['name'])} to {_short(n)}")
+            if abs(o["hour"] - h) > 1e-9: ch.append(f"Hours from {_fmt_num(o['hour'])} to {_fmt_num(h)}{tag}")
+            if abs(o["count"] - c) > 1e-9: ch.append(f"Count from {_fmt_num(o['count'])} to {_fmt_num(c)}{tag}")
+            if str(o["desc"]).strip() != str(d).strip():
+                ch.append(f"Description from \"{_short(o['desc'])}\" to \"{_short(d)}\"{tag}")
+        elif i < len(procs):
+            ch.append("Added process " + _proc_txt(procs[i][0], procs[i][1], procs[i][2]))
+        else:
+            ch.append("Removed process " + _proc_txt(op[i]["name"], op[i]["hour"], op[i]["count"]))
+    on = old["notes"]
+    for i in range(max(len(on), len(notes))):
+        if i < len(on) and i < len(notes):
+            if str(on[i]["desc"]).strip() != str(notes[i][0]).strip():
+                ch.append(f"Note from \"{_short(on[i]['desc'])}\" to \"{_short(notes[i][0])}\"")
+            if abs(on[i]["hour"] - notes[i][1]) > 1e-9:
+                ch.append(f"Note hours from {_fmt_num(on[i]['hour'])} to {_fmt_num(notes[i][1])} [{_short(notes[i][0])}]")
+        elif i < len(notes):
+            ch.append(f"Added note {_short(notes[i][0])} ({_fmt_num(notes[i][1])} hr)")
+        else:
+            ch.append(f"Removed note {_short(on[i]['desc'])} ({_fmt_num(on[i]['hour'])} hr)")
+    return f"Entry {date}: " + "; ".join(ch) if ch else ""
+
+def field_change(label, old, new):
+    old, new = str(old or "").strip(), str(new or "").strip()
+    if not old: return f"{label} set to {_short(new, 80)}"
+    if not new: return f"{label} cleared (was {_short(old, 80)})"
+    return f"{label} from {_short(old, 80)} to {_short(new, 80)}"
 
 def notif_rows():
     if _notif_cache[1] is None or time.time() - _notif_cache[0] > 8:
         _notif_cache[:] = [time.time(), rows("Notifications")]
     return _notif_cache[1]
 
-def update_entry(r):
-    """One Notifications-sheet row -> a 'who changed what' entry, or None for login/logout alerts."""
+def _clock(t):
+    """'2026-09-29 10:30:05 AM' -> '10:30 AM' (time of day only, for the one-line summary)."""
+    try: return dt.datetime.strptime(str(t).strip(), "%Y-%m-%d " + TIME_FMT).strftime("%I:%M %p")
+    except ValueError: return t12(t)
+
+def notif_view(r):
+    """Any Notifications-sheet row -> dict(name, id, time, section, action, details, summary, kind, new).
+    kind = 'change' for employee edits, 'session' for login/logout. Rows saved before the Section/Action/
+    Details columns existed are read from their Event text."""
     ev = str(r.get("Event", "")).strip()
     name = str(r.get("Employee name", "")).strip() or str(r.get("Employee ID", ""))
-    if ev.startswith("Updated "):
-        head, _, det = ev.partition(" \u2013 ")
-        section, details = head[len("Updated "):].strip(), det.strip()
-        summary = f"{name} updated {section}" + (f" \u2013 {details}." if details else ".")
-    elif ev == "Changed password":
-        section, details, summary = "Account", "Password", f"{name} changed their password."
+    sec, act, det = (str(r.get(k, "") or "").strip() for k in ("Section", "Action", "Details"))
+    kind = "change"
+    if not (sec and act):
+        if ev.startswith("Updated "):                       # older profile notifications
+            head, _, d = ev.partition(" \u2013 ")
+            sec, act, det = head[len("Updated "):].strip(), "Updated", d.strip()
+        elif ev == "Changed password":
+            sec, act, det = "Account", "Updated", "Password changed"
+        else:                                               # Logged in / Logged out ...
+            kind, sec, act, det = "session", "Login / Logout", ev, ""
+    t = r.get("Time", "")
+    if kind == "change":
+        summary = f"{name} \u2013 {sec} \u2013 {act}" + (f" {det}" if det else "") + f" \u2013 {_clock(t)}."
     else:
-        return None
-    return dict(name=name, id=r.get("Employee ID", ""), time=r.get("Time", ""), section=section,
-                details=details or section, summary=summary, new=str(r.get("Seen", "")).strip() != "Yes")
+        summary = f"{name} {ev.lower()} \u2013 {_clock(t)}."
+    return dict(name=name, id=r.get("Employee ID", ""), time=t, section=sec, action=act, details=det,
+                summary=summary, kind=kind, new=str(r.get("Seen", "")).strip() != "Yes", row=r.get("_row"))
+
+def update_entry(r):
+    v = notif_view(r)
+    return v if v["kind"] == "change" else None
 
 def update_log(limit=200):
-    """Employee 'details updated' entries for the admin's Notifications log, newest first."""
+    """Employee change entries (not login/logout) for the Employee Info log, newest first."""
     out = [e for e in (update_entry(r) for r in sorted(notif_rows(), key=_nid, reverse=True)) if e]
     return out[:limit]
 
 def note_text(r):
+    v = notif_view(r)
+    if v["kind"] == "change": return v["summary"]
     return f"{r['Employee name']} ({r['Employee ID']}) {str(r['Event']).lower()} at {t12(r['Time'])}"
 
 def _close_stale(emp_id, now):
@@ -900,7 +986,8 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"),
               ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
               ("/admin/leave-permission", "Leave & Permission Log"),
-              ("/admin/employee-info", "Employee Info")],
+              ("/admin/employee-info", "Employee Info"),
+              ("/admin/notifications", "Notifications Log")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
@@ -1473,26 +1560,36 @@ def admin_holiday_delete():
     return redirect(nxt if nxt.startswith("/admin/") else "/admin/leave-permission")
 
 # ---------------------------------------------------------------- admin: notifications
-NOTIF = """<div class="head"><div><h1>Notifications</h1>
-<p class="mut">Employee login / logout alerts with the exact time, newest first (latest 200). New ones are in bold.</p></div></div>
-<table><tr><th>Time</th><th>Employee</th><th>Event</th></tr>
-{% for r in data %}<tr{% if r.new %} style="font-weight:600"{% endif %}><td>{{r['Time']|t12}}</td>
-<td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
-<td><span class="pill {{'in' if r['Event']=='Logged in' else ('out' if r['Event'].startswith('Logged out') else 'act')}}">{{r['Event']}}</span></td></tr>
-{% else %}<tr><td colspan="3">No notifications yet.</td></tr>{% endfor %}</table>"""
+NOTIF = """<div class="head"><div><h1>Notifications Log</h1>
+<p class="mut">Everything employees add, update or delete (Daily Productivity Entry, Leave &amp; Permission, Personal Details) plus login / logout alerts, newest first (latest 200). New ones are in bold.</p></div></div>
+<form class="grid no-print" method="get"><input name="q" placeholder="Search employee ID / name" value="{{q}}">
+<select name="section"><option value="">All sections</option>{% for x in sections %}<option value="{{x}}" {{'selected' if x==section else ''}}>{{x}}</option>{% endfor %}</select>
+<button class="primary">Filter</button><a href="/admin/notifications">Reset</a></form>
+<table><tr><th>Employee Name</th><th>Date &amp; Time</th><th>Section / Log</th><th>Action</th><th>Details</th></tr>
+{% for v in data %}<tr{% if v.new %} style="font-weight:600"{% endif %}>
+<td><a href="/admin/employee-info/{{v.id|urlencode}}">{{v.name}}</a></td><td>{{v.time|t12}}</td><td>{{v.section}}</td>
+<td><span class="pill {{'in' if v.action=='Logged in' else ('out' if v.action.startswith('Logged out') else ('out' if v.action=='Deleted' else 'act'))}}">{{v.action}}</span></td>
+<td>{{v.details or '-'}}</td></tr>
+{% else %}<tr><td colspan="5">No notifications found.</td></tr>{% endfor %}</table>"""
+
+NOTIF_SECTIONS = [SEC_PROD, SEC_LEAVE, SEC_PERSONAL, "Account", "Login / Logout"]
 
 @app.route("/admin/notifications")
 @need("admin")
 def admin_notifications():
-    data = rows("Notifications")
-    for r in data: r["new"] = str(r.get("Seen", "")).strip() != "Yes"
-    fresh = [r for r in data if r["new"]]
-    if fresh:                                              # opening the page marks them as read
+    q = request.args.get("q", "").strip().lower()
+    section = request.args.get("section", "")
+    data = sorted(rows("Notifications"), key=_nid, reverse=True)
+    views = [notif_view(r) for r in data]
+    views = [v for v in views if (not section or v["section"] == section)
+             and (not q or q in str(v["id"]).lower() or q in str(v["name"]).lower())][:200]
+    fresh = [v for v in views if v["new"]]
+    if fresh:                                              # opening the page marks the alerts shown as read
         ws_of("Notifications").batch_update(
-            [{"range": f"F{r['_row']}", "values": [["Yes"]]} for r in fresh], value_input_option="RAW")
+            [{"range": f"F{v['row']}", "values": [["Yes"]]} for v in fresh], value_input_option="RAW")
         _notif_cache[1] = None
-    data.sort(key=_nid, reverse=True)
-    return page(NOTIF, title="Notifications", data=data[:200])
+    return page(NOTIF, title="Notifications Log", data=views, q=request.args.get("q", ""),
+                section=section, sections=NOTIF_SECTIONS)
 
 @app.route("/admin/notify/poll")
 @need("admin")
@@ -1511,17 +1608,17 @@ def admin_notify_poll():
 TABS = [("personal", "Personal Details"), ("missed", "Missed Entries"), ("leave", "Leave Log"),
         ("holidays", "Holidays"), ("notifications", "Notifications")]
 
-EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if view=='notifications' %}A log of the details employees have updated, newest first (latest 200).{% else %}Click an employee's name to open their details. A name in red has unseen login/logout notifications.{% endif %}</p></div>
+EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if view=='notifications' %}A log of what employees have added, updated or deleted, newest first (latest 200).{% else %}Click an employee's name to open their details. A name in red has unseen login/logout notifications.{% endif %}</p></div>
 {% if view!='notifications' %}<form class="grid" method="get"><input name="q" placeholder="Search ID / name" value="{{q}}">
 <button class="primary">Search</button><a href="/admin/employee-info">Reset</a></form>{% endif %}</div>
 <div class="tabs no-print"><a href="/admin/employee-info" class="{{'' if view=='notifications' else 'on'}}">Employees</a>
 <a href="/admin/employee-info?view=notifications" class="{{'on' if view=='notifications' else ''}}">Notifications{% if new_count %} ({{new_count}} new){% endif %}</a></div>
 {% if view=='notifications' %}
-<table><tr><th>Employee Name</th><th>Date &amp; Time</th><th>Details Updated</th><th>Summary</th></tr>
+<table><tr><th>Employee Name</th><th>Date &amp; Time</th><th>Section / Log</th><th>Action</th><th>Details</th><th>Summary</th></tr>
 {% for r in log %}<tr{% if r.new %} style="font-weight:600"{% endif %}>
-<td><a href="/admin/employee-info/{{r.id|urlencode}}">{{r.name}}</a></td><td>{{r.time|t12}}</td>
-<td><span class="pill act">{{r.section}}</span> {{r.details}}</td><td>{{r.summary}}</td></tr>
-{% else %}<tr><td colspan="4">No employee updates yet.</td></tr>{% endfor %}</table>
+<td><a href="/admin/employee-info/{{r.id|urlencode}}">{{r.name}}</a></td><td>{{r.time|t12}}</td><td>{{r.section}}</td>
+<td><span class="pill {{'out' if r.action=='Deleted' else 'act'}}">{{r.action}}</span></td><td>{{r.details or '-'}}</td><td>{{r.summary}}</td></tr>
+{% else %}<tr><td colspan="6">No employee updates yet.</td></tr>{% endfor %}</table>
 {% else %}
 <table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Band</th></tr>
 {% for e in emps %}<tr><td>{{e['Employee ID']}}</td>
@@ -1580,12 +1677,12 @@ T_HOLIDAYS = """<p class="mut">Company holidays (they apply to every employee). 
 {% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r.day}}</td><td>{{r['Name']}}</td></tr>
 {% else %}<tr><td colspan="3">No holidays declared.</td></tr>{% endfor %}</table>"""
 
-T_NOTIF = """<p class="mut">Login / logout alerts and profile updates for this employee, newest first (latest 200).</p>
-<table><tr><th>Date &amp; Time</th><th>Event</th><th>Summary</th></tr>
-{% for r in data %}<tr{% if r.new %} style="font-weight:600"{% endif %}><td>{{r['Time']|t12}}</td>
-<td><span class="pill {{'in' if r['Event']=='Logged in' else ('out' if r['Event'].startswith('Logged out') else 'act')}}">{{r['Event'].split(' \u2013 ')[0]}}</span></td>
-<td>{{r['Summary']}}</td></tr>
-{% else %}<tr><td colspan="3">No notifications yet.</td></tr>{% endfor %}</table>"""
+T_NOTIF = """<p class="mut">Everything this employee added, updated or deleted, plus login / logout alerts, newest first (latest 200).</p>
+<table><tr><th>Date &amp; Time</th><th>Section / Log</th><th>Action</th><th>Details</th></tr>
+{% for v in data %}<tr{% if v.new %} style="font-weight:600"{% endif %}><td>{{v.time|t12}}</td><td>{{v.section}}</td>
+<td><span class="pill {{'in' if v.action=='Logged in' else ('out' if (v.action.startswith('Logged out') or v.action=='Deleted') else 'act')}}">{{v.action}}</span></td>
+<td>{{v.details or '-'}}</td></tr>
+{% else %}<tr><td colspan="4">No notifications yet.</td></tr>{% endfor %}</table>"""
 
 @app.route("/admin/employee-info")
 @need("admin")
@@ -1654,18 +1751,14 @@ def admin_employee_detail(eid):
             except ValueError: r["day"] = ""
         body = T_HOLIDAYS; ctx["data"] = data
     else:   # notifications - opening the tab marks this employee's alerts as read
-        data = [r for r in rows("Notifications") if _key(r["Employee ID"]) == _key(eid)]
-        for r in data: r["new"] = str(r.get("Seen", "")).strip() != "Yes"
-        fresh = [r for r in data if r["new"]]
+        data = [notif_view(r) for r in sorted(rows("Notifications"), key=_nid, reverse=True)
+                if _key(r["Employee ID"]) == _key(eid)][:200]
+        fresh = [v for v in data if v["new"]]
         if fresh:
             ws_of("Notifications").batch_update(
-                [{"range": f"F{r['_row']}", "values": [["Yes"]]} for r in fresh], value_input_option="RAW")
+                [{"range": f"F{v['row']}", "values": [["Yes"]]} for v in fresh], value_input_option="RAW")
             _notif_cache[1] = None
-        data.sort(key=_nid, reverse=True)
-        for r in data:
-            u = update_entry(r)
-            r["Summary"] = u["summary"] if u else ""
-        body = T_NOTIF; ctx["data"] = data[:200]
+        body = T_NOTIF; ctx["data"] = data
     return page(EMP_HEAD + body, title=emp["Name"], **ctx)
 
 @app.route("/admin/employee-info/<eid>/leave", methods=["POST"])
@@ -1985,6 +2078,7 @@ def employee_save():
     if err:
         flash(err, "error"); return redirect("/employee")
     write_sub(uuid.uuid4().hex[:10], date, (session["band"], session["emp_id"], session["name"]), procs, notes)
+    log_change(SEC_PROD, "Added", entry_added_details(date, procs, notes))
     flash("Saved." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else "")); return redirect("/employee")
 
 @app.route("/entry/<sid>", methods=["GET", "POST"])
@@ -1997,8 +2091,10 @@ def entry_edit(sid):
             err = f"An entry for {date} already exists. Choose a different date or edit that entry."
         if err:
             flash(err, "error"); return redirect(request.path)
+        changed = entry_diff(s, date, procs, notes)          # compare with the saved entry before it is replaced
         delete_rows(s["rows"])
         write_sub(sid, date, (s["band"], s["emp_id"], s["emp_name"]), procs, notes)
+        if changed: log_change(SEC_PROD, "Updated", changed)
         flash("Updated." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else "")); return redirect(home())
     body, ctx = form_page(s, request.path, "Edit entry")
     return page(body, title="Edit entry", **ctx)
@@ -2011,7 +2107,10 @@ def entry_view(sid):
 @app.route("/entry/<sid>/delete", methods=["POST"])
 @need()
 def entry_delete(sid):
-    delete_rows(get_sub(sid)["rows"])
+    s = get_sub(sid)
+    delete_rows(s["rows"])
+    log_change(SEC_PROD, "Deleted",
+               f"Entry {s['date']} ({_fmt_num(s['prod'])} productive hr, {_fmt_num(s['non'])} non-productive hr)")
     flash("Deleted."); return redirect(home())
 
 # ---------------------------------------------------------------- leave + reports
@@ -2490,11 +2589,12 @@ def employee_profile():
         changes = {f: request.form.get(f, "").strip() for f in EMP_EDITABLE_PERSONAL}
         changed_fields = [f.replace("_", " ") for f in EMP_EDITABLE_PERSONAL
                            if changes[f] != str(emp.get(f, "") or "").strip()]
+        change_lines = [field_change(f.replace("_", " "), emp.get(f, ""), changes[f]) for f in EMP_EDITABLE_PERSONAL
+                        if changes[f] != str(emp.get(f, "") or "").strip()]
         ok = save_employee_row(emp["_row"], session["emp_id"], changes)
         if ok:
             if changed_fields:      # only log a notification when something was actually changed
-                _bg(notify, session["emp_id"], session["name"],
-                    "Updated Personal Details – " + _and_join(changed_fields), now_local())
+                log_change(SEC_PERSONAL, "Updated", "; ".join(change_lines))
             flash("Profile updated. Admin can now see your latest details.")
         else:
             flash("Could not save - please reload the page and try again.")
@@ -2511,7 +2611,7 @@ def employee_password():
     elif new != conf: flash("New password and confirmation do not match.")
     elif eq(new, cur): flash("New password must be different from the current one.")
     elif save_employee_row(emp["_row"], session["emp_id"], {"Password": new}):
-        _bg(notify, session["emp_id"], session["name"], "Changed password", now_local())
+        log_change("Account", "Updated", "Password")
         flash("Password changed. Use it the next time you log in.")
     else:
         flash("Could not change the password - please reload the page and try again.")
@@ -2524,6 +2624,9 @@ def employee_leave():
         try:
             skipped = leave_range_check(request.form['d1'], request.form['d2'])
             n = add_leave(my_emp(), request.form['d1'], request.form['d2'], request.form['reason'].strip())
+            if n:
+                d1, d2, why = request.form['d1'], request.form['d2'], request.form['reason'].strip() or "Leave"
+                log_change(SEC_LEAVE, "Added", f"Leave {d1 if d1 == d2 else d1 + ' to ' + d2} ({n} day(s)) \u2013 {_short(why, 80)}")
             flash(f"{n} leave day(s) submitted - waiting for admin approval." +
                   (f" Holiday date(s) {', '.join(skipped)} were skipped (leave is not needed on a holiday)." if skipped else ""))
         except ValueError as e:
@@ -2552,6 +2655,7 @@ def employee_leave_delete(row):
         flash("Only pending leave can be cancelled."); return redirect("/employee/leave")
     ws_of("Leave").delete_rows(row)
     invalidate_cache("Leave")
+    log_change(SEC_LEAVE, "Deleted", f"Leave {r['Date']} \u2013 {_short(r.get('Reason', ''), 80)}")
     flash("Leave cancelled."); return redirect("/employee/leave")
 
 @app.route("/employee/permission", methods=["POST"])
@@ -2559,6 +2663,8 @@ def employee_leave_delete(row):
 def employee_permission():
     try:
         add_permission(my_emp(), request.form.get("reason", "").strip(), request.form.get("hours", ""))
+        log_change(SEC_LEAVE, "Added", f"Permission request for {today_local()} ({_fmt_num(round(float(request.form.get('hours', 0)), 2))} hr) "
+                                        f"\u2013 {_short(request.form.get('reason', '').strip() or 'Permission', 80)}")
         flash("Permission request submitted for today.")
     except ValueError as e:
         flash(str(e))
@@ -2573,6 +2679,8 @@ def employee_permission_delete(row):
         flash("Only pending requests can be cancelled."); return redirect("/employee/leave")
     ws_of("Permissions").delete_rows(row)
     invalidate_cache("Permissions")
+    log_change(SEC_LEAVE, "Deleted", f"Permission request for {r['Date']} "
+                                      f"({_fmt_num(num(r.get('Hours')))} hr) \u2013 {_short(r.get('Reason', ''), 80)}")
     flash("Permission request cancelled."); return redirect("/employee/leave")
 
 if __name__ == "__main__":

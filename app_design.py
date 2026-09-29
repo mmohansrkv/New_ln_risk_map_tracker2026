@@ -112,6 +112,32 @@ KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave", "
 
 app = Flask(__name__)
 
+# ---------------------------------------------------------------- performance: slow-network optimizations
+# 1) Serve /static (e.g. the login background image) with a long cache lifetime, so it is only
+#    downloaded once per browser rather than on every login-page view.
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 604800  # 7 days
+
+# 2) Gzip every response on the way out. Every page here is a single self-contained HTML document
+#    with its CSS/JS inline, so compressing that text is the single biggest win on a slow link -
+#    typically a 70-85% size cut for HTML/CSS/JS with zero effect on how the page looks or behaves.
+import gzip as _gzip
+@app.after_request
+def _compress(resp):
+    accepts = request.headers.get("Accept-Encoding", "")
+    if ("gzip" not in accepts or resp.direct_passthrough or resp.status_code < 200
+            or resp.status_code in (204, 304) or "Content-Encoding" in resp.headers):
+        return resp
+    mimetype = (resp.mimetype or "").lower()
+    compressible = mimetype in ("text/html", "text/css", "application/javascript", "text/javascript",
+                                 "application/json") or mimetype.startswith("text/")
+    if not compressible or resp.calculate_content_length() is None or resp.content_length < 500:
+        return resp
+    resp.set_data(_gzip.compress(resp.get_data(), compresslevel=6))
+    resp.headers["Content-Encoding"] = "gzip"
+    resp.headers["Vary"] = "Accept-Encoding"
+    resp.headers["Content-Length"] = resp.content_length
+    return resp
+
 @app.errorhandler(APIError)
 def _handle_sheets_api_error(e):
     # Reached only if retries in _with_retry were exhausted (Sheets still
@@ -668,6 +694,12 @@ aside.emp{position:sticky;top:0;height:100vh;overflow-y:auto;align-self:flex-sta
 @media(max-width:800px){.av3d{width:72px;height:72px}.wflex{gap:12px}
 aside.emp{position:static;height:auto;overflow:visible;align-self:auto}.prof-sub{display:none}.prof-row{gap:8px}.prof{order:99;margin:0 0 0 auto;border:0;padding:0;flex-direction:row;gap:10px}.prof .av3d{width:44px;height:44px;margin:0}.prof-name{font-size:13px}}
 @media(prefers-reduced-motion:reduce){.av-stage{animation:none!important}}
+/* Admin sidebar: flat, non-3D, non-animated avatar (kept the same size/spot as the old 3D one) */
+.av-flat{position:relative;flex:none;width:96px;height:96px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+ background:radial-gradient(circle at 35% 28%,#dbeafe,#93c5fd 55%,#4f46e5);box-shadow:0 12px 22px -8px #4f46e577,0 0 0 3px #fff;margin-bottom:6px}
+.av-flat span{font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:34px;font-weight:700;color:#fff}
+.prof .av-flat{width:84px;height:84px}
+@media(max-width:800px){.prof .av-flat{width:44px;height:44px}.prof .av-flat span{font-size:18px}}
 /* ================= Professional 3D look (Admin, Employee, Login) ================= */
 body{background:radial-gradient(1100px 520px at 8% -8%,#e7eaff 0%,transparent 60%),radial-gradient(900px 480px at 100% 0%,#f4e9ff 0%,transparent 55%),#f3f5fb}
 aside{background:linear-gradient(180deg,#252f5c 0%,#1c2340 55%,#151b34 100%);box-shadow:10px 0 28px -8px #1c234055,inset -1px 0 0 #ffffff14;position:relative;z-index:2}
@@ -797,7 +829,7 @@ def page(body, title="Productivity Tracker", **ctx):
            for h, l in NAVS.get(session.get("role"), [])]
     side_avatar = ""
     if session.get("role") == "admin":
-        side_avatar = render_template_string(AVATAR3D, gender="male", initials="A")
+        side_avatar = '<div class="av-flat" role="img" aria-label="Admin profile picture"><span>A</span></div>'
     elif session.get("role") == "employee":
         try:
             g = gender_of(my_emp_row())
@@ -978,10 +1010,17 @@ VIEW = """<div class="card"><h2>{{s.date}} &middot; {{s.emp_name}} ({{s.emp_id}}
 # ---------------------------------------------------------------- routes: common
 @app.route("/photo/<role>")
 def photo(role):
-    import base64
+    import base64, hashlib
     from flask import Response
     if role not in PHOTOS: abort(404)
-    return Response(base64.b64decode(PHOTOS[role].split(",", 1)[1]), mimetype="image/jpeg")
+    data = base64.b64decode(PHOTOS[role].split(",", 1)[1])
+    etag = hashlib.md5(data).hexdigest()                         # changes automatically if the photo ever changes
+    if request.headers.get("If-None-Match") == etag:
+        return Response(status=304)
+    resp = Response(data, mimetype="image/jpeg")
+    resp.headers["Cache-Control"] = "public, max-age=604800, immutable"   # cache for 7 days on slow connections
+    resp.headers["ETag"] = etag
+    return resp
 
 @app.route("/")
 def index():

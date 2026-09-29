@@ -15,6 +15,17 @@ TZ = ZoneInfo(os.getenv("APP_TZ", "Asia/Kolkata"))
 def now_local(): return dt.datetime.now(TZ).replace(tzinfo=None)
 def today_local(): return now_local().date()
 
+def t12(v):
+    """Display a stored timestamp in 12-hour format with AM/PM: '2026-09-29 14:30:05' -> '2026-09-29 02:30:05 PM'.
+    Sheets keep the sortable 24-hour text, so sorting/grouping is unaffected; only what people SEE changes.
+    Values that are empty, date-only or already 12-hour are returned unchanged."""
+    s = str(v if v is not None else "").strip()
+    for fmt, out in (("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %I:%M:%S %p"), ("%Y-%m-%d %H:%M", "%Y-%m-%d %I:%M %p"),
+                     ("%H:%M:%S", "%I:%M:%S %p"), ("%H:%M", "%I:%M %p")):
+        try: return dt.datetime.strptime(s, fmt).strftime(out)
+        except ValueError: pass
+    return s
+
 SHEET_ID = os.getenv("SHEET_ID", "1zh_W-ZDLEa3XZCt_a0iw8m5V8VxrUg3pj55FG0ZFJJg")
 CREDS_FILE = os.getenv("GOOGLE_CREDS", "credentials.json")
 ADMIN_USER = os.getenv("ADMIN_USER", "Admin_Mobius")
@@ -145,6 +156,7 @@ def _handle_sheets_api_error(e):
     return ("Google Sheets is temporarily busy handling everyone's requests. "
             "Please wait a few seconds and try again."), 503
 app.secret_key = os.getenv("SECRET_KEY", "change-me")
+app.jinja_env.filters["t12"] = t12
 app.jinja_env.filters["g"] = lambda x: "%g" % (float(x) if str(x).strip() else 0)
 app.jinja_env.globals["PERMISSION_MONTHLY_LIMIT"] = PERMISSION_MONTHLY_LIMIT
 app.jinja_env.globals["LEAVE_MONTHLY_LIMIT"] = LEAVE_MONTHLY_LIMIT
@@ -247,22 +259,70 @@ def invalidate_cache(name=None):
         else:
             _rows_cache.pop(name, None)
 
+_ROWS_STALE_TTL = float(os.getenv("ROWS_STALE_TTL", "90"))   # older than this -> wait for a fresh read
+_refreshing = set()
+
+def _fetch_rows(name):
+    recs = _with_retry(ws_of(name).get_all_records, numericise_ignore=["all"])
+    for i, r in enumerate(recs, start=2):
+        r["_row"] = i
+    with _rows_cache_lock:
+        _rows_cache[name] = (time.monotonic(), recs)
+        _refreshing.discard(name)
+    return recs
+
+def _refresh_bg(name):
+    """Re-read one sheet in the background so the request that noticed stale data is not kept waiting."""
+    with _rows_cache_lock:
+        if name in _refreshing: return
+        _refreshing.add(name)
+    def run():
+        try: _fetch_rows(name)
+        except Exception as e:
+            print("cache refresh error:", e)
+            with _rows_cache_lock: _refreshing.discard(name)
+    threading.Thread(target=run, daemon=True).start()
+
 def rows(name):
+    """Cached sheet read. Fresh (< TTL): served from memory. Slightly old: served instantly while a background
+    refresh runs (so a page never waits on Google for data it already has). Own writes and 'fresh_until'
+    sessions always read straight from the sheet, so nobody misses their own changes."""
     now = time.monotonic()
     try: bypass = has_request_context() and session.get("fresh_until", 0) > time.time()
     except Exception: bypass = False
     with _rows_cache_lock:
         cached = _rows_cache.get(name)
-        if cached and not bypass and now - cached[0] < _ROWS_CACHE_TTL:
+    if cached and not bypass:
+        age = now - cached[0]
+        if age < _ROWS_CACHE_TTL:
             return [dict(r) for r in cached[1]]
+        if age < _ROWS_STALE_TTL:
+            _refresh_bg(name)
+            return [dict(r) for r in cached[1]]
+    return [dict(r) for r in _fetch_rows(name)]
 
-    recs = _with_retry(ws_of(name).get_all_records, numericise_ignore=["all"])
-    for i, r in enumerate(recs, start=2):
-        r["_row"] = i
+EMP_PAGE_SHEETS = ("Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays")
 
+def warm_employee_cache():
+    """Read every sheet the Employee dashboard needs, all at once."""
+    ths = [threading.Thread(target=_safe_fetch, args=(n,), daemon=True) for n in EMP_PAGE_SHEETS]
+    for t in ths: t.start()
+    for t in ths: t.join(timeout=25)
+
+def prefetch(*names):
+    """Load several sheets at the same time (instead of one after another) when they are not cached yet."""
+    now = time.monotonic()
     with _rows_cache_lock:
-        _rows_cache[name] = (now, recs)
-    return [dict(r) for r in recs]
+        cold = [n for n in names if n not in _rows_cache or now - _rows_cache[n][0] >= _ROWS_STALE_TTL]
+    if len(cold) < 2:
+        return
+    ths = [threading.Thread(target=lambda n=n: _safe_fetch(n), daemon=True) for n in cold]
+    for t in ths: t.start()
+    for t in ths: t.join(timeout=20)
+
+def _safe_fetch(name):
+    try: _fetch_rows(name)
+    except Exception as e: print("prefetch error:", e)
 
 def num(x):
     try: return float(x)
@@ -309,12 +369,15 @@ def find_designation(emp_id, name="", band=""):
         e = next((e for e in emps if _key(e["Name"]) == _key(name) and _key(e["Band"]) == _key(band)), None)
     return str(e.get("Designation", "")).strip() if e else ""
 
-def load_subs():
+def load_subs(emp_id=None):
+    """All submissions, or (emp_id given) only that employee's - far less work on a big Productivity log."""
     T = target_hours()
     dm = desig_map()
     tph = {r["Process name"]: num(r["Target count / hour"]) for r in rows("Processes")}
     subs = {}
+    want = _key(emp_id) if emp_id is not None else None
     for r in rows("Productivity log"):
+        if want is not None and _key(r["Employee ID"]) != want: continue
         s = subs.setdefault(r["Submission ID"], dict(
             id=r["Submission ID"], date=r["Date"], band=r["Band"], emp_id=r["Employee ID"],
             emp_name=r["Employee name"], designation=dm.get(_key(r["Employee ID"]), ""),
@@ -461,7 +524,7 @@ def update_log(limit=200):
     return out[:limit]
 
 def note_text(r):
-    return f"{r['Employee name']} ({r['Employee ID']}) {str(r['Event']).lower()} at {r['Time']}"
+    return f"{r['Employee name']} ({r['Employee ID']}) {str(r['Event']).lower()} at {t12(r['Time'])}"
 
 def _close_stale(emp_id, now):
     """Sessions from earlier days that never logged out (browser/computer closed, etc.)
@@ -537,7 +600,7 @@ BASE = """<!doctype html><html><head><meta charset="utf-8">
 <style>
 :root{--ink:#1c2340;--mut:#6b7390;--pri:#4f46e5;--line:#e6e9f2}
 *{box-sizing:border-box}
-body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f3f5fb;color:var(--ink);animation:pageFade .4s ease}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f3f5fb;color:var(--ink);}
 @keyframes pageFade{from{opacity:0}to{opacity:1}}
 .app{display:flex;min-height:100vh}
 aside{width:220px;background:#1c2340;color:#fff;padding:20px 12px;display:flex;flex-direction:column;gap:4px;flex:none}
@@ -566,14 +629,7 @@ button:focus-visible,.primary:focus-visible,.btnl:focus-visible{outline:2px soli
 .danger{color:#c62828;border-color:#f3c1c1}
 .danger:hover{background:#fdeaea;border-color:#e5484d;box-shadow:0 6px 16px #e5484d26}
 /* ---- subtle post-login animation for labels, buttons and log/table sections ---- */
-h1,h2,h3,.mut,label,.kpi span{animation:fadeInUp .35s ease backwards}
-h2{animation-delay:.03s}h3{animation-delay:.05s}.mut{animation-delay:.06s}
-table{animation:fadeInUp .4s cubic-bezier(.22,1,.36,1) backwards}
-tbody tr{animation:rowIn .3s ease backwards}
-tbody tr:nth-child(1){animation-delay:.02s}tbody tr:nth-child(2){animation-delay:.05s}
-tbody tr:nth-child(3){animation-delay:.08s}tbody tr:nth-child(4){animation-delay:.11s}
-tbody tr:nth-child(5){animation-delay:.14s}tbody tr:nth-child(6){animation-delay:.17s}
-tbody tr:nth-child(n+7){animation-delay:.2s}
+/* perf: per-element entrance animations on every heading/label/table row removed - the page itself still fades in */
 @keyframes rowIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 aside a{animation:navIn .35s ease backwards}
 aside a:nth-child(1){animation-delay:.03s}aside a:nth-child(2){animation-delay:.06s}
@@ -688,9 +744,9 @@ tbody tr{transition:background .15s ease}
 .welcome{padding:16px 22px;border-radius:16px;background:linear-gradient(135deg,#fff 0%,#eef0ff 100%);border:1px solid #e2e6f3;box-shadow:0 1px 0 #fff inset,0 4px 0 #dfe3f7,0 18px 30px -14px #4f46e544}
 .wt{font-size:26px;letter-spacing:-.2px;animation:none}
 .wt-hi{display:inline-block;animation:segIn .6s cubic-bezier(.22,1,.36,1) both}
-.wt-name{display:inline-block;background:linear-gradient(90deg,#4f46e5,#c026d3,#0ea5e9,#4f46e5);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:segIn .7s .12s cubic-bezier(.22,1,.36,1) both,shimmer 7s linear infinite}
+.wt-name{display:inline-block;background:linear-gradient(90deg,#4f46e5,#c026d3,#0ea5e9,#4f46e5);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:segIn .7s .12s cubic-bezier(.22,1,.36,1) both,shimmer 3s linear 1}
 .wsub{margin-top:6px;font-size:14px}
-.wsub .seg{display:inline-block;background:linear-gradient(100deg,#5b6384 35%,#4f46e5 50%,#5b6384 65%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:segIn .6s cubic-bezier(.22,1,.36,1) both,sweep 6s ease-in-out infinite}
+.wsub .seg{display:inline-block;background:linear-gradient(100deg,#5b6384 35%,#4f46e5 50%,#5b6384 65%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:segIn .6s cubic-bezier(.22,1,.36,1) both,sweep 3s ease-in-out 1}
 .wsub .dot{display:inline-block;margin:0 8px;color:#a3aac6;animation:segIn .6s ease both}
 .wsub .seg:nth-of-type(1){animation-delay:.25s,.9s}.wsub .seg:nth-of-type(2){animation-delay:.4s,1.1s}
 .wsub .seg:nth-of-type(3){animation-delay:.55s,1.3s}.wsub .seg:nth-of-type(4){animation-delay:.7s,1.5s}
@@ -702,7 +758,7 @@ tbody tr{transition:background .15s ease}
 .wflex{display:flex;align-items:center;gap:18px}.wtxt{min-width:0}
 .av3d{position:relative;flex:none;width:96px;height:96px;perspective:520px;margin-bottom:6px}
 .av3d::after{content:"";position:absolute;left:14%;right:14%;bottom:-8px;height:10px;border-radius:50%;background:radial-gradient(#1c234055,transparent 70%)}
-.av-stage{position:relative;width:100%;height:100%;transform-style:preserve-3d;animation:avSway 7s ease-in-out infinite;will-change:transform}
+.av-stage{position:relative;width:100%;height:100%;transform-style:preserve-3d;animation:avSway 7s ease-in-out 1}
 .av3d.live .av-stage{animation:none;transform:rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));transition:transform .14s linear}
 .av-l{position:absolute;inset:0;width:100%;height:100%;transform:translateZ(var(--z,0px));pointer-events:none}
 .av-l:first-child{border-radius:50%;box-shadow:0 12px 22px -8px #4f46e577,0 0 0 3px #fff}
@@ -1035,13 +1091,16 @@ VIEW = """<div class="card"><h2>{{s.date}} &middot; {{s.emp_name}} ({{s.emp_id}}
 <a href="{{back}}">Back</a></div>"""
 
 # ---------------------------------------------------------------- routes: common
+_photo_cache = {}
 @app.route("/photo/<role>")
 def photo(role):
     import base64, hashlib
     from flask import Response
     if role not in PHOTOS: abort(404)
-    data = base64.b64decode(PHOTOS[role].split(",", 1)[1])
-    etag = hashlib.md5(data).hexdigest()                         # changes automatically if the photo ever changes
+    if role not in _photo_cache:                                 # decode + hash once, not on every request
+        _d = base64.b64decode(PHOTOS[role].split(",", 1)[1])
+        _photo_cache[role] = (_d, hashlib.md5(_d).hexdigest())  # etag changes automatically if the photo changes
+    data, etag = _photo_cache[role]
     if request.headers.get("If-None-Match") == etag:
         return Response(status=304)
     resp = Response(data, mimetype="image/jpeg")
@@ -1207,7 +1266,7 @@ def admin_log_report():
     tn = sum(x[7] for x in r["summary"] if x[9] != "Weekend - not counted")
     return page(LOG_REPORT, title="Productivity report", period=period, label=r["label"], emp=r["emp"],
                 summary=r["summary"], detail=r["detail"], sh=SUMMARY_HEADS, dh=DETAIL_HEADS, tp=tp, tn=tn,
-                now=now_local().strftime("%Y-%m-%d %H:%M"), autoprint=request.args.get("print") == "1")
+                now=now_local().strftime("%Y-%m-%d %I:%M %p"), autoprint=request.args.get("print") == "1")
 
 @app.route("/admin/log/export")
 @need("admin")
@@ -1285,9 +1344,9 @@ LP_LOG = """<div class="head"><div><h1>Leave &amp; Permission Log</h1>
 <td class="act no-print"><form method="post" action="/admin/leave-permission/holiday/delete" onsubmit="return confirm('Remove this holiday? Employees will be able to submit entries for this date again.')"><input type="hidden" name="date" value="{{r.start}}"><input type="hidden" name="next" value="{{here}}"><button class="danger">Remove</button></form></td></tr>
 {% else %}<tr><td><span class="pill {{'act' if r.type=='Permission' else ''}}">{{r.type}}</span></td>
 <td><a href="/admin/employee-info/{{r.eid|urlencode}}?tab=leave">{{r.eid}} &middot; {{r.name}}</a></td><td>{{r.desig}}</td><td>{{r.band}}</td>
-<td>{{r.start}}</td><td>{{r.end}}</td><td>{{r.dur}}</td><td>{{r.reason}}</td><td>{{r.applied}}</td>
+<td>{{r.start}}</td><td>{{r.end}}</td><td>{{r.dur}}</td><td>{{r.reason}}</td><td>{{r.applied|t12}}</td>
 <td><span class="pill {{r.status|ppill}}">{{r.status}}</span></td>
-<td>{% if r.reviewed %}{{r.reviewed}}{% if r.by %} &middot; {{r.by}}{% endif %}{% else %}-{% endif %}</td>
+<td>{% if r.reviewed %}{{r.reviewed|t12}}{% if r.by %} &middot; {{r.by}}{% endif %}{% else %}-{% endif %}</td>
 <td class="act no-print">{% set perm = r.type=='Permission' %}
 {% if r.status!='Approved' %}<form method="post" action="{{ ('/admin/employee-info/' ~ (r.eid|urlencode) ~ '/permission/' ~ r.row ~ '/approve') if perm else '/admin/leave-permission/leave-review' }}">{% if not perm %}<input type="hidden" name="eid" value="{{r.eid}}"><input type="hidden" name="rows" value="{{r.lrows}}"><input type="hidden" name="status" value="Approved">{% endif %}<input type="hidden" name="next" value="{{here}}"><button class="primary">Approve</button></form>{% endif %}
 {% if r.status!='Rejected' %}<form method="post" action="{{ ('/admin/employee-info/' ~ (r.eid|urlencode) ~ '/permission/' ~ r.row ~ '/reject') if perm else '/admin/leave-permission/leave-review' }}" onsubmit="return confirm('Reject this request?')">{% if not perm %}<input type="hidden" name="eid" value="{{r.eid}}"><input type="hidden" name="rows" value="{{r.lrows}}"><input type="hidden" name="status" value="Rejected">{% endif %}<input type="hidden" name="next" value="{{here}}"><button class="danger">Reject</button></form>{% endif %}</td></tr>{% endif %}
@@ -1417,7 +1476,7 @@ def admin_holiday_delete():
 NOTIF = """<div class="head"><div><h1>Notifications</h1>
 <p class="mut">Employee login / logout alerts with the exact time, newest first (latest 200). New ones are in bold.</p></div></div>
 <table><tr><th>Time</th><th>Employee</th><th>Event</th></tr>
-{% for r in data %}<tr{% if r.new %} style="font-weight:600"{% endif %}><td>{{r['Time']}}</td>
+{% for r in data %}<tr{% if r.new %} style="font-weight:600"{% endif %}><td>{{r['Time']|t12}}</td>
 <td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td>
 <td><span class="pill {{'in' if r['Event']=='Logged in' else ('out' if r['Event'].startswith('Logged out') else 'act')}}">{{r['Event']}}</span></td></tr>
 {% else %}<tr><td colspan="3">No notifications yet.</td></tr>{% endfor %}</table>"""
@@ -1460,7 +1519,7 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 {% if view=='notifications' %}
 <table><tr><th>Employee Name</th><th>Date &amp; Time</th><th>Details Updated</th><th>Summary</th></tr>
 {% for r in log %}<tr{% if r.new %} style="font-weight:600"{% endif %}>
-<td><a href="/admin/employee-info/{{r.id|urlencode}}">{{r.name}}</a></td><td>{{r.time}}</td>
+<td><a href="/admin/employee-info/{{r.id|urlencode}}">{{r.name}}</a></td><td>{{r.time|t12}}</td>
 <td><span class="pill act">{{r.section}}</span> {{r.details}}</td><td>{{r.summary}}</td></tr>
 {% else %}<tr><td colspan="4">No employee updates yet.</td></tr>{% endfor %}</table>
 {% else %}
@@ -1499,8 +1558,8 @@ T_LEAVE = """<p class="mut">This month's balance (working days / hours used agai
 <label>From date<input type="date" name="d1" required></label><label>To date<input type="date" name="d2" required></label>
 <label>Reason<input name="reason" placeholder="Reason"></label><button class="primary">Add leave</button></form></div>
 <table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th><th>Reviewed at</th><th class="no-print"></th></tr>
-{% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
-<td><span class="pill {{st|ppill}}">{{st}}</span></td><td>{{r['Reviewed at'] or '-'}}</td>
+{% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']|t12}}</td>
+<td><span class="pill {{st|ppill}}">{{st}}</span></td><td>{{(r['Reviewed at'] or '-')|t12}}</td>
 <td class="act no-print">{% if st!='Approved' %}<form method="post" action="/admin/leave-permission/leave-review"><input type="hidden" name="eid" value="{{emp['Employee ID']}}"><input type="hidden" name="rows" value="{{r['_row']}}"><input type="hidden" name="status" value="Approved"><input type="hidden" name="next" value="/admin/employee-info/{{emp['Employee ID']|urlencode}}?tab=leave"><button class="primary">Approve</button></form>{% endif %}
 {% if st!='Rejected' %}<form method="post" action="/admin/leave-permission/leave-review" onsubmit="return confirm('Reject this leave?')"><input type="hidden" name="eid" value="{{emp['Employee ID']}}"><input type="hidden" name="rows" value="{{r['_row']}}"><input type="hidden" name="status" value="Rejected"><input type="hidden" name="next" value="/admin/employee-info/{{emp['Employee ID']|urlencode}}?tab=leave"><button class="danger">Reject</button></form>{% endif %}<form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/leave/{{r['_row']}}/delete"
 onsubmit="return confirm('Delete this leave?')"><button class="danger">Delete</button></form></td></tr>
@@ -1508,8 +1567,8 @@ onsubmit="return confirm('Delete this leave?')"><button class="danger">Delete</b
 <h2>Permission requests</h2>
 <p class="mut">Employees can apply for permission only for the current day, up to {{PERMISSION_MONTHLY_LIMIT|g}} hrs total per month. Review pending requests below.</p>
 <table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th><th>Reviewed at</th><th class="no-print"></th></tr>
-{% for r in perms %}<tr><td>{{r['Date']}}</td><td>{{r['Hours']|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
-<td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td><td>{{r['Reviewed at'] or '-'}}</td>
+{% for r in perms %}<tr><td>{{r['Date']}}</td><td>{{r['Hours']|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']|t12}}</td>
+<td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td><td>{{(r['Reviewed at'] or '-')|t12}}</td>
 <td class="act no-print">{% if r['Status']=='Pending' %}
 <form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/permission/{{r['_row']}}/approve"><button class="primary">Approve</button></form>
 <form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/permission/{{r['_row']}}/reject"><button class="danger">Reject</button></form>
@@ -1523,7 +1582,7 @@ T_HOLIDAYS = """<p class="mut">Company holidays (they apply to every employee). 
 
 T_NOTIF = """<p class="mut">Login / logout alerts and profile updates for this employee, newest first (latest 200).</p>
 <table><tr><th>Date &amp; Time</th><th>Event</th><th>Summary</th></tr>
-{% for r in data %}<tr{% if r.new %} style="font-weight:600"{% endif %}><td>{{r['Time']}}</td>
+{% for r in data %}<tr{% if r.new %} style="font-weight:600"{% endif %}><td>{{r['Time']|t12}}</td>
 <td><span class="pill {{'in' if r['Event']=='Logged in' else ('out' if r['Event'].startswith('Logged out') else 'act')}}">{{r['Event'].split(' \u2013 ')[0]}}</span></td>
 <td>{{r['Summary']}}</td></tr>
 {% else %}<tr><td colspan="3">No notifications yet.</td></tr>{% endfor %}</table>"""
@@ -1561,7 +1620,7 @@ def admin_employee_detail(eid):
     if tab == "personal":
         fields = [("Employee ID", emp["Employee ID"]), ("Name", emp["Name"]), ("Designation", emp.get("Designation", "")),
                   ("Band", emp["Band"])] + [(f, emp.get(f, "")) for f in EDITABLE_PERSONAL] + \
-                 [("Office Email ID", emp.get("Email", "")), ("Last updated", emp.get("Profile updated at", ""))]
+                 [("Office Email ID", emp.get("Email", "")), ("Last updated", t12(emp.get("Profile updated at", "")))]
         body = T_PERSONAL; ctx["fields"] = fields
     elif tab == "missed":
         subs = [s for s in load_subs() if _key(s["emp_id"]) == _key(eid)]
@@ -1664,6 +1723,7 @@ def employee_login():
                 session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"],
                                designation=str(e.get("Designation", "")))
                 track_login(session["emp_id"], session["name"], session["band"])
+                _bg(warm_employee_cache)                  # dashboard data loads while the welcome animation plays
                 return redirect("/employee/welcome")
         flash("Wrong username or password.")
     return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee")
@@ -1853,13 +1913,14 @@ def employee_welcome():
 @app.route("/employee")
 @need("employee")
 def employee_home():
+    prefetch(*EMP_PAGE_SHEETS)          # cold cache: fetch all sheets together instead of one by one
     today = str(today_local())
     session["designation"] = find_designation(session["emp_id"], session["name"], session["band"])
     sub = dict(date=today, band=session["band"], designation=session["designation"],
                emp_id=session["emp_id"], emp_name=session["name"],
                procs=[{}], notes=[{}])
     body, ctx = form_page(sub, "/employee/save", "Daily productivity entry")
-    all_mine = [s for s in load_subs() if s["emp_id"] == session["emp_id"]]
+    all_mine = [s for s in load_subs(session["emp_id"]) if s["emp_id"] == session["emp_id"]]
     mine = [s for s in all_mine if s["date"] == today]
     first = today_local().replace(day=1)
     lv = rows("Leave"); t0 = today_local()
@@ -1885,8 +1946,9 @@ def employee_home():
 def employee_productivity():
     """Productivity Info: this employee's current-month submissions. The month always follows
     today's date automatically, so this page never needs a month picker."""
+    prefetch("Productivity log", "Processes", "Employees", "Settings", "Permissions", "Holidays")
     today = today_local()
-    all_mine = [s for s in load_subs() if s["emp_id"] == session["emp_id"]]
+    all_mine = [s for s in load_subs(session["emp_id"]) if s["emp_id"] == session["emp_id"]]
     month = str(today)[:7]                              # e.g. 2026-09
     month_subs = sorted((s for s in all_mine if str(s["date"]).startswith(month)),
                         key=lambda s: s["date"], reverse=True)
@@ -1908,7 +1970,7 @@ def employee_productivity():
         + LIST.replace("in subs", "in msubs")
         + '<h2>Permission requests (' + today.strftime("%B %Y") + ')</h2>'
         + '<table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th></tr>'
-        + '{% for r in perms %}<tr><td>{{r["Date"]}}</td><td>{{r["Hours"]|g}}</td><td>{{r["Reason"]}}</td><td>{{r["Applied at"]}}</td>'
+        + '{% for r in perms %}<tr><td>{{r["Date"]}}</td><td>{{r["Hours"]|g}}</td><td>{{r["Reason"]}}</td><td>{{r["Applied at"]|t12}}</td>'
         + '<td><span class="pill {{r["Status"]|ppill}}">{{r["Status"]}}</span></td></tr>'
         + '{% else %}<tr><td colspan="5">No permission requests this month.</td></tr>{% endfor %}</table>')
     return page(body, title="Productivity Info", msubs=month_subs, m_count=m_count, m_prod=m_prod, m_non=m_non,
@@ -2201,7 +2263,7 @@ LEAVE_EMP = """<style>
 <button class="primary">Submit leave</button></form></div>
 {% if hols %}<p class="mut">&#127774; <b>Upcoming holidays</b> (no leave, permission or productivity entry needed): {% for d,n in hols %}{{d}}{% if n %} - {{n}}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
 <h2>My leave days</h2><table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
-{% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
+{% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']|t12}}</td>
 <td><span class="pill {{st|ppill}}">{{st}}</span></td>
 <td>{% if st=='Pending' %}<form method="post" action="/employee/leave/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this leave?')"><button class="danger">Cancel</button></form>{% else %}-{% endif %}</td></tr>
 {% else %}<tr><td colspan="5">No leave yet.</td></tr>{% endfor %}</table>
@@ -2214,7 +2276,7 @@ LEAVE_EMP = """<style>
 <label>Reason<input name="reason" size="30" placeholder="Reason for permission" required></label>
 <button class="primary">Submit request</button></form></div>
 <h2>My permission requests</h2><table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
-{% for r in perm_data %}<tr><td>{{r['Date']}}</td><td>{{r['Hours']|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td>
+{% for r in perm_data %}<tr><td>{{r['Date']}}</td><td>{{r['Hours']|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']|t12}}</td>
 <td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td>
 <td>{% if r['Status']=='Pending' %}<form method="post" action="/employee/permission/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this request?')"><button class="danger">Cancel</button></form>{% else %}-{% endif %}</td></tr>
 {% else %}<tr><td colspan="6">No permission requests yet.</td></tr>{% endfor %}</table></div>"""
@@ -2226,7 +2288,7 @@ LEAVE_ADMIN = """<div class="head"><h1>Leave log</h1></div>
 <label>Reason<input name="reason" placeholder="Reason"></label><button class="primary">Add leave</button></form></div>
 <table><tr><th>Date</th><th>Employee</th><th>Designation</th><th>Band</th><th>Reason</th><th>Applied at</th><th></th></tr>
 {% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td><td>{{r['Designation']}}</td><td>{{r['Band']}}</td>
-<td>{{r['Reason']}}</td><td>{{r['Applied at']}}</td><td class="act"><a href="/admin/leave/{{r['_row']}}">Edit</a>
+<td>{{r['Reason']}}</td><td>{{r['Applied at']|t12}}</td><td class="act"><a href="/admin/leave/{{r['_row']}}">Edit</a>
 <form method="post" action="/admin/leave/{{r['_row']}}/delete" onsubmit="return confirm('Delete?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="7">No leave records.</td></tr>{% endfor %}</table>"""
 
@@ -2237,7 +2299,7 @@ PERSONAL_VIEW = """<div class="head"><div><h1>Personal details</h1>
 <th>Phone Number</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID <small>(login)</small></th><th>Last updated</th><th></th></tr>
 {% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td>{{e['Name']}}</td><td>{{e['Gender']}}</td><td>{{e['Address Line_1']}}</td><td>{{e['Address Line_2']}}</td>
 <td>{{e['City']}}</td><td>{{e['PIN']}}</td><td>{{e['Phone Number']}}</td><td>{{e['Emergency no']}}</td>
-<td>{{e['Personal Email ID']}}</td><td>{{e['Email']}}</td><td>{{e['Profile updated at'] or '-'}}</td><td class="act"><a href="/admin/personal/{{e['_row']}}">Edit</a></td></tr>
+<td>{{e['Personal Email ID']}}</td><td>{{e['Email']}}</td><td>{{(e['Profile updated at'] or '-')|t12}}</td><td class="act"><a href="/admin/personal/{{e['_row']}}">Edit</a></td></tr>
 {% else %}<tr><td colspan="13">No employees yet.</td></tr>{% endfor %}</table>"""
 
 @app.route("/admin/personal")
@@ -2331,7 +2393,7 @@ PROFILE = """<div class="card"><h2>Personal details</h2>
 <label>Personal Email ID<input type="email" name="Personal Email ID" value="{{emp['Personal Email ID']}}"></label>
 <label>Office Email ID<input value="{{emp['Email']}}" readonly></label>
 <button class="primary">Save</button></form>
-<p class="mut" style="margin-top:10px">Last updated: {{emp['Profile updated at'] or '-'}}</p></div>
+<p class="mut" style="margin-top:10px">Last updated: {{(emp['Profile updated at'] or '-')|t12}}</p></div>
 <div class="card"><h2>Change password</h2>
 <p class="mut">Enter your current password, then choose a new one (at least 6 characters). Use the new password next time you log in.</p>
 <form method="post" action="/employee/password" class="grid" autocomplete="off">
@@ -2390,7 +2452,15 @@ def my_emp():
     return {"Employee ID": session["emp_id"], "Name": session["name"], "Band": session["band"]}
 
 def my_emp_row():
-    """Full Employees-sheet record (with _row) for the logged-in employee."""
+    """Full Employees-sheet record (with _row) for the logged-in employee (looked up once per request)."""
+    if has_request_context():
+        hit = getattr(request, "_my_emp_row", None)
+        if hit is not None and hit.get("Employee ID") == session.get("emp_id"): return hit
+    r = my_emp_row_uncached()
+    if has_request_context(): request._my_emp_row = r
+    return r
+
+def my_emp_row_uncached():
     r = next((e for e in rows("Employees") if str(e["Employee ID"]) == session["emp_id"]), None)
     if not r: abort(404)
     return r

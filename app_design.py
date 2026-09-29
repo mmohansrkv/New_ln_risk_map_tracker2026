@@ -89,10 +89,15 @@ EDITABLE_PERSONAL = [f for f in PERSONAL_FIELDS if f != "Office Email ID"]
 # "incomplete". Everything else the employee can edit is required.
 OPTIONAL_PERSONAL = {"Address Line_2"}
 REQUIRED_PERSONAL = [f for f in EDITABLE_PERSONAL if f not in OPTIONAL_PERSONAL]
+# Gender is admin-only: employees never see or submit it on their own Personal details page,
+# so it must not appear as an editable/required field there.
+EMP_EDITABLE_PERSONAL = [f for f in EDITABLE_PERSONAL if f != "Gender"]
+EMP_REQUIRED_PERSONAL = [f for f in REQUIRED_PERSONAL if f != "Gender"]
 
 def missing_personal(emp_row):
-    """Names of the required personal details that are actually blank (empty list = complete)."""
-    return [f for f in REQUIRED_PERSONAL if not str(emp_row.get(f) or "").strip()]
+    """Names of the required personal details that are actually blank (empty list = complete).
+    Employee-facing, so Gender (admin-only) is excluded even if blank."""
+    return [f for f in EMP_REQUIRED_PERSONAL if not str(emp_row.get(f) or "").strip()]
 # Columns shown on Admin -> Employees, in this display order (personal fields live on the
 # Personal details pages). Display order != sheet column order, so reads/writes map by name.
 LIST_HEADERS = {"Employees": ["Employee ID", "Name", "Designation", "Band", "Email", "Password"]}
@@ -732,6 +737,19 @@ table td small,table th small{font-size:10.5px!important}
 .lcard .field.pw .fly-letter{right:84px}
 @media(max-width:800px){.scene .hm{display:none}}
 @media(prefers-reduced-motion:reduce){.scene *,.scene *::before{animation:none!important}}
+/* ---- compact text: admin Leave & Permission Log / Mark a Holiday, employee dashboard, tabs, info pages ---- */
+.head h1,h1{font-size:19px}
+.head .mut,.head p{font-size:12px}
+.card>h2,.head h2,h2{font-size:14px;margin:10px 0 6px}
+.wt{font-size:20px;line-height:1.25}
+.wt .wt-hi{font-size:15px;font-weight:500}
+.wt .wt-name{font-size:20px}
+.wsub{font-size:11.5px}
+.wsub .seg{white-space:nowrap}
+.kpis .kpi span{font-size:11px}
+.kpis .kpi b{font-size:17px}
+.tabs a{font-size:12.5px;padding:6px 12px}
+.totals{font-size:12px}
 </style></head><body>
 {% if session.role %}<div class="app"><aside class="emp">
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
@@ -963,7 +981,7 @@ def admin_login():
             track_logout(auto=True, reason="New login")      # closes a previous session in this browser, if any
             session.clear(); session.update(role="admin", name="Admin")
             track_login("ADMIN", "Admin", "-")
-            return redirect("/admin/summary")
+            return redirect("/admin/welcome")
         flash("Wrong username or password.")
     return page(LOGIN, title="Admin login", ph="Admin username", role="admin",
                 admin_avatar=render_template_string(AVATAR3D, gender="male", initials="A"))
@@ -1563,16 +1581,10 @@ def initials_of(name):
 
 WELCOME = """<style>
 .wl{position:fixed;inset:0;z-index:9999;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:linear-gradient(135deg,#c9b8f6 0%,#fbd3e2 45%,#b9d2f8 100%)}
-.wl-card{position:absolute;inset:0;margin:auto;width:max-content;height:max-content;max-width:90vw;background:#fff;border-radius:16px;padding:34px 46px;text-align:center;box-shadow:0 20px 50px #0003;animation:wlPop .7s cubic-bezier(.22,1,.36,1) both;transition:opacity .5s ease,transform .5s ease}
-.wl-card h1{font-size:28px;margin:0 0 6px;color:#4f46e5}.wl-card p{margin:0;color:#6b7280;font-size:13px}
-.wl-card.off{opacity:0;transform:scale(.9);pointer-events:none}
-@keyframes wlPop{from{opacity:0;transform:translateY(14px) scale(.94)}to{opacity:1;transform:none}}
-.sc{position:absolute;inset:0;opacity:0;transition:opacity .6s ease;background:radial-gradient(ellipse at 50% 0%,#fff6 0%,transparent 60%),linear-gradient(180deg,#8fb4f7 0%,#c9b8f6 55%,#fbd3e2 100%)}
-.sc.on{opacity:1}
-.sc-title{position:absolute;top:5vh;left:0;right:0;text-align:center;z-index:5;color:#fff;text-shadow:0 3px 12px #4f46e5aa}
-.sc-title b{display:block;font-size:min(5vw,44px)}.sc-title span{font-size:min(2.4vw,18px);opacity:.95}
-.sc-skip{position:absolute;right:18px;bottom:14px;z-index:6;color:#fff;font-size:12px;text-decoration:none;opacity:.8;background:#0002;padding:4px 10px;border-radius:12px}
-.cam{position:absolute;inset:0;perspective:1100px;font-size:min(2.3vw,3.7vh);display:flex;align-items:center;justify-content:center;padding-top:8vh}
+.wl-card{position:absolute;left:0;right:0;top:6vh;margin:0 auto;width:max-content;max-width:88vw;background:#fffc;backdrop-filter:blur(3px);border-radius:16px;padding:18px 30px;text-align:center;box-shadow:0 20px 50px #0003;z-index:5;animation:wlPop .5s cubic-bezier(.22,1,.36,1) both}
+.wl-card h1{font-size:24px;margin:0 0 3px;color:#4f46e5}.wl-card p{margin:0;color:#6b7280;font-size:12.5px}
+@keyframes wlPop{from{opacity:0;transform:translateY(-10px) scale(.96)}to{opacity:1;transform:none}}
+.cam{position:absolute;inset:0;perspective:1100px;font-size:min(2.3vw,3.7vh);display:flex;align-items:center;justify-content:center;padding-top:10vh}
 .tilt{position:relative;width:0;height:0;transform-style:preserve-3d;transform:rotateX(-20deg)}
 .ring{position:absolute;left:0;top:0;transform-style:preserve-3d;animation:ringSpin 14s linear infinite}
 @keyframes ringSpin{to{transform:rotateY(360deg)}}
@@ -1601,43 +1613,59 @@ WELCOME = """<style>
 .bpos{position:absolute;left:0;top:0;transform:translateZ(13em);transform-style:preserve-3d}
 .ball{position:absolute;left:-.9em;top:-6em;width:1.8em;height:1.8em;border-radius:50%;background:radial-gradient(circle at 32% 30%,#fff,#ff5d5d 45%,#b91c1c);box-shadow:0 .5em 1em #0004;animation:bball .95s ease-in-out infinite}
 @keyframes bball{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.4em)}}
-.cf{position:absolute;top:-6vh;width:10px;height:14px;opacity:.9;animation:cfFall linear infinite}
-@keyframes cfFall{to{transform:translate3d(var(--dx),110vh,0) rotate(720deg)}}
+.flw{position:absolute;top:-8vh;left:0;will-change:transform,opacity;pointer-events:none;z-index:6;animation:flDrop linear forwards}
+@keyframes flDrop{0%{opacity:0;transform:translate3d(0,0,0) rotate(0deg)}8%{opacity:1}92%{opacity:1}100%{opacity:0;transform:translate3d(var(--dx),118vh,0) rotate(var(--rot))}}
 </style>
 <div class="wl" id="wl">
  <div class="wl-card" id="wlCard"><h1>Welcome, {{session.name}}</h1><p>Getting your workspace ready&hellip;</p></div>
- <div class="sc" id="wlScene" aria-hidden="true">
-  <div class="sc-title"><b>Welcome, {{session.name}}!</b><span>Let&rsquo;s play together as a team</span></div>
-  <div class="cam"><div class="tilt"><div class="ring">
-   <div class="floor"></div>
-   {% for c in [('#ef4444','#b91c1c','#3b2314'),('#3b82f6','#1d4ed8','#111827'),('#22c55e','#15803d','#7c2d12'),('#f59e0b','#b45309','#1f2937'),('#a855f7','#7e22ce','#422006'),('#ec4899','#be185d','#0f172a')] %}
-   <div class="pos" style="--a:{{loop.index0*60}}deg;--i:{{loop.index0}};--c:{{c[0]}};--d:{{c[1]}};--h:{{c[2]}}">
-    <div class="shadow"></div>
-    <div class="bill"><div class="jump"><div class="fig">
-     <div class="leg l"></div><div class="leg r"></div>
-     <div class="arm l"></div><div class="arm r"></div>
-     <div class="torso"></div>
-     <div class="head"><div class="mouth"></div></div>
-    </div></div></div>
-   </div>
-   {% endfor %}
-   <div class="bspin"><div class="bpos"><div class="ball"></div></div></div>
-  </div></div></div>
-  <a class="sc-skip" href="/employee">Skip &rsaquo;</a>
- </div>
+ <div class="cam"><div class="tilt"><div class="ring">
+  <div class="floor"></div>
+  {% for c in [('#ef4444','#b91c1c','#3b2314'),('#3b82f6','#1d4ed8','#111827'),('#22c55e','#15803d','#7c2d12'),('#f59e0b','#b45309','#1f2937'),('#a855f7','#7e22ce','#422006'),('#ec4899','#be185d','#0f172a')] %}
+  <div class="pos" style="--a:{{loop.index0*60}}deg;--i:{{loop.index0}};--c:{{c[0]}};--d:{{c[1]}};--h:{{c[2]}}">
+   <div class="shadow"></div>
+   <div class="bill"><div class="jump"><div class="fig">
+    <div class="leg l"></div><div class="leg r"></div>
+    <div class="arm l"></div><div class="arm r"></div>
+    <div class="torso"></div>
+    <div class="head"><div class="mouth"></div></div>
+   </div></div></div>
+  </div>
+  {% endfor %}
+  <div class="bspin"><div class="bpos"><div class="ball"></div></div></div>
+ </div></div></div>
 </div>
 <script>
 (function(){
- var sc=document.getElementById('wlScene'),card=document.getElementById('wlCard'),colors=['#ffd166','#ff8fab','#6ee7b7','#7dd3fc','#c4b5fd','#fff'];
- for(var i=0;i<36;i++){var d=document.createElement('i');d.className='cf';
-  d.style.left=(Math.random()*100)+'vw';d.style.background=colors[i%colors.length];
-  d.style.setProperty('--dx',((Math.random()-.5)*160)+'px');
-  d.style.animationDuration=(2.2+Math.random()*2.4)+'s';d.style.animationDelay=(Math.random()*3)+'s';sc.appendChild(d)}
- setTimeout(function(){card.classList.add('off');sc.classList.add('on')},2000);      /* welcome message, then scene */
- setTimeout(function(){window.location.replace('/employee')},7000);                   /* 5-second scene, then Employee page */
+ var wl=document.getElementById('wl');
+ var petals=['#ffb6d0','#ffd1e6','#ffe38a','#c9b8f6','#fff'];
+ function petal(){                                   /* one flower, falling top -> bottom */
+  var d=document.createElement('span'); d.className='flw';
+  var s=10+Math.random()*8;
+  d.style.left=(Math.random()*100)+'vw';
+  d.style.width=s+'px';d.style.height=s+'px';d.style.borderRadius='0 60% 0 60%';
+  d.style.background=petals[Math.floor(Math.random()*petals.length)];
+  d.style.setProperty('--dx',((Math.random()-.5)*90)+'px');
+  d.style.setProperty('--rot',(360+Math.random()*360)+'deg');
+  d.style.animationDuration=(2.6+Math.random()*1.4)+'s';
+  wl.appendChild(d);
+  setTimeout(function(){ d.remove(); }, 4200);
+ }
+ for(var k=0;k<5;k++) petal();                        /* a few on screen right away */
+ var spawn=setInterval(petal,1000);                    /* a new flower every 1 second */
+ setTimeout(function(){                                /* welcome (3D team + flowers) for 2s, then move on */
+  clearInterval(spawn);
+  window.location.replace({{ ('/admin/summary' if session.role=='admin' else '/employee') | tojson }});
+ },2000);
 })();
 </script>
-<noscript><meta http-equiv="refresh" content="7;url=/employee"></noscript>"""
+<noscript><meta http-equiv="refresh" content="2;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
+
+@app.route("/admin/welcome")
+@need("admin")
+def admin_welcome():
+    return page(WELCOME, title="Welcome")
+
+
 
 @app.route("/employee/welcome")
 @need("employee")
@@ -2116,7 +2144,6 @@ PROFILE = """<div class="card"><h2>Personal details</h2>
 <form method="post" class="grid">
 <label>Emp ID<input value="{{emp['Employee ID']}}" readonly></label>
 <label>Name<input value="{{emp['Name']}}" readonly></label>
-<label>Gender<select name="Gender"><option value="">Select</option>{% for g in ['Male','Female'] %}<option {{'selected' if (emp.get('Gender') or '')|lower==g|lower else ''}}>{{g}}</option>{% endfor %}</select></label>
 <label>Address Line_1<input name="Address Line_1" value="{{emp['Address Line_1']}}"></label>
 <label>Address Line_2<input name="Address Line_2" value="{{emp['Address Line_2']}}"></label>
 <label>City<input name="City" value="{{emp['City']}}"></label>
@@ -2213,7 +2240,7 @@ def employee_profile():
     emp = my_emp_row()
     if request.method == "POST":
         ok = save_employee_row(emp["_row"], session["emp_id"],
-                               {f: request.form.get(f, "").strip() for f in EDITABLE_PERSONAL})
+                               {f: request.form.get(f, "").strip() for f in EMP_EDITABLE_PERSONAL})
         if ok:
             _bg(notify, session["emp_id"], session["name"], "Updated personal details", now_local())
             flash("Profile updated. Admin can now see your latest details.")

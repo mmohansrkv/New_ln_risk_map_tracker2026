@@ -1,6 +1,14 @@
 """Productivity Tracker - Flask + Google Sheets.
 Admin link:    /admin/login
 Employee link: /employee/login
+
+Access rules (Update59):
+  * Two separate logins. /admin/login accepts ONLY the admin account; /employee/login accepts ONLY employees.
+  * /admin/* is reachable only with an admin session, /employee/* only with an employee session
+    (enforced twice: by a URL-prefix guard on every request AND by @need(role) on each view).
+  * A signed-in employee who opens any admin URL (or the admin login page) is sent back to their own
+    page; a signed-in admin who opens an employee URL is sent to the Admin dashboard.
+  * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
 from functools import wraps
@@ -96,6 +104,8 @@ HEADERS = {
                    "Login time", "Logout time", "Duration", "Logout type"],
     "Notifications": ["Notification ID", "Time", "Employee ID", "Employee name", "Event", "Seen",
                       "Section", "Action", "Details"],
+    # Audit Log permissions set by Admin: one row per employee. Processes = "*" (all) or "A | B | C".
+    "Audit Access": ["Employee ID", "Employee name", "Enabled", "Processes", "Updated at", "Updated by"],
 }
 PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                     "Emergency no", "Personal Email ID", "Office Email ID"]
@@ -156,7 +166,37 @@ def _handle_sheets_api_error(e):
     # unavailable/rate-limited after ~6 attempts with backoff).
     return ("Google Sheets is temporarily busy handling everyone's requests. "
             "Please wait a few seconds and try again."), 503
-app.secret_key = os.getenv("SECRET_KEY", "change-me")
+def _load_secret_key():
+    """Signing key for session cookies. Use the SECRET_KEY environment variable in production.
+    If it is missing, a random key is created once and kept in a private '.secret_key' file next to
+    this script (so every worker/restart shares it). The old hard-coded default 'change-me' is never
+    used, because anyone who knows it could forge an 'admin' session cookie."""
+    import secrets
+    k = os.getenv("SECRET_KEY", "").strip()
+    if k and k != "change-me":
+        return k
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".secret_key")
+    for _ in range(3):
+        try:
+            with open(path) as fh:
+                k = fh.read().strip()
+            if k: return k
+        except OSError:
+            pass
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w") as fh: fh.write(secrets.token_hex(32))
+            print("WARNING: SECRET_KEY is not set - generated one in", path,
+                  "- set the SECRET_KEY environment variable for production.")
+        except FileExistsError:
+            time.sleep(0.1)                     # another worker is creating it; read it on the next loop
+        except OSError:
+            break
+    return secrets.token_hex(32)                # last resort (read-only disk): valid for this process only
+
+app.secret_key = _load_secret_key()
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
+                  SESSION_COOKIE_SECURE=os.getenv("COOKIE_SECURE", "0") == "1")   # set COOKIE_SECURE=1 when served over HTTPS
 app.jinja_env.filters["t12"] = t12
 app.jinja_env.filters["g"] = lambda x: "%g" % (float(x) if str(x).strip() else 0)
 app.jinja_env.globals["PERMISSION_MONTHLY_LIMIT"] = PERMISSION_MONTHLY_LIMIT
@@ -178,6 +218,44 @@ def _idle_auto_logout():
             flash(f"You were logged out automatically after {SESSION_IDLE_MINUTES} minutes of inactivity.")
             return redirect("/admin/login" if was_admin else "/employee/login")
         session["last_seen"] = now_ts
+
+# ---------------------------------------------------------------- role separation (Admin vs Employee)
+LOGIN_URL = {"admin": "/admin/login", "employee": "/employee/login"}
+
+def _area_of(path):
+    """'admin' for /admin and /admin/..., 'employee' for /employee and /employee/..., else None."""
+    p = path.rstrip("/") or "/"
+    if p == "/admin" or p.startswith("/admin/"): return "admin"
+    if p == "/employee" or p.startswith("/employee/"): return "employee"
+    return None
+
+def _wrong_area(area):
+    """Someone signed in with the OTHER role: send them to their own page - never show them this area."""
+    flash(f"Access denied: that page is for {area} users only.")
+    return redirect("/admin/log" if session.get("role") == "admin" else "/employee")
+
+@app.before_request
+def _role_wall():
+    """Every /admin/* URL needs an admin session and every /employee/* URL an employee session,
+    so a route added later without @need() is still protected. The two login pages are handled
+    by their own views."""
+    area = _area_of(request.path)
+    if area is None or request.path.rstrip("/") in LOGIN_URL.values():
+        return
+    role = session.get("role")
+    if role == area:
+        return
+    if not role:
+        return redirect(LOGIN_URL[area])
+    return _wrong_area(area)
+
+@app.after_request
+def _no_store_private(resp):
+    """Signed-in pages must not be kept by the browser/proxies, so the Back button after logout
+    cannot show an Admin or Employee page."""
+    if session.get("role") and request.endpoint not in ("static", "photo"):
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 # ---------------------------------------------------------------- Google Sheets
 #
@@ -671,8 +749,10 @@ def need(role=None):
         @wraps(f)
         def w(*a, **k):
             r = session.get("role")
-            if not r or (role and r != role):
-                return redirect("/admin/login" if role == "admin" else "/employee/login")
+            if not r:
+                return redirect(LOGIN_URL.get(role, "/employee/login"))
+            if role and r != role:                      # signed in, but with the wrong role
+                return _wrong_area(role)
             return f(*a, **k)
         return w
     return deco
@@ -1022,7 +1102,7 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"),
               ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
               ("/admin/leave-permission", "Leave & Permission Log"),
-              ("/admin/employee-info", "Employee Info")],
+              ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
@@ -1030,8 +1110,14 @@ NAVS = {
 def page(body, title="Productivity Tracker", **ctx):
     ctx["title"] = title
     p = request.path
+    items = list(NAVS.get(session.get("role"), []))
+    if session.get("role") == "employee":
+        try:      # Admin-controlled: the menu item exists only while Audit Log access is enabled for this employee
+            if audit_access(session.get("emp_id", ""))["enabled"]: items.append(("/employee/audit", "Audit Log"))
+        except Exception:
+            pass
     nav = [(h, l, p == h or (h != "/employee" and p.startswith(h + "/")))
-           for h, l in NAVS.get(session.get("role"), [])]
+           for h, l in items]
     side_avatar = ""
     if session.get("role") == "admin":
         side_avatar = '<div class="av-flat" role="img" aria-label="Admin profile picture"><span>A</span></div>'
@@ -1246,6 +1332,8 @@ def logout():
 # ---------------------------------------------------------------- admin
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
+    if session.get("role") == "employee":               # employees never get the Admin login page
+        return _wrong_area("admin")
     if request.method == "POST":
         if eq(request.form["u"], ADMIN_USER) and eq(request.form["p"], ADMIN_PASS):
             track_logout(auto=True, reason="New login")      # closes a previous session in this browser, if any
@@ -1811,6 +1899,8 @@ def admin_permission_reject(eid, row):
 # ---------------------------------------------------------------- employee
 @app.route("/employee/login", methods=["GET", "POST"])
 def employee_login():
+    if session.get("role") == "admin":                  # the admin uses the Admin login only
+        return _wrong_area("employee")
     if request.method == "POST":
         u = request.form["u"].strip().lower()
         for e in rows("Employees"):
@@ -2686,6 +2776,231 @@ def employee_permission_delete(row):
     log_change(SEC_LEAVE, "Deleted", f"Permission request for {r['Date']} "
                                       f"({_fmt_num(num(r.get('Hours')))} hr) \u2013 {_short(r.get('Reason', ''), 80)}")
     flash("Permission request cancelled."); return redirect("/employee/leave")
+
+# ================================================================ Audit Log (Admin-controlled access)
+# Admin -> Audit Log: pick an employee, see Productivity + Attendance, and control that employee's
+# "Audit Log" access (on/off + which processes they may audit). Permissions live in the "Audit Access"
+# sheet (one row per employee). An employee sees "Audit Log" in their menu ONLY while access is enabled.
+AUDIT_ALL = "*"          # stored in the Processes column when every process is allowed
+
+def _audit_parse(r):
+    raw = str(r.get("Processes", "")).strip()
+    return dict(enabled=str(r.get("Enabled", "")).strip().lower() == "yes", raw=raw,
+                procs=None if raw == AUDIT_ALL else [p.strip() for p in raw.split("|") if p.strip()],
+                updated=str(r.get("Updated at", "")))
+
+def audit_access(eid, fresh=False):
+    """This employee's Audit Log permission. fresh=True bypasses the cache (used to ENFORCE access, so a
+    revoke takes effect on the very next click); the cached read is only used to draw menus and lists."""
+    src = _fetch_rows("Audit Access") if fresh else rows("Audit Access")
+    for r in src:
+        if _key(r.get("Employee ID", "")) == _key(eid):
+            return _audit_parse(r)
+    return dict(enabled=False, raw="", procs=[], updated="")
+
+def audit_access_map():
+    return {_key(r["Employee ID"]): _audit_parse(r) for r in rows("Audit Access") if str(r.get("Employee ID", "")).strip()}
+
+def audit_process_names():
+    return [str(r["Process name"]).strip() for r in rows("Processes") if str(r.get("Process name", "")).strip()]
+
+def audit_allowed(acc):
+    """Process names this permission covers (None = all -> every current process)."""
+    names = audit_process_names()
+    return names if acc["procs"] is None else [p for p in names if p in acc["procs"]]
+
+def audit_write(emp, enabled, raw):
+    ws = ws_of("Audit Access")
+    ids = ws.col_values(1)
+    vals = [str(emp["Employee ID"]), emp["Name"], "Yes" if enabled else "No", raw,
+            now_local().strftime("%Y-%m-%d %H:%M:%S"), "Admin"]
+    at = next((i for i, v in enumerate(ids) if i > 0 and _key(v) == _key(emp["Employee ID"])), None)
+    if at is None: ws.append_row(vals, value_input_option="RAW")
+    else: ws.update(range_name=f"A{at + 1}:F{at + 1}", values=[vals], value_input_option="RAW")
+    invalidate_cache("Audit Access")
+
+def audit_need(f):
+    """Employee-side guard: only employees Admin has enabled may open Audit Log pages."""
+    @wraps(f)
+    def w(*a, **k):
+        acc = audit_access(session.get("emp_id", ""), fresh=True)
+        if not acc["enabled"]: abort(403)
+        return f(acc, *a, **k)
+    return w
+
+def _aud_month():
+    start, end = month_range(request.args.get("month", ""))
+    return start.strftime("%Y-%m"), start, end
+
+def _aud_proc_rows(subs, start, end):
+    """Every process line an employee logged in the period (weekly-off days are not counted)."""
+    out = []
+    for s in subs:
+        if s["off"] or not (str(start) <= str(s["date"]) <= str(end)): continue
+        for p in s["procs"]:
+            out.append(dict(date=s["date"], name=p["name"], hour=p["hour"], count=p["count"], target=p["target"],
+                            pct=p["pct"], desc=p["desc"]))
+    return sorted(out, key=lambda r: (r["date"], r["name"]), reverse=True)
+
+def _aud_breakdown(lines, names):
+    agg = {n: dict(name=n, hour=0.0, count=0.0, target=0.0) for n in names}
+    for l in lines:
+        if l["name"] in agg:
+            a = agg[l["name"]]; a["hour"] += l["hour"]; a["count"] += l["count"]; a["target"] += l["target"] or 0
+    for a in agg.values(): a["pct"] = round(a["count"] / a["target"] * 100) if a["target"] else None
+    return list(agg.values())
+
+AUD_LIST = """<div class="head"><div><h1>Audit Log</h1>
+<p class="mut">{% if admin %}Employee-wise productivity and attendance. Control who can open the Audit Log and which processes they may audit.{% else %}Employee-wise productivity and attendance.{% endif %}</p></div></div>
+<form class="grid no-print" method="get"><input name="q" value="{{q}}" placeholder="Search employee ID or name">
+<input type="month" name="month" value="{{month}}"><button class="primary">Show</button><a href="{{base}}">Reset</a></form>
+<p class="mut">Period: <b>{{label}}</b></p>
+<table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Attendance</th><th>Productivity</th>
+{% if admin %}<th>Audit Log access</th><th>Process audit access</th>{% endif %}<th></th></tr>
+{% for r in rep %}<tr><td>{{r.id}}</td><td><a href="{{base}}/{{r.id|urlencode}}"><b>{{r.name}}</b></a></td><td>{{r.designation}}</td>
+<td>{{r.att}}%</td><td>{{r.pct}}%</td>
+{% if admin %}<td><span class="pill {{'in' if r.acc.enabled else 'out'}}">{{'Enabled' if r.acc.enabled else 'Disabled'}}</span></td>
+<td>{% if not r.acc.enabled %}-{% elif r.acc.procs is none %}All processes{% elif r.acc.procs %}{{r.acc.procs|join(', ')}}{% else %}<span class="mut">None selected</span>{% endif %}</td>{% endif %}
+<td class="act"><a href="{{base}}/{{r.id|urlencode}}">Open</a>
+{% if admin %}<a href="{{base}}/{{r.id|urlencode}}?tab=access">Manage access</a>
+<form method="post" action="{{base}}/{{r.id|urlencode}}/toggle"><button class="{{'danger' if r.acc.enabled else 'primary'}}">{{'Disable' if r.acc.enabled else 'Enable'}}</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="8">No employees found.</td></tr>{% endfor %}</table>"""
+
+AUD_HEAD = """<div class="head"><div><h1>{{emp.Name}}</h1>
+<p class="mut">{{emp.id}} &middot; {{emp.desig or 'No designation'}} &middot; Band {{emp.band}}</p></div>
+<a href="{{base}}">&larr; All employees</a></div>
+<div class="tabs no-print">{% for k,l in tabs %}<a href="{{base}}/{{emp.id|urlencode}}?tab={{k}}&month={{month}}" class="{{'on' if k==tab else ''}}">{{l}}</a>{% endfor %}</div>
+{% if tab != 'access' %}<form class="grid no-print" method="get"><input type="hidden" name="tab" value="{{tab}}">
+<input type="month" name="month" value="{{month}}"><button class="primary">Show</button></form>
+<p class="mut">Period: <b>{{label}}</b></p>{% endif %}"""
+
+AUD_PROD = """<div class="totals">Working days: <b>{{k.wd}}</b> &middot; Present: <b>{{k.present}}</b> &middot; Productive: <b>{{k.prod|g}}</b> hrs
+&middot; Non-productive: <b>{{k.non|g}}</b> hrs &middot; Productivity: <b>{{k.pct}}%</b></div>
+<h2>Daily entries</h2>
+<table><tr><th>Date</th><th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Productivity</th></tr>
+{% for s in subs %}<tr><td>{{s.date}}</td><td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
+<td>{{ 'Weekend - not counted' if s.off else (s.pct ~ '%') }}</td></tr>
+{% else %}<tr><td colspan="5">No productivity entries for this period.</td></tr>{% endfor %}</table>"""
+
+AUD_ATT = """<div class="totals">Working days: <b>{{k.wd}}</b> &middot; Present: <b>{{k.present}}</b> &middot; Leave: <b>{{k.leave}}</b>
+&middot; Absent: <b>{{k.absent}}</b> &middot; Attendance: <b>{{k.att}}%</b></div>
+<h2>Login / logout history</h2>
+<table><tr><th>Date</th><th>Login</th><th>Logout</th><th>Duration</th><th>Logout type</th></tr>
+{% for r in sess %}<tr><td>{{r['Date']}}</td><td>{{r['Login time']|t12 or '-'}}</td><td>{{r['Logout time']|t12 or '-'}}</td>
+<td>{{r['Duration'] or '-'}}</td><td>{{r['Logout type'] or 'Active'}}</td></tr>
+{% else %}<tr><td colspan="5">No login records for this period.</td></tr>{% endfor %}</table>"""
+
+AUD_PROC = """{% if not allowed %}<div class="card"><p>Admin has not granted you access to any process audit information yet.</p></div>{% else %}
+<h2>Process summary</h2>
+<table><tr><th>Process</th><th>Hours</th><th>Count</th><th>Target count</th><th>Achievement</th></tr>
+{% for b in bd %}<tr><td>{{b.name}}</td><td>{{b.hour|g}}</td><td>{{b.count|g}}</td><td>{{b.target|g}}</td><td>{{ (b.pct ~ '%') if b.pct is not none else '-' }}</td></tr>{% endfor %}</table>
+<h2>Process entries</h2>
+<table><tr><th>Date</th><th>Process</th><th>Description</th><th>Hours</th><th>Count</th><th>Target count</th><th>Achievement</th></tr>
+{% for l in lines %}<tr><td>{{l.date}}</td><td>{{l.name}}</td><td>{{l.desc}}</td><td>{{l.hour|g}}</td><td>{{l.count|g}}</td><td>{{l.target|g}}</td>
+<td>{{ (l.pct ~ '%') if l.pct is not none else '-' }}</td></tr>
+{% else %}<tr><td colspan="7">No entries for your permitted processes in this period.</td></tr>{% endfor %}</table>{% endif %}"""
+
+AUD_ACCESS = """<div class="card"><h2>Audit Log access &amp; process audit access</h2>
+<p class="mut">Enabled &rarr; <b>Audit Log</b> appears on this employee's page with full access to Productivity and Attendance, plus the process audit information ticked below.
+Disabled &rarr; it disappears. You can change or revoke this at any time.</p>
+<form method="post" action="{{base}}/{{emp.id|urlencode}}/access">
+<p><label><input type="checkbox" name="enabled" value="1" {{'checked' if acc.enabled}}> <b>Enable Audit Log for {{emp.Name}}</b></label></p>
+<h3>Process audit access</h3>
+<p><label><input type="checkbox" id="allp" name="all_procs" value="1" {{'checked' if acc.procs is none}}> All processes (including ones added later)</label></p>
+<div id="plist">{% for p in procs %}<label style="display:block;margin:4px 0"><input type="checkbox" name="procs" value="{{p}}" {{'checked' if acc.procs is not none and p in acc.procs}}> {{p}}</label>
+{% else %}<p class="mut">No processes exist yet. Add them under Processes.</p>{% endfor %}</div><br>
+<button class="primary">Save permission</button> <a href="{{base}}">Cancel</a>
+{% if acc.updated %}<p class="mut">Last saved: {{acc.updated|t12}}</p>{% endif %}</form>
+<script>(function(){var a=document.getElementById('allp'),l=document.getElementById('plist');
+function s(){l.style.opacity=a.checked?.45:1;l.querySelectorAll('input').forEach(function(i){i.disabled=a.checked})}a.addEventListener('change',s);s()})();</script></div>"""
+
+def _audit_list(base, admin):
+    prefetch("Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays", "Audit Access")
+    month, start, end = _aud_month()
+    q = request.args.get("q", "").strip().lower()
+    emps = [e for e in rows("Employees") if not q or q in str(e["Employee ID"]).lower() or q in str(e["Name"]).lower()]
+    rep = sorted(report(emps, load_subs(), rows("Leave"), start, end), key=lambda r: str(r["name"]).lower())
+    amap = audit_access_map()
+    for r in rep: r["acc"] = amap.get(_key(r["id"]), dict(enabled=False, procs=[], raw="", updated=""))
+    return page(AUD_LIST, title="Audit Log", rep=rep, base=base, admin=admin, q=request.args.get("q", ""),
+                month=month, label=start.strftime("%B %Y"))
+
+def _audit_detail(base, eid, admin, acc=None):
+    prefetch("Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays", "Attendance")
+    emp = emp_or_404(eid); eid = str(emp["Employee ID"])
+    tabs = [("productivity", "Productivity"), ("attendance", "Attendance"),
+            ("access", "Process Audit Access") if admin else ("process", "Process Audit")]
+    tab = request.args.get("tab", "productivity")
+    if tab not in dict(tabs): tab = "productivity"
+    month, start, end = _aud_month()
+    view = dict(id=eid, Name=emp["Name"], desig=emp.get("Designation", ""), band=emp["Band"])   # never expose the password column
+    ctx = dict(emp=view, base=base, tabs=tabs, tab=tab, month=month, label=start.strftime("%B %Y"))
+    if tab == "access":
+        body = AUD_ACCESS
+        ctx.update(acc=audit_access(eid, fresh=True), procs=audit_process_names())
+    else:
+        subs = load_subs(eid); subs = [s for s in subs if _key(s["emp_id"]) == _key(eid)]
+        k = report([emp], subs, rows("Leave"), start, end)[0]
+        if tab == "productivity":
+            body = AUD_PROD
+            ctx.update(k=k, subs=[s for s in subs if str(start) <= str(s["date"]) <= str(end)])
+        elif tab == "attendance":
+            body = AUD_ATT
+            sess = [r for r in rows("Attendance") if _key(r["Employee ID"]) == _key(eid)
+                    and str(start) <= str(r["Date"]) <= str(end)]
+            sess.sort(key=lambda r: (str(r["Date"]), str(r["Login time"])), reverse=True)
+            ctx.update(k=k, sess=sess)
+        else:   # employee-side process audit: ONLY the processes Admin ticked
+            allowed = audit_allowed(acc)
+            lines = [l for l in _aud_proc_rows(subs, start, end) if l["name"] in allowed]
+            body = AUD_PROC
+            ctx.update(allowed=allowed, lines=lines, bd=_aud_breakdown(lines, allowed))
+    return page(AUD_HEAD + body, title=f"Audit Log - {emp['Name']}", **ctx)
+
+# ---- Admin side
+@app.route("/admin/audit")
+@need("admin")
+def admin_audit(): return _audit_list("/admin/audit", True)
+
+@app.route("/admin/audit/<eid>")
+@need("admin")
+def admin_audit_detail(eid): return _audit_detail("/admin/audit", eid, True)
+
+@app.route("/admin/audit/<eid>/access", methods=["POST"])
+@need("admin")
+def admin_audit_save(eid):
+    emp = emp_or_404(eid)
+    if request.form.get("all_procs") == "1":
+        raw = AUDIT_ALL
+    else:
+        valid = audit_process_names()
+        raw = " | ".join(p for p in request.form.getlist("procs") if p in valid)
+    enabled = request.form.get("enabled") == "1"
+    audit_write(emp, enabled, raw)
+    flash(f"Audit Log {'enabled' if enabled else 'disabled'} for {emp['Name']}."
+          + (" Choose at least one process for process audit access." if enabled and not raw else ""))
+    return redirect(f"/admin/audit/{emp['Employee ID']}?tab=access")
+
+@app.route("/admin/audit/<eid>/toggle", methods=["POST"])
+@need("admin")
+def admin_audit_toggle(eid):
+    emp = emp_or_404(eid)
+    cur = audit_access(str(emp["Employee ID"]), fresh=True)
+    audit_write(emp, not cur["enabled"], cur["raw"])
+    if cur["enabled"]: flash(f"Audit Log disabled for {emp['Name']}.")
+    else: flash(f"Audit Log enabled for {emp['Name']}." + ("" if cur["raw"] else " Now choose their process audit access."))
+    return redirect(request.referrer or "/admin/audit")
+
+# ---- Employee side (only for employees Admin has enabled)
+@app.route("/employee/audit")
+@need("employee")
+@audit_need
+def employee_audit(acc): return _audit_list("/employee/audit", False)
+
+@app.route("/employee/audit/<eid>")
+@need("employee")
+@audit_need
+def employee_audit_detail(acc, eid): return _audit_detail("/employee/audit", eid, False, acc)
 
 if __name__ == "__main__":
     # NOTE: Flask's built-in dev server (even with threaded=True) is still not

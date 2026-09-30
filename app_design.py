@@ -62,6 +62,9 @@ Access rules (Update59):
     rows that were just shared. Respects "reduce motion" settings.
     Employee page: the sidebar "Mahizhchi" item is the same running-letter badge (white pill, gradient border, floating emoji) and the
     Mahizhchi page title uses the running-letter effect.
+  * Update83 (cont.): the employee sidebar "Mahizhchi" pill sits at the BOTTOM of the menu, just above the profile block. The employee Mahizhchi
+    page sits on a background PNG (file "mahizhchi_bg.png" next to this .py, or set MZ_BG_FILE); cards, timer and buttons are frosted white so
+    text stays readable. If the PNG is missing a soft gradient is used instead.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -1266,7 +1269,7 @@ aside .ng .kids a.on{background:transparent;color:#fff;font-weight:700;box-shado
 #bgm:hover{opacity:1}
 @media print{ #bgm{display:none}}
 /* Update83: employee sidebar - animated "Mahizhchi" running-letter badge */
-aside a.mzn{position:relative;align-self:flex-start;display:inline-flex;margin:3px 0 3px 4px;padding:6px 16px;border:1.5px solid transparent;border-radius:999px;font-weight:800;font-size:15px;letter-spacing:.3px;white-space:nowrap;color:#4f46e5;
+aside a.mzn{position:relative;align-self:flex-start;display:inline-flex;margin:auto 0 14px 4px;padding:6px 16px;border:1.5px solid transparent;border-radius:999px;font-weight:800;font-size:15px;letter-spacing:.3px;white-space:nowrap;color:#4f46e5;
 background:linear-gradient(#fff,#fff) padding-box,linear-gradient(120deg,#4f46e5,#ec4899,#f59e0b,#10b981,#3b82f6,#4f46e5) border-box;background-size:100% 100%,300% 100%;
 box-shadow:0 0 0 0 rgba(236,72,153,0);animation:mznGlow 2.4s ease-in-out infinite,mznBorder 5s linear infinite}
 aside a.mzn:hover{background:linear-gradient(#fff,#fff) padding-box,linear-gradient(120deg,#4f46e5,#ec4899,#f59e0b,#10b981,#3b82f6,#4f46e5) border-box;background-size:100% 100%,300% 100%;transform:translateX(2px) scale(1.04)}
@@ -1276,6 +1279,7 @@ aside a.mzn.on{background:linear-gradient(#fff,#fff) padding-box,linear-gradient
 .mzn-c:nth-of-type(9n+8){color:#3b82f6}.mzn-c:nth-of-type(9n+9){color:#8b5cf6}.mzn-c:nth-of-type(9n+10){color:#ef4444}.mzn-c:nth-of-type(9n+11){color:#06b6d4}.mzn-c:nth-of-type(9n+12){color:#f97316}
 .mzn-em{position:absolute;font-size:13px;line-height:1;pointer-events:none;opacity:0;animation:mznFloat 2.8s ease-in-out infinite}
 .mzn-em.e1{left:-7px;top:-10px}.mzn-em.e2{right:16px;top:-13px;animation-delay:.9s}.mzn-em.e3{right:-8px;bottom:-9px;animation-delay:1.8s}
+aside a.mzn ~ .prof{margin-top:0}
 @keyframes mznIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes mznWave{0%,55%,100%{transform:translateY(0) scale(1)}25%{transform:translateY(-4px) scale(1.18)}}
 @keyframes mznGlow{0%,100%{box-shadow:0 0 0 0 rgba(236,72,153,0)}50%{box-shadow:0 0 14px 2px rgba(236,72,153,.35)}}
@@ -4060,6 +4064,18 @@ MZ_CSS = """<style>
 .mz-timer.low{background:#fef2f2;border-color:#fca5a5;color:#991b1b}
 .mz-locked .mz-o{opacity:.55;pointer-events:none}
 .mz-stats{display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 4px}
+/* Update83: employee Mahizhchi page on a background PNG - content sits on frosted white so it stays readable */
+.mz-stage{position:relative;isolation:isolate;border-radius:18px;padding:22px;margin:0 0 16px;min-height:62vh;background:linear-gradient(135deg,#eef0ff,#fdf2f8 55%,#fff7e6)}
+.mz-stage.has-bg{background:var(--mzbg) center/cover no-repeat,linear-gradient(135deg,#eef0ff,#fdf2f8)}
+.mz-stage.has-bg::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;background:linear-gradient(180deg,rgba(255,255,255,.35),rgba(255,255,255,.6))}
+.mz-stage .head{margin-bottom:14px}
+.mz-stage .head h1{display:inline-block;margin:0;padding:6px 18px;border-radius:12px;background:rgba(255,255,255,.92);box-shadow:0 4px 14px -6px rgba(28,35,64,.35)}
+.mz-stage .card,.mz-stage .mz-q{background:rgba(255,255,255,.97);border:1px solid rgba(255,255,255,.9);box-shadow:0 8px 24px -12px rgba(28,35,64,.4);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);color:var(--ink)}
+.mz-stage .flash{background:rgba(255,255,255,.95);color:var(--ink);font-weight:600}
+.mz-stage .mz-timer{background:rgba(238,240,255,.97);box-shadow:0 6px 18px -8px rgba(28,35,64,.45)}
+.mz-stage .mz-timer.low{background:rgba(254,242,242,.98)}
+.mz-stage button.primary{padding:10px 24px;font-size:15px;box-shadow:0 0 0 4px rgba(255,255,255,.85),0 8px 18px -6px rgba(79,70,229,.6)}
+@media(max-width:800px){.mz-stage{padding:12px;border-radius:12px;min-height:50vh}.mz-stage .head h1{font-size:22px;padding:4px 12px}}
 /* Update83: animated "Mahizhchi" access highlight */
 .mz-run{display:inline-flex;font-weight:800;letter-spacing:.4px;white-space:nowrap}
 .mz-run span{display:inline-block;background:linear-gradient(90deg,#4f46e5,#ec4899,#f59e0b,#10b981,#4f46e5);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;
@@ -4162,7 +4178,8 @@ MZ_ADMIN_RESULTS = MZ_CSS + MZ_HEAD + "{% if detail %}" + MZ_DETAIL + """{% else
 <td>{% if r.answered %}<a href="/admin/mahizhchi?tab=results&emp={{r.id|urlencode}}">Details</a>{% endif %}</td></tr>
 {% else %}<tr><td colspan="7">No employee has access or answers yet.</td></tr>{% endfor %}</table></div>{% endif %}"""
 
-MZ_EMP = MZ_CSS + """<div class="head"><div><h1>{{ mzrun() }}</h1></div></div>
+MZ_EMP = MZ_CSS + """<div class="mz-stage{{' has-bg' if bg_v}}"{% if bg_v %} style="--mzbg:url('/employee/mahizhchi/bg?v={{bg_v}}')"{% endif %}>
+<div class="head"><div><h1>{{ mzrun() }}</h1></div></div>
 {% if not qs %}<div class="card"><p>There are no questions in {{MZ_TITLE}} yet.</p></div>
 {% elif state=='intro' %}<div class="card"><h2>Ready?</h2>
 <p>There are <b>{{qs|length}}</b> question(s) and you have <b>{{mz_dur(limit)}}</b>. The timer starts when you press <b>Start</b> and cannot be paused or restarted.
@@ -4193,7 +4210,14 @@ f.addEventListener('submit',function(e){if(over)return;
   if(n>c&&!confirm((n-c)+' question(s) are not answered. Submit anyway? You cannot answer them later.')){e.preventDefault();return}
   over=true;clearInterval(iv)});
 tick();iv=setInterval(tick,250);})();</script>{% endif %}
-{% endif %}"""
+{% endif %}</div>"""
+
+def mz_bg_path():
+    """Background PNG for the employee Mahizhchi page: $MZ_BG_FILE, else mahizhchi_bg.png next to this file (or in ./static)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for pth in (os.getenv("MZ_BG_FILE", ""), os.path.join(here, "mahizhchi_bg.png"), os.path.join(here, "static", "mahizhchi_bg.png")):
+        if pth and os.path.isfile(pth): return pth
+    return ""
 
 # ---- Admin side (full control)
 @app.route("/admin/mahizhchi")
@@ -4300,8 +4324,18 @@ def employee_mahizhchi():
     else: state = "intro"          # questions are not even sent to the browser until the employee presses Start
     if state == "intro": qs_view = [dict(qid=q["qid"], q="", opts=[], mine=None) for q in qs]   # only the count is needed
     else: qs_view = qs
+    bg = mz_bg_path()
     return page(MZ_EMP, title=MZ_TITLE, qs=qs_view, state=state, remaining=remaining, limit=MZ_TIME_LIMIT,
-                todo=[q for q in qs if not q["mine"]])
+                todo=[q for q in qs if not q["mine"]], bg_v=int(os.path.getmtime(bg)) if bg else 0)
+
+@app.route("/employee/mahizhchi/bg")
+@need("employee")
+def employee_mahizhchi_bg():
+    if not mz_active(session.get("emp_id", "")): abort(404)      # same rule as the page itself
+    bg = mz_bg_path()
+    if not bg: abort(404)
+    resp = send_file(bg, mimetype="image/png"); resp.headers["Cache-Control"] = "private, max-age=3600"
+    return resp
 
 @app.route("/employee/mahizhchi/start", methods=["POST"])
 @need("employee")

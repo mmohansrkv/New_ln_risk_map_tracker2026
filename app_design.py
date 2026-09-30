@@ -32,6 +32,9 @@ Access rules (Update59):
     8-hour target internally). Welcome page never plays music by itself: the Tamil-style music starts when the mouse moves over it.
   * Update70: Employee pages play the Tamil-style music (Mohanam) only after the mouse moves on the page - never automatically,
     no button needed (the speaker button is just an optional mute). Replaces the old remote-file background music.
+  * Update71: (1) Admin -> Overview has a live "Online Employees" log (employee + status; adds/removes itself as employees log in/out,
+    refreshes every 5 s; heartbeat-based so a closed tab drops off). (2) Employee-page background music is now a soft solo
+    Tamil bamboo flute (Pullangu Kuzhal, raga Mohanam) - no vocals, no drone, no percussion, no other instrument.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -248,7 +251,12 @@ def _idle_auto_logout():
             session.clear()
             flash(f"You were logged out automatically after {SESSION_IDLE_MINUTES} minutes of inactivity.")
             return redirect("/admin/login" if was_admin else "/employee/login")
+        if request.endpoint == "employee_ping":          # heartbeat: shows "online" but must NOT reset the idle timer
+            online_set(session.get("att_id"), session.get("att_eid"), session.get("att_name"), active=last)
+            return
         session["last_seen"] = now_ts
+        if session.get("role") == "employee":
+            online_set(session.get("att_id"), session.get("att_eid"), session.get("att_name"), active=now_ts)
 
 # ---------------------------------------------------------------- role separation (Admin vs Employee)
 LOGIN_URL = {"admin": "/admin/login", "employee": "/employee/login"}
@@ -823,6 +831,7 @@ def track_login(emp_id, name, band):
     session["att_eid"], session["att_name"], session["att_band"] = emp_id, name, band
     session["last_seen"] = time.time()
     _bg(_log_login, session["att_id"], emp_id, name, band, now_local())
+    online_set(session["att_id"], emp_id, name)
 
 def track_logout(auto=False, reason=""):
     """Save the logout time for whoever is currently logged in (Admin or Employee); no-op otherwise.
@@ -832,7 +841,36 @@ def track_logout(auto=False, reason=""):
         logout_type = f"Auto ({reason})" if auto else "Manual"
         _bg(_log_logout, session["att_id"], session.get("att_eid", "ADMIN"),
             session.get("att_name", "Admin"), session.get("att_band", "-"), now_local(), logout_type)
+        online_drop(session.get("att_id"))
         session.pop("att_id", None)
+
+# ---------------------------------------------------------------- online employees (Update71)
+ONLINE_TTL = 90     # seconds without a heartbeat before an employee counts as offline (tab closed / connection lost)
+AWAY_AFTER = 300    # seconds with no clicks / page loads before the status reads "Away" instead of "Online"
+_online, _online_lock = {}, threading.Lock()   # per server process; run one worker (threads are fine) so every request sees the same list
+
+def online_set(att_id, emp_id, name, active=None):
+    if not att_id or not emp_id or str(emp_id).upper() == "ADMIN": return
+    now = time.time()
+    with _online_lock:
+        cur = _online.get(att_id) or {"since": now}
+        cur.update(eid=str(emp_id), name=str(name or ""), seen=now, active=active or now)
+        _online[att_id] = cur
+
+def online_drop(att_id):
+    with _online_lock: _online.pop(att_id, None)
+
+def online_list():
+    now = time.time()
+    with _online_lock:
+        for k in [k for k, v in _online.items() if now - v["seen"] > ONLINE_TTL]: del _online[k]
+        best = {}
+        for v in _online.values():                       # same employee in two browsers -> one row
+            b = best.get(v["eid"])
+            if not b or v["active"] > b["active"]: best[v["eid"]] = dict(v, since=min(v["since"], b["since"]) if b else v["since"])
+        out = [dict(id=v["eid"], name=v["name"], status="Away" if now - v["active"] > AWAY_AFTER else "Online",
+                    since=dt.datetime.fromtimestamp(v["since"], TZ).strftime("%I:%M %p")) for v in best.values()]
+    return sorted(out, key=lambda r: r["name"].lower())
 
 # ---------------------------------------------------------------- auth helpers
 def need(role=None):
@@ -1220,9 +1258,10 @@ function poll(){fetch('/admin/notify/poll?since='+since+'&first='+first,{credent
  j.items.forEach(function(i){toast(i.text)});since=j.last;first=0}).catch(function(){})}
 poll();setInterval(poll,15000)})();
 </script>{% endif %}
+{% if session.role=='employee' %}<script>(function(){function p(){fetch('/employee/ping',{credentials:'same-origin',cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();</script>{% endif %}
 {% if session.role=='employee' and request.path!='/employee/welcome' %}<button id="bgm" type="button" aria-label="Turn background music off" title="Background music (optional mute)" hidden>&#128266;</button><script>
 (function(){
-/* Update70: Employee-page Tamil-style background music (raga Mohanam, synthesised live - no audio file).
+/* Update71: Employee-page background music = solo Tamil bamboo flute (Pullangu Kuzhal), raga Mohanam, synthesised live - no audio file.
    NEVER starts by itself: it starts when the employee moves the mouse anywhere on the page (click / key / touch also work).
    No button needed; the speaker button is only an optional mute. Stops on logout / when the tab is hidden. */
 try{
@@ -1298,7 +1337,7 @@ def page(body, title="Productivity Tracker", **ctx):
             g = ""
         side_avatar = render_template_string(AVATAR3D, gender=g, initials=initials_of(session.get("name", "")))
     return render_template_string(BASE, body=render_template_string(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar, music_engine=WL_ENGINE)
+                                  side_avatar=side_avatar, music_engine=FLUTE_ENGINE)
 
 
 LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></div>
@@ -2234,6 +2273,64 @@ def initials_of(name):
     parts = str(name).replace(".", " ").split()
     return "".join(p[0] for p in parts[:2]).upper() or "?"
 
+FLUTE_ENGINE = r"""
+/* Update71: solo Tamil bamboo flute (Pullangu Kuzhal). Raga Mohanam (S R2 G3 P D2), slow and soft, with breathy attack,
+   gentle vibrato that blooms on long notes, gamaka glides between swaras and breath pauses between phrases.
+   ONLY the flute voice exists here: no vocals, no tanpura drone, no percussion. */
+var SA=220,BPM=62,SPB=60/BPM/2;
+var RAT=[1,9/8,5/4,3/2,5/3];
+function fr(i){var o=Math.floor(i/5),d=((i%5)+5)%5;return SA*2*RAT[d]*Math.pow(2,o)}
+var PH=[[[2,2],[3,2],[4,4],[3,2],[2,2],[1,2],[0,6],[null,4]],
+        [[0,2],[1,2],[2,4],[3,2],[4,2],[5,4],[4,2],[3,2],[2,4],[null,4]],
+        [[3,2],[4,2],[5,6],[4,2],[3,2],[2,2],[1,2],[2,2],[0,8],[null,4]],
+        [[-1,2],[0,2],[1,2],[2,6],[1,2],[0,4],[-1,6],[null,4]]];
+var ORDER=[0,1,0,2,3,1,2,0];
+var SEQ=[];
+(function(){var pos=0;ORDER.forEach(function(p){PH[p].forEach(function(n){SEQ.push([pos,n[0],n[1]]);pos+=n[1]})});SEQ.total=pos})();
+var byStep={};SEQ.forEach(function(n){byStep[n[0]]=n});
+function icon(){bi.innerHTML=muted?'&#128263;':'&#128266;';bt.textContent=muted?'Music off':'Music on';
+ btn.setAttribute('aria-label',muted?'Turn music on':'Turn music off')}
+function env(g,t,peak,att,dec,sus,dur,rel){g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(peak,t+att);
+ g.gain.exponentialRampToValueAtTime(Math.max(peak*sus,0.0002),t+att+dec);g.gain.setValueAtTime(Math.max(peak*sus,0.0002),t+dur);
+ g.gain.exponentialRampToValueAtTime(0.0001,t+dur+rel)}
+function flute(t,f,dur){
+ var g=ctx.createGain(),lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=2800;
+ var from=lastF>0?lastF:f,stop=t+dur+0.4,parts=[[1,1],[2,0.14],[3,0.04]],oscs=[];
+ parts.forEach(function(p){var o=ctx.createOscillator(),pg=ctx.createGain();o.type='sine';pg.gain.value=p[1];
+  o.frequency.setValueAtTime(from*p[0],t);o.frequency.linearRampToValueAtTime(f*p[0],t+0.09);   /* gamaka: slide in from the previous swara */
+  o.connect(pg);pg.connect(lp);oscs.push(o)});
+ lastF=f;
+ var nz=ctx.createBufferSource(),bp=ctx.createBiquadFilter(),ng=ctx.createGain();   /* breath / air of the bamboo */
+ nz.buffer=noiseBuf;nz.loop=true;bp.type='bandpass';bp.frequency.value=Math.min(f*2,5000);bp.Q.value=1.2;
+ nz.connect(bp);bp.connect(ng);ng.connect(g);env(ng,t,0.05,0.05,0.25,0.5,dur,0.2);nz.start(t);nz.stop(stop);
+ lp.connect(g);g.connect(master);g.connect(verb);
+ env(g,t,0.24,0.09,0.25,0.78,dur,0.28);
+ if(dur>SPB*1.8){var l=ctx.createOscillator(),lg=ctx.createGain();l.frequency.value=5.2;   /* vibrato blooms after the note starts */
+  lg.gain.setValueAtTime(0,t);lg.gain.setValueAtTime(0,t+dur*0.25);lg.gain.linearRampToValueAtTime(11,t+dur*0.6);
+  l.connect(lg);oscs.forEach(function(o){lg.connect(o.detune)});l.start(t);l.stop(stop)}
+ oscs.forEach(function(o){o.start(t);o.stop(stop)})}
+function play(n,t){
+ var m=byStep[n%SEQ.total];
+ if(m){if(m[1]===null){lastF=0}else flute(t,fr(m[1]),Math.max(m[2]*SPB*0.95,0.2))}}
+function sched(){if(!ctx||ctx.state!=='running'||muted)return;
+ while(next<ctx.currentTime+0.6){play(step,next);next+=SPB;step++}}
+function build(){
+ ctx=new AC();master=ctx.createGain();master.gain.value=0;
+ var comp=ctx.createDynamicsCompressor();master.connect(comp);comp.connect(ctx.destination);
+ var d=ctx.createDelay(1);d.delayTime.value=0.31;var fb=ctx.createGain();fb.gain.value=0.3;d.connect(fb);fb.connect(d);
+ var vg=ctx.createGain();vg.gain.value=0.4;verb=ctx.createGain();verb.connect(d);d.connect(vg);vg.connect(master);
+ noiseBuf=ctx.createBuffer(1,Math.floor(ctx.sampleRate*1),ctx.sampleRate);
+ var ch=noiseBuf.getChannelData(0);for(var i=0;i<ch.length;i++)ch[i]=Math.random()*2-1}
+function fade(to,sec){if(!master)return;var t=ctx.currentTime;master.gain.cancelScheduledValues(t);master.gain.setValueAtTime(master.gain.value,t);master.gain.linearRampToValueAtTime(to,t+sec)}
+function go(){
+ if(muted)return;
+ if(!ctx)build();
+ var r=ctx.resume?ctx.resume():null;
+ var run=function(){if(ctx.state!=='running')return;if(!timer){next=ctx.currentTime+0.15;timer=setInterval(sched,150)}fade(0.75,2.5)};
+ if(r&&r.then)r.then(run,function(){});else run()}
+function stopAll(){if(timer){clearInterval(timer);timer=null}if(ctx&&master)fade(0,0.25)}
+"""
+
 WL_SCENE = LOGIN[LOGIN.index('<div class="scene '):LOGIN.index('<div class="lcard">')]   # same 3D scene + data-packet flow as the login pages
 WL_ENGINE = LOGIN[LOGIN.index("var SA=ADMIN"):LOGIN.index("function arm()")]      # same Tamil-style engine as the login page
 WELCOME = """<style>
@@ -2279,7 +2376,7 @@ WELCOME = """<style>
  var ctx=null,master=null,verb=null,timer=null,muted=false,next=0,step=0,noiseBuf=null,lastF=0;
  var btn={setAttribute:function(){}},bi={},bt={};
  function get(k){return null}function put(k,v){}
- """ + WL_ENGINE + """
+ """ + "{% if session.role=='employee' %}" + FLUTE_ENGINE + "{% else %}" + WL_ENGINE + "{% endif %}" + """
  var mEv=['mousemove','pointermove','pointerdown','keydown','touchstart'];
  function onUser(){
   if(!AC)return;
@@ -2301,6 +2398,16 @@ WELCOME = """<style>
 @need("admin")
 def admin_welcome():
     return page(WELCOME, title="Welcome", wl_gender="male")
+
+@app.route("/employee/ping")
+@need("employee")
+def employee_ping():
+    return ("", 204)          # heartbeat; the online bookkeeping happens in _idle_auto_logout
+
+@app.route("/admin/online/poll")
+@need("admin")
+def admin_online_poll():
+    return jsonify(items=online_list())
 
 @app.route("/employee/welcome")
 @need("employee")
@@ -2654,6 +2761,18 @@ SUMMARY = """<div class="head ov-head"><div><h1>Overview</h1>
 <form class="grid" method="get" style="margin:0"><input type="month" name="month" value="{{month if month!='all' else ''}}">
 <button class="primary pbtn">Show</button><a href="/admin/summary?month=all">All time</a></form></div></div>
 """ + KPI + """
+<div class="card" id="onl"><h2 style="margin:0 0 8px">Online Employees <span class="pill in" id="onl_n">{{online|length}}</span> <small class="mut">live &middot; updates automatically</small></h2>
+<table id="onl_t"><tr><th>Employee</th><th>Status</th><th>Online since</th></tr>
+{% for r in online %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td><span class="pill {{'in' if r.status=='Online' else 'act'}}">&#9679; {{r.status}}</span></td><td>{{r.since}}</td></tr>
+{% else %}<tr><td colspan="3">No employees are online right now.</td></tr>{% endfor %}</table></div>
+<script>(function(){var t=document.getElementById('onl_t'),n=document.getElementById('onl_n');if(!t)return;
+function cell(tr,txt,cls){var td=tr.insertCell();if(cls){var s=document.createElement('span');s.className='pill '+cls;s.textContent=txt;td.appendChild(s)}else td.textContent=txt}
+function draw(list){while(t.rows.length>1)t.deleteRow(1);n.textContent=list.length;
+ if(!list.length){var r=t.insertRow(),c=r.insertCell();c.colSpan=3;c.textContent='No employees are online right now.';return}
+ list.forEach(function(e){var r=t.insertRow();cell(r,e.id+' · '+e.name);cell(r,'● '+e.status,e.status==='Online'?'in':'act');cell(r,e.since)})}
+function poll(){fetch('/admin/online/poll',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(j){draw(j.items)}).catch(function(){})}
+setInterval(poll,5000);document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()})})();
+</script>
 <table><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Productivity</th></tr>
 {% for r in rep %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>
@@ -2767,7 +2886,8 @@ def admin_summary():
     # Missed-entries list is intentionally NOT shown on the Overview page any more;
     # it lives only on the dedicated "Missed entries" page (/admin/missed).
     return page(SUMMARY, title="Overview", rep=rep, month=month, label=label, wd=workdays(start, end),
-                lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra, target=target_hours())
+                lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra, target=target_hours(),
+                online=online_list())
 
 @app.route("/admin/settings/target", methods=["POST"])
 @need("admin")

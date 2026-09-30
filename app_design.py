@@ -23,6 +23,9 @@ Access rules (Update59):
     warning in the entry form.
   * Update66: Productivity log shows each entry's Target count, Completed count and a Target met / Not met badge (plus a
     met / not-met tally). Employee Info in the admin sidebar expands to Employees / Notifications / Mahizhchi.
+  * Update67: Admin sidebar 'Employee Info' is a dropdown (Employees / Notifications / Mahizhchi). Login pages get a 3D data-packet
+    animation (Employee: packets uploaded to the server; Admin: live feed arriving at the dashboard) and synthesised
+    Tamil-style background music (Employee = raga Mohanam, Admin = raga Hamsadhwani) with a Music on/off button.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -1123,13 +1126,66 @@ table td small,table th small{font-size:10.5px!important}
 #tgtBadge{display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;vertical-align:middle}
 #tgtBadge.met{background:#d9f7e3;color:#146c43}
 #tgtBadge.miss{background:#fbe0e0;color:#a52a2a}
+
+/* ---- Update67: login data-flow animations (Employee = upload to server, Admin = incoming feed) ---- */
+.dp{display:none}
+@supports (width:1cqw){
+.dp{display:block;position:absolute;inset:0;container-type:inline-size;pointer-events:none;--pk:#ffe2b8;--pk2:#ff9fd0}
+.dp.adm{--pk:#a9c1ff;--pk2:#6fe7ff}
+.dp-lab{position:absolute;top:12px;left:0;right:0;text-align:center;font:600 10px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.22em;color:#fff;opacity:.78;text-shadow:0 0 10px var(--pk2)}
+.dp-lab b{display:inline-block;animation:dpBlink 1.4s steps(2,end) infinite;color:var(--pk2)}
+.dp-lane{position:absolute;left:0;right:0;top:var(--y);height:0;--t:5.2s}
+.dp-lane::before{content:"";position:absolute;left:11cqw;right:11cqw;top:0;height:1px;background:linear-gradient(90deg,transparent,var(--pk) 30%,var(--pk) 70%,transparent);opacity:.32}
+.dp-pk{position:absolute;top:0;left:11cqw;width:15px;height:15px;will-change:transform,opacity;animation:dpGo var(--t) linear infinite;opacity:0}
+.dp.adm .dp-pk{left:auto;right:11cqw;animation-name:dpCome}
+.dp-pk::before{content:"";position:absolute;top:50%;right:100%;width:78px;height:3px;transform:translateY(-50%);background:linear-gradient(90deg,transparent,var(--pk2))}
+.dp.adm .dp-pk::before{right:auto;left:100%;background:linear-gradient(270deg,transparent,var(--pk2))}
+.dp-pk::after{content:"";position:absolute;inset:0;border-radius:3px;background:linear-gradient(135deg,#fff,var(--pk) 45%,var(--pk2));box-shadow:0 0 12px var(--pk2),0 0 3px #fff inset;animation:dpSpin 1.9s linear infinite}
+.dp-pk:nth-child(2){animation-delay:calc(var(--t) * -.2)}.dp-pk:nth-child(3){animation-delay:calc(var(--t) * -.4)}
+.dp-pk:nth-child(4){animation-delay:calc(var(--t) * -.6)}.dp-pk:nth-child(5){animation-delay:calc(var(--t) * -.8)}
+.dp-lane:nth-child(3){--t:6.1s}.dp-lane:nth-child(4){--t:4.6s}
+.dp-lane:nth-child(3) .dp-pk{width:11px;height:11px}
+@keyframes dpGo{0%{transform:translate3d(0,-50%,0) scale(1.25);opacity:0}10%{opacity:1}86%{opacity:1}100%{transform:translate3d(72cqw,-50%,0) scale(.5);opacity:0}}
+@keyframes dpCome{0%{transform:translate3d(0,-50%,0) scale(.5);opacity:0}14%{opacity:1}90%{opacity:1}100%{transform:translate3d(-72cqw,-50%,0) scale(1.25);opacity:0}}
+@keyframes dpSpin{to{transform:rotate3d(1,1,0,360deg)}}
+@keyframes dpBlink{50%{opacity:.25}}
+.dp-node{position:absolute;top:50%;margin-top:-34px;width:78px;height:68px;transform-style:preserve-3d}
+.dp-node.l{left:3cqw;transform:perspective(420px) rotateY(24deg)}
+.dp-node.r{right:3cqw;transform:perspective(420px) rotateY(-24deg)}
+.dp-node::after{content:"";position:absolute;inset:-6px;border-radius:14px;border:2px solid var(--pk2);opacity:0;animation:dpPulse 2.6s ease-out infinite}
+/* Employee login has a round photo at the bottom-left: keep the EMPLOYEE label above its node so nothing is covered */
+.dp.emp .dp-node.l{margin-top:-42px}.dp.emp .dp-node.l small{bottom:auto;top:-20px}
+.dp-node small{white-space:nowrap;position:absolute;left:-30px;right:-30px;bottom:-22px;text-align:center;font:600 9px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;color:#fff;opacity:.85}
+@keyframes dpPulse{0%{transform:scale(.85);opacity:.7}100%{transform:scale(1.5);opacity:0}}
+.dp-scr{position:absolute;inset:0 0 14px;border:2px solid var(--pk);border-radius:8px;background:linear-gradient(140deg,#ffffff40,#ffffff0d);box-shadow:0 0 20px var(--pk2),inset 0 0 14px #ffffff33;overflow:hidden}
+.dp-scr i{position:absolute;left:8px;height:4px;border-radius:2px;background:var(--pk);opacity:.85;animation:dpLine 2.4s ease-in-out infinite}
+.dp-scr i:nth-child(1){top:10px;width:34px}.dp-scr i:nth-child(2){top:22px;width:50px;animation-delay:-.6s}.dp-scr i:nth-child(3){top:34px;width:26px;animation-delay:-1.2s}
+@keyframes dpLine{50%{transform:scaleX(.55);transform-origin:left}}
+.dp-stand{position:absolute;left:26px;right:26px;bottom:0;height:8px;border-radius:0 0 6px 6px;background:var(--pk);opacity:.8}
+.dp-rack i{position:absolute;left:0;right:0;height:19px;border:2px solid var(--pk);border-radius:6px;background:linear-gradient(140deg,#ffffff40,#ffffff10);box-shadow:0 0 14px var(--pk2)}
+.dp-rack i:nth-child(1){top:0}.dp-rack i:nth-child(2){top:24px}.dp-rack i:nth-child(3){top:48px}
+.dp-rack i::after{content:"";position:absolute;right:7px;top:50%;width:6px;height:6px;margin-top:-3px;border-radius:50%;background:#7dffb0;box-shadow:0 0 8px #7dffb0;animation:dpLed 1.1s steps(2,end) infinite}
+.dp-rack i:nth-child(2)::after{animation-delay:-.4s}.dp-rack i:nth-child(3)::after{animation-delay:-.8s}
+@keyframes dpLed{50%{opacity:.25}}
+.dp-dash{position:absolute;inset:0 0 14px;border:2px solid var(--pk);border-radius:8px;background:linear-gradient(140deg,#ffffff40,#ffffff0d);box-shadow:0 0 20px var(--pk2),inset 0 0 14px #ffffff33;display:flex;align-items:flex-end;gap:6px;padding:8px 9px}
+.dp-dash i{flex:1;border-radius:3px 3px 0 0;background:linear-gradient(180deg,var(--pk),var(--pk2));transform-origin:bottom;animation:dpBar 2.2s ease-in-out infinite}
+.dp-dash i:nth-child(1){height:40%}.dp-dash i:nth-child(2){height:75%;animation-delay:-.5s}.dp-dash i:nth-child(3){height:55%;animation-delay:-1s}.dp-dash i:nth-child(4){height:90%;animation-delay:-1.5s}
+@keyframes dpBar{50%{transform:scaleY(.6)}}
+.scene.dp-paused *,.scene.dp-paused *::before,.scene.dp-paused *::after{animation-play-state:paused!important}
+/* the older decorative floats would sit on top of the data-flow nodes: keep only the two top cubes while the flow is shown */
+.scene:has(.dp) .fl:nth-child(n+5){display:none}
+@media(max-width:800px){.dp-node,.dp-lab{display:none}.dp-pk:nth-child(n+4){display:none}.dp-lane:nth-child(4){display:none}.dp-lane::before{left:0;right:0}.dp-pk{left:0}.dp.adm .dp-pk{right:0}}
+@media(prefers-reduced-motion:reduce){.dp{display:none}}
+}
+#lgm{position:fixed;right:14px;bottom:14px;z-index:60;height:38px;padding:0 14px 0 11px;border-radius:19px;border:1px solid #ffffff66;background:#ffffffd9;color:#1c2340;font:600 12px/1 system-ui,sans-serif;cursor:pointer;box-shadow:0 2px 12px #0003;display:flex;align-items:center;gap:7px;width:auto;margin:0}
+#lgm:hover{background:#fff}#lgm[hidden]{display:none}
 .tg-badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;white-space:nowrap}
 .tg-badge.met{background:#d9f7e3;color:#146c43}.tg-badge.miss{background:#fbe0e0;color:#a52a2a}
 /* Update66: expandable sidebar group (Employee Info > Employees / Notifications / Mahizhchi) */
 aside .ng>a.ng-h{display:flex;justify-content:space-between;align-items:center;border:1px solid transparent}
-aside .ng>a.ng-h .chev{font-size:11px;opacity:.85;transition:transform .2s}
+aside .ng>a.ng-h .chev{font-size:11px;opacity:.85;transition:transform .2s;transform:rotate(180deg)}
 aside .ng.open>a.ng-h{border:1.5px solid #fff;background:transparent;color:#fff;box-shadow:none;transform:none}
-aside .ng.open>a.ng-h .chev{transform:rotate(180deg)}
+aside .ng.open>a.ng-h .chev{transform:rotate(0deg)}
 aside .ng .kids{display:none;flex-direction:column;gap:2px;padding:4px 0 4px 14px}
 aside .ng.open .kids{display:flex}
 aside .ng .kids a{font-size:13px;padding:7px 12px}
@@ -1140,7 +1196,7 @@ aside .ng .kids a.on{background:transparent;color:#fff;font-weight:700;box-shado
 </style></head><body>
 {% if session.role %}<div class="app"><aside class="emp">
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
-{% for h,l,on,kids in nav %}{% if kids %}<div class="ng{{' open' if on else ''}}"><a class="ng-h" href="{{h}}">{{l}}<span class="chev">&#9650;</span></a>
+{% for h,l,on,kids in nav %}{% if kids %}<div class="ng{{' open' if on else ''}}"><a class="ng-h" href="{{h}}" role="button" aria-expanded="{{'true' if on else 'false'}}" onclick="var g=this.parentNode;var o=g.classList.toggle('open');this.setAttribute('aria-expanded',o);return false">{{l}}<span class="chev">&#9650;</span></a>
 <div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
 <div class="prof"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
@@ -1245,7 +1301,7 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
 <div class="fl hm" style="right:24%;top:5%;--bt:9s;--d:-3s"><div class="ring3d" style="--s:54px;--t:8s"></div></div>
 <div class="fl" style="left:22%;top:6%;--bt:6s;--d:-2.5s"><div class="sph" style="--s:26px"></div></div>
 <div class="fl hm" style="right:5%;top:46%;--bt:7s;--d:-1.5s"><div class="sph" style="--s:34px"></div></div>
-<div class="fl hm" style="left:4%;top:48%;--bt:8s;--d:-5s"><div class="sph" style="--s:20px"></div></div></div>
+<div class="fl hm" style="left:4%;top:48%;--bt:8s;--d:-5s"><div class="sph" style="--s:20px"></div></div>{% if role=='admin' %}<div class="dp adm"><div class="dp-lab"><b>&#9664;&#9664;&#9664;</b>&nbsp; LIVE DATA FEED &middot; INCOMING FROM SERVER</div><div class="dp-node l"><div class="dp-dash"><i></i><i></i><i></i><i></i></div><div class="dp-stand"></div><small>ADMIN DASHBOARD</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% else %}<div class="dp emp"><div class="dp-lab">UPLOADING ENCRYPTED DATA TO SERVER &nbsp;<b>&#9654;&#9654;&#9654;</b></div><div class="dp-node l"><div class="dp-scr"><i></i><i></i><i></i></div><div class="dp-stand"></div><small>EMPLOYEE</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% endif %}</div>
 <div class="lcard">{% if role=='admin' %}<div class="lav">{{admin_avatar|safe}}</div>{% endif %}<h2>Welcome back</h2><p>{{title}}</p>
 <form method="post">
 <div class="field"><input id="login_u" name="u" placeholder="{{ph}}" required autofocus autocomplete="off"></div>
@@ -1301,6 +1357,103 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
       p.focus();
     });
   }
+})();
+</script>
+<button id="lgm" type="button" aria-label="Turn music off" title="Background music" hidden><span id="lgm_i">&#128266;</span><span id="lgm_t">Music on</span></button>
+<script>
+(function(){
+/* Update67: Tamil-style background music, synthesised live with Web Audio (no audio file, nothing to download).
+   Employee = raga Mohanam, Admin = raga Hamsadhwani; tanpura drone + veena/flute-like lead with gamaka + thavil-style rhythm (Adi tala).
+   Starts on the first click/key/touch (browser rule), can be muted, never touches the login form, pauses when the tab is hidden. */
+try{
+var ADMIN={{ 'true' if role=='admin' else 'false' }};
+var AC=window.AudioContext||window.webkitAudioContext;
+var btn=document.getElementById('lgm'),bi=document.getElementById('lgm_i'),bt=document.getElementById('lgm_t');
+if(!AC||!btn)return;
+var ctx=null,master=null,verb=null,timer=null,muted=false,armed=false,next=0,step=0,noiseBuf=null,lastF=0;
+function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+var SA=ADMIN?174.61:196,BPM=ADMIN?88:104,SPB=60/BPM/2;
+var RAT=ADMIN?[1,9/8,5/4,3/2,15/8]:[1,9/8,5/4,3/2,5/3];
+function fr(i){var o=Math.floor(i/5),d=((i%5)+5)%5;return SA*2*RAT[d]*Math.pow(2,o)}
+var PH=[[[2,2],[3,2],[4,2],[3,1],[2,1],[1,2],[0,2],[1,2],[2,2]],
+        [[5,3],[4,1],[3,2],[4,2],[3,2],[2,2],[1,2],[0,2]],
+        [[0,2],[1,1],[2,1],[3,2],[2,2],[3,1],[4,1],[5,2],[4,2],[3,2]],
+        [[3,2],[2,1],[1,1],[0,2],[-1,2],[0,2],[1,2],[2,2],[0,2]]];
+var ORDER=[0,1,0,2,3,1,2,0];
+var SEQ=[];  /* flat step list: [stepIndex, noteIdx, lengthSteps] */
+(function(){var pos=0;ORDER.forEach(function(p){PH[p].forEach(function(n){SEQ.push([pos,n[0],n[1]]);pos+=n[1]})});SEQ.total=pos})();
+var byStep={};SEQ.forEach(function(n){byStep[n[0]]=n});
+function icon(){bi.innerHTML=muted?'&#128263;':'&#128266;';bt.textContent=muted?'Music off':'Music on';
+ btn.setAttribute('aria-label',muted?'Turn music on':'Turn music off')}
+function env(g,t,peak,att,dec,sus,dur,rel){g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(peak,t+att);
+ g.gain.exponentialRampToValueAtTime(Math.max(peak*sus,0.0002),t+att+dec);g.gain.setValueAtTime(Math.max(peak*sus,0.0002),t+dur);
+ g.gain.exponentialRampToValueAtTime(0.0001,t+dur+rel)}
+function lead(t,f,dur){
+ var g=ctx.createGain(),lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=2600;
+ var o1=ctx.createOscillator(),o2=ctx.createOscillator(),g2=ctx.createGain();
+ o1.type='triangle';o2.type='sine';g2.gain.value=0.3;
+ var from=lastF>0?lastF:f;   /* gamaka: glide in from the previous swara */
+ o1.frequency.setValueAtTime(from,t);o1.frequency.linearRampToValueAtTime(f,t+0.07);
+ o2.frequency.setValueAtTime(from*2,t);o2.frequency.linearRampToValueAtTime(f*2,t+0.07);
+ lastF=f;
+ o1.connect(lp);o2.connect(g2);g2.connect(lp);lp.connect(g);g.connect(master);g.connect(verb);
+ env(g,t,0.16,0.02,0.35,0.55,dur,0.16);
+ var stop=t+dur+0.3;
+ if(dur>SPB*1.8){var l=ctx.createOscillator(),lg=ctx.createGain();l.frequency.value=5.6;lg.gain.value=9;
+  l.connect(lg);lg.connect(o1.detune);lg.connect(o2.detune);l.start(t+dur*0.3);l.stop(stop)}
+ o1.start(t);o2.start(t);o1.stop(stop);o2.stop(stop)}
+function tanpura(t,f){
+ [0,3].forEach(function(c){var o=ctx.createOscillator(),lp=ctx.createBiquadFilter(),g=ctx.createGain();
+  o.type='sawtooth';o.frequency.value=f;o.detune.value=c;lp.type='lowpass';lp.frequency.value=950;
+  o.connect(lp);lp.connect(g);g.connect(master);env(g,t,0.05,0.006,1.6,0.05,0.2,0.4);o.start(t);o.stop(t+2.4)})}
+function thump(t,acc){var o=ctx.createOscillator(),g=ctx.createGain();o.type='sine';
+ o.frequency.setValueAtTime(150,t);o.frequency.exponentialRampToValueAtTime(70,t+0.2);
+ o.connect(g);g.connect(master);env(g,t,acc?0.42:0.3,0.004,0.24,0.02,0.02,0.05);o.start(t);o.stop(t+0.4)}
+function tick(t,acc){var s=ctx.createBufferSource(),bp=ctx.createBiquadFilter(),g=ctx.createGain();
+ s.buffer=noiseBuf;bp.type='bandpass';bp.frequency.value=acc?3400:2400;bp.Q.value=1.3;
+ s.connect(bp);bp.connect(g);g.connect(master);env(g,t,acc?0.2:0.11,0.002,0.07,0.02,0.01,0.03);s.start(t);s.stop(t+0.15)}
+var LOW=[0,8,12],HI=[2,4,6,10,14,15],ACC=[4,12];
+function play(n,t){
+ var k=n%16;
+ if(n%8===0)tanpura(t,SA*0.75);if(n%8===2)tanpura(t,SA);if(n%8===4)tanpura(t,SA);if(n%8===6)tanpura(t,SA*0.5);
+ if(LOW.indexOf(k)>=0)thump(t,k===0);
+ if(HI.indexOf(k)>=0)tick(t,ACC.indexOf(k)>=0);
+ var m=byStep[n%SEQ.total];if(m&&m[1]!==null)lead(t,fr(m[1]),Math.max(m[2]*SPB*0.95,0.15))}
+function sched(){if(!ctx||ctx.state!=='running'||muted)return;
+ while(next<ctx.currentTime+0.6){play(step,next);next+=SPB;step++}}
+function build(){
+ ctx=new AC();master=ctx.createGain();master.gain.value=0;
+ var comp=ctx.createDynamicsCompressor();master.connect(comp);comp.connect(ctx.destination);
+ var d=ctx.createDelay(1);d.delayTime.value=0.27;var fb=ctx.createGain();fb.gain.value=0.28;d.connect(fb);fb.connect(d);
+ var vg=ctx.createGain();vg.gain.value=0.35;verb=ctx.createGain();verb.connect(d);d.connect(vg);vg.connect(master);
+ noiseBuf=ctx.createBuffer(1,Math.floor(ctx.sampleRate*0.2),ctx.sampleRate);
+ var ch=noiseBuf.getChannelData(0);for(var i=0;i<ch.length;i++)ch[i]=Math.random()*2-1}
+function fade(to,sec){if(!master)return;var t=ctx.currentTime;master.gain.cancelScheduledValues(t);master.gain.setValueAtTime(master.gain.value,t);master.gain.linearRampToValueAtTime(to,t+sec)}
+function go(){
+ if(muted)return;
+ if(!ctx)build();
+ var r=ctx.resume?ctx.resume():null;
+ var run=function(){if(ctx.state!=='running')return;if(!timer){next=ctx.currentTime+0.15;timer=setInterval(sched,150)}fade(0.8,2.5)};
+ if(r&&r.then)r.then(run,function(){});else run()}
+function stopAll(){if(timer){clearInterval(timer);timer=null}if(ctx&&master)fade(0,0.25)}
+function arm(){if(armed)return;armed=true;   /* autoplay is blocked until the first click / key / touch */
+ var h=function(){['pointerdown','keydown','touchstart'].forEach(function(t){document.removeEventListener(t,h,true)});armed=false;go()};
+ ['pointerdown','keydown','touchstart'].forEach(function(t){document.addEventListener(t,h,true)})}
+function init(){
+ muted=get('loginMusicMuted')==='1';btn.hidden=false;icon();
+ btn.addEventListener('click',function(){muted=!muted;put('loginMusicMuted',muted?'1':'0');icon();
+  if(muted)stopAll();else{armed=false;go()}});
+ if(!muted){try{build();ctx.resume().then(function(){go()},function(){arm()});arm()}catch(e){arm()}}}
+document.addEventListener('visibilitychange',function(){   /* hidden tab: no audio work, no animation work */
+ var sc=document.querySelector('.scene');if(sc)sc.classList.toggle('dp-paused',document.hidden);
+ if(!ctx)return;if(document.hidden){if(timer){clearInterval(timer);timer=null}ctx.suspend&&ctx.suspend()}
+ else if(!muted){ctx.resume&&ctx.resume().then(function(){if(!timer){next=ctx.currentTime+0.15;timer=setInterval(sched,150)}})}});
+window.addEventListener('pagehide',function(){stopAll();if(ctx&&ctx.close)ctx.close()});
+var f=document.querySelector('form');if(f)f.addEventListener('submit',function(){stopAll()});   /* quiet the moment they log in */
+function start(){setTimeout(init,500)}   /* after the page has loaded - never competes with the login itself */
+if(document.readyState==='complete')start();else window.addEventListener('load',start);
+}catch(e){/* audio unavailable: login and animation carry on normally */}
 })();
 </script>"""
 

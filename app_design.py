@@ -28,6 +28,8 @@ Access rules (Update59):
     Tamil-style background music (Employee = raga Mohanam, Admin = raga Hamsadhwani) with a Music on/off button.
   * Update68: Welcome page (after Admin and Employee login) uses the same AI-style 3D scene + data-packet flow as the login
     pages (Employee = data sent to server, Admin = live data arriving). Overview no longer shows the "Employees" count card.
+  * Update69: sidebar 'Employees' link removed; Processes list/form no longer shows 'Target count / hour' (still derived from the
+    8-hour target internally). Welcome page never plays music by itself: the Tamil-style music starts when the mouse moves over it.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -152,7 +154,8 @@ def missing_personal(emp_row):
     return [f for f in EMP_REQUIRED_PERSONAL if not str(emp_row.get(f) or "").strip()]
 # Columns shown on Admin -> Employees, in this display order (personal fields live on the
 # Personal details pages). Display order != sheet column order, so reads/writes map by name.
-LIST_HEADERS = {"Employees": ["Employee ID", "Name", "Designation", "Band", "Email", "Password"]}
+LIST_HEADERS = {"Employees": ["Employee ID", "Name", "Designation", "Band", "Email", "Password"],
+                "Processes": ["Process name", "Target hours", "Target 100%", "Target count / 8 hrs"]}   # Update69: per-hour column hidden
 def list_heads(sheet): return LIST_HEADERS.get(sheet, HEADERS[sheet])
 OPTIONAL_FIELDS = set(PERSONAL_FIELDS) | {"Status", "Reviewed at", "Reviewed by", "Target count / hour", "Target count / 8 hrs"}   # Processes: fill EITHER target column   # not required when admin adds/edits an employee
 LOCKED_FIELDS = {}   # nothing locked: admin can add/edit personal details; employees can also edit their own via /employee/profile
@@ -1251,8 +1254,7 @@ if(document.readyState==='complete')start();else window.addEventListener('load',
 </body></html>"""
 
 NAVS = {
-    "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"),
-              ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
+    "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
               ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
@@ -1462,7 +1464,7 @@ if(document.readyState==='complete')start();else window.addEventListener('load',
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
 <button class="primary">Add</button></form>
-{% if kind=='processes' %}<p class="mut">Set the <b>Target count / 8 hrs</b> &mdash; the count an employee must complete in a full 8-hour day. The per-hour rate is worked out automatically (target &divide; 8); you may fill either one. If an employee's count is below the target for the hours they logged, they get an alert.</p>{% endif %}
+{% if kind=='processes' %}<p class="mut">Set the <b>Target count / 8 hrs</b> &mdash; the count an employee must complete in a full 8-hour day. The per-hour rate is worked out automatically (target &divide; 8). If an employee's count is below the target for the hours they logged, they get an alert.</p>{% endif %}
 {% if missing %}<p class="mut">&#9888; {{missing}} employee(s) have no Designation yet. Use Edit to set it; it then fills in automatically on their daily entry page.</p>{% endif %}
 {% if locked %}<p class="mut">Personal details are managed on the Personal details page. Office Email ID follows the login Email.</p>{% endif %}</div>
 <table><tr>{% for h in heads %}<th>{{h}}</th>{% endfor %}<th></th></tr>
@@ -1471,7 +1473,7 @@ TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" action="/admin/{{kind}}/{{r['_row']}}/delete" onsubmit="return confirm('Delete?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="9">No records yet.</td></tr>{% endfor %}</table>"""
 
-EDIT = """<div class="card"><h2>Edit {{title}}</h2>{% if kind=='processes' %}<p class="mut">Set the <b>Target count / 8 hrs</b> &mdash; the count an employee must complete in a full 8-hour day. The per-hour rate is worked out automatically (target &divide; 8); you may fill either one. If an employee's count is below the target for the hours they logged, they get an alert.</p>{% endif %}<form method="post" class="grid">
+EDIT = """<div class="card"><h2>Edit {{title}}</h2>{% if kind=='processes' %}<p class="mut">Set the <b>Target count / 8 hrs</b> &mdash; the count an employee must complete in a full 8-hour day. The per-hour rate is worked out automatically (target &divide; 8). If an employee's count is below the target for the hours they logged, they get an alert.</p>{% endif %}<form method="post" class="grid">
 {% for h in heads %}<label>{{h}}<input name="f{{loop.index0}}" value="{{vals[loop.index0]}}"{% if h not in optional %} required{% endif %}{% if h in locked %} readonly{% endif %}></label>{% endfor %}
 <button class="primary">Save</button> <a href="/admin/{{kind}}">Cancel</a></form>
 {% if locked %}<p class="mut">Personal details (grayed out) are entered by the employee on their own Personal details page.</p>{% endif %}</div>"""
@@ -1667,9 +1669,9 @@ def admin_edit(kind, row):
     cur = ws.row_values(row); cur += [""] * (len(HEADERS[sheet]) - len(cur))
     vals = [cur[HEADERS[sheet].index(h)] for h in heads]
     if sheet == "Processes":                      # prefill the derived figure so the form never looks empty
-        ih, idl = heads.index("Target count / hour"), heads.index("Target count / 8 hrs")
-        h_, d_, _e = proc_targets_sync(vals[ih], vals[idl], vals[ih], vals[idl])
-        if not _e: vals[ih], vals[idl] = h_, d_
+        idl = heads.index("Target count / 8 hrs"); hcur = cur[HEADERS[sheet].index("Target count / hour")]
+        h_, d_, _e = proc_targets_sync(hcur, vals[idl], hcur, vals[idl])
+        if not _e: vals[idl] = d_
     return page(EDIT, title=sheet, heads=heads, vals=vals, kind=kind,
                 optional=OPTIONAL_FIELDS, locked=LOCKED_FIELDS.get(sheet, set()))
 
@@ -2227,6 +2229,7 @@ def initials_of(name):
     return "".join(p[0] for p in parts[:2]).upper() or "?"
 
 WL_SCENE = LOGIN[LOGIN.index('<div class="scene '):LOGIN.index('<div class="lcard">')]   # same 3D scene + data-packet flow as the login pages
+WL_ENGINE = LOGIN[LOGIN.index("var SA=ADMIN"):LOGIN.index("function arm()")]      # same Tamil-style engine as the login page
 WELCOME = """<style>
 .wl{position:fixed;inset:0;z-index:9999;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
 .wl.admin{background:radial-gradient(900px 420px at 20% 0%,#3b5bdb55,transparent 60%),linear-gradient(120deg,#0b1230 0%,#182a6b 48%,#4f46e5 100%)}
@@ -2238,7 +2241,7 @@ WELCOME = """<style>
 .wl-card h1{font-family:Georgia,serif;font-size:27px;margin:0 0 4px;color:#5b4fb0;word-break:break-word}
 .wl-card p{margin:0 0 14px;color:#6b7390;font-size:13px}
 .wl-bar{height:6px;border-radius:4px;background:#e9e6fb;overflow:hidden}
-.wl-bar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#6d70f5,#f58a8a);transform-origin:left;transform:scaleX(0);animation:wlFill 2s linear forwards}
+.wl-bar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#6d70f5,#f58a8a);transform-origin:left;transform:scaleX(0);animation:wlFill 4s linear forwards}
 @keyframes wlFill{to{transform:scaleX(1)}}
 .wl-st{margin-top:10px;font:600 10px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;color:#8a90ad}
 </style>
@@ -2246,12 +2249,12 @@ WELCOME = """<style>
 """ + WL_SCENE.replace('{{role}}', "{{session.role}}").replace("role=='admin'", "session.role=='admin'") + """
  <div class="wl-card"><h1>Welcome, {{session.name}}</h1>
  <p>{{ 'Syncing live data from the server' if session.role=='admin' else 'Securely connecting to the server' }}&hellip;</p>
- <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div></div>
+ <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div><div class="wl-st" style="margin-top:6px;font-weight:500">&#9834; Move the mouse to play music</div></div>
 </div>
 <script>
 (function(){
  var ROLE={{session.role|tojson}}, NAME={{session.name|tojson}};
- var WL_MS=2000;                                       /* total time the welcome page is shown */
+ var WL_MS=4000;                                       /* total time the welcome page is shown (long enough to move the mouse and hear the music) */
 
  if(ROLE==='employee'){                                /* AI voice announcement - Employee welcome only, no BGM */
   try{
@@ -2264,38 +2267,29 @@ WELCOME = """<style>
   }catch(e){ /* speech unavailable/blocked - animation still runs fine without it */ }
  }
 
- var ac=null,master=null;
- if(ROLE!=='employee'){
-  try{                                                  /* soft background music (Admin loading only), synth-generated */
-   var AC=window.AudioContext||window.webkitAudioContext;
-   if(AC){
-    ac=new AC();
-    master=ac.createGain(); master.gain.value=0; master.connect(ac.destination);
-    var now=ac.currentTime, fadeIn=.25, fadeOut=.35, end=now+WL_MS/1000;
-    master.gain.linearRampToValueAtTime(.16, now+fadeIn);
-    master.gain.setValueAtTime(.16, Math.max(now+fadeIn, end-fadeOut));
-    master.gain.linearRampToValueAtTime(0, end);
-    var chord=[261.63,329.63,392.00,523.25];
-    chord.forEach(function(freq,idx){
-     var o=ac.createOscillator(),g=ac.createGain();
-     o.type='sine'; o.frequency.value=freq;
-     g.gain.value=idx===0?.9:.55;
-     o.connect(g); g.connect(master);
-     o.start(now); o.stop(end+.05);
-    });
-    if(ac.state==='suspended') ac.resume().catch(function(){});
-   }
-  }catch(e){ /* Web Audio unavailable/blocked - animation still runs fine without BGM */ }
+  /* Music: NEVER automatic. It starts only when the user moves the mouse over this page (click / key / touch work as a fallback). */
+ var ADMIN=(ROLE==='admin');
+ var AC=window.AudioContext||window.webkitAudioContext;
+ var ctx=null,master=null,verb=null,timer=null,muted=false,next=0,step=0,noiseBuf=null,lastF=0;
+ var btn={setAttribute:function(){}},bi={},bt={};
+ function get(k){return null}function put(k,v){}
+ """ + WL_ENGINE + """
+ var mEv=['mousemove','pointermove','pointerdown','keydown','touchstart'];
+ function onUser(){
+  if(!AC)return;
+  try{go()}catch(e){}
+  if(ctx&&ctx.state==='running'){mEv.forEach(function(t){document.removeEventListener(t,onUser,true)})}   /* running: stop listening */
  }
+ mEv.forEach(function(t){document.addEventListener(t,onUser,true)});
 
  setTimeout(function(){                                /* welcome animation for 2s, then move on */
-  if(ac){ try{ master.gain.cancelScheduledValues(ac.currentTime); master.gain.value=0; ac.close(); }catch(e){} }
+  try{ if(timer)clearInterval(timer); if(ctx){ master.gain.cancelScheduledValues(ctx.currentTime); master.gain.value=0; ctx.close(); } }catch(e){}
   if(ROLE==='employee' && 'speechSynthesis' in window){ try{ window.speechSynthesis.cancel(); }catch(e){} }
   window.location.replace({{ ('/admin/summary' if session.role=='admin' else '/employee') | tojson }});
  },WL_MS);
 })();
 </script>
-<noscript><meta http-equiv="refresh" content="2;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
+<noscript><meta http-equiv="refresh" content="4;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
 
 @app.route("/admin/welcome")
 @need("admin")
@@ -2763,7 +2757,7 @@ def admin_summary():
     rep = sorted(report(emps, subs, leaves, start, end), key=lambda r: str(r["name"]))
     n = len(rep) or 1
     a1, a2 = round(sum(r["att"] for r in rep) / n), round(sum(r["pct"] for r in rep) / n)
-    extra = [("Total leave days", sum(r["leave"] for r in rep))]        # Update68: the "Employees" card was removed from Overview
+    extra = [("Employees", len(rep)), ("Total leave days", sum(r["leave"] for r in rep))]
     # Missed-entries list is intentionally NOT shown on the Overview page any more;
     # it lives only on the dedicated "Missed entries" page (/admin/missed).
     return page(SUMMARY, title="Overview", rep=rep, month=month, label=label, wd=workdays(start, end),

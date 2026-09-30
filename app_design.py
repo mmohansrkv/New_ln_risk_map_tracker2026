@@ -30,6 +30,8 @@ Access rules (Update59):
     pages (Employee = data sent to server, Admin = live data arriving). Overview no longer shows the "Employees" count card.
   * Update69: sidebar 'Employees' link removed; Processes list/form no longer shows 'Target count / hour' (still derived from the
     8-hour target internally). Welcome page never plays music by itself: the Tamil-style music starts when the mouse moves over it.
+  * Update70: Employee pages play the Tamil-style music (Mohanam) only after the mouse moves on the page - never automatically,
+    no button needed (the speaker button is just an optional mute). Replaces the old remote-file background music.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -1218,37 +1220,41 @@ function poll(){fetch('/admin/notify/poll?since='+since+'&first='+first,{credent
  j.items.forEach(function(i){toast(i.text)});since=j.last;first=0}).catch(function(){})}
 poll();setInterval(poll,15000)})();
 </script>{% endif %}
-{% if session.role=='employee' %}<button id="bgm" type="button" aria-label="Turn background music off" title="Background music" hidden>&#128266;</button><script>
+{% if session.role=='employee' and request.path!='/employee/welcome' %}<button id="bgm" type="button" aria-label="Turn background music off" title="Background music (optional mute)" hidden>&#128266;</button><script>
 (function(){
-/* Employee-only background music: lazy-loaded after the page is ready, clearly audible, looping.
-   Never rendered for Admin. Stops when the employee leaves the employee pages / logs out (the page unloads). */
-var SRC="https://commons.wikimedia.org/wiki/Special:FilePath/Erik_Satie_-_gymnopedies_-_la_1_ere._lent_et_douloureux.ogg";
-var VOL=0.5,a=null,   /* default volume: comfortable but clearly audible (0 = silent, 1 = max) */
-    btn=document.getElementById('bgm'),muted=false,armed=false;
+/* Update70: Employee-page Tamil-style background music (raga Mohanam, synthesised live - no audio file).
+   NEVER starts by itself: it starts when the employee moves the mouse anywhere on the page (click / key / touch also work).
+   No button needed; the speaker button is only an optional mute. Stops on logout / when the tab is hidden. */
+try{
+var ADMIN=false,AC=window.AudioContext||window.webkitAudioContext;
+if(!AC)return;
+var btn=document.getElementById('bgm'),bi=btn,bt={};
+var ctx=null,master=null,verb=null,timer=null,muted=false,next=0,step=0,noiseBuf=null,lastF=0;
 function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
 function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
-function icon(){if(!btn)return;btn.innerHTML=muted?'&#128263;':'&#128266;';
- btn.setAttribute('aria-label',muted?'Turn background music on':'Turn background music off')}
-function tryPlay(){if(!a||muted)return;var p=a.play();if(p&&p.catch)p.catch(function(){arm()})}
-function arm(){if(armed)return;armed=true;   /* browsers block autoplay until the first click/key/touch */
- var go=function(){['pointerdown','keydown','touchstart'].forEach(function(t){document.removeEventListener(t,go,true)});armed=false;tryPlay()};
- ['pointerdown','keydown','touchstart'].forEach(function(t){document.addEventListener(t,go,true)})}
-function savePos(){if(a&&!isNaN(a.currentTime))put('bgmPos',String(a.currentTime))}
+{{ music_engine|safe }}
+var mEv=['mousemove','pointermove','pointerdown','keydown','touchstart'];
+function onUser(){
+ if(muted)return;
+ try{go()}catch(e){}
+ if(ctx&&ctx.state==='running'){mEv.forEach(function(t){document.removeEventListener(t,onUser,true)})}
+}
 function init(){
  muted=get('bgmMuted')==='1';
- a=new Audio();a.loop=true;a.volume=VOL;a.preload='auto';a.src=SRC;
- var pos=parseFloat(get('bgmPos'));   /* continue from where the previous employee page stopped */
- if(pos>0)a.addEventListener('loadedmetadata',function(){try{if(pos<a.duration)a.currentTime=pos}catch(e){}},{once:true});
- a.addEventListener('error',function(){if(btn)btn.hidden=true});   /* source unreachable: stay silent, page unaffected */
  if(btn){btn.hidden=false;icon();btn.addEventListener('click',function(){
-   muted=!muted;put('bgmMuted',muted?'1':'0');icon();if(muted)a.pause();else tryPlay()})}
- setInterval(savePos,4000);tryPlay();}
-window.addEventListener('pagehide',function(){savePos();if(a)a.pause()});
-document.addEventListener('click',function(e){var l=e.target.closest&&e.target.closest('a[href="/logout"]');if(l&&a){savePos();a.pause()}},true);   /* stop the moment Logout is clicked */
-window.addEventListener('pageshow',function(e){if(e.persisted&&a)tryPlay()});
-document.addEventListener('visibilitychange',function(){if(!a)return;if(document.hidden)a.pause();else tryPlay()});
-function start(){setTimeout(init,600)}   /* after load, so it never competes with the page itself */
+   muted=!muted;put('bgmMuted',muted?'1':'0');icon();
+   if(muted)stopAll();else{go();mEv.forEach(function(t){document.addEventListener(t,onUser,true)})}})}
+ mEv.forEach(function(t){document.addEventListener(t,onUser,true)});   /* wait for the mouse - nothing plays before that */
+}
+document.addEventListener('visibilitychange',function(){
+ if(!ctx)return;
+ if(document.hidden){if(timer){clearInterval(timer);timer=null}ctx.suspend&&ctx.suspend()}
+ else if(!muted){ctx.resume&&ctx.resume().then(function(){if(!timer){next=ctx.currentTime+0.15;timer=setInterval(sched,150)}})}});
+window.addEventListener('pagehide',function(){stopAll();if(ctx&&ctx.close)ctx.close()});
+document.addEventListener('click',function(e){var l=e.target.closest&&e.target.closest('a[href="/logout"]');if(l)stopAll()},true);   /* stop the moment Logout is clicked */
+function start(){setTimeout(init,300)}
 if(document.readyState==='complete')start();else window.addEventListener('load',start);
+}catch(e){/* audio unavailable: the page works normally without music */}
 })();
 </script>{% endif %}
 </body></html>"""
@@ -1292,7 +1298,7 @@ def page(body, title="Productivity Tracker", **ctx):
             g = ""
         side_avatar = render_template_string(AVATAR3D, gender=g, initials=initials_of(session.get("name", "")))
     return render_template_string(BASE, body=render_template_string(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar)
+                                  side_avatar=side_avatar, music_engine=WL_ENGINE)
 
 
 LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></div>

@@ -53,6 +53,8 @@ Access rules (Update59):
     melody, different from the earlier Mohanam tune), Welcome Page only.
   * Update80: the old Chat button/page/routes are removed completely. NEW Group Chat icon (bottom-right, employee pages): opens a chat panel for the
     employees who are online right now; join on login, leave on logout/offline; messages auto-delete after 1 hour; no audio.
+  * Update81: NEW Tamil BGM on the Employee Welcome Page (original raga Hamsadhwani instrumental: veena-style melody, tanpura, light mridangam) replacing the flute tune.
+    Still starts only after the AI voice ends; no music on the Employee pages.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -1284,30 +1286,30 @@ poll();setInterval(poll,15000)})();
 #gcn{display:none;position:absolute;top:-3px;right:-3px;background:#ff3b30;color:#fff;border:2px solid #fff;border-radius:11px;font:700 11px/1 system-ui,sans-serif;padding:3px 6px;min-width:10px;text-align:center}
 #gcp{position:fixed;right:20px;bottom:96px;z-index:99;width:min(360px,calc(100vw - 24px));height:min(480px,calc(100vh - 120px));background:#fff;border:1px solid #d8dbe6;border-radius:16px;box-shadow:0 20px 50px #0003;display:flex;flex-direction:column;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
 #gcp[hidden]{display:none}
-#gcp .gh{display:flex;align-items:center;gap:8px;padding:11px 14px;background:linear-gradient(120deg,#1f9fd8,#4a3fd0);color:#fff}
-#gcp .gh b{font-size:15px;flex:1}#gcp .gh span{font-size:12px;background:#ffffff33;border-radius:10px;padding:2px 8px}
-#gcp .gh button{background:none;border:0;color:#fff;font-size:20px;line-height:1;cursor:pointer;padding:0 2px}
+#gcp .gc-h{display:flex;align-items:center;gap:8px;padding:11px 14px;background:linear-gradient(120deg,#1f9fd8,#4a3fd0);color:#fff}
+#gcp .gc-h b{font-size:15px;flex:1}#gcp .gc-h span{font-size:12px;background:#ffffff33;border-radius:10px;padding:2px 8px}
+#gcp .gc-h button{background:none;border:0;color:#fff;font-size:20px;line-height:1;cursor:pointer;padding:0 2px}
 #gcm{display:flex;gap:6px;overflow-x:auto;padding:8px 10px;border-bottom:1px solid #e6e8f0;background:#f6f8ff;flex:none}
 #gcm i{font-style:normal;white-space:nowrap;font-size:12px;background:#fff;border:1px solid #d8dbe6;border-radius:12px;padding:3px 9px;color:#1c2340}
 #gcm i:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:#2fb26a;margin-right:5px}
 #gcm i.away:before{background:#e0a020}
 #gcl{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:7px;background:#f8f9fd}
-#gcl .b{max-width:80%;padding:7px 11px;border-radius:14px;font-size:13.5px;line-height:1.4;word-wrap:break-word;white-space:pre-wrap}
-#gcl .b b{display:block;font-size:11px;color:#4a3fd0;margin-bottom:2px}#gcl .b small{display:block;font-size:10px;opacity:.65;margin-top:3px}
-#gcl .b.me{align-self:flex-end;background:#4a3fd0;color:#fff;border-bottom-right-radius:4px}
-#gcl .b.th{align-self:flex-start;background:#fff;border:1px solid #d8dbe6;border-bottom-left-radius:4px}
-#gcl .e{color:#6b7390;font-size:13px;text-align:center;padding:18px}
-#gcp .gf{display:flex;gap:8px;padding:10px;border-top:1px solid #e6e8f0;flex:none}
-#gcp .gf input{flex:1;padding:9px 12px;border:1px solid #d8dbe6;border-radius:10px;font-size:14px;min-width:0}
-#gcp .gf button{padding:9px 14px;border:0;border-radius:10px;background:#4a3fd0;color:#fff;font-weight:600;cursor:pointer}
+#gcl .gc-b{max-width:80%;padding:7px 11px;border-radius:14px;font-size:13.5px;line-height:1.4;word-wrap:break-word;white-space:pre-wrap}
+#gcl .gc-b b{display:block;font-size:11px;color:#4a3fd0;margin-bottom:2px}#gcl .gc-b small{display:block;font-size:10px;opacity:.65;margin-top:3px}
+#gcl .gc-b.me{align-self:flex-end;background:#4a3fd0;color:#fff;border-bottom-right-radius:4px}
+#gcl .gc-b.th{align-self:flex-start;background:#fff;border:1px solid #d8dbe6;border-bottom-left-radius:4px}
+#gcl .gc-e{color:#6b7390;font-size:13px;text-align:center;padding:18px}
+#gcp .gc-f{display:flex;gap:8px;padding:10px;border-top:1px solid #e6e8f0;flex:none}
+#gcp .gc-f input{flex:1;padding:9px 12px;border:1px solid #d8dbe6;border-radius:10px;font-size:14px;min-width:0}
+#gcp .gc-f button{padding:9px 14px;border:0;border-radius:10px;background:#4a3fd0;color:#fff;font-weight:600;cursor:pointer}
 @media print{ #gcb,#gcp{display:none}}
 </style>
 <button id="gcb" type="button" title="Group Chat - employees online now" aria-label="Group Chat" aria-expanded="false"><svg viewBox="0 0 64 64" width="42" height="42" aria-hidden="true" focusable="false"><defs><linearGradient id="gc_l" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#bfe0ff"/></linearGradient></defs><circle cx="17" cy="26" r="5.500" fill="#d6ecff" opacity="0.85"/><path d="M5 47Q5 35 17 35Q21 35 24 37L24 47Z" fill="#d6ecff" opacity="0.85"/><circle cx="47" cy="26" r="5.500" fill="#d6ecff" opacity="0.85"/><path d="M59 47Q59 35 47 35Q43 35 40 37L40 47Z" fill="#d6ecff" opacity="0.85"/><circle cx="32" cy="23" r="8" fill="url(#gc_l)"/><path d="M18 49Q18 34 32 34Q46 34 46 49Z" fill="url(#gc_l)"/></svg><span id="gcn"></span></button>
 <div id="gcp" hidden role="dialog" aria-label="Group Chat">
- <div class="gh"><b>Group Chat</b><span id="gcc">0 online</span><button id="gcx" type="button" aria-label="Close">&times;</button></div>
+ <div class="gc-h"><b>Group Chat</b><span id="gcc">0 online</span><button id="gcx" type="button" aria-label="Close">&times;</button></div>
  <div id="gcm"></div>
- <div id="gcl"><div class="e">No messages yet - say hello to everyone who is online.</div></div>
- <div class="gf"><input id="gci" maxlength="500" placeholder="Message everyone online..." autocomplete="off"><button id="gcs" type="button">Send</button></div>
+ <div id="gcl"><div class="gc-e">No messages yet - say hello to everyone who is online.</div></div>
+ <div class="gc-f"><input id="gci" maxlength="500" placeholder="Message everyone online..." autocomplete="off"><button id="gcs" type="button">Send</button></div>
 </div>
 <script>
 /* Update80: NEW Group Chat. One group = the employees who are online right now (join on login / coming online, leave on logout / offline). Messages auto-delete after 1 hour. No audio. */
@@ -1320,21 +1322,23 @@ function badge(n){bdg.textContent=n>99?'99+':n;bdg.style.display=n?'block':'none
 function members(list){memEl.textContent='';cnt.textContent=list.length+' online';
  list.forEach(function(m){memEl.appendChild(el('i',m.status==='Away'?'away':'',m.name+(m.me?' (You)':'')))})}
 function msgs(list,now){
- Array.prototype.slice.call(listEl.querySelectorAll('.b')).forEach(function(b){if(now-parseFloat(b.getAttribute('data-ts'))>3600)b.remove()});
+ Array.prototype.slice.call(listEl.querySelectorAll('.gc-b')).forEach(function(b){if(now-parseFloat(b.getAttribute('data-ts'))>3600)b.remove()});
  if(!list.length)return;
- var e0=listEl.querySelector('.e');if(e0)e0.remove();
+ var e0=listEl.querySelector('.gc-e');if(e0)e0.remove();
  var down=listEl.scrollHeight-listEl.scrollTop-listEl.clientHeight<80||after<0;
- list.forEach(function(x){if(shown[x.id])return;shown[x.id]=1;var b=el('div','b '+(x.mine?'me':'th'));b.setAttribute('data-ts',x.ts);
+ list.forEach(function(x){if(shown[x.id])return;shown[x.id]=1;var b=el('div','gc-b '+(x.mine?'me':'th'));b.setAttribute('data-ts',x.ts);
   if(!x.mine)b.appendChild(el('b','',x.name));b.appendChild(document.createTextNode(x.text));b.appendChild(el('small','',x.t));listEl.appendChild(b);after=Math.max(after,x.id)});
  if(down)listEl.scrollTop=listEl.scrollHeight}
-function poll(){if(busy)return;busy=true;
+var again=false;
+function done(){busy=false;if(again){again=false;poll()}}
+function poll(){if(busy){again=true;return}busy=true;   /* a refresh asked for while one is running (e.g. right after sending) runs as soon as it finishes */
  fetch('/employee/gc/state?after='+after+'&open='+(open&&!document.hidden?1:0),{credentials:'same-origin',cache:'no-store'})
- .then(function(r){return r.json()}).then(function(j){busy=false;badge(open?0:j.unread);members(j.members);msgs(j.messages,j.now)}).catch(function(){busy=false})}
+ .then(function(r){return r.json()}).then(function(j){badge(open?0:j.unread);members(j.members);msgs(j.messages,j.now);done()}).catch(function(){done()})}
 function setOpen(v){open=v;pan.hidden=!v;btn.setAttribute('aria-expanded',v?'true':'false');
  if(v){badge(0);poll();setTimeout(function(){listEl.scrollTop=listEl.scrollHeight;inp.focus()},50)}}
 function send(){var t=inp.value.trim();if(!t)return;var f=new URLSearchParams();f.set('text',t);inp.value='';
  fetch('/employee/gc/send',{method:'POST',body:f,credentials:'same-origin'}).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
- .then(function(x){if(!x.ok){var e=el('div','e',x.j.error||'Not sent.');listEl.appendChild(e);listEl.scrollTop=listEl.scrollHeight;setTimeout(function(){e.remove()},4000)}poll()}).catch(function(){})}
+ .then(function(x){if(!x.ok){var e=el('div','gc-e',x.j.error||'Not sent.');listEl.appendChild(e);listEl.scrollTop=listEl.scrollHeight;setTimeout(function(){e.remove()},4000)}poll()}).catch(function(){})}
 btn.onclick=function(){setOpen(!open)};
 document.getElementById('gcx').onclick=function(){setOpen(false)};
 document.getElementById('gcs').onclick=send;
@@ -1406,7 +1410,7 @@ def page(body, title="Productivity Tracker", **ctx):
             g = ""
         side_avatar = render_template_string(AVATAR3D, gender=g, initials=initials_of(session.get("name", "")))
     return render_template_string(BASE, body=render_template_string(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar, music_engine=FLUTE_ENGINE)
+                                  side_avatar=side_avatar, music_engine=BGM_ENGINE)
 
 
 LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></div>
@@ -2342,63 +2346,65 @@ def initials_of(name):
     parts = str(name).replace(".", " ").split()
     return "".join(p[0] for p in parts[:2]).upper() or "?"
 
-FLUTE_ENGINE = r"""
-/* Update71: solo Tamil bamboo flute (Pullangu Kuzhal). Raga Mohanam (S R2 G3 P D2), slow and soft, with breathy attack,
-   gentle vibrato that blooms on long notes, gamaka glides between swaras and breath pauses between phrases.
-   ONLY the flute voice exists here: no vocals, no tanpura drone, no percussion. */
-var SA=247,BPM=76,SPB=60/BPM/2;
-var RAT=[1,9/8,5/4,45/32,3/2,5/3,15/8];   /* Kalyani: S R2 G3 M2 P D2 N3 */
-function fr(i){var o=Math.floor(i/7),d=((i%7)+7)%7;return SA*2*RAT[d]*Math.pow(2,o)}
-/* NEW original Tamil bamboo-flute (Pullangu Kuzhal) BGM: [swara index, length in half-beats, ornament]; null = breath pause; ornament 1 = quick grace note */
-var PH=[[[4,4],[5,3],[6,1],[7,6,1],[6,2],[5,2],[4,4],[null,2]],
-        [[2,2],[4,2],[5,2,1],[4,2],[2,2],[1,2],[2,2],[4,2],[6,2,1],[5,2],[4,2],[2,4],[null,2]],
-        [[7,2],[8,2],[9,3,1],[8,1],[7,2],[6,2],[7,2],[5,2],[6,2],[4,4],[3,2],[4,2],[null,2]],
-        [[9,2],[8,2],[7,2],[6,2],[5,2],[4,2],[3,2],[4,2],[2,3,1],[1,1],[0,6],[null,4]]];
-var ORDER=[0,1,2,1,3,2,3];
-var SEQ=[];
+BGM_ENGINE = r"""
+/* Update81: NEW original Tamil-style instrumental BGM (replaces the earlier bamboo-flute tune). Raga Hamsadhwani (S R2 G3 P N3), 84 BPM, Adi tala (8 beats).
+   Soft veena-style plucked melody + gentle tanpura drone + light mridangam-style thump. Synthesised live with Web Audio: no audio file, no vocals, nothing to download. */
+var SA=220,BPM=84,SPB=60/BPM/2;
+var RAT=[1,9/8,5/4,3/2,15/8];   /* Hamsadhwani: S R2 G3 P N3 */
+function fr(i){var o=Math.floor(i/5),d=((i%5)+5)%5;return SA*RAT[d]*Math.pow(2,o)}
+/* melody: [swara index (5 per octave, 5 = upper Sa), length in steps, ornament]; null = rest */
+var PH=[[[5,2],[4,1],[3,1],[2,2],[3,2],[4,2],[3,2],[2,2],[1,2],[0,4],[null,2]],
+        [[0,2],[2,2],[3,2],[4,2],[5,3],[4,1],[3,2],[4,2],[3,2],[2,2],[1,2],[2,4],[null,2]],
+        [[7,2],[6,2],[5,2],[4,2],[3,3,1],[4,1],[5,2],[6,2],[5,2],[4,2],[3,2],[2,2],[3,4],[null,2]],
+        [[5,2],[4,2],[3,2],[2,2],[1,2],[2,2],[1,2],[0,6],[null,4]]];
+var ORDER=[0,1,0,2,1,3];
+var SEQ=[],byStep={};
 (function(){var pos=0;ORDER.forEach(function(p){PH[p].forEach(function(n){SEQ.push([pos,n[0],n[1],n[2]||0]);pos+=n[1]})});SEQ.total=pos})();
-var byStep={};SEQ.forEach(function(n){byStep[n[0]]=n});
-function icon(){bi.innerHTML=muted?'&#128263;':'&#128266;';bt.textContent=muted?'Music off':'Music on';
- btn.setAttribute('aria-label',muted?'Turn music on':'Turn music off')}
-function env(g,t,peak,att,dec,sus,dur,rel){g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(peak,t+att);
- g.gain.exponentialRampToValueAtTime(Math.max(peak*sus,0.0002),t+att+dec);g.gain.setValueAtTime(Math.max(peak*sus,0.0002),t+Math.max(dur,att+dec));
- g.gain.exponentialRampToValueAtTime(0.0001,t+Math.max(dur,att+dec)+rel)}
-function flute(t,f,dur,q){
- var g=ctx.createGain(),lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=3000;
- var from=(!q&&lastF>0)?lastF:f,stop=t+dur+0.4,parts=[[1,1],[2,0.16],[3,0.05]],oscs=[];
- parts.forEach(function(p){var o=ctx.createOscillator(),pg=ctx.createGain();o.type='sine';pg.gain.value=p[1];
-  o.frequency.setValueAtTime(from*p[0],t);o.frequency.linearRampToValueAtTime(f*p[0],t+(q?0.01:0.1));   /* gamaka: glide in from the previous swara */
-  o.connect(pg);pg.connect(lp);oscs.push(o)});
- if(!q)lastF=f;
- var nz=ctx.createBufferSource(),bp=ctx.createBiquadFilter(),ng=ctx.createGain();   /* breath of the bamboo */
- nz.buffer=noiseBuf;nz.loop=true;bp.type='bandpass';bp.frequency.value=Math.min(f*2,5200);bp.Q.value=1.1;
- nz.connect(bp);bp.connect(ng);ng.connect(g);env(ng,t,q?0.03:0.06,0.04,0.2,0.45,dur,0.2);nz.start(t);nz.stop(stop);
- lp.connect(g);g.connect(master);g.connect(verb);
- if(q)env(g,t,0.2,0.02,0.05,0.8,dur,0.05);else env(g,t,0.24,0.09,0.25,0.78,dur,0.3);
- if(!q&&dur>SPB*1.8){var l=ctx.createOscillator(),lg=ctx.createGain();l.frequency.value=5.4;   /* vibrato blooms on long notes */
-  lg.gain.setValueAtTime(0,t);lg.gain.setValueAtTime(0,t+dur*0.25);lg.gain.linearRampToValueAtTime(12,t+dur*0.6);
-  l.connect(lg);oscs.forEach(function(o){lg.connect(o.detune)});l.start(t);l.stop(stop)}
- oscs.forEach(function(o){o.start(t);o.stop(stop)})}
+SEQ.forEach(function(n){byStep[n[0]]=n});
+function icon(){bi.innerHTML=muted?'&#128263;':'&#128266;';bt.textContent=muted?'Music off':'Music on';btn.setAttribute('aria-label',muted?'Turn music on':'Turn music off')}
+function pluck(t,f,dur,gain){                 /* veena-style string: bright attack, quick natural decay */
+ var g=ctx.createGain(),lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.setValueAtTime(4200,t);lp.frequency.exponentialRampToValueAtTime(1200,t+0.5);
+ var len=Math.min(Math.max(dur*1.4,0.6),1.8),stop=t+len+0.1;
+ [[1,'triangle',1,0],[1,'triangle',0.5,6],[2,'sine',0.28,0],[3,'sine',0.09,0]].forEach(function(p){
+  var o=ctx.createOscillator(),pg=ctx.createGain();o.type=p[1];pg.gain.value=p[2];o.detune.value=p[3];
+  o.frequency.setValueAtTime(f*p[0]*1.012,t);o.frequency.exponentialRampToValueAtTime(f*p[0],t+0.04);   /* tiny gamaka glide into the note */
+  o.connect(pg);pg.connect(lp);o.start(t);o.stop(stop)});
+ g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(gain,t+0.006);g.gain.exponentialRampToValueAtTime(0.0001,t+len);
+ lp.connect(g);g.connect(master);g.connect(verb)}
+function drone(t,f){                          /* tanpura: soft, long, sitting far behind the melody */
+ var g=ctx.createGain(),lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=1600;
+ [[1,'sine',1],[2,'triangle',0.35],[3,'sine',0.12]].forEach(function(p){var o=ctx.createOscillator(),pg=ctx.createGain();o.type=p[1];o.frequency.value=f*p[0];pg.gain.value=p[2];o.connect(pg);pg.connect(lp);o.start(t);o.stop(t+3)});
+ g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(0.07,t+0.03);g.gain.exponentialRampToValueAtTime(0.0001,t+2.6);lp.connect(g);g.connect(master)}
+function thump(t,f,gain){                     /* mridangam-style bass stroke */
+ var o=ctx.createOscillator(),g=ctx.createGain();o.type='sine';o.frequency.setValueAtTime(f*1.6,t);o.frequency.exponentialRampToValueAtTime(f,t+0.09);
+ g.gain.setValueAtTime(gain,t);g.gain.exponentialRampToValueAtTime(0.0001,t+0.32);o.connect(g);g.connect(master);o.start(t);o.stop(t+0.35)}
+function tick(t,gain){                        /* light finger tap */
+ var n=ctx.createBufferSource(),hp=ctx.createBiquadFilter(),g=ctx.createGain();n.buffer=noiseBuf;hp.type='highpass';hp.frequency.value=3200;
+ g.gain.setValueAtTime(gain,t);g.gain.exponentialRampToValueAtTime(0.0001,t+0.05);n.connect(hp);hp.connect(g);g.connect(master);n.start(t);n.stop(t+0.06)}
+var DRONE=[0.75,1,1,0.5];
 function play(n,t){
- var m=byStep[n%SEQ.total];if(!m)return;
- if(m[1]===null){lastF=0;return}
- var f=fr(m[1]),d=Math.max(m[2]*SPB*0.95,0.2);
- if(m[3]===1){var gd=0.11;flute(t,fr(m[1]+1),gd,true);flute(t+gd,f,d-gd)}else flute(t,f,d)}
+ var pos=n%SEQ.total;
+ if(n%4===0)drone(t,SA*DRONE[(n/4)%4]);   /* Pa - Sa - Sa - low Sa */
+ var c=n%8;                                /* Adi tala: 8 counts */
+ if(c===0)thump(t,78,0.2);else if(c===4)thump(t,96,0.12);else if(c%2===0)tick(t,0.05);
+ var m=byStep[pos];if(!m||m[1]===null)return;
+ var f=fr(m[1]),d=m[2]*SPB;
+ if(m[3]===1){pluck(t,fr(m[1]+1),0.12,0.16);pluck(t+0.11,f,d,0.22)}else pluck(t,f,d,0.22)}
 function sched(){if(!ctx||ctx.state!=='running'||muted)return;
  while(next<ctx.currentTime+0.6){play(step,next);next+=SPB;step++}}
 function build(){
  ctx=new AC();master=ctx.createGain();master.gain.value=0;
  var comp=ctx.createDynamicsCompressor();master.connect(comp);comp.connect(ctx.destination);
- var d=ctx.createDelay(1);d.delayTime.value=0.31;var fb=ctx.createGain();fb.gain.value=0.3;d.connect(fb);fb.connect(d);
- var vg=ctx.createGain();vg.gain.value=0.4;verb=ctx.createGain();verb.connect(d);d.connect(vg);vg.connect(master);
- noiseBuf=ctx.createBuffer(1,Math.floor(ctx.sampleRate*1),ctx.sampleRate);
+ var d=ctx.createDelay(1);d.delayTime.value=0.27;var fb=ctx.createGain();fb.gain.value=0.28;d.connect(fb);fb.connect(d);
+ var vg=ctx.createGain();vg.gain.value=0.35;verb=ctx.createGain();verb.connect(d);d.connect(vg);vg.connect(master);
+ noiseBuf=ctx.createBuffer(1,Math.floor(ctx.sampleRate*0.3),ctx.sampleRate);
  var ch=noiseBuf.getChannelData(0);for(var i=0;i<ch.length;i++)ch[i]=Math.random()*2-1}
 function fade(to,sec){if(!master)return;var t=ctx.currentTime;master.gain.cancelScheduledValues(t);master.gain.setValueAtTime(master.gain.value,t);master.gain.linearRampToValueAtTime(to,t+sec)}
 function go(){
  if(muted)return;
  if(!ctx)build();
  var r=ctx.resume?ctx.resume():null;
- var run=function(){if(ctx.state!=='running')return;if(!timer){next=ctx.currentTime+0.15;timer=setInterval(sched,150)}fade(0.75,2.5)};
+ var run=function(){if(ctx.state!=='running')return;if(!timer){next=ctx.currentTime+0.15;timer=setInterval(sched,150)}fade(0.85,2)};
  if(r&&r.then)r.then(run,function(){});else run()}
 function stopAll(){if(timer){clearInterval(timer);timer=null}if(ctx&&master)fade(0,0.25)}
 """
@@ -2434,12 +2440,12 @@ WELCOME = """<style>
  var IS_EMP=(ROLE==='employee');
 
  /* Update79: ADMIN welcome = no voice, no music (animation only). EMPLOYEE welcome = AI voice first; ONLY AFTER the voice
-    has finished does the Tamil bamboo-flute BGM start. The BGM never starts before the voice ends. */
+    has finished does the Tamil BGM start. The BGM never starts before the voice ends. */
  var AC=window.AudioContext||window.webkitAudioContext;
  var ctx=null,master=null,verb=null,timer=null,muted=false,next=0,step=0,noiseBuf=null,lastF=0;
  var btn={setAttribute:function(){}},bi={},bt={};
  function get(k){return null}function put(k,v){}
- """ + FLUTE_ENGINE + """
+ """ + BGM_ENGINE + """
  function msg(t){var m=document.getElementById('wl_msg');if(m)m.textContent=t}
  function leave(){
   try{ if(timer)clearInterval(timer); if(ctx){ master.gain.cancelScheduledValues(ctx.currentTime); master.gain.value=0; ctx.close(); } }catch(e){}
@@ -2460,8 +2466,8 @@ WELCOME = """<style>
  function startBgm(){                                   /* called ONLY when the voice has finished */
   if(bgmBegun)return; bgmBegun=true; ready=true; clearTimeout(guard); clearTimeout(giveUp);
   if(!AC){ setTimeout(leave,1500); return; }
-  msg('\\u266A Tamil flute music'); try{go()}catch(e){}
-  setTimeout(function(){ if(!ctx||ctx.state!=='running')msg('\\u266A Move the mouse to play the flute music') },800);
+  msg('\\u266A Tamil music'); try{go()}catch(e){}
+  setTimeout(function(){ if(!ctx||ctx.state!=='running')msg('\\u266A Move the mouse to play the music') },800);
   setTimeout(function(){ try{stopAll()}catch(e){} },PLAY_MS-500);
   setTimeout(leave,PLAY_MS);
  }

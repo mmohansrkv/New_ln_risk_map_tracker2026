@@ -35,6 +35,7 @@ Access rules (Update59):
   * Update71: (1) Admin -> Overview has a live "Online Employees" log (employee + status; adds/removes itself as employees log in/out,
     refreshes every 5 s; heartbeat-based so a closed tab drops off). (2) Employee-page background music is now a soft solo
     Tamil bamboo flute (Pullangu Kuzhal, raga Mohanam) - no vocals, no drone, no percussion, no other instrument.
+  * Update72: after employee login the Welcome Page starts the Tamil bamboo-flute music by itself (7 s welcome), instrumental only.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -2344,7 +2345,7 @@ WELCOME = """<style>
 .wl-card h1{font-family:Georgia,serif;font-size:27px;margin:0 0 4px;color:#5b4fb0;word-break:break-word}
 .wl-card p{margin:0 0 14px;color:#6b7390;font-size:13px}
 .wl-bar{height:6px;border-radius:4px;background:#e9e6fb;overflow:hidden}
-.wl-bar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#6d70f5,#f58a8a);transform-origin:left;transform:scaleX(0);animation:wlFill 4s linear forwards}
+.wl-bar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#6d70f5,#f58a8a);transform-origin:left;transform:scaleX(0);animation:wlFill 7s linear forwards}
 @keyframes wlFill{to{transform:scaleX(1)}}
 .wl-st{margin-top:10px;font:600 10px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;color:#8a90ad}
 </style>
@@ -2352,12 +2353,12 @@ WELCOME = """<style>
 """ + WL_SCENE.replace('{{role}}', "{{session.role}}").replace("role=='admin'", "session.role=='admin'") + """
  <div class="wl-card"><h1>Welcome, {{session.name}}</h1>
  <p>{{ 'Syncing live data from the server' if session.role=='admin' else 'Securely connecting to the server' }}&hellip;</p>
- <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div><div class="wl-st" style="margin-top:6px;font-weight:500">&#9834; Move the mouse to play music</div></div>
+ <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div><div class="wl-st" style="margin-top:6px;font-weight:500">{% if session.role=='employee' %}&#9834; Flute music playing{% else %}&#9834; Move the mouse to play music{% endif %}</div></div>
 </div>
 <script>
 (function(){
  var ROLE={{session.role|tojson}}, NAME={{session.name|tojson}};
- var WL_MS=4000;                                       /* total time the welcome page is shown (long enough to move the mouse and hear the music) */
+ var WL_MS=7000;                                       /* total time the welcome page is shown (long enough to move the mouse and hear the music) */
 
  if(ROLE==='employee'){                                /* AI voice announcement - Employee welcome only, no BGM */
   try{
@@ -2384,6 +2385,10 @@ WELCOME = """<style>
   if(ctx&&ctx.state==='running'){mEv.forEach(function(t){document.removeEventListener(t,onUser,true)})}   /* running: stop listening */
  }
  mEv.forEach(function(t){document.addEventListener(t,onUser,true)});
+ if(AC && ROLE==='employee'){   /* Update72: flute starts on the Welcome Page itself; if the browser blocks autoplay, the first mouse move / click / key starts it */
+  try{ go(); }catch(e){}
+  setTimeout(function(){ try{ go(); }catch(e){} },400);
+ }
 
  setTimeout(function(){                                /* welcome animation for 2s, then move on */
   try{ if(timer)clearInterval(timer); if(ctx){ master.gain.cancelScheduledValues(ctx.currentTime); master.gain.value=0; ctx.close(); } }catch(e){}
@@ -2392,7 +2397,7 @@ WELCOME = """<style>
  },WL_MS);
 })();
 </script>
-<noscript><meta http-equiv="refresh" content="4;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
+<noscript><meta http-equiv="refresh" content="7;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
 
 @app.route("/admin/welcome")
 @need("admin")

@@ -60,6 +60,8 @@ Access rules (Update59):
   * Update83: Admin -> Mahizhchi (Share / Access tab and Employee Info -> Mahizhchi Log): when an employee has access, "Mahizhchi" is shown as an
     animated running-letter badge (wave + colour shimmer) with floating emoji. Sharing celebrates with a confetti banner and highlights the
     rows that were just shared. Respects "reduce motion" settings.
+    Employee page: the sidebar "Mahizhchi" item is the same running-letter badge (white pill, gradient border, floating emoji) and the
+    Mahizhchi page title uses the running-letter effect.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -1263,11 +1265,29 @@ aside .ng .kids a.on{background:transparent;color:#fff;font-weight:700;box-shado
 #bgm{position:fixed;right:14px;bottom:14px;z-index:60;width:38px;height:38px;border-radius:50%;border:1px solid var(--line,#d8dbe6);background:#fff;color:#1c2340;font-size:17px;line-height:1;cursor:pointer;box-shadow:0 2px 10px #0002;opacity:.85;padding:0}
 #bgm:hover{opacity:1}
 @media print{ #bgm{display:none}}
+/* Update83: employee sidebar - animated "Mahizhchi" running-letter badge */
+aside a.mzn{position:relative;align-self:flex-start;display:inline-flex;margin:3px 0 3px 4px;padding:6px 16px;border:1.5px solid transparent;border-radius:999px;font-weight:800;font-size:15px;letter-spacing:.3px;white-space:nowrap;color:#4f46e5;
+background:linear-gradient(#fff,#fff) padding-box,linear-gradient(120deg,#4f46e5,#ec4899,#f59e0b,#10b981,#3b82f6,#4f46e5) border-box;background-size:100% 100%,300% 100%;
+box-shadow:0 0 0 0 rgba(236,72,153,0);animation:mznGlow 2.4s ease-in-out infinite,mznBorder 5s linear infinite}
+aside a.mzn:hover{background:linear-gradient(#fff,#fff) padding-box,linear-gradient(120deg,#4f46e5,#ec4899,#f59e0b,#10b981,#3b82f6,#4f46e5) border-box;background-size:100% 100%,300% 100%;transform:translateX(2px) scale(1.04)}
+aside a.mzn.on{background:linear-gradient(#fff,#fff) padding-box,linear-gradient(120deg,#4f46e5,#ec4899,#f59e0b,#10b981,#3b82f6,#4f46e5) border-box;background-size:100% 100%,300% 100%;transform:none;box-shadow:0 0 0 3px rgba(109,112,245,.55),0 6px 16px -4px rgba(79,70,229,.6);color:#4f46e5}
+.mzn-c{display:inline-block;animation:mznIn .45s ease both,mznWave 1.8s ease-in-out infinite;animation-delay:calc(var(--i)*.08s),calc(var(--i)*.08s + .7s)}
+.mzn-c:nth-of-type(9n+4){color:#4f46e5}.mzn-c:nth-of-type(9n+5){color:#ec4899}.mzn-c:nth-of-type(9n+6){color:#f59e0b}.mzn-c:nth-of-type(9n+7){color:#10b981}
+.mzn-c:nth-of-type(9n+8){color:#3b82f6}.mzn-c:nth-of-type(9n+9){color:#8b5cf6}.mzn-c:nth-of-type(9n+10){color:#ef4444}.mzn-c:nth-of-type(9n+11){color:#06b6d4}.mzn-c:nth-of-type(9n+12){color:#f97316}
+.mzn-em{position:absolute;font-size:13px;line-height:1;pointer-events:none;opacity:0;animation:mznFloat 2.8s ease-in-out infinite}
+.mzn-em.e1{left:-7px;top:-10px}.mzn-em.e2{right:16px;top:-13px;animation-delay:.9s}.mzn-em.e3{right:-8px;bottom:-9px;animation-delay:1.8s}
+@keyframes mznIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes mznWave{0%,55%,100%{transform:translateY(0) scale(1)}25%{transform:translateY(-4px) scale(1.18)}}
+@keyframes mznGlow{0%,100%{box-shadow:0 0 0 0 rgba(236,72,153,0)}50%{box-shadow:0 0 14px 2px rgba(236,72,153,.35)}}
+@keyframes mznBorder{to{background-position:0 0,300% 0}}
+@keyframes mznFloat{0%{opacity:0;transform:translateY(6px) scale(.5) rotate(0)}25%{opacity:1}70%{opacity:1;transform:translateY(-8px) scale(1.1) rotate(14deg)}100%{opacity:0;transform:translateY(-16px) scale(.6) rotate(-10deg)}}
+@media(prefers-reduced-motion:reduce){aside a.mzn,.mzn-c{animation:none!important;opacity:1}.mzn-em{display:none}}
 </style></head><body>
 {% if session.role %}<div class="app"><aside class="emp">
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
 {% for h,l,on,kids in nav %}{% if kids %}<div class="ng{{' open' if on else ''}}"><a class="ng-h" href="{{h}}" role="button" aria-expanded="{{'true' if on else 'false'}}" onclick="var g=this.parentNode;var o=g.classList.toggle('open');this.setAttribute('aria-expanded',o);return false">{{l}}<span class="chev">&#9650;</span></a>
 <div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
+{% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
 <div class="prof"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
@@ -4142,7 +4162,7 @@ MZ_ADMIN_RESULTS = MZ_CSS + MZ_HEAD + "{% if detail %}" + MZ_DETAIL + """{% else
 <td>{% if r.answered %}<a href="/admin/mahizhchi?tab=results&emp={{r.id|urlencode}}">Details</a>{% endif %}</td></tr>
 {% else %}<tr><td colspan="7">No employee has access or answers yet.</td></tr>{% endfor %}</table></div>{% endif %}"""
 
-MZ_EMP = MZ_CSS + """<div class="head"><div><h1>{{MZ_TITLE}}</h1></div></div>
+MZ_EMP = MZ_CSS + """<div class="head"><div><h1>{{ mzrun() }}</h1></div></div>
 {% if not qs %}<div class="card"><p>There are no questions in {{MZ_TITLE}} yet.</p></div>
 {% elif state=='intro' %}<div class="card"><h2>Ready?</h2>
 <p>There are <b>{{qs|length}}</b> question(s) and you have <b>{{mz_dur(limit)}}</b>. The timer starts when you press <b>Start</b> and cannot be paused or restarted.

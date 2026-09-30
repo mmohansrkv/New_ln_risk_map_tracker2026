@@ -13,10 +13,14 @@ Access rules (Update59):
   * Audit Log (Update61): Admin's Audit Log is PROCESS-FIRST: pick a process -> the employees who worked on it are
     found automatically -> Productivity, Productivity %, Attendance and audit details are shown. The old
     employee-wise list + access control stays under 'By Employee / Access'. Employees are unchanged (own data, ticked processes only).
-  * மகிழ்ச்சி (Update62): Admin keeps multiple-choice questions (options A-D, ONE ✓ correct answer) in the "Mahizhchi Log"
-    sheet or pastes them on Admin -> மகிழ்ச்சி, publishes it and shares it with all / selected employees.
+  * Mahizhchi (Update62): Admin keeps multiple-choice questions (options A-D, ONE ✓ correct answer) in the "Mahizhchi Log"
+    sheet or pastes them on Admin -> Mahizhchi, publishes it and shares it with all / selected employees.
     Employees ANSWER by ticking one option per question; the correct answer is never sent to them (only Admin sees it and
     the results). It shows for an employee only while it is published AND shared with them; otherwise it is hidden.
+  * 8-hour process targets (Update63): Admin sets, per process, the count to be completed in a full 8-hour day
+    (Processes -> "Target count / 8 hrs"; the per-hour rate is derived = target / 8, and vice versa). An employee whose
+    entry is below the target for the hours logged gets a red alert when saving, a dashboard alert (last 7 days) and a live
+    warning in the entry form.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -98,7 +102,7 @@ HEADERS = {
     "Employees": ["Employee ID", "Name", "Band", "Email", "Password",
                   "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                   "Emergency no", "Personal Email ID", "Office Email ID", "Designation", "Profile updated at", "Gender"],
-    "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour"],
+    "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour", "Target count / 8 hrs"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
     "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at",
@@ -115,7 +119,7 @@ HEADERS = {
                       "Section", "Action", "Details"],
     # Audit Log permissions set by Admin: one row per employee. Processes = the ticked process names "A | B | C".
     "Audit Access": ["Employee ID", "Employee name", "Enabled", "Processes", "Updated at", "Updated by"],
-    # மகிழ்ச்சி (Update62): Admin's questions (A-D options, one ✓ correct answer) and which employees may view them.
+    # Mahizhchi (Update62): Admin's questions (A-D options, one ✓ correct answer) and which employees may view them.
     "Mahizhchi Log": ["Question", "A", "B", "C", "D", "Correct Answer"],
     "Mahizhchi Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
     "Mahizhchi Answers": ["Employee ID", "Employee name", "Question ID", "Question", "Answer", "Submitted at"],
@@ -143,7 +147,7 @@ def missing_personal(emp_row):
 # Personal details pages). Display order != sheet column order, so reads/writes map by name.
 LIST_HEADERS = {"Employees": ["Employee ID", "Name", "Designation", "Band", "Email", "Password"]}
 def list_heads(sheet): return LIST_HEADERS.get(sheet, HEADERS[sheet])
-OPTIONAL_FIELDS = set(PERSONAL_FIELDS) | {"Status", "Reviewed at", "Reviewed by"}   # not required when admin adds/edits an employee
+OPTIONAL_FIELDS = set(PERSONAL_FIELDS) | {"Status", "Reviewed at", "Reviewed by", "Target count / hour", "Target count / 8 hrs"}   # Processes: fill EITHER target column   # not required when admin adds/edits an employee
 LOCKED_FIELDS = {}   # nothing locked: admin can add/edit personal details; employees can also edit their own via /employee/profile
 KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave", "holidays": "Holidays"}
 
@@ -422,6 +426,59 @@ def num(x):
     try: return float(x)
     except (TypeError, ValueError): return 0.0
 
+# ---------------------------------------------------------------- per-process 8-hour targets
+TARGET_BASIS_HOURS = float(DAY_HOURS)          # Admin's per-process target is for a full 8-hour day
+def _g4(x): return "%g" % round(float(x), 4)
+
+def process_targets():
+    """{process name: dict(rate=count per hour, daily=count per 8 hrs)}. Admin may fill either column; the other is derived,
+    so processes set up before the 8-hour column existed keep working unchanged."""
+    out = {}
+    for r in rows("Processes"):
+        hourly, daily = num(r.get("Target count / hour")), num(r.get("Target count / 8 hrs"))
+        if hourly <= 0 < daily: hourly = daily / TARGET_BASIS_HOURS
+        elif daily <= 0 < hourly: daily = hourly * TARGET_BASIS_HOURS
+        out[r["Process name"]] = dict(rate=hourly, daily=daily)
+    return out
+
+def process_rates():
+    return {n: t["rate"] for n, t in process_targets().items()}
+
+def proc_targets_sync(h, d, old_h="", old_d=""):
+    """Keep 'per hour' and 'per 8 hrs' consistent when Admin saves a process. Returns (hourly, daily, error).
+    If both are given and they disagree, whichever one Admin just CHANGED wins (the 8-hour figure if both changed)."""
+    B = TARGET_BASIS_HOURS
+    hn, dn, ohn, odn = num(h), num(d), num(old_h), num(old_d)
+    if hn <= 0 and dn <= 0:
+        return "", "", "Enter the target count for 8 hours (or the count per hour) - it must be more than 0."
+    odn = odn if odn > 0 else ohn * B
+    if dn > 0 >= hn: hn = dn / B
+    elif hn > 0 >= dn: dn = hn * B
+    elif abs(dn - odn) > 1e-9 or abs(hn - ohn) <= 1e-9: hn = dn / B
+    else: dn = hn * B
+    return _g4(hn), _g4(dn), None
+
+def miss_lines(date, items):
+    """items = (process, hours, count). A line is 'missed' when the count is below the Admin target for the hours logged
+    (8-hour target, pro-rated to the hours actually booked on that process)."""
+    tg, out = process_targets(), []
+    for name, hour, count in items:
+        t = tg.get(name)
+        if not t or t["rate"] <= 0: continue
+        need = hour * t["rate"]
+        if need > 0 and count + 1e-9 < need:
+            out.append(dict(date=date, name=name, hour=hour, count=count, target=round(need, 2),
+                            pct=round(count / need * 100), daily=round(t["daily"], 2)))
+    return out
+
+def sub_misses(s):
+    return [] if s.get("off") else miss_lines(s["date"], [(p["name"], p["hour"], p["count"]) for p in s["procs"]])
+
+def target_alert_text(miss):
+    return ("\u26A0 Target not achieved (8-hour target) \u2013 "
+            + "; ".join(f"{m['name']}: {_fmt_num(m['count'])} of {_fmt_num(m['target'])} ({m['pct']}%)" for m in miss)
+            + ". Please complete the target within 8 hours.")
+
 TARGET_KEY = "Daily productivity target (hours)"
 def target_hours():
     """Daily productivity target in hours, set by Admin (Overview page). Productivity % = productive hrs / this.
@@ -467,7 +524,7 @@ def load_subs(emp_id=None):
     """All submissions, or (emp_id given) only that employee's - far less work on a big Productivity log."""
     T = target_hours()
     dm = desig_map()
-    tph = {r["Process name"]: num(r["Target count / hour"]) for r in rows("Processes")}
+    tph = process_rates()
     subs = {}
     want = _key(emp_id) if emp_id is not None else None
     for r in rows("Productivity log"):
@@ -1118,7 +1175,7 @@ NAVS = {
               ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
               ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log"),
-              ("/admin/mahizhchi", "மகிழ்ச்சி")],
+              ("/admin/mahizhchi", "Mahizhchi")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
@@ -1132,10 +1189,10 @@ def page(body, title="Productivity Tracker", **ctx):
             if audit_active(audit_access(session.get("emp_id", ""))): items.append(("/employee/audit", "Audit Log"))
         except Exception:
             pass
-        try:      # Admin-controlled: மகிழ்ச்சி appears only while it is published AND shared with this employee
+        try:      # Admin-controlled: Mahizhchi appears only while it is published AND shared with this employee
             if mz_active(session.get("emp_id", "")): items.append(("/employee/mahizhchi", MZ_TITLE))
         except Exception as e:
-            print("மகிழ்ச்சி menu check failed (are the Mahizhchi sheets created? restart the app once):", e)
+            print("Mahizhchi menu check failed (are the Mahizhchi sheets created? restart the app once):", e)
     nav = [(h, l, p == h or (h != "/employee" and p.startswith(h + "/")))
            for h, l in items]
     side_avatar = ""
@@ -1223,6 +1280,7 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
 <button class="primary">Add</button></form>
+{% if kind=='processes' %}<p class="mut">Set the <b>Target count / 8 hrs</b> &mdash; the count an employee must complete in a full 8-hour day. The per-hour rate is worked out automatically (target &divide; 8); you may fill either one. If an employee's count is below the target for the hours they logged, they get an alert.</p>{% endif %}
 {% if missing %}<p class="mut">&#9888; {{missing}} employee(s) have no Designation yet. Use Edit to set it; it then fills in automatically on their daily entry page.</p>{% endif %}
 {% if locked %}<p class="mut">Personal details are managed on the Personal details page. Office Email ID follows the login Email.</p>{% endif %}</div>
 <table><tr>{% for h in heads %}<th>{{h}}</th>{% endfor %}<th></th></tr>
@@ -1231,7 +1289,7 @@ TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" action="/admin/{{kind}}/{{r['_row']}}/delete" onsubmit="return confirm('Delete?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="9">No records yet.</td></tr>{% endfor %}</table>"""
 
-EDIT = """<div class="card"><h2>Edit {{title}}</h2><form method="post" class="grid">
+EDIT = """<div class="card"><h2>Edit {{title}}</h2>{% if kind=='processes' %}<p class="mut">Set the <b>Target count / 8 hrs</b> &mdash; the count an employee must complete in a full 8-hour day. The per-hour rate is worked out automatically (target &divide; 8); you may fill either one. If an employee's count is below the target for the hours they logged, they get an alert.</p>{% endif %}<form method="post" class="grid">
 {% for h in heads %}<label>{{h}}<input name="f{{loop.index0}}" value="{{vals[loop.index0]}}"{% if h not in optional %} required{% endif %}{% if h in locked %} readonly{% endif %}></label>{% endfor %}
 <button class="primary">Save</button> <a href="/admin/{{kind}}">Cancel</a></form>
 {% if locked %}<p class="mut">Personal details (grayed out) are entered by the employee on their own Personal details page.</p>{% endif %}</div>"""
@@ -1259,6 +1317,7 @@ FORM = """<div class="card" id="entryCard"><h2>{{heading}} <span id="tgtBadge"><
 <div class="totals">Total day: <b>{{day|g}}</b> hrs &middot; Productive: <b id="tp">0</b> hrs &middot;
 Non-productive: <b id="tn">0</b> hrs &middot; Balance: <b id="tb">{{day|g}}</b> hrs &middot;
 Productivity: <b id="tpct">0</b>% &middot; <b id="tstat"></b> <span class="mut">({{target|g}} productive hrs = 100%, target set by Admin)</span></div>
+<div id="tgtMsg" class="flash err" style="display:none" role="alert"></div>
 <div id="formerr" class="flash err" style="display:none" role="alert"></div>
 <button class="primary">Save</button></form></div>
 <script>
@@ -1294,7 +1353,10 @@ function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e
  entryCard.classList.toggle('tgt-met',met);
  entryCard.classList.toggle('tgt-miss',!met);
  tgtBadge.textContent=met?'Target: Met':'Target: Not met';
- tgtBadge.className=met?'met':'miss'}
+ tgtBadge.className=met?'met':'miss';
+ const low=[];prows.forEach(row=>{const nm=(row.querySelector('[name=pn]')||{}).value,rate=T[nm]||0,hr=+((row.querySelector('[name=ph]')||{}).value)||0,ct=+((row.querySelector('[name=pc]')||{}).value)||0,need=rate*hr;
+  if(need>0&&ct<need)low.push(nm+': '+ct+' of '+Math.round(need*100)/100)});
+ tgtMsg.textContent=low.length?('⚠ Target not achieved (8-hour target) – '+low.join(' | ')):'';tgtMsg.style.display=low.length?'block':'none'}
 document.querySelector('[name=date]').addEventListener('change',calc);
 function showErr(m){formerr.textContent=m;formerr.style.display='block';formerr.scrollIntoView({behavior:'smooth',block:'center'})}
 document.querySelector('form[action="{{action}}"]').addEventListener('submit',function(e){
@@ -1379,12 +1441,23 @@ def admin_list(kind):
             flash(f"{heads[0]} '{vals[0]}' already exists.")
         else:
             full = dict(zip(heads, vals))
+            if sheet == "Processes":
+                full["Target count / hour"], full["Target count / 8 hrs"], err = proc_targets_sync(
+                    full.get("Target count / hour"), full.get("Target count / 8 hrs"))
+                if err: flash(err, "error"); return redirect(request.path)
             if sheet == "Employees": full["Office Email ID"] = full.get("Email", "")
             ws_of(sheet).append_row([full.get(h, "") for h in HEADERS[sheet]],
                                                value_input_option="RAW"); invalidate_cache(sheet)
             flash("Added.")
         return redirect(request.path)
     data = rows(sheet)
+    if sheet == "Processes":                      # show the derived figure for processes saved before the 8-hour column existed
+        tg = process_targets()
+        for r in data:
+            t = tg.get(r["Process name"])
+            if t and t["rate"] > 0:
+                if not str(r.get("Target count / hour", "")).strip(): r["Target count / hour"] = _g4(t["rate"])
+                if not str(r.get("Target count / 8 hrs", "")).strip(): r["Target count / 8 hrs"] = _g4(t["daily"])
     missing = sum(1 for r in data if not str(r.get("Designation", "x")).strip()) if sheet == "Employees" else 0
     return page(TABLE, title=sheet, heads=heads, data=data, kind=kind, missing=missing,
                 optional=OPTIONAL_FIELDS, locked=LOCKED_FIELDS.get(sheet, set()))
@@ -1396,14 +1469,22 @@ def admin_edit(kind, row):
     heads = list_heads(sheet); ws = ws_of(sheet)
     if request.method == "POST":
         vals = [request.form.get(f"f{i}", "").strip() for i in range(len(heads))]
-        full = ws.row_values(row); full += [""] * (len(HEADERS[sheet]) - len(full))
+        full = ws.row_values(row); full += [""] * (len(HEADERS[sheet]) - len(full)); old = list(full)
         for h, v in zip(heads, vals): full[HEADERS[sheet].index(h)] = v
+        if sheet == "Processes":
+            ih, idl = HEADERS[sheet].index("Target count / hour"), HEADERS[sheet].index("Target count / 8 hrs")
+            full[ih], full[idl], err = proc_targets_sync(full[ih], full[idl], old[ih], old[idl])
+            if err: flash(err, "error"); return redirect(request.path)
         if sheet == "Employees":   # office email follows the login email
             full[HEADERS[sheet].index("Office Email ID")] = vals[heads.index("Email")]
         ws.update(range_name=f"A{row}", values=[full], value_input_option="RAW"); invalidate_cache(sheet)
         flash("Updated."); return redirect(f"/admin/{kind}")
     cur = ws.row_values(row); cur += [""] * (len(HEADERS[sheet]) - len(cur))
     vals = [cur[HEADERS[sheet].index(h)] for h in heads]
+    if sheet == "Processes":                      # prefill the derived figure so the form never looks empty
+        ih, idl = heads.index("Target count / hour"), heads.index("Target count / 8 hrs")
+        h_, d_, _e = proc_targets_sync(vals[ih], vals[idl], vals[ih], vals[idl])
+        if not _e: vals[ih], vals[idl] = h_, d_
     return page(EDIT, title=sheet, heads=heads, vals=vals, kind=kind,
                 optional=OPTIONAL_FIELDS, locked=LOCKED_FIELDS.get(sheet, set()))
 
@@ -1718,7 +1799,7 @@ def admin_notify_poll():
 
 # ---------------------------------------------------------------- admin: Employee Info (list -> employee details)
 TABS = [("personal", "Personal Details"), ("missed", "Missed Entries"), ("leave", "Leave Log"),
-        ("holidays", "Holidays"), ("notifications", "Notifications")]
+        ("holidays", "Holidays"), ("mahizhchi", "Mahizhchi Log"), ("notifications", "Notifications")]
 
 EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if view=='notifications' %}A log of what employees have added, updated or deleted, newest first (latest 200).{% else %}Click an employee's name to open their details. A name in red has unseen login/logout notifications.{% endif %}</p></div>
 {% if view!='notifications' %}<form class="grid" method="get"><input name="q" placeholder="Search ID / name" value="{{q}}">
@@ -1862,6 +1943,8 @@ def admin_employee_detail(eid):
             try: r["day"] = dt.date.fromisoformat(str(r["Date"])).strftime("%a")
             except ValueError: r["day"] = ""
         body = T_HOLIDAYS; ctx["data"] = data
+    elif tab == "mahizhchi":
+        body = MZ_EMPINFO; ctx["detail"] = mz_detail(emp); ctx["back"] = None
     else:   # notifications - opening the tab marks this employee's alerts as read
         data = [notif_view(r) for r in sorted(rows("Notifications"), key=_nid, reverse=True)
                 if _key(r["Employee ID"]) == _key(eid)][:200]
@@ -1938,7 +2021,7 @@ def employee_login():
 def form_page(sub, action, heading):
     procs = rows("Processes")
     names = [r["Process name"] for r in procs]
-    tph = {r["Process name"]: num(r["Target count / hour"]) for r in procs}
+    tph = process_rates()
     perm = {}
     for r in rows("Permissions"):
         if str(r.get("Employee ID")) == str(sub.get("emp_id")) and str(r.get("Status", "")).strip() == "Approved":
@@ -2141,8 +2224,10 @@ def employee_home():
     today_perm = next((r for r in rows("Permissions")
                        if str(r["Employee ID"]) == session["emp_id"] and r["Date"] == today), None)
     perm_used = permission_hours_used(session["emp_id"], today[:7])
-    return page(EMP_MARQUEE + EMP_TOP + EMP_ALERT + body + '<h2>Submitted today</h2>' + LIST,
-                title="Daily productivity", missed=missed, pend=pend, subs=mine,
+    cut = str(t0 - dt.timedelta(days=6))
+    tgt_miss = [m for s_ in all_mine if s_["date"] >= cut for m in sub_misses(s_)][:12]     # newest entries first
+    return page(EMP_MARQUEE + EMP_TOP + EMP_ALERT + EMP_TARGET + body + '<h2>Submitted today</h2>' + LIST,
+                title="Daily productivity", missed=missed, pend=pend, subs=mine, tgt_miss=tgt_miss,
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
                 a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete, missing_fields=missing_fields,
                 today_perm=today_perm, perm_limit=PERMISSION_MONTHLY_LIMIT, perm_used=perm_used,
@@ -2193,7 +2278,10 @@ def employee_save():
         flash(err, "error"); return redirect("/employee")
     write_sub(uuid.uuid4().hex[:10], date, (session["band"], session["emp_id"], session["name"]), procs, notes)
     log_change(SEC_PROD, "Added", entry_added_details(date, procs, notes))
-    flash("Saved." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else "")); return redirect("/employee")
+    flash("Saved." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else ""))
+    miss = [] if is_off(date) else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
+    if miss: flash(target_alert_text(miss), "error")           # employee is told straight away that the target was missed
+    return redirect("/employee")
 
 @app.route("/entry/<sid>", methods=["GET", "POST"])
 @need()
@@ -2209,7 +2297,10 @@ def entry_edit(sid):
         delete_rows(s["rows"])
         write_sub(sid, date, (s["band"], s["emp_id"], s["emp_name"]), procs, notes)
         if changed: log_change(SEC_PROD, "Updated", changed)
-        flash("Updated." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else "")); return redirect(home())
+        flash("Updated." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else ""))
+        miss = [] if is_off(date) or session.get("role") != "employee" else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
+        if miss: flash(target_alert_text(miss), "error")
+        return redirect(home())
     body, ctx = form_page(s, request.path, "Edit entry")
     return page(body, title="Edit entry", **ctx)
 
@@ -2392,6 +2483,10 @@ EMP_MARQUEE = """{% if missed or pend %}{% set msg %}&#9888; Productivity entry 
 
 EMP_ALERT = """{% if profile_incomplete %}<div class="warn"><b>&#9888; Personal details incomplete</b>
 <div>Please <a href="/employee/profile">complete your personal details</a>{% if missing_fields %} &mdash; missing: {{ missing_fields|join(', ') }}{% endif %}.</div></div>{% endif %}"""
+
+EMP_TARGET = """{% if tgt_miss %}<div class="warn"><b>&#9888; Target not achieved (8-hour target)</b>
+{% for m in tgt_miss %}<div>{{m.date}} &middot; {{m.name}}: <b>{{m.count|g}}</b> of <b>{{m.target|g}}</b> ({{m.pct}}%) for {{m.hour|g}} hr &mdash; 8-hour target: {{m.daily|g}}</div>{% endfor %}
+<div class="mut">Last 7 days. Please complete the target within 8 hours.</div></div>{% endif %}"""
 
 ADMIN_ALERT = """{% if miss or pend %}<div class="warn"><b>&#9888; Missed entries - {{mlabel}}</b>
 {% for r in miss %}<div>{{r.id}} &middot; {{r.name}}: {{r.days|length}} day(s) - {{r.days|join(', ')}}</div>{% endfor %}
@@ -3166,7 +3261,7 @@ def employee_audit(acc): return _audit_detail("/employee/audit", session["emp_id
 @audit_need
 def employee_audit_detail(acc, eid): return _audit_detail("/employee/audit", eid, False, acc)   # 403 unless it is their own ID
 
-# ================================================================ மகிழ்ச்சி (Question & Answer)  - Update62
+# ================================================================ Mahizhchi (Question & Answer)  - Update62
 # Admin keeps multiple-choice questions in the "Mahizhchi Log" Google Sheet (or pastes them on the Admin page):
 #     Question | A | B | C | D | Correct Answer
 # The correct option carries ONE tick mark (✓) - either in the option cell ("Pacific Ocean ✓"), in the
@@ -3175,12 +3270,14 @@ def employee_audit_detail(acc, eid): return _audit_detail("/employee/audit", eid
 # "Mahizhchi Answers" sheet, under their own ID only). They can never edit questions/options/the correct answer,
 # and the correct answer is never included in anything sent to them. Reachable only while published AND shared.
 import re as _re, hashlib as _hl
-MZ_TITLE = "மகிழ்ச்சி"
+MZ_TITLE = "Mahizhchi"
 MZ_SHEET, MZ_ACCESS_SHEET, MZ_ANS_SHEET, MZ_ATT_SHEET = "Mahizhchi Log", "Mahizhchi Access", "Mahizhchi Answers", "Mahizhchi Attempts"
-MZ_TIME_LIMIT = int(os.getenv("MZ_TIME_SECONDS", "120"))   # quiz time limit per employee (seconds) - 2 minutes
+MZ_TIME_LIMIT = int(os.getenv("MZ_TIME_SECONDS", "150"))   # quiz time limit per employee (seconds) - 2 minutes 30 seconds
 MZ_GRACE = 8                                                # seconds of network delay tolerated when the page auto-submits at 0:00
 def _mz_dur(sec):
-    return f"{sec // 60} minute{'s' if sec // 60 != 1 else ''}" if sec % 60 == 0 else f"{sec} seconds"
+    m, r = divmod(int(sec), 60)
+    parts = ([f"{m} minute{'s' if m != 1 else ''}"] if m else []) + ([f"{r} second{'s' if r != 1 else ''}"] if r or not m else [])
+    return " ".join(parts)
 app.jinja_env.globals["mz_dur"] = _mz_dur
 MZ_LETTERS = "ABCD"
 MZ_TICKS = "✓✔☑✅"                      # any of these typed by Admin is treated as "the correct answer" and shown as ✓
@@ -3259,6 +3356,20 @@ def mz_close_attempt(att):
     _with_retry(ws_of(MZ_ATT_SHEET).update, range_name=f"D{att['row']}",
                 values=[[now_local().strftime("%Y-%m-%d %H:%M:%S")]], value_input_option="RAW")
     invalidate_cache(MZ_ATT_SHEET)
+
+def mz_detail(emp):
+    """Everything Admin sees about ONE employee's Mahizhchi attempt (used by Results and by Employee Info -> Mahizhchi Log)."""
+    eid = str(emp["Employee ID"]); qs = [q for q in mz_questions() if q["ok"]]; total = len(qs)
+    d = mz_results(qs).get(_key(eid), dict(answered=0, correct=0, last=""))
+    mine = mz_my_answers(eid); att = mz_attempt(eid)
+    if att and att["closed"]: status = "Completed" if d["answered"] else "Closed - no answers (time over)"
+    elif att: status = "In progress" if mz_seconds_left(att) > 0 else "Time over"
+    else: status = "Completed" if mine else "Not started"
+    return dict(name=emp["Name"], answered=d["answered"], correct=d["correct"], total=total,
+                pct=round(d["correct"] / total * 100) if total else 0, status=status,
+                started=att["start"].strftime("%Y-%m-%d %H:%M:%S") if att else "", last=d["last"],
+                shared=mz_access_map().get(_key(eid), False), pub=mz_published(),
+                lines=[dict(q=q, mine=mine.get(q["qid"])) for q in qs])
 
 def mz_results(qs):
     """{employee key: dict(answered, correct, last)} scored against the CURRENT correct answers (Admin side only)."""
@@ -3414,14 +3525,16 @@ A question is skipped, and reported, if it has no ✓, more than one ✓, or few
 <textarea name="text" rows="14" maxlength="{{maxlen}}" required style="width:100%;font-family:inherit" placeholder="1. Which is the largest ocean on Earth?&#10;A. Atlantic Ocean&#10;B. Indian Ocean&#10;C. Pacific Ocean ✓&#10;D. Arctic Ocean"></textarea><br><br>
 <button class="primary">Add to sheet</button> <a href="/admin/mahizhchi">Cancel</a></form></div>"""
 
-MZ_ADMIN_RESULTS = MZ_CSS + MZ_HEAD + """
-{% if detail %}<div class="card"><h2>{{detail.name}} &mdash; {{detail.correct}} / {{detail.total}} correct ({{detail.pct}}%)</h2>
-<p class="mut">Answered {{detail.answered}} of {{detail.total}} &middot; <a href="/admin/mahizhchi?tab=results">&larr; All results</a></p></div>
+MZ_DETAIL = """<div class="card"><h2>{{detail.name}} &mdash; {{detail.correct}} / {{detail.total}} correct ({{detail.pct}}%)</h2>
+<p class="mut">Status: <b>{{detail.status}}</b>{% if detail.started %} &middot; started {{detail.started|t12}}{% endif %} &middot; answered {{detail.answered}} of {{detail.total}}
+{% if not detail.shared %} &middot; <span class="pill out">Not shared with this employee</span>{% elif not detail.pub %} &middot; <span class="pill act">Shared - not published</span>{% endif %}
+{% if back %} &middot; <a href="{{back}}">&larr; All results</a>{% endif %}</p></div>
 {% for d in detail.lines %}<div class="mz-q"><h3><span class="no">{{loop.index}}.</span>{{d.q.q}}</h3>
 {% for o in d.q.opts %}<div class="mz-o {{'ok' if o.letter==d.q.correct else ('mine' if o.letter==d.mine else '')}}"><span class="l">{{o.letter}}.</span>
 <span>{{o.text}}{% if o.letter==d.q.correct %} <span class="tick">&#10003;</span>{% endif %}{% if o.letter==d.mine %} <span class="pill {{'in' if d.mine==d.q.correct else 'out'}}">employee&rsquo;s answer</span>{% endif %}</span></div>{% endfor %}
-{% if not d.mine %}<p class="mz-issue">Not answered yet</p>{% endif %}</div>{% endfor %}
-{% else %}<div class="card"><h2>Results</h2><p class="mut">Scored against the current ✓ correct answers of the {{total}} ready question(s).</p>
+{% if not d.mine %}<p class="mz-issue">Not answered</p>{% endif %}</div>{% else %}<div class="card"><p>No questions in Mahizhchi yet.</p></div>{% endfor %}"""
+MZ_EMPINFO = MZ_CSS + MZ_DETAIL
+MZ_ADMIN_RESULTS = MZ_CSS + MZ_HEAD + "{% if detail %}" + MZ_DETAIL + """{% else %}<div class="card"><h2>Results</h2><p class="mut">Scored against the current ✓ correct answers of the {{total}} ready question(s).</p>
 <table><tr><th>Employee ID</th><th>Name</th><th>Answered</th><th>Correct</th><th>Score</th><th>Last submitted</th><th></th></tr>
 {% for r in res %}<tr><td>{{r.id}}</td><td>{{r.name}}</td><td>{{r.answered}} / {{total}}</td><td>{{r.correct}}</td>
 <td>{% if r.answered %}<b>{{r.pct}}%</b>{% else %}<span class="pill out">Not answered</span>{% endif %}</td><td>{{r.last|t12}}</td>
@@ -3475,12 +3588,8 @@ def admin_mahizhchi():
         qs = [q for q in mz_questions() if q["ok"]]; per = mz_results(qs); total = len(qs)
         eid = request.args.get("emp", "").strip()
         if eid:
-            e = emp_or_404(eid); mine = mz_my_answers(str(e["Employee ID"]))
-            d = per.get(_key(e["Employee ID"]), dict(answered=0, correct=0))
-            detail = dict(name=e["Name"], answered=d["answered"], correct=d["correct"], total=total,
-                          pct=round(d["correct"] / total * 100) if total else 0,
-                          lines=[dict(q=q, mine=mine.get(q["qid"])) for q in qs])
-            return page(MZ_ADMIN_RESULTS, title=MZ_TITLE, tab="results", detail=detail)
+            detail = mz_detail(emp_or_404(eid))
+            return page(MZ_ADMIN_RESULTS, title=MZ_TITLE, tab="results", detail=detail, back="/admin/mahizhchi?tab=results")
         res = []
         for e in emps:
             k = _key(e["Employee ID"]); d = per.get(k)

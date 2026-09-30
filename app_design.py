@@ -26,6 +26,8 @@ Access rules (Update59):
   * Update67: Admin sidebar 'Employee Info' is a dropdown (Employees / Notifications / Mahizhchi). Login pages get a 3D data-packet
     animation (Employee: packets uploaded to the server; Admin: live feed arriving at the dashboard) and synthesised
     Tamil-style background music (Employee = raga Mohanam, Admin = raga Hamsadhwani) with a Music on/off button.
+  * Update68: Welcome page (after Admin and Employee login) uses the same AI-style 3D scene + data-packet flow as the login
+    pages (Employee = data sent to server, Admin = live data arriving). Overview no longer shows the "Employees" count card.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -2224,107 +2226,31 @@ def initials_of(name):
     parts = str(name).replace(".", " ").split()
     return "".join(p[0] for p in parts[:2]).upper() or "?"
 
+WL_SCENE = LOGIN[LOGIN.index('<div class="scene '):LOGIN.index('<div class="lcard">')]   # same 3D scene + data-packet flow as the login pages
 WELCOME = """<style>
-.wl{position:fixed;inset:0;z-index:9999;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:linear-gradient(135deg,#c9b8f6 0%,#fbd3e2 45%,#b9d2f8 100%)}
-.wl-card{position:absolute;left:0;right:0;top:6vh;margin:0 auto;width:max-content;max-width:88vw;background:#fffc;backdrop-filter:blur(3px);border-radius:16px;padding:18px 30px;text-align:center;box-shadow:0 20px 50px #0003;z-index:5;animation:wlPop .5s cubic-bezier(.22,1,.36,1) both}
-.wl-card h1{font-size:24px;margin:0 0 3px;color:#4f46e5}.wl-card p{margin:0;color:#6b7280;font-size:12.5px}
-@keyframes wlPop{from{opacity:0;transform:translateY(-10px) scale(.96)}to{opacity:1;transform:none}}
-.cam{position:absolute;inset:0;perspective:1100px;font-size:min(2.3vw,3.7vh);display:flex;align-items:center;justify-content:center;padding-top:10vh}
-.tilt{position:relative;width:0;height:0;transform-style:preserve-3d;transform:rotateX(-20deg)}
-.ring{position:absolute;left:0;top:0;transform-style:preserve-3d;animation:ringSpin 14s linear infinite}
-@keyframes ringSpin{to{transform:rotateY(360deg)}}
-.pos{position:absolute;left:0;top:0;transform-style:preserve-3d;transform:rotateY(var(--a)) translateZ(13em)}
-.bill{position:absolute;left:0;top:0;transform-style:preserve-3d;animation:unspin 14s linear infinite}
-@keyframes unspin{from{transform:rotateY(calc(var(--a) * -1))}to{transform:rotateY(calc(var(--a) * -1 - 360deg))}}
-/* -------- Employee welcome: 3D dancing team (unchanged) -------- */
-.floor{position:absolute;width:38em;height:38em;left:-19em;top:-19em;border-radius:50%;transform:rotateX(90deg);
- background:radial-gradient(circle,#fff 0 8%,transparent 8.5%),repeating-conic-gradient(#ffd166 0 15deg,#ff8fab 15deg 30deg,#6ee7b7 30deg 45deg,#7dd3fc 45deg 60deg);box-shadow:0 0 0 .6em #fff8,0 0 4em #4f46e588}
-.shadow{position:absolute;left:-1.8em;top:-1.1em;width:3.6em;height:2.2em;border-radius:50%;background:#0003;transform:rotateX(90deg)}
-.jump{position:absolute;left:0;top:0;animation:hop .72s ease-in-out infinite;animation-delay:calc(var(--i) * -.13s)}
-@keyframes hop{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.8em)}}
-.fig{position:absolute;left:-2em;top:-7.2em;width:4em;height:7.2em}
-.head{position:absolute;left:.6em;top:0;width:2.8em;height:2.8em;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffe6cf,#f5b98a);box-shadow:inset -.2em -.3em .5em #0002}
-.head::before{content:"";position:absolute;left:-.05em;top:-.15em;width:2.9em;height:1.4em;border-radius:1.5em 1.5em .3em .3em;background:var(--h)}
-.head::after{content:"";position:absolute;left:.7em;top:1.2em;width:.4em;height:.4em;border-radius:50%;background:#222;box-shadow:.95em 0 #222}
-.mouth{position:absolute;left:.95em;top:1.85em;width:.9em;height:.45em;border-radius:0 0 .9em .9em;background:#b3364a}
-.torso{position:absolute;left:.4em;top:2.7em;width:3.2em;height:2.7em;border-radius:1.2em 1.2em .6em .6em;background:linear-gradient(160deg,var(--c),var(--d));box-shadow:inset -.3em -.3em .6em #0003}
-.arm{position:absolute;top:3em;width:.8em;height:2.3em;border-radius:.5em;background:var(--c);transform-origin:50% .3em}
-.arm.l{left:-.2em;animation:waveL .5s ease-in-out infinite alternate;animation-delay:calc(var(--i) * -.1s)}
-.arm.r{right:-.2em;animation:waveR .5s ease-in-out infinite alternate;animation-delay:calc(var(--i) * -.1s)}
-@keyframes waveL{from{transform:rotate(150deg)}to{transform:rotate(200deg)}}
-@keyframes waveR{from{transform:rotate(-150deg)}to{transform:rotate(-200deg)}}
-.leg{position:absolute;top:5.3em;width:1em;height:1.9em;border-radius:.4em .4em .6em .6em;background:#3b3f5c}
-.leg.l{left:.9em}.leg.r{right:.9em}
-.fig.female .head::before{height:1.55em;border-radius:1.5em 1.5em 45% 45%}
-.fig.female .head::after{box-shadow:.95em 0 #222,-.05em .95em #222,1em .95em #222}
-.fig.female .torso::after{content:"";position:absolute;left:-.35em;bottom:-1em;width:3.9em;height:1.3em;border-radius:0 0 1.6em 1.6em;background:linear-gradient(160deg,var(--c),var(--d))}
-.bspin{position:absolute;left:0;top:0;transform-style:preserve-3d;animation:ringSpin 1.9s linear infinite}
-.bpos{position:absolute;left:0;top:0;transform:translateZ(13em);transform-style:preserve-3d}
-.ball{position:absolute;left:-.9em;top:-6em;width:1.8em;height:1.8em;border-radius:50%;background:radial-gradient(circle at 32% 30%,#fff,#ff5d5d 45%,#b91c1c);box-shadow:0 .5em 1em #0004;animation:bball .95s ease-in-out infinite}
-@keyframes bball{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.4em)}}
-/* -------- Admin loading: lightweight 3D flying/falling flowers (replaces the team animation) -------- */
-.fring{position:absolute;left:0;top:0;transform-style:preserve-3d;animation:ringSpin 20s linear infinite}
-.fpos{position:absolute;left:0;top:0;transform-style:preserve-3d;transform:rotateY(var(--a)) translateZ(11em) translateY(var(--fy,0));animation:flFly 3.6s ease-in-out infinite;animation-delay:calc(var(--i) * -.5s)}
-@keyframes flFly{0%,100%{transform:rotateY(var(--a)) translateZ(11em) translateY(0)}50%{transform:rotateY(var(--a)) translateZ(11em) translateY(-1.1em)}}
-.fbill{position:absolute;left:0;top:0;transform-style:preserve-3d;animation:unspin 20s linear infinite,petSpin 7s linear infinite}
-@keyframes petSpin{to{transform:rotateZ(360deg)}}
-.flower3d{position:absolute;left:-1.7em;top:-1.7em;width:3.4em;height:3.4em}
-.petal{position:absolute;left:50%;top:50%;width:1.7em;height:1.05em;margin:-.52em 0 0 -.85em;border-radius:60% 60% 60% 60%/80% 80% 40% 40%;background:var(--pc);opacity:.96;transform-origin:50% 50%;box-shadow:inset 0 0 .3em #ffffff55}
-.core{position:absolute;left:50%;top:50%;width:1em;height:1em;margin:-.5em;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff9,#ffd166 70%);box-shadow:0 0 .35em #0003 inset}
-.flw{position:absolute;top:-8vh;left:0;will-change:transform,opacity;pointer-events:none;z-index:6;animation:flDrop linear forwards}
-@keyframes flDrop{0%{opacity:0;transform:translate3d(0,0,0) rotate(0deg)}8%{opacity:1}92%{opacity:1}100%{opacity:0;transform:translate3d(var(--dx),118vh,0) rotate(var(--rot))}}
+.wl{position:fixed;inset:0;z-index:9999;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+.wl.admin{background:radial-gradient(900px 420px at 20% 0%,#3b5bdb55,transparent 60%),linear-gradient(120deg,#0b1230 0%,#182a6b 48%,#4f46e5 100%)}
+.wl.employee{background:radial-gradient(900px 420px at 80% 0%,#ffb37066,transparent 60%),linear-gradient(120deg,#3b1f6e 0%,#a3407f 48%,#f29a63 100%)}
+.wl .scene{border-radius:0}
+.wl-card{position:absolute;left:50%;top:50%;width:min(380px,88vw);background:#fff;border-radius:14px;padding:26px 28px 22px;text-align:center;z-index:5;
+ box-shadow:0 1px 0 #fff inset,0 30px 60px -16px #0009,0 0 0 1px #ffffff55,0 0 44px -6px #ffffff55;animation:wlPop .55s cubic-bezier(.22,1,.36,1) both;transform:translate(-50%,-50%)}
+@keyframes wlPop{from{opacity:0;transform:translate(-50%,-46%) scale(.95)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+.wl-card h1{font-family:Georgia,serif;font-size:27px;margin:0 0 4px;color:#5b4fb0;word-break:break-word}
+.wl-card p{margin:0 0 14px;color:#6b7390;font-size:13px}
+.wl-bar{height:6px;border-radius:4px;background:#e9e6fb;overflow:hidden}
+.wl-bar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#6d70f5,#f58a8a);transform-origin:left;transform:scaleX(0);animation:wlFill 2s linear forwards}
+@keyframes wlFill{to{transform:scaleX(1)}}
+.wl-st{margin-top:10px;font:600 10px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;color:#8a90ad}
 </style>
-<div class="wl" id="wl">
- <div class="wl-card" id="wlCard"><h1>Welcome, {{session.name}}</h1><p>Getting your workspace ready&hellip;</p></div>
-{% if session.role == 'admin' %}
- <div class="cam"><div class="tilt"><div class="fring">
-  {% for pc in ['#ff6f91','#ffc75f','#f9f871','#845ec2','#00c9a7','#ff9671'] %}
-  <div class="fpos" style="--a:{{loop.index0*60}}deg;--i:{{loop.index0}}">
-   <div class="fbill"><div class="flower3d">
-    {% for k in range(6) %}<div class="petal" style="--pc:{{pc}};transform:rotate({{k*60}}deg) translateY(-.85em)"></div>{% endfor %}
-    <div class="core"></div>
-   </div></div>
-  </div>
-  {% endfor %}
- </div></div></div>
-{% else %}
- <div class="cam"><div class="tilt"><div class="ring">
-  <div class="floor"></div>
-  {% for c in [('#ef4444','#b91c1c','#3b2314'),('#3b82f6','#1d4ed8','#111827'),('#22c55e','#15803d','#7c2d12'),('#f59e0b','#b45309','#1f2937'),('#a855f7','#7e22ce','#422006'),('#ec4899','#be185d','#0f172a')] %}
-  <div class="pos" style="--a:{{loop.index0*60}}deg;--i:{{loop.index0}};--c:{{c[0]}};--d:{{c[1]}};--h:{{c[2]}}">
-   <div class="shadow"></div>
-   <div class="bill"><div class="jump"><div class="fig {{wl_gender}}">
-    <div class="leg l"></div><div class="leg r"></div>
-    <div class="arm l"></div><div class="arm r"></div>
-    <div class="torso"></div>
-    <div class="head"><div class="mouth"></div></div>
-   </div></div></div>
-  </div>
-  {% endfor %}
-  <div class="bspin"><div class="bpos"><div class="ball"></div></div></div>
- </div></div></div>
-{% endif %}
+<div class="wl {{session.role}}" id="wl">
+""" + WL_SCENE.replace('{{role}}', "{{session.role}}").replace("role=='admin'", "session.role=='admin'") + """
+ <div class="wl-card"><h1>Welcome, {{session.name}}</h1>
+ <p>{{ 'Syncing live data from the server' if session.role=='admin' else 'Securely connecting to the server' }}&hellip;</p>
+ <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div></div>
 </div>
 <script>
 (function(){
  var ROLE={{session.role|tojson}}, NAME={{session.name|tojson}};
- var wl=document.getElementById('wl');
- var petals=['#ffb6d0','#ffd1e6','#ffe38a','#c9b8f6','#fff'];
- function petal(){                                   /* one flower, falling top -> bottom (ambient, both pages) */
-  var d=document.createElement('span'); d.className='flw';
-  var s=10+Math.random()*8;
-  d.style.left=(Math.random()*100)+'vw';
-  d.style.width=s+'px';d.style.height=s+'px';d.style.borderRadius='0 60% 0 60%';
-  d.style.background=petals[Math.floor(Math.random()*petals.length)];
-  d.style.setProperty('--dx',((Math.random()-.5)*90)+'px');
-  d.style.setProperty('--rot',(360+Math.random()*360)+'deg');
-  d.style.animationDuration=(2.6+Math.random()*1.4)+'s';
-  wl.appendChild(d);
-  setTimeout(function(){ d.remove(); }, 4200);
- }
- for(var k=0;k<5;k++) petal();                        /* a few on screen right away */
- var spawn=setInterval(petal,1000);                    /* a new flower every 1 second */
-
  var WL_MS=2000;                                       /* total time the welcome page is shown */
 
  if(ROLE==='employee'){                                /* AI voice announcement - Employee welcome only, no BGM */
@@ -2363,11 +2289,10 @@ WELCOME = """<style>
  }
 
  setTimeout(function(){                                /* welcome animation for 2s, then move on */
-  clearInterval(spawn);
   if(ac){ try{ master.gain.cancelScheduledValues(ac.currentTime); master.gain.value=0; ac.close(); }catch(e){} }
   if(ROLE==='employee' && 'speechSynthesis' in window){ try{ window.speechSynthesis.cancel(); }catch(e){} }
   window.location.replace({{ ('/admin/summary' if session.role=='admin' else '/employee') | tojson }});
- },2000);
+ },WL_MS);
 })();
 </script>
 <noscript><meta http-equiv="refresh" content="2;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
@@ -2838,7 +2763,7 @@ def admin_summary():
     rep = sorted(report(emps, subs, leaves, start, end), key=lambda r: str(r["name"]))
     n = len(rep) or 1
     a1, a2 = round(sum(r["att"] for r in rep) / n), round(sum(r["pct"] for r in rep) / n)
-    extra = [("Employees", len(rep)), ("Total leave days", sum(r["leave"] for r in rep))]
+    extra = [("Total leave days", sum(r["leave"] for r in rep))]        # Update68: the "Employees" card was removed from Overview
     # Missed-entries list is intentionally NOT shown on the Overview page any more;
     # it lives only on the dedicated "Missed entries" page (/admin/missed).
     return page(SUMMARY, title="Overview", rep=rep, month=month, label=label, wd=workdays(start, end),

@@ -1276,7 +1276,7 @@ poll();setInterval(poll,15000)})();
 </script>{% endif %}
 {% if session.role=='employee' %}<script>(function(){function p(){fetch('/employee/ping',{credentials:'same-origin',cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();</script>{% endif %}
 {% if session.role=='employee' and request.path!='/employee/welcome' %}{% if request.path!='/employee/group-chat' %}<a id="chatfab" href="/employee/group-chat" title="Chat" aria-label="Chat"
- style="position:fixed;right:22px;bottom:22px;z-index:98;width:54px;height:54px;border-radius:50%;background:#4f5bd5;color:#fff;display:flex;align-items:center;justify-content:center;font-size:25px;text-decoration:none;box-shadow:0 8px 22px #4f5bd566">&#128172;<span id="chatfab_n" style="display:none;position:absolute;top:-4px;right:-4px;background:#e5484d;color:#fff;border-radius:10px;font-size:11px;font-weight:700;padding:1px 6px;min-width:10px;text-align:center"></span></a>{% endif %}<script>
+ style="position:fixed;right:22px;bottom:22px;z-index:98;width:60px;height:60px;border-radius:50%;background:#fff;border:1px solid #e5e5ea;display:flex;align-items:center;justify-content:center;text-decoration:none;box-shadow:0 8px 24px #0003,0 2px 6px #0002;transition:transform .15s ease,box-shadow .15s ease" onmouseover="this.style.transform='scale(1.08)'" onmouseout="this.style.transform='none'"><svg viewBox="0 0 40 40" width="32" height="32" aria-hidden="true" focusable="false"><path d="M23 3h6.5A7.5 7.5 0 0 1 37 10.5v1A7.5 7.5 0 0 1 29.5 19H29l3 4.5-6-4.5h-3A7.5 7.5 0 0 1 15.5 11.5v-1A7.5 7.5 0 0 1 23 3z" fill="#8e8e93"/><path d="M12.5 13h4A9.5 9.5 0 0 1 26 22.500v.5A9.500 9.500 0 0 1 16.5 32.500H15.500L9 37l1.200-5.300A9.500 9.500 0 0 1 3 23v-.5A9.500 9.500 0 0 1 12.500 13z" fill="#34c759"/><circle cx="9.500" cy="23" r="2" fill="#fff"/><circle cx="14.500" cy="23" r="2" fill="#fff"/><circle cx="19.500" cy="23" r="2" fill="#fff"/></svg><span id="chatfab_n" style="display:none;position:absolute;top:-3px;right:-3px;background:#ff3b30;color:#fff;border:2px solid #fff;border-radius:11px;font-size:11px;font-weight:700;padding:1px 6px;min-width:10px;text-align:center"></span></a>{% endif %}<script>
 (function(){
 var root=document.getElementById('chat_root'),busy=false,base=document.title,shown={},after=-1;
 function ss(k,v){try{if(v===undefined)return sessionStorage.getItem(k);sessionStorage.setItem(k,v)}catch(e){return null}}
@@ -2412,14 +2412,10 @@ WELCOME = """<style>
 
  /* Update79: ADMIN welcome = no voice, no music (animation only). EMPLOYEE welcome = AI voice first; ONLY AFTER the voice
     has finished does the Tamil bamboo-flute BGM start. The BGM never starts before the voice ends. */
- var AC=window.AudioContext||window.webkitAudioContext;
- var ctx=null,master=null,verb=null,timer=null,muted=false,next=0,step=0,noiseBuf=null,lastF=0;
- var btn={setAttribute:function(){}},bi={},bt={};
- function get(k){return null}function put(k,v){}
- """ + FLUTE_ENGINE + """
+ var AUDIO=null;
  function msg(t){var m=document.getElementById('wl_msg');if(m)m.textContent=t}
  function leave(){
-  try{ if(timer)clearInterval(timer); if(ctx){ master.gain.cancelScheduledValues(ctx.currentTime); master.gain.value=0; ctx.close(); } }catch(e){}
+  try{ if(AUDIO){AUDIO.pause()} }catch(e){}
   try{ if(window.speechSynthesis)window.speechSynthesis.cancel() }catch(e){}
   window.location.replace(DEST);
  }
@@ -2429,17 +2425,20 @@ WELCOME = """<style>
  var SS=window.speechSynthesis, hadStart=false, bgmBegun=false, guard=null, giveUp=null, ready=false;
  var TEXT='Welcome, '+NAME+'. Wishing you a productive day.';
 
- function unlock(){ try{ if(AC){ if(!ctx)build(); if(ctx.resume)ctx.resume() } }catch(e){} }   /* silent; just lets the BGM start later */
- var uEv=['mousemove','pointermove','pointerdown','keydown','touchstart'];
- function onUser(){ if(!AC||!ready)return; try{go()}catch(e){} if(ctx&&ctx.state==='running'){uEv.forEach(function(t){document.removeEventListener(t,onUser,true)})} }
+ /* Update80: the old flute music is gone. After the voice ends, the NEW BGM file (route /welcome-bgm) plays. */
+ var BGM_URL='/welcome-bgm';
+ function playBgm(){ try{ if(!AUDIO){AUDIO=new Audio(BGM_URL);AUDIO.preload='auto';AUDIO.volume=0.7;
+    AUDIO.onerror=function(){ msg(''); setTimeout(leave,1200) }}   /* no BGM file installed: just continue */
+   var pr=AUDIO.play(); if(pr&&pr.catch)pr.catch(function(){ msg('\\u266A Click or move the mouse to play the music') }) }catch(e){} }
+ function unlock(){ try{ if(!AUDIO){AUDIO=new Audio(BGM_URL);AUDIO.preload='auto'} }catch(e){} }   /* preload while the voice speaks */
+ var uEv=['mousemove','pointerdown','keydown','touchstart'];
+ function onUser(){ if(!ready)return; playBgm(); if(AUDIO&&!AUDIO.paused){uEv.forEach(function(t){document.removeEventListener(t,onUser,true)})} }
  uEv.forEach(function(t){document.addEventListener(t,onUser,true)});
 
  function startBgm(){                                   /* called ONLY when the voice has finished */
   if(bgmBegun)return; bgmBegun=true; ready=true; clearTimeout(guard); clearTimeout(giveUp);
-  if(!AC){ setTimeout(leave,1500); return; }
-  msg('\\u266A Tamil flute music'); try{go()}catch(e){}
-  setTimeout(function(){ if(!ctx||ctx.state!=='running')msg('\\u266A Move the mouse to play the flute music') },800);
-  setTimeout(function(){ try{stopAll()}catch(e){} },PLAY_MS-500);
+  msg('\\u266A Music'); playBgm();
+  setTimeout(function(){ try{ if(AUDIO){var v=0.7,iv=setInterval(function(){v-=0.1;if(v<=0){AUDIO.volume=0;clearInterval(iv)}else AUDIO.volume=v},60)} }catch(e){} },PLAY_MS-1000);
   setTimeout(leave,PLAY_MS);
  }
  function pickVoice(){ var v=(SS.getVoices&&SS.getVoices())||[],i;
@@ -2470,6 +2469,23 @@ WELCOME = """<style>
 })();
 </script>
 <noscript><meta http-equiv="refresh" content="16;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
+
+# Update80: the Welcome Page BGM. Put the new audio file next to this script as  welcome_bgm.mp3  (or set WELCOME_BGM=/full/path/file.mp3).
+def _bgm_path():
+    p = os.getenv("WELCOME_BGM", "")
+    if p and os.path.isfile(p): return p
+    for n in ("welcome_bgm.mp3", "welcome_bgm.m4a", "welcome_bgm.ogg", "welcome_bgm.wav"):
+        q = os.path.join(os.path.dirname(os.path.abspath(__file__)), n)
+        if os.path.isfile(q): return q
+    return ""
+
+@app.route("/welcome-bgm")
+def welcome_bgm():
+    if not session.get("role"): abort(404)
+    p = _bgm_path()
+    if not p: abort(404)
+    from flask import send_file
+    return send_file(p, conditional=True, max_age=604800)
 
 @app.route("/admin/welcome")
 @need("admin")

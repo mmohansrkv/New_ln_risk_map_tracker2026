@@ -1322,6 +1322,26 @@ poll();
 document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()});
 })();
 </script>{% endif %}
+{% if session.role and request.path not in ['/employee/welcome','/admin/welcome'] %}<script>
+/* Update79: one short, identical click sound for every button / link / control on the Admin and Employee pages. No music here. */
+(function(){
+ var AC=window.AudioContext||window.webkitAudioContext,ctx=null;
+ var SEL='a[href],button,input[type=button],input[type=submit],input[type=checkbox],input[type=radio],select,summary,[role=button],[onclick],.btn';
+ function prime(){try{if(!AC)return;if(!ctx)ctx=new AC();if(ctx.state==='suspended')ctx.resume()}catch(e){}}
+ function tick(){
+  try{prime();if(!ctx)return;var t=ctx.currentTime,o=ctx.createOscillator(),g=ctx.createGain();
+   o.type='sine';o.frequency.setValueAtTime(1400,t);o.frequency.exponentialRampToValueAtTime(700,t+0.05);
+   g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(0.16,t+0.005);g.gain.exponentialRampToValueAtTime(0.0001,t+0.07);
+   o.connect(g);g.connect(ctx.destination);o.start(t);o.stop(t+0.08)}catch(e){}
+ }
+ ['pointerdown','keydown','touchstart'].forEach(function(n){document.addEventListener(n,prime,{capture:true,once:true,passive:true})});
+ document.addEventListener('click',function(e){
+  var t=e.target&&e.target.closest?e.target.closest(SEL):null;
+  if(!t||t.disabled||t.getAttribute('aria-disabled')==='true')return;
+  tick();
+ },true);
+})();
+</script>{% endif %}
 </body></html>"""
 
 NAVS = {
@@ -1526,7 +1546,7 @@ document.addEventListener('visibilitychange',function(){   /* hidden tab: no aud
  else if(!muted){ctx.resume&&ctx.resume().then(function(){if(!timer){next=ctx.currentTime+0.15;timer=setInterval(sched,150)}})}});
 window.addEventListener('pagehide',function(){stopAll();if(ctx&&ctx.close)ctx.close()});
 var f=document.querySelector('form');if(f)f.addEventListener('submit',function(){stopAll()});   /* quiet the moment they log in */
-function start(){setTimeout(init,500)}   /* after the page has loaded - never competes with the login itself */
+function start(){}   /* Update79: no automatic music on the login pages */   /* after the page has loaded - never competes with the login itself */
 if(document.readyState==='complete')start();else window.addEventListener('load',start);
 }catch(e){/* audio unavailable: login and animation carry on normally */}
 })();
@@ -2386,33 +2406,67 @@ WELCOME = """<style>
 <script>
 (function(){
  var ROLE={{session.role|tojson}}, NAME={{session.name|tojson}};
- var ANIM_MS=4000, PLAY_MS=12000;                      /* welcome animation first, then the flute plays for PLAY_MS before the dashboard opens */
+ var ANIM_MS=4000, PLAY_MS=12000;
  var DEST={{ ('/admin/summary' if session.role=='admin' else '/employee') | tojson }};
+ var IS_EMP=(ROLE==='employee');
 
- /* Update78: the Welcome Page is the ONLY place with music: NEW Tamil bamboo flute (Pullangu Kuzhal) BGM, instrumental, after the animation. */
+ /* Update79: ADMIN welcome = no voice, no music (animation only). EMPLOYEE welcome = AI voice first; ONLY AFTER the voice
+    has finished does the Tamil bamboo-flute BGM start. The BGM never starts before the voice ends. */
  var AC=window.AudioContext||window.webkitAudioContext;
  var ctx=null,master=null,verb=null,timer=null,muted=false,next=0,step=0,noiseBuf=null,lastF=0;
  var btn={setAttribute:function(){}},bi={},bt={};
  function get(k){return null}function put(k,v){}
  """ + FLUTE_ENGINE + """
- var ready=false,mEv=['mousemove','pointermove','pointerdown','keydown','touchstart'];
- function onUser(){
-  if(!AC||!ready)return;
-  try{go()}catch(e){}
-  if(ctx&&ctx.state==='running'){mEv.forEach(function(t){document.removeEventListener(t,onUser,true)})}
- }
- mEv.forEach(function(t){document.addEventListener(t,onUser,true)});
  function msg(t){var m=document.getElementById('wl_msg');if(m)m.textContent=t}
- setTimeout(function(){                                /* animation finished -> flute starts */
-  ready=true;
-  if(AC){msg('\u266A Tamil flute music');try{go()}catch(e){}
-   setTimeout(function(){if(!ctx||ctx.state!=='running')msg('\u266A Move the mouse to play the flute music')},800)}
- },ANIM_MS);
- setTimeout(function(){try{stopAll()}catch(e){}},ANIM_MS+PLAY_MS-500);   /* fade out just before leaving */
- setTimeout(function(){
+ function leave(){
   try{ if(timer)clearInterval(timer); if(ctx){ master.gain.cancelScheduledValues(ctx.currentTime); master.gain.value=0; ctx.close(); } }catch(e){}
+  try{ if(window.speechSynthesis)window.speechSynthesis.cancel() }catch(e){}
   window.location.replace(DEST);
- },ANIM_MS+PLAY_MS);
+ }
+
+ if(!IS_EMP){ setTimeout(leave,ANIM_MS); return; }      /* Admin: no automatic audio at all */
+
+ var SS=window.speechSynthesis, hadStart=false, bgmBegun=false, guard=null, giveUp=null, ready=false;
+ var TEXT='Welcome, '+NAME+'. Wishing you a productive day.';
+
+ function unlock(){ try{ if(AC){ if(!ctx)build(); if(ctx.resume)ctx.resume() } }catch(e){} }   /* silent; just lets the BGM start later */
+ var uEv=['mousemove','pointermove','pointerdown','keydown','touchstart'];
+ function onUser(){ if(!AC||!ready)return; try{go()}catch(e){} if(ctx&&ctx.state==='running'){uEv.forEach(function(t){document.removeEventListener(t,onUser,true)})} }
+ uEv.forEach(function(t){document.addEventListener(t,onUser,true)});
+
+ function startBgm(){                                   /* called ONLY when the voice has finished */
+  if(bgmBegun)return; bgmBegun=true; ready=true; clearTimeout(guard); clearTimeout(giveUp);
+  if(!AC){ setTimeout(leave,1500); return; }
+  msg('\\u266A Tamil flute music'); try{go()}catch(e){}
+  setTimeout(function(){ if(!ctx||ctx.state!=='running')msg('\\u266A Move the mouse to play the flute music') },800);
+  setTimeout(function(){ try{stopAll()}catch(e){} },PLAY_MS-500);
+  setTimeout(leave,PLAY_MS);
+ }
+ function pickVoice(){ var v=(SS.getVoices&&SS.getVoices())||[],i;
+  for(i=0;i<v.length;i++) if(/^en[-_]IN/i.test(v[i].lang)) return v[i];
+  for(i=0;i<v.length;i++) if(/^en/i.test(v[i].lang)) return v[i];
+  return null }
+ function speak(){
+  if(hadStart||bgmBegun)return;
+  try{
+   SS.cancel();
+   var u=new SpeechSynthesisUtterance(TEXT); u.lang='en-IN'; u.rate=0.95; u.pitch=1; u.volume=1;
+   var v=pickVoice(); if(v)u.voice=v;
+   u.onstart=function(){ hadStart=true; clearTimeout(giveUp); msg('AI voice welcome\\u2026'); guard=setTimeout(startBgm,20000) };   /* safety: a voice that never reports its end */
+   u.onend=function(){ if(hadStart)startBgm() };
+   u.onerror=function(){ if(hadStart)startBgm(); else msg('Click anywhere to hear the welcome') };
+   SS.speak(u);
+  }catch(e){ msg('Click anywhere to hear the welcome') }
+ }
+ if(!SS||typeof SpeechSynthesisUtterance==='undefined'){        /* no voice support in this browser: go straight to the BGM */
+  setTimeout(startBgm,ANIM_MS);
+ }else{
+  setTimeout(speak,700);
+  /* browsers may block speech until the page is touched: the first click/key/touch retries it (and unlocks the audio engine) */
+  var retry=function(){ unlock(); if(!hadStart)speak(); if(hadStart)['click','keydown','touchstart'].forEach(function(t){document.removeEventListener(t,retry,true)}) };
+  ['click','keydown','touchstart'].forEach(function(t){document.addEventListener(t,retry,true)});
+  giveUp=setTimeout(function(){ if(!hadStart)leave() },9000);   /* voice never started (blocked): open the dashboard, silently */
+ }
 })();
 </script>
 <noscript><meta http-equiv="refresh" content="16;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""

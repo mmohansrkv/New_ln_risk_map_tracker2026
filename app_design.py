@@ -55,6 +55,8 @@ Access rules (Update59):
     employees who are online right now; join on login, leave on logout/offline; messages auto-delete after 1 hour; no audio.
   * Update81: NEW Tamil BGM on the Employee Welcome Page (original raga Hamsadhwani instrumental: veena-style melody, tanpura, light mridangam) replacing the flute tune.
     Still starts only after the AI voice ends; no music on the Employee pages.
+  * Update82: Group Chat can send files (5 MB max, programs/scripts blocked), images/photos (shown inline, click to enlarge) and emoji (picker + big emoji-only
+    messages). Attachments are kept in memory only and deleted after 1 hour with the message.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -62,7 +64,7 @@ from functools import wraps
 import gspread
 from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
-from flask import Flask, request, redirect, session, render_template_string, flash, abort, jsonify, has_request_context, Response
+from flask import Flask, request, redirect, session, render_template_string, flash, abort, jsonify, has_request_context, Response, send_file
 
 from zoneinfo import ZoneInfo
 # The server clock is often UTC. All app times use this timezone instead (set APP_TZ to change it).
@@ -1284,24 +1286,52 @@ poll();setInterval(poll,15000)})();
  background:radial-gradient(circle at 32% 26%,#5fe0c8 0%,#1f9fd8 46%,#4a3fd0 100%);box-shadow:0 10px 22px #2b3fa866,0 2px 0 #ffffff66 inset,0 -4px 8px #1b1f7a55 inset;transition:transform .15s ease}
 #gcb:hover{transform:scale(1.08)}#gcb:focus-visible{outline:3px solid #9bb4ff;outline-offset:3px}
 #gcn{display:none;position:absolute;top:-3px;right:-3px;background:#ff3b30;color:#fff;border:2px solid #fff;border-radius:11px;font:700 11px/1 system-ui,sans-serif;padding:3px 6px;min-width:10px;text-align:center}
-#gcp{position:fixed;right:20px;bottom:96px;z-index:99;width:min(360px,calc(100vw - 24px));height:min(480px,calc(100vh - 120px));background:#fff;border:1px solid #d8dbe6;border-radius:16px;box-shadow:0 20px 50px #0003;display:flex;flex-direction:column;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+#gcp{position:fixed;right:20px;bottom:96px;z-index:99;width:min(380px,calc(100vw - 24px));height:min(520px,calc(100vh - 120px));background:#fff;border:1px solid #d8dbe6;border-radius:16px;box-shadow:0 20px 50px #0003;display:flex;flex-direction:column;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
 #gcp[hidden]{display:none}
+#gcp button,#gcp input{margin:0}
 #gcp .gc-h{display:flex;align-items:center;gap:8px;padding:11px 14px;background:linear-gradient(120deg,#1f9fd8,#4a3fd0);color:#fff}
 #gcp .gc-h b{font-size:15px;flex:1}#gcp .gc-h span{font-size:12px;background:#ffffff33;border-radius:10px;padding:2px 8px}
-#gcp .gc-h button{background:none;border:0;color:#fff;font-size:20px;line-height:1;cursor:pointer;padding:0 2px}
+#gcp .gc-h button{background:none;border:0;color:#fff;font-size:20px;line-height:1;cursor:pointer;padding:0 2px;box-shadow:none}
 #gcm{display:flex;gap:6px;overflow-x:auto;padding:8px 10px;border-bottom:1px solid #e6e8f0;background:#f6f8ff;flex:none}
 #gcm i{font-style:normal;white-space:nowrap;font-size:12px;background:#fff;border:1px solid #d8dbe6;border-radius:12px;padding:3px 9px;color:#1c2340}
 #gcm i:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:#2fb26a;margin-right:5px}
 #gcm i.away:before{background:#e0a020}
 #gcl{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:7px;background:#f8f9fd}
-#gcl .gc-b{max-width:80%;padding:7px 11px;border-radius:14px;font-size:13.5px;line-height:1.4;word-wrap:break-word;white-space:pre-wrap}
+#gcl .gc-b{max-width:82%;padding:7px 11px;border-radius:14px;font-size:13.5px;line-height:1.4;word-wrap:break-word;overflow-wrap:anywhere;white-space:pre-wrap}
 #gcl .gc-b b{display:block;font-size:11px;color:#4a3fd0;margin-bottom:2px}#gcl .gc-b small{display:block;font-size:10px;opacity:.65;margin-top:3px}
 #gcl .gc-b.me{align-self:flex-end;background:#4a3fd0;color:#fff;border-bottom-right-radius:4px}
 #gcl .gc-b.th{align-self:flex-start;background:#fff;border:1px solid #d8dbe6;border-bottom-left-radius:4px}
+#gcl .gc-b .gc-big{font-size:34px;line-height:1.15}
 #gcl .gc-e{color:#6b7390;font-size:13px;text-align:center;padding:18px}
-#gcp .gc-f{display:flex;gap:8px;padding:10px;border-top:1px solid #e6e8f0;flex:none}
-#gcp .gc-f input{flex:1;padding:9px 12px;border:1px solid #d8dbe6;border-radius:10px;font-size:14px;min-width:0}
-#gcp .gc-f button{padding:9px 14px;border:0;border-radius:10px;background:#4a3fd0;color:#fff;font-weight:600;cursor:pointer}
+#gcl .gc-imgl{display:block;margin:2px 0 4px;line-height:0}
+#gcl .gc-img{max-width:100%;max-height:220px;border-radius:10px;display:block;background:#e9ecf6;min-width:60px;min-height:40px}
+#gcl .gc-file{display:flex;align-items:center;gap:9px;text-decoration:none;color:inherit;background:#0000000d;border-radius:10px;padding:7px 9px;margin:2px 0 4px;white-space:normal}
+#gcl .gc-b.me .gc-file{background:#ffffff26}
+#gcl .gc-file .gc-fi{font-size:24px;line-height:1}
+#gcl .gc-file .gc-fn{min-width:0}#gcl .gc-file .gc-fn b{display:block;font-size:12.5px;color:inherit;margin:0;word-break:break-all}
+#gcl .gc-file .gc-fn small{margin:0}
+#gcl .gc-gone{font-size:12px;opacity:.7;font-style:italic;margin:2px 0 4px}
+#gcpv{display:flex;align-items:center;gap:10px;padding:8px 12px;border-top:1px solid #e6e8f0;background:#f6f8ff;flex:none}
+#gcpv[hidden]{display:none}
+#gcpv img{width:44px;height:44px;object-fit:cover;border-radius:8px}
+#gcpv .gc-pi{font-size:26px}
+#gcpv .gc-pn{flex:1;min-width:0;font-size:12.5px}#gcpv .gc-pn b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#gcpv .gc-pn small{color:#6b7390}
+#gcpv button{border:0;background:#e5e8f4;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:14px;line-height:1;padding:0}
+#gcem{position:absolute;left:8px;right:8px;bottom:62px;height:210px;background:#fff;border:1px solid #d8dbe6;border-radius:12px;box-shadow:0 10px 30px #0003;display:flex;flex-direction:column;z-index:3}
+#gcem[hidden]{display:none}
+#gcem .gc-tabs{display:flex;gap:4px;padding:6px 8px;border-bottom:1px solid #e6e8f0}
+#gcem .gc-tabs button{border:0;background:none;font-size:20px;cursor:pointer;border-radius:8px;padding:3px 9px}
+#gcem .gc-tabs button.on{background:#e8e6fb}
+#gcem .gc-grid{flex:1;overflow:auto;display:grid;grid-template-columns:repeat(8,1fr);gap:2px;padding:6px 8px;align-content:start}
+#gcem .gc-grid button{border:0;background:none;font-size:22px;line-height:1;cursor:pointer;border-radius:8px;padding:5px 0}
+#gcem .gc-grid button:hover{background:#eef0fb}
+#gcp .gc-f{display:flex;align-items:center;gap:6px;padding:10px;border-top:1px solid #e6e8f0;flex:none}
+#gcp .gc-f .gc-t{width:34px;height:34px;flex:none;border:0;background:#eef0fb;border-radius:50%;font-size:17px;line-height:1;cursor:pointer;padding:0;box-shadow:none;display:flex;align-items:center;justify-content:center}
+#gcp .gc-f .gc-t:hover{background:#e0e3f7}
+#gcp .gc-f input[type=text]{flex:1;padding:9px 11px;border:1px solid #d8dbe6;border-radius:10px;font-size:14px;min-width:0}
+#gcp .gc-f #gcs{padding:9px 13px;border:0;border-radius:10px;background:#4a3fd0;color:#fff;font-weight:600;cursor:pointer;flex:none}
+#gcp .gc-f #gcs:disabled{opacity:.6;cursor:default}
+#gcp.gc-drop{outline:3px dashed #4a3fd0;outline-offset:-6px}
 @media print{ #gcb,#gcp{display:none}}
 </style>
 <button id="gcb" type="button" title="Group Chat - employees online now" aria-label="Group Chat" aria-expanded="false"><svg viewBox="0 0 64 64" width="42" height="42" aria-hidden="true" focusable="false"><defs><linearGradient id="gc_l" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#bfe0ff"/></linearGradient></defs><circle cx="17" cy="26" r="5.500" fill="#d6ecff" opacity="0.85"/><path d="M5 47Q5 35 17 35Q21 35 24 37L24 47Z" fill="#d6ecff" opacity="0.85"/><circle cx="47" cy="26" r="5.500" fill="#d6ecff" opacity="0.85"/><path d="M59 47Q59 35 47 35Q43 35 40 37L40 47Z" fill="#d6ecff" opacity="0.85"/><circle cx="32" cy="23" r="8" fill="url(#gc_l)"/><path d="M18 49Q18 34 32 34Q46 34 46 49Z" fill="url(#gc_l)"/></svg><span id="gcn"></span></button>
@@ -1309,41 +1339,122 @@ poll();setInterval(poll,15000)})();
  <div class="gc-h"><b>Group Chat</b><span id="gcc">0 online</span><button id="gcx" type="button" aria-label="Close">&times;</button></div>
  <div id="gcm"></div>
  <div id="gcl"><div class="gc-e">No messages yet - say hello to everyone who is online.</div></div>
- <div class="gc-f"><input id="gci" maxlength="500" placeholder="Message everyone online..." autocomplete="off"><button id="gcs" type="button">Send</button></div>
+ <div id="gcpv" hidden></div>
+ <div id="gcem" hidden></div>
+ <div class="gc-f">
+  <button class="gc-t" id="gcat" type="button" title="Send a file" aria-label="Send a file">&#128206;</button>
+  <button class="gc-t" id="gcim" type="button" title="Send a photo / image" aria-label="Send a photo or image">&#128247;</button>
+  <button class="gc-t" id="gcemb" type="button" title="Emoji" aria-label="Emoji">&#128522;</button>
+  <input type="text" id="gci" maxlength="500" placeholder="Message everyone online..." autocomplete="off">
+  <button id="gcs" type="button">Send</button>
+ </div>
+ <input type="file" id="gcfi" hidden>
+ <input type="file" id="gcii" accept="image/*" hidden>
 </div>
 <script>
-/* Update80: NEW Group Chat. One group = the employees who are online right now (join on login / coming online, leave on logout / offline). Messages auto-delete after 1 hour. No audio. */
+/* Update82: Group Chat with files, images/photos and emoji. One group = the employees online right now. Messages and attachments auto-delete after 1 hour. No audio. */
 (function(){
-var btn=document.getElementById('gcb'),pan=document.getElementById('gcp'),listEl=document.getElementById('gcl'),memEl=document.getElementById('gcm'),
-    inp=document.getElementById('gci'),cnt=document.getElementById('gcc'),bdg=document.getElementById('gcn'),
-    open=false,busy=false,after=-1,shown={},base=document.title;
+var $=function(i){return document.getElementById(i)};
+var btn=$('gcb'),pan=$('gcp'),listEl=$('gcl'),memEl=$('gcm'),inp=$('gci'),cnt=$('gcc'),bdg=$('gcn'),pv=$('gcpv'),emp=$('gcem'),
+    fileIn=$('gcfi'),imgIn=$('gcii'),sendB=$('gcs'),
+    open=false,busy=false,again=false,after=-1,shown={},base=document.title,pending=null,pendUrl=null,sending=false,MAXF=5*1024*1024;
 function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e}
+function cp(n){return String.fromCodePoint(n)}
+function fmt(n){return n<1024?n+' B':(n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(1)+' MB')}
 function badge(n){bdg.textContent=n>99?'99+':n;bdg.style.display=n?'block':'none';document.title=(n?'('+n+') New message - ':'')+base}
+function note(t){var e=el('div','gc-e',t);listEl.appendChild(e);listEl.scrollTop=listEl.scrollHeight;setTimeout(function(){e.remove()},4500)}
 function members(list){memEl.textContent='';cnt.textContent=list.length+' online';
  list.forEach(function(m){memEl.appendChild(el('i',m.status==='Away'?'away':'',m.name+(m.me?' (You)':'')))})}
+function emojiOnly(t){t=t.trim();if(!t||t.length>14)return false;for(var i=0;i<t.length;i++){if(t.charCodeAt(i)<128)return false}return true}
+
+/* ---------- attachments inside a message ---------- */
+function attach(a,stick){
+ if(a.gone)return el('div','gc-gone',cp(0x1F4C4)+' '+a.name+' - no longer available');
+ var url='/employee/gc/file/'+a.fid;
+ if(a.kind==='image'){
+  var l=el('a','gc-imgl');l.href=url;l.target='_blank';l.rel='noopener';
+  var im=el('img','gc-img');im.alt=a.name;im.title=a.name;im.src=url;im.onload=function(){if(stick())listEl.scrollTop=listEl.scrollHeight};
+  im.onerror=function(){l.replaceWith(el('div','gc-gone',cp(0x1F5BC)+' '+a.name+' - could not load'))};
+  l.appendChild(im);return l}
+ var f=el('a','gc-file');f.href=url+'?dl=1';f.setAttribute('download',a.name);
+ f.appendChild(el('span','gc-fi',cp(0x1F4C4)));
+ var n=el('div','gc-fn');n.appendChild(el('b','',a.name));n.appendChild(el('small','',fmt(a.size)+' \u00B7 tap to download'));f.appendChild(n);return f}
+
 function msgs(list,now){
  Array.prototype.slice.call(listEl.querySelectorAll('.gc-b')).forEach(function(b){if(now-parseFloat(b.getAttribute('data-ts'))>3600)b.remove()});
  if(!list.length)return;
  var e0=listEl.querySelector('.gc-e');if(e0)e0.remove();
  var down=listEl.scrollHeight-listEl.scrollTop-listEl.clientHeight<80||after<0;
  list.forEach(function(x){if(shown[x.id])return;shown[x.id]=1;var b=el('div','gc-b '+(x.mine?'me':'th'));b.setAttribute('data-ts',x.ts);
-  if(!x.mine)b.appendChild(el('b','',x.name));b.appendChild(document.createTextNode(x.text));b.appendChild(el('small','',x.t));listEl.appendChild(b);after=Math.max(after,x.id)});
+  if(!x.mine)b.appendChild(el('b','',x.name));
+  if(x.att)b.appendChild(attach(x.att,function(){return down}));
+  if(x.text){var tx=el('div',emojiOnly(x.text)&&!x.att?'gc-big':'',x.text);b.appendChild(tx)}
+  b.appendChild(el('small','',x.t));listEl.appendChild(b);after=Math.max(after,x.id)});
  if(down)listEl.scrollTop=listEl.scrollHeight}
-var again=false;
+
+/* ---------- polling ---------- */
 function done(){busy=false;if(again){again=false;poll()}}
-function poll(){if(busy){again=true;return}busy=true;   /* a refresh asked for while one is running (e.g. right after sending) runs as soon as it finishes */
+function poll(){if(busy){again=true;return}busy=true;
  fetch('/employee/gc/state?after='+after+'&open='+(open&&!document.hidden?1:0),{credentials:'same-origin',cache:'no-store'})
  .then(function(r){return r.json()}).then(function(j){badge(open?0:j.unread);members(j.members);msgs(j.messages,j.now);done()}).catch(function(){done()})}
-function setOpen(v){open=v;pan.hidden=!v;btn.setAttribute('aria-expanded',v?'true':'false');
+function setOpen(v){open=v;pan.hidden=!v;btn.setAttribute('aria-expanded',v?'true':'false');if(!v)emp.hidden=true;
  if(v){badge(0);poll();setTimeout(function(){listEl.scrollTop=listEl.scrollHeight;inp.focus()},50)}}
-function send(){var t=inp.value.trim();if(!t)return;var f=new URLSearchParams();f.set('text',t);inp.value='';
- fetch('/employee/gc/send',{method:'POST',body:f,credentials:'same-origin'}).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
- .then(function(x){if(!x.ok){var e=el('div','gc-e',x.j.error||'Not sent.');listEl.appendChild(e);listEl.scrollTop=listEl.scrollHeight;setTimeout(function(){e.remove()},4000)}poll()}).catch(function(){})}
+
+/* ---------- pending attachment (preview before sending) ---------- */
+function clearPending(){if(pendUrl){URL.revokeObjectURL(pendUrl);pendUrl=null}pending=null;pv.hidden=true;pv.textContent='';fileIn.value='';imgIn.value=''}
+function setPending(f){
+ if(!f)return;
+ if(f.size>MAXF){note('That file is '+fmt(f.size)+' - the limit is 5 MB.');return}
+ if(f.size===0){note('That file is empty.');return}
+ clearPending();pending=f;pv.textContent='';
+ if(f.type&&f.type.indexOf('image/')===0&&f.type!=='image/svg+xml'){pendUrl=URL.createObjectURL(f);var im=el('img');im.src=pendUrl;im.alt='';pv.appendChild(im)}
+ else pv.appendChild(el('span','gc-pi',cp(0x1F4C4)));
+ var n=el('div','gc-pn');n.appendChild(el('b','',f.name||'file'));n.appendChild(el('small','',fmt(f.size)));pv.appendChild(n);
+ var x=el('button','','\u00D7');x.type='button';x.title='Remove';x.setAttribute('aria-label','Remove attachment');x.onclick=clearPending;pv.appendChild(x);
+ pv.hidden=false;inp.focus()}
+
+/* ---------- sending ---------- */
+function send(){
+ var t=inp.value.trim();if((!t&&!pending)||sending)return;
+ sending=true;sendB.disabled=true;emp.hidden=true;
+ var fd=new FormData();fd.append('text',t);if(pending)fd.append('file',pending,pending.name||'file');
+ var keepT=t,keepF=pending;inp.value='';
+ fetch('/employee/gc/send',{method:'POST',body:fd,credentials:'same-origin'})
+ .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}},function(){return {ok:false,j:{error:'Not sent (server error).'}}})})
+ .then(function(x){sending=false;sendB.disabled=false;
+  if(x.ok){clearPending()}else{inp.value=keepT;if(keepF&&!pending)setPending(keepF);note(x.j.error||'Not sent.')}
+  poll();inp.focus()})
+ .catch(function(){sending=false;sendB.disabled=false;inp.value=keepT;note('Not sent - check your connection.')})}
+
+/* ---------- emoji picker ---------- */
+var SETS=[[0x1F600,[0x1F600,0x1F601,0x1F602,0x1F923,0x1F603,0x1F604,0x1F605,0x1F606,0x1F609,0x1F60A,0x1F60B,0x1F60E,0x1F60D,0x1F618,0x1F970,0x1F617,0x1F642,0x1F917,0x1F929,0x1F914,0x1F928,0x1F610,0x1F611,0x1F636,0x1F644,0x1F60F,0x1F623,0x1F625,0x1F62E,0x1F910,0x1F62F,0x1F62A,0x1F62B,0x1F634,0x1F60C,0x1F61B,0x1F61C,0x1F61D,0x1F924,0x1F612,0x1F613,0x1F614,0x1F615,0x1F643,0x1F911,0x1F632,0x1F641,0x1F616,0x1F61E,0x1F61F,0x1F624,0x1F622,0x1F62D,0x1F626,0x1F627,0x1F628,0x1F629,0x1F92F,0x1F62C,0x1F630,0x1F631,0x1F633,0x1F92A,0x1F635,0x1F621,0x1F620,0x1F637,0x1F912,0x1F915,0x1F922,0x1F607,0x1F920,0x1F973]],
+ [0x1F44D,[0x1F44D,0x1F44E,0x1F44C,0x1F91E,0x1F91D,0x1F44F,0x1F64C,0x1F64F,0x1F4AA,0x1F44B,0x1F91A,0x1F449,0x1F448,0x1F446,0x1F447,0x1F44A,0x270A,0x1F91B,0x1F91C,0x1F450,0x1F64B,0x1F926,0x1F937,0x1F645,0x1F646,0x1F64D,0x1F481,0x1F440,0x1F442,0x1F9E0]],
+ [0x2728,[0x1F496,0x1F495,0x1F49B,0x1F499,0x1F49A,0x1F49C,0x1F5A4,0x1F494,0x1F4AF,0x1F525,0x2728,0x1F389,0x1F38A,0x1F381,0x1F388,0x1F31F,0x2B50,0x1F4A1,0x1F4A5,0x1F4A4,0x1F680,0x1F3C6,0x2615,0x1F355,0x1F382,0x2705,0x274C,0x2753,0x2757,0x1F4CC,0x1F4CE,0x1F4C5,0x23F0,0x1F4BC,0x1F4BB,0x1F4DE,0x1F4CA,0x1F4C8,0x1F4DD,0x1F4E7]]];
+var emBuilt=false,emTab=0;
+function insertEmoji(ch){var s=inp.selectionStart,e=inp.selectionEnd,v=inp.value;if(typeof s!=='number'){s=e=v.length}
+ if(v.length+ch.length>500)return;inp.value=v.slice(0,s)+ch+v.slice(e);var p=s+ch.length;inp.focus();try{inp.setSelectionRange(p,p)}catch(x){}}
+function drawGrid(){var g=emp.querySelector('.gc-grid');g.textContent='';SETS[emTab][1].forEach(function(n){var b=el('button','',cp(n));b.type='button';b.onclick=function(){insertEmoji(cp(n))};g.appendChild(b)});
+ Array.prototype.forEach.call(emp.querySelectorAll('.gc-tabs button'),function(b,i){b.className=i===emTab?'on':''})}
+function buildEmoji(){if(emBuilt)return;emBuilt=true;var tabs=el('div','gc-tabs');
+ SETS.forEach(function(s,i){var b=el('button','',cp(s[0]));b.type='button';b.onclick=function(){emTab=i;drawGrid()};tabs.appendChild(b)});
+ emp.appendChild(tabs);emp.appendChild(el('div','gc-grid'));drawGrid()}
+$('gcemb').onclick=function(){buildEmoji();emp.hidden=!emp.hidden;if(!emp.hidden)inp.focus()};
+
+/* ---------- wiring ---------- */
 btn.onclick=function(){setOpen(!open)};
-document.getElementById('gcx').onclick=function(){setOpen(false)};
-document.getElementById('gcs').onclick=send;
+$('gcx').onclick=function(){setOpen(false)};
+$('gcat').onclick=function(){fileIn.click()};
+$('gcim').onclick=function(){imgIn.click()};
+fileIn.onchange=function(){if(fileIn.files&&fileIn.files[0])setPending(fileIn.files[0])};
+imgIn.onchange=function(){if(imgIn.files&&imgIn.files[0])setPending(imgIn.files[0])};
+sendB.onclick=send;
 inp.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();send()}});
-document.addEventListener('keydown',function(e){if(e.key==='Escape'&&open)setOpen(false)});
+inp.addEventListener('paste',function(e){var it=(e.clipboardData&&e.clipboardData.items)||[];
+ for(var i=0;i<it.length;i++){if(it[i].kind==='file'){var f=it[i].getAsFile();if(f){e.preventDefault();setPending(f);return}}}});
+pan.addEventListener('dragover',function(e){e.preventDefault();pan.classList.add('gc-drop')});
+pan.addEventListener('dragleave',function(e){if(e.target===pan)pan.classList.remove('gc-drop')});
+pan.addEventListener('drop',function(e){e.preventDefault();pan.classList.remove('gc-drop');if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0])setPending(e.dataTransfer.files[0])});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&open){if(!emp.hidden)emp.hidden=true;else setOpen(false)}});
 document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()});
 poll();
 (function loop(){setTimeout(function(){if(!document.hidden||open)poll();loop()},open?2000:6000)})();
@@ -2505,14 +2616,20 @@ WELCOME = """<style>
 def admin_welcome():
     return page(WELCOME, title="Welcome", wl_gender="male")
 
-# ---------------------------------------------------------------- employee GROUP CHAT (Update80)
+# ---------------------------------------------------------------- employee GROUP CHAT (Update80 / Update82)
 # ONE group = every employee who is online right now. Nobody is added by hand: coming online joins the group, going offline leaves it.
-# The chat is a floating icon (bottom-right) on every employee page. Messages live in memory only and are deleted GC_TTL seconds (1 hour) after sending.
+# The chat is a floating icon (bottom-right) on every employee page. Messages AND attachments live in memory only and are deleted GC_TTL seconds
+# (1 hour) after sending. Update82: files, images/photos and emoji.
 _gc, _gc_read, _gc_seq, _gc_lock = [], {}, [0], threading.Lock()
 GC_MAX_LEN, GC_KEEP, GC_TTL = 500, 3000, 3600
+GC_MAX_FILE  = 5 * 1024 * 1024        # largest single attachment
+GC_MAX_STORE = 150 * 1024 * 1024      # all attachments together; the oldest ones are dropped first when this is exceeded
+# Never accept programs / scripts / web pages: they could be dangerous when opened. Everything else (documents, sheets, PDFs, zips, photos...) is fine.
+GC_BLOCKED_EXT = {"exe", "bat", "cmd", "com", "scr", "msi", "msp", "dll", "js", "mjs", "vbs", "vbe", "wsf", "ps1", "psm1", "sh", "bash", "jar", "apk",
+                  "app", "pif", "cpl", "reg", "lnk", "hta", "html", "htm", "xhtml", "svg", "php", "py", "pyc", "iso", "dmg"}
 
 def _gc_purge():
-    """Delete messages older than 1 hour (caller holds _gc_lock)."""
+    """Delete messages (and their attachments) older than 1 hour (caller holds _gc_lock)."""
     cut = time.time() - GC_TTL
     _gc[:] = [m for m in _gc if m["ts"] > cut]
 
@@ -2523,6 +2640,24 @@ def _gc_sweeper():
             with _gc_lock: _gc_purge()
         except Exception: pass
 threading.Thread(target=_gc_sweeper, daemon=True).start()
+
+def _gc_img_mime(data):
+    """Real image type from the file's first bytes (the browser-supplied type is never trusted). Only safe raster formats count as images."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n": return "image/png"
+    if data[:3] == b"\xff\xd8\xff": return "image/jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"): return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP": return "image/webp"
+    return ""
+
+def _gc_clean_name(n):
+    n = os.path.basename(str(n or "").replace("\\", "/"))
+    n = "".join(c for c in n if c.isprintable() and c not in '<>:"|?*').strip(" .")
+    return (n or "file")[:120]
+
+def _gc_att_pick(m):
+    a = m.get("att")
+    if not a: return None
+    return dict(fid=a["fid"], name=a["name"], kind=a["kind"], size=a["size"], gone=a["data"] is None)
 
 @app.route("/employee/gc/state")
 @need("employee")
@@ -2540,25 +2675,62 @@ def gc_state():
         if me not in _gc_read or request.args.get("open") == "1": _gc_read[me] = top   # just joined: nothing unread; panel open: all read
         unread = sum(1 for m in _gc if m["frm"] != me and m["id"] > _gc_read[me])
         conv = [m for m in _gc if m["id"] > after][-200:]
-    pick = lambda m: dict(id=m["id"], name=m["name"], text=m["text"], t=m["t"], ts=m["ts"], mine=(m["frm"] == me))
+        out = [dict(id=m["id"], name=m["name"], text=m["text"], t=m["t"], ts=m["ts"], mine=(m["frm"] == me), att=_gc_att_pick(m)) for m in conv]
     return jsonify(members=[dict(id=r["id"], name=r["name"], status=r["status"], me=(r["id"] == me)) for r in members],
-                   unread=unread, now=time.time(), messages=[pick(m) for m in conv])
+                   unread=unread, now=time.time(), messages=out)
 
 @app.route("/employee/gc/send", methods=["POST"])
 @need("employee")
 def gc_send():
     me = str(session.get("emp_id", ""))
+    if request.content_length and request.content_length > GC_MAX_FILE + 256 * 1024:      # refuse before reading the upload
+        return jsonify(ok=False, error="That file is too large - the limit is 5 MB."), 413
     text = (request.form.get("text") or "").strip()[:GC_MAX_LEN]
-    if not text: return jsonify(ok=False, error="Type a message first."), 400
+    up = request.files.get("file")
+    att = None
+    if up is not None and (up.filename or "").strip():
+        data = up.read(GC_MAX_FILE + 1)
+        if not data: return jsonify(ok=False, error="That file is empty."), 400
+        if len(data) > GC_MAX_FILE: return jsonify(ok=False, error="That file is too large - the limit is 5 MB."), 413
+        name = _gc_clean_name(up.filename)
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        if ext in GC_BLOCKED_EXT:
+            return jsonify(ok=False, error="'." + ext + "' files can't be sent in the chat (programs, scripts and web pages are blocked)."), 415
+        mime = _gc_img_mime(data)
+        att = dict(fid=uuid.uuid4().hex, name=name, kind="image" if mime else "file", mime=mime or "application/octet-stream", size=len(data), data=data)
+    if not text and not att: return jsonify(ok=False, error="Type a message or attach a file first."), 400
     if me not in {r["id"] for r in online_list()}: return jsonify(ok=False, error="You are offline - message not sent."), 409
     with _gc_lock:
         _gc_purge()
         _gc_seq[0] += 1
-        _gc.append(dict(id=_gc_seq[0], frm=me, name=str(session.get("name", "")), text=text,
+        _gc.append(dict(id=_gc_seq[0], frm=me, name=str(session.get("name", "")), text=text, att=att,
                         t=now_local().strftime("%I:%M %p"), ts=time.time()))
         del _gc[:-GC_KEEP]
         _gc_read[me] = _gc_seq[0]
+        total = sum(len(m["att"]["data"]) for m in _gc if m.get("att") and m["att"]["data"] is not None)
+        for m in _gc:                                                       # over the storage cap: free the oldest attachments first
+            if total <= GC_MAX_STORE: break
+            a = m.get("att")
+            if a and a["data"] is not None and m["id"] != _gc_seq[0]:
+                total -= len(a["data"]); a["data"] = None
     return jsonify(ok=True)
+
+@app.route("/employee/gc/file/<fid>")
+@need("employee")
+def gc_file(fid):
+    """Serve one chat attachment. Photos display inline (verified raster images only); every other file is forced to download, never opened by the browser."""
+    with _gc_lock:
+        _gc_purge()
+        a = next((m["att"] for m in _gc if m.get("att") and m["att"]["fid"] == fid), None)
+        data = a["data"] if a else None
+        meta = dict(a) if a else None
+    if not meta or data is None: abort(404)
+    inline = meta["kind"] == "image" and request.args.get("dl") != "1"
+    resp = send_file(io.BytesIO(data), mimetype=meta["mime"] if meta["kind"] == "image" else "application/octet-stream",
+                     as_attachment=not inline, download_name=meta["name"])
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+    return resp
 
 @app.route("/employee/ping")
 @need("employee")

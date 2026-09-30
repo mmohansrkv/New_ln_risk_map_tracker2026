@@ -48,6 +48,9 @@ Access rules (Update59):
     now - joining on login/coming online, removed on logout/offline - messages auto-delete after 1 hour, no audio in the chat.
     (2) Music only on the Welcome Pages (employee + admin): after the welcome animation the Tamil bamboo flute (Pullangu Kuzhal) plays, flute only.
     No music on login pages, the Employee pages or the Admin pages.
+  * Update78: Welcome Page opens first for Admin and Employee, no 'Continue' button, opens the Admin/Employee page by itself when it ends.
+    Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
+    melody, different from the earlier Mohanam tune), Welcome Page only.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -1272,18 +1275,20 @@ function poll(){fetch('/admin/notify/poll?since='+since+'&first='+first,{credent
 poll();setInterval(poll,15000)})();
 </script>{% endif %}
 {% if session.role=='employee' %}<script>(function(){function p(){fetch('/employee/ping',{credentials:'same-origin',cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();</script>{% endif %}
-{% if session.role=='employee' and request.path!='/employee/welcome' %}<script>
+{% if session.role=='employee' and request.path!='/employee/welcome' %}{% if request.path!='/employee/group-chat' %}<a id="chatfab" href="/employee/group-chat" title="Chat" aria-label="Chat"
+ style="position:fixed;right:22px;bottom:22px;z-index:98;width:54px;height:54px;border-radius:50%;background:#4f5bd5;color:#fff;display:flex;align-items:center;justify-content:center;font-size:25px;text-decoration:none;box-shadow:0 8px 22px #4f5bd566">&#128172;<span id="chatfab_n" style="display:none;position:absolute;top:-4px;right:-4px;background:#e5484d;color:#fff;border-radius:10px;font-size:11px;font-weight:700;padding:1px 6px;min-width:10px;text-align:center"></span></a>{% endif %}<script>
 (function(){
 var root=document.getElementById('chat_root'),busy=false,base=document.title,shown={},after=-1;
 function ss(k,v){try{if(v===undefined)return sessionStorage.getItem(k);sessionStorage.setItem(k,v)}catch(e){return null}}
 var notified=parseInt(ss('gchatNotified')||'-1',10);if(isNaN(notified))notified=-1;
 function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e}
-var tw=el('div');tw.style.cssText='position:fixed;bottom:16px;right:16px;z-index:99;display:flex;flex-direction:column;gap:8px;max-width:320px';document.body.appendChild(tw);
+var tw=el('div');tw.style.cssText='position:fixed;bottom:88px;right:16px;z-index:99;display:flex;flex-direction:column;gap:8px;max-width:320px';document.body.appendChild(tw);
 function toast(m){var d=el('div','toast','\\uD83D\\uDCAC '+m.name+': '+(m.text.length>60?m.text.slice(0,60)+'...':m.text));d.style.cursor='pointer';
  d.onclick=function(){window.location='/employee/group-chat'};
  tw.appendChild(d);setTimeout(function(){d.remove()},8000)}
 function badge(n){var a=document.querySelector('a[href="/employee/group-chat"]');
  if(a){if(!a.getAttribute('data-l'))a.setAttribute('data-l',a.textContent.trim());a.textContent=a.getAttribute('data-l')+(n?' ('+n+')':'')}
+ var fb=document.getElementById('chatfab_n');if(fb){fb.textContent=n;fb.style.display=n?'block':'none'}
  document.title=(n?'('+n+') New message - ':'')+base}
 function drawMembers(list){var box=document.getElementById('chl');box.textContent='';document.getElementById('chn').textContent=list.length;document.getElementById('cht_c').textContent=list.length+' online';
  list.forEach(function(e){var r=el('div','chp');r.appendChild(el('span','dot'+(e.status==='Away'?' away':'')));
@@ -1323,7 +1328,7 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
               ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log")],
-    "employee": [("/employee", "Daily entry"), ("/employee/group-chat", "Group Chat"), ("/employee/leave", "Leave & Permission"),
+    "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
 
@@ -2298,15 +2303,15 @@ FLUTE_ENGINE = r"""
 /* Update71: solo Tamil bamboo flute (Pullangu Kuzhal). Raga Mohanam (S R2 G3 P D2), slow and soft, with breathy attack,
    gentle vibrato that blooms on long notes, gamaka glides between swaras and breath pauses between phrases.
    ONLY the flute voice exists here: no vocals, no tanpura drone, no percussion. */
-var SA=233,BPM=66,SPB=60/BPM/2;
-var RAT=[1,9/8,5/4,3/2,5/3];   /* Mohanam: S R2 G3 P D2 */
-function fr(i){var o=Math.floor(i/5),d=((i%5)+5)%5;return SA*2*RAT[d]*Math.pow(2,o)}
-/* Original lilting Pullangu Kuzhal melody (not a copy of any film song): [swara index, length in half-beats, ornament]; null = breath pause; ornament 1 = quick grace note */
-var PH=[[[2,2],[3,2],[4,3,1],[3,1],[2,2],[3,2],[2,2],[1,2],[0,4],[null,2]],
-        [[0,2],[1,2],[2,3],[1,1],[2,2],[3,2],[4,4],[3,2],[2,2],[1,2],[2,4],[null,2]],
-        [[4,2],[5,3,1],[4,1],[5,2],[6,2],[5,2],[4,2],[3,4],[4,2],[3,2],[2,4],[null,2]],
-        [[3,2],[2,2],[1,3],[0,1],[1,2],[2,2],[1,2],[0,2],[-1,2],[0,6],[null,4]]];
-var ORDER=[0,1,0,1,2,2,3,0,1,3];
+var SA=247,BPM=76,SPB=60/BPM/2;
+var RAT=[1,9/8,5/4,45/32,3/2,5/3,15/8];   /* Kalyani: S R2 G3 M2 P D2 N3 */
+function fr(i){var o=Math.floor(i/7),d=((i%7)+7)%7;return SA*2*RAT[d]*Math.pow(2,o)}
+/* NEW original Tamil bamboo-flute (Pullangu Kuzhal) BGM: [swara index, length in half-beats, ornament]; null = breath pause; ornament 1 = quick grace note */
+var PH=[[[4,4],[5,3],[6,1],[7,6,1],[6,2],[5,2],[4,4],[null,2]],
+        [[2,2],[4,2],[5,2,1],[4,2],[2,2],[1,2],[2,2],[4,2],[6,2,1],[5,2],[4,2],[2,4],[null,2]],
+        [[7,2],[8,2],[9,3,1],[8,1],[7,2],[6,2],[7,2],[5,2],[6,2],[4,4],[3,2],[4,2],[null,2]],
+        [[9,2],[8,2],[7,2],[6,2],[5,2],[4,2],[3,2],[4,2],[2,3,1],[1,1],[0,6],[null,4]]];
+var ORDER=[0,1,2,1,3,2,3];
 var SEQ=[];
 (function(){var pos=0;ORDER.forEach(function(p){PH[p].forEach(function(n){SEQ.push([pos,n[0],n[1],n[2]||0]);pos+=n[1]})});SEQ.total=pos})();
 var byStep={};SEQ.forEach(function(n){byStep[n[0]]=n});
@@ -2376,15 +2381,15 @@ WELCOME = """<style>
 """ + WL_SCENE.replace('{{role}}', "{{session.role}}").replace("role=='admin'", "session.role=='admin'") + """
  <div class="wl-card"><h1>Welcome, {{session.name}}</h1>
  <p>{{ 'Syncing live data from the server' if session.role=='admin' else 'Securely connecting to the server' }}&hellip;</p>
- <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div><div class="wl-st" style="margin-top:6px;font-weight:500"><span id="wl_msg">&nbsp;</span></div><a id="wl_skip" href="{{ '/admin/summary' if session.role=='admin' else '/employee' }}" style="display:none;margin-top:12px;font-size:12px;color:#5b4fb0">Continue &rarr;</a></div>
+ <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div><div class="wl-st" style="margin-top:6px;font-weight:500"><span id="wl_msg">&nbsp;</span></div></div>
 </div>
 <script>
 (function(){
  var ROLE={{session.role|tojson}}, NAME={{session.name|tojson}};
- var ANIM_MS=4000, PLAY_MS=10000;                      /* welcome animation first, then the flute plays for PLAY_MS before the dashboard opens */
+ var ANIM_MS=4000, PLAY_MS=12000;                      /* welcome animation first, then the flute plays for PLAY_MS before the dashboard opens */
  var DEST={{ ('/admin/summary' if session.role=='admin' else '/employee') | tojson }};
 
- /* Update77: the Welcome Page is the ONLY place with music: Tamil bamboo flute (Pullangu Kuzhal), instrumental, after the animation. */
+ /* Update78: the Welcome Page is the ONLY place with music: NEW Tamil bamboo flute (Pullangu Kuzhal) BGM, instrumental, after the animation. */
  var AC=window.AudioContext||window.webkitAudioContext;
  var ctx=null,master=null,verb=null,timer=null,muted=false,next=0,step=0,noiseBuf=null,lastF=0;
  var btn={setAttribute:function(){}},bi={},bt={};
@@ -2400,7 +2405,6 @@ WELCOME = """<style>
  function msg(t){var m=document.getElementById('wl_msg');if(m)m.textContent=t}
  setTimeout(function(){                                /* animation finished -> flute starts */
   ready=true;
-  var k=document.getElementById('wl_skip');if(k)k.style.display='inline-block';
   if(AC){msg('\u266A Tamil flute music');try{go()}catch(e){}
    setTimeout(function(){if(!ctx||ctx.state!=='running')msg('\u266A Move the mouse to play the flute music')},800)}
  },ANIM_MS);
@@ -2411,7 +2415,7 @@ WELCOME = """<style>
  },ANIM_MS+PLAY_MS);
 })();
 </script>
-<noscript><meta http-equiv="refresh" content="14;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
+<noscript><meta http-equiv="refresh" content="16;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
 
 @app.route("/admin/welcome")
 @need("admin")

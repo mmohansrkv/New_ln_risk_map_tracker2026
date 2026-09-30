@@ -44,6 +44,10 @@ Access rules (Update59):
   * Update76: Chat = floating chat button on every employee page + sidebar link; messages live 1 hour only (auto-deleted every minute and on
     every access); Chat section has NO audio (the flute does not play there). New original Tamil bamboo-flute (Pullangu Kuzhal) instrumental
     for the Employee Page, flute only.
+  * Update77: (1) The floating Chat button and the 1-to-1 chat are gone. Sidebar 'Group Chat': ONE group made of the employees who are online right
+    now - joining on login/coming online, removed on logout/offline - messages auto-delete after 1 hour, no audio in the chat.
+    (2) Music only on the Welcome Pages (employee + admin): after the welcome animation the Tamil bamboo flute (Pullangu Kuzhal) plays, flute only.
+    No music on login pages, the Employee pages or the Admin pages.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -260,7 +264,7 @@ def _idle_auto_logout():
             session.clear()
             flash(f"You were logged out automatically after {SESSION_IDLE_MINUTES} minutes of inactivity.")
             return redirect("/admin/login" if was_admin else "/employee/login")
-        if request.endpoint in ("employee_ping", "chat_state"):          # heartbeat: shows "online" but must NOT reset the idle timer
+        if request.endpoint in ("employee_ping", "group_state"):          # heartbeat: shows "online" but must NOT reset the idle timer
             online_set(session.get("att_id"), session.get("att_eid"), session.get("att_name"), active=last)
             return
         session["last_seen"] = now_ts
@@ -1268,96 +1272,49 @@ function poll(){fetch('/admin/notify/poll?since='+since+'&first='+first,{credent
 poll();setInterval(poll,15000)})();
 </script>{% endif %}
 {% if session.role=='employee' %}<script>(function(){function p(){fetch('/employee/ping',{credentials:'same-origin',cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();</script>{% endif %}
-{% if session.role=='employee' and request.path!='/employee/welcome' %}{% if request.path!='/employee/chat' %}<a id="chatfab" href="/employee/chat" title="Chat with online employees" aria-label="Chat"
- style="position:fixed;right:22px;bottom:22px;z-index:98;width:54px;height:54px;border-radius:50%;background:#4f5bd5;color:#fff;display:flex;align-items:center;justify-content:center;font-size:25px;text-decoration:none;box-shadow:0 8px 22px #4f5bd566">&#128172;<span id="chatfab_n" style="display:none;position:absolute;top:-4px;right:-4px;background:#e5484d;color:#fff;border-radius:10px;font-size:11px;font-weight:700;padding:1px 6px;min-width:10px;text-align:center"></span></a>{% endif %}<script>
+{% if session.role=='employee' and request.path!='/employee/welcome' %}<script>
 (function(){
-var root=document.getElementById('chat_root'),peer=null,peerName='',after=-1,busy=false,base=document.title,shown={};
+var root=document.getElementById('chat_root'),busy=false,base=document.title,shown={},after=-1;
 function ss(k,v){try{if(v===undefined)return sessionStorage.getItem(k);sessionStorage.setItem(k,v)}catch(e){return null}}
-var notified=parseInt(ss('chatNotified')||'-1',10);if(isNaN(notified))notified=-1;
+var notified=parseInt(ss('gchatNotified')||'-1',10);if(isNaN(notified))notified=-1;
 function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e}
-var tw=el('div');tw.style.cssText='position:fixed;bottom:88px;right:16px;z-index:99;display:flex;flex-direction:column;gap:8px;max-width:320px';document.body.appendChild(tw);
+var tw=el('div');tw.style.cssText='position:fixed;bottom:16px;right:16px;z-index:99;display:flex;flex-direction:column;gap:8px;max-width:320px';document.body.appendChild(tw);
 function toast(m){var d=el('div','toast','\\uD83D\\uDCAC '+m.name+': '+(m.text.length>60?m.text.slice(0,60)+'...':m.text));d.style.cursor='pointer';
- d.onclick=function(){d.remove();if(root)pick(m.frm,m.name);else window.location='/employee/chat?with='+encodeURIComponent(m.frm)};
+ d.onclick=function(){window.location='/employee/group-chat'};
  tw.appendChild(d);setTimeout(function(){d.remove()},8000)}
-function badge(n){var a=document.querySelector('a[href="/employee/chat"]');
+function badge(n){var a=document.querySelector('a[href="/employee/group-chat"]');
  if(a){if(!a.getAttribute('data-l'))a.setAttribute('data-l',a.textContent.trim());a.textContent=a.getAttribute('data-l')+(n?' ('+n+')':'')}
- var fb=document.getElementById('chatfab_n');if(fb){fb.textContent=n;fb.style.display=n?'block':'none'}
  document.title=(n?'('+n+') New message - ':'')+base}
-function status(st){var s=document.getElementById('cht_s');if(!s)return;s.textContent='';
- var p=el('span','pill '+(st==='Offline'?'out':(st==='Away'?'act':'in')),'\\u25CF '+(st==='Away'?'Online (away)':st));s.appendChild(p)}
-function lock(off){document.getElementById('chi').disabled=off;document.getElementById('chs').disabled=off;
- document.getElementById('chi').placeholder=off?'This employee is offline':'Type a message...'}
-function pick(id,name){peer=id;peerName=name||id;after=-1;shown={};document.getElementById('cht_n').textContent=peerName;
- var m=document.getElementById('chm');m.textContent='';status('Online');lock(false);poll();setTimeout(function(){document.getElementById('chi').focus()},50)}
-function drawList(list,unread){var box=document.getElementById('chl');box.textContent='';document.getElementById('chn').textContent=list.length;
- if(!list.length){box.appendChild(el('div','chempty','No other employees are online right now.'));return}
- list.forEach(function(e){var r=el('div','chp'+(e.id===peer?' sel':''));r.appendChild(el('span','dot'+(e.status==='Away'?' away':'')));
-  var n=el('div','nm');n.appendChild(el('b','',e.name));n.appendChild(el('small','',e.id+' \\u00B7 '+(e.status==='Away'?'Online (away)':'Online')));r.appendChild(n);
-  if(unread[e.id])r.appendChild(el('span','bd',unread[e.id]));
-  r.onclick=function(){pick(e.id,e.name)};box.appendChild(r)})}
+function drawMembers(list){var box=document.getElementById('chl');box.textContent='';document.getElementById('chn').textContent=list.length;document.getElementById('cht_c').textContent=list.length+' online';
+ list.forEach(function(e){var r=el('div','chp');r.appendChild(el('span','dot'+(e.status==='Away'?' away':'')));
+  var n=el('div','nm');n.appendChild(el('b','',e.name+(e.me?' (You)':'')));n.appendChild(el('small','',e.id+' \\u00B7 '+(e.status==='Away'?'Online (away)':'Online')));r.appendChild(n);box.appendChild(r)})}
 function expire(now){var m=document.getElementById('chm');if(!m)return;   /* messages older than 1 hour disappear from the screen too */
  Array.prototype.slice.call(m.querySelectorAll('.bub')).forEach(function(b){if(now-parseFloat(b.getAttribute('data-ts'))>3600)b.remove()})}
 function drawMsgs(list){var m=document.getElementById('chm');if(!list.length)return;
+ var e0=m.querySelector('.chempty');if(e0)e0.remove();
  var down=m.scrollHeight-m.scrollTop-m.clientHeight<80||after<0;
- list.forEach(function(x){if(shown[x.id])return;shown[x.id]=1;var b=el('div','bub '+(x.mine?'me':'th'),x.text);b.setAttribute('data-ts',x.ts);b.appendChild(el('small','',x.t));m.appendChild(b);after=Math.max(after,x.id)});
+ list.forEach(function(x){if(shown[x.id])return;shown[x.id]=1;var b=el('div','bub '+(x.mine?'me':'th'));b.setAttribute('data-ts',x.ts);
+  if(!x.mine)b.appendChild(el('b','',x.name));b.appendChild(document.createTextNode(x.text));b.appendChild(el('small','',x.t));m.appendChild(b);after=Math.max(after,x.id)});
  if(down)m.scrollTop=m.scrollHeight}
 function apply(j){
  badge(j.total);
- j.incoming.forEach(function(m){if(!(root&&peer===m.frm&&!document.hidden))toast(m)});
- if(j.latest>notified||notified<0){notified=j.latest;ss('chatNotified',String(notified))}
+ if(!(root&&!document.hidden))j.incoming.forEach(toast);
+ if(j.latest>notified||notified<0){notified=j.latest;ss('gchatNotified',String(notified))}
  if(!root)return;
- drawList(j.online,j.unread);expire(j.now);
- if(peer){status(j.peer_status);lock(j.peer_status==='Offline');if(j.peer_name)document.getElementById('cht_n').textContent=j.peer_name;drawMsgs(j.messages)}}
+ drawMembers(j.members);expire(j.now);drawMsgs(j.messages)}
 function poll(){if(busy)return;busy=true;
- var q='/employee/chat/state?since='+notified+(root&&peer?'&with='+encodeURIComponent(peer)+'&after='+after+'&vis='+(document.hidden?0:1):'');
+ var q='/employee/group-chat/state?since='+notified+(root?'&after='+after+'&vis='+(document.hidden?0:1):'');
  fetch(q,{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(j){busy=false;apply(j)}).catch(function(){busy=false})}
-function send(){var i=document.getElementById('chi'),t=i.value.trim();if(!t||!peer)return;
- var f=new URLSearchParams();f.set('to',peer);f.set('text',t);i.value='';
- fetch('/employee/chat/send',{method:'POST',body:f,credentials:'same-origin'}).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
-  .then(function(x){if(!x.ok){var m=document.getElementById('chm');var n=el('div','chempty',x.j.error||'Not sent.');m.appendChild(n);m.scrollTop=m.scrollHeight}poll()}).catch(function(){})}
+function send(){var i=document.getElementById('chi'),t=i.value.trim();if(!t)return;
+ var f=new URLSearchParams();f.set('text',t);i.value='';
+ fetch('/employee/group-chat/send',{method:'POST',body:f,credentials:'same-origin'}).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
+  .then(function(x){if(!x.ok){var m=document.getElementById('chm');m.appendChild(el('div','chempty',x.j.error||'Not sent.'));m.scrollTop=m.scrollHeight}poll()}).catch(function(){})}
 if(root){document.getElementById('chs').onclick=send;
  document.getElementById('chi').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();send()}});
- var w=new URLSearchParams(location.search).get('with');if(w){peer=w;peerName=w;document.getElementById('cht_n').textContent=w;lock(false)}}
+ document.getElementById('chi').disabled=false;document.getElementById('chs').disabled=false}
 poll();
 (function loop(){setTimeout(function(){if(!document.hidden||!root)poll();loop()},root?2000:5000)})();
 document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()});
-})();
-</script>{% endif %}
-{% if session.role=='employee' and request.path!='/employee/welcome' and not request.path.startswith('/employee/chat') %}<button id="bgm" type="button" aria-label="Turn background music off" title="Background music (optional mute)" hidden>&#128266;</button><script>
-(function(){
-/* Update71: Employee-page background music = solo Tamil bamboo flute (Pullangu Kuzhal), raga Mohanam, synthesised live - no audio file.
-   NEVER starts by itself: it starts when the employee moves the mouse anywhere on the page (click / key / touch also work).
-   No button needed; the speaker button is only an optional mute. Stops on logout / when the tab is hidden. */
-try{
-var ADMIN=false,AC=window.AudioContext||window.webkitAudioContext;
-if(!AC)return;
-var btn=document.getElementById('bgm'),bi=btn,bt={};
-var ctx=null,master=null,verb=null,timer=null,muted=false,next=0,step=0,noiseBuf=null,lastF=0;
-function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
-function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
-{{ music_engine|safe }}
-var mEv=['mousemove','pointermove','pointerdown','keydown','touchstart'];
-function onUser(){
- if(muted)return;
- try{go()}catch(e){}
- if(ctx&&ctx.state==='running'){mEv.forEach(function(t){document.removeEventListener(t,onUser,true)})}
-}
-function init(){
- muted=get('bgmMuted')==='1';
- if(btn){btn.hidden=false;icon();btn.addEventListener('click',function(){
-   muted=!muted;put('bgmMuted',muted?'1':'0');icon();
-   if(muted)stopAll();else{go();mEv.forEach(function(t){document.addEventListener(t,onUser,true)})}})}
- mEv.forEach(function(t){document.addEventListener(t,onUser,true)});   /* wait for the mouse - nothing plays before that */
-}
-document.addEventListener('visibilitychange',function(){
- if(!ctx)return;
- if(document.hidden){if(timer){clearInterval(timer);timer=null}ctx.suspend&&ctx.suspend()}
- else if(!muted){ctx.resume&&ctx.resume().then(function(){if(!timer){next=ctx.currentTime+0.15;timer=setInterval(sched,150)}})}});
-window.addEventListener('pagehide',function(){stopAll();if(ctx&&ctx.close)ctx.close()});
-document.addEventListener('click',function(e){var l=e.target.closest&&e.target.closest('a[href="/logout"]');if(l)stopAll()},true);   /* stop the moment Logout is clicked */
-function start(){setTimeout(init,300)}
-if(document.readyState==='complete')start();else window.addEventListener('load',start);
-}catch(e){/* audio unavailable: the page works normally without music */}
 })();
 </script>{% endif %}
 </body></html>"""
@@ -1366,7 +1323,7 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
               ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log")],
-    "employee": [("/employee", "Daily entry"), ("/employee/chat", "Chat"), ("/employee/leave", "Leave & Permission"),
+    "employee": [("/employee", "Daily entry"), ("/employee/group-chat", "Group Chat"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
 
@@ -1472,7 +1429,7 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
   }
 })();
 </script>
-{% if role=='admin' %}<button id="lgm" type="button" aria-label="Turn music off" title="Background music" hidden><span id="lgm_i">&#128266;</span><span id="lgm_t">Music on</span></button>{% endif %}
+
 <script>
 (function(){
 /* Update67: Tamil-style background music, synthesised live with Web Audio (no audio file, nothing to download).
@@ -2419,147 +2376,136 @@ WELCOME = """<style>
 """ + WL_SCENE.replace('{{role}}', "{{session.role}}").replace("role=='admin'", "session.role=='admin'") + """
  <div class="wl-card"><h1>Welcome, {{session.name}}</h1>
  <p>{{ 'Syncing live data from the server' if session.role=='admin' else 'Securely connecting to the server' }}&hellip;</p>
- <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div><div class="wl-st" style="margin-top:6px;font-weight:500">{% if session.role=='admin' %}&#9834; Move the mouse to play music{% endif %}</div></div>
+ <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div><div class="wl-st" style="margin-top:6px;font-weight:500"><span id="wl_msg">&nbsp;</span></div><a id="wl_skip" href="{{ '/admin/summary' if session.role=='admin' else '/employee' }}" style="display:none;margin-top:12px;font-size:12px;color:#5b4fb0">Continue &rarr;</a></div>
 </div>
 <script>
 (function(){
  var ROLE={{session.role|tojson}}, NAME={{session.name|tojson}};
- var WL_MS=4000;                                       /* total time the welcome page is shown */
+ var ANIM_MS=4000, PLAY_MS=10000;                      /* welcome animation first, then the flute plays for PLAY_MS before the dashboard opens */
+ var DEST={{ ('/admin/summary' if session.role=='admin' else '/employee') | tojson }};
 
- /* Update75: the EMPLOYEE welcome page has NO audio at all (no voice, no music). Only the animation runs, then the dashboard opens.
-    The ADMIN welcome page keeps its existing behaviour (Tamil-style music only after the mouse moves). */
+ /* Update77: the Welcome Page is the ONLY place with music: Tamil bamboo flute (Pullangu Kuzhal), instrumental, after the animation. */
  var AC=window.AudioContext||window.webkitAudioContext;
- var ADMIN=(ROLE==='admin');
  var ctx=null,master=null,verb=null,timer=null,muted=false,next=0,step=0,noiseBuf=null,lastF=0;
  var btn={setAttribute:function(){}},bi={},bt={};
  function get(k){return null}function put(k,v){}
- """ + "{% if session.role=='admin' %}" + WL_ENGINE + """
- var mEv=['mousemove','pointermove','pointerdown','keydown','touchstart'];
+ """ + FLUTE_ENGINE + """
+ var ready=false,mEv=['mousemove','pointermove','pointerdown','keydown','touchstart'];
  function onUser(){
-  if(!AC)return;
+  if(!AC||!ready)return;
   try{go()}catch(e){}
   if(ctx&&ctx.state==='running'){mEv.forEach(function(t){document.removeEventListener(t,onUser,true)})}
  }
  mEv.forEach(function(t){document.addEventListener(t,onUser,true)});
- {% endif %}""" + """
-
- setTimeout(function(){                                /* welcome animation, then move on */
+ function msg(t){var m=document.getElementById('wl_msg');if(m)m.textContent=t}
+ setTimeout(function(){                                /* animation finished -> flute starts */
+  ready=true;
+  var k=document.getElementById('wl_skip');if(k)k.style.display='inline-block';
+  if(AC){msg('\u266A Tamil flute music');try{go()}catch(e){}
+   setTimeout(function(){if(!ctx||ctx.state!=='running')msg('\u266A Move the mouse to play the flute music')},800)}
+ },ANIM_MS);
+ setTimeout(function(){try{stopAll()}catch(e){}},ANIM_MS+PLAY_MS-500);   /* fade out just before leaving */
+ setTimeout(function(){
   try{ if(timer)clearInterval(timer); if(ctx){ master.gain.cancelScheduledValues(ctx.currentTime); master.gain.value=0; ctx.close(); } }catch(e){}
-  window.location.replace({{ ('/admin/summary' if session.role=='admin' else '/employee') | tojson }});
- },WL_MS);
+  window.location.replace(DEST);
+ },ANIM_MS+PLAY_MS);
 })();
 </script>
-<noscript><meta http-equiv="refresh" content="4;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
+<noscript><meta http-equiv="refresh" content="14;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
 
 @app.route("/admin/welcome")
 @need("admin")
 def admin_welcome():
     return page(WELCOME, title="Welcome", wl_gender="male")
 
-# ---------------------------------------------------------------- employee chat (Update74)
-_chat, _chat_read, _chat_seq, _chat_lock = [], {}, [0], threading.Lock()   # in memory (like the online list): cleared on restart
-CHAT_MAX_LEN, CHAT_KEEP = 500, 3000
-CHAT_TTL = 3600     # seconds: every message is deleted 1 hour after it was sent (nothing is kept permanently)
+# ---------------------------------------------------------------- employee GROUP chat (Update77)
+# One group = every employee who is online right now. Nobody is "added" by hand: coming online joins the group, going offline leaves it.
+# Messages live in memory only and are deleted CHAT_TTL seconds (1 hour) after they were sent.
+_gchat, _gread, _gseq, _glock = [], {}, [0], threading.Lock()
+CHAT_MAX_LEN, CHAT_KEEP, CHAT_TTL = 500, 3000, 3600
 
-def _chat_purge():
-    """Drop messages older than CHAT_TTL (caller holds _chat_lock) and read-markers of conversations that no longer exist."""
+def _gpurge():
+    """Delete messages older than 1 hour (caller holds _glock)."""
     cut = time.time() - CHAT_TTL
-    _chat[:] = [m for m in _chat if m["ts"] > cut]
-    pairs = {(m["to"], m["frm"]) for m in _chat} | {(m["frm"], m["to"]) for m in _chat}
-    for k in [k for k in _chat_read if k not in pairs]: del _chat_read[k]
+    _gchat[:] = [m for m in _gchat if m["ts"] > cut]
 
-def _chat_sweeper():
+def _gsweeper():
     while True:
         time.sleep(60)
         try:
-            with _chat_lock: _chat_purge()
+            with _glock: _gpurge()
         except Exception: pass
-threading.Thread(target=_chat_sweeper, daemon=True).start()
+threading.Thread(target=_gsweeper, daemon=True).start()
 
-def _chat_name(eid, fallback=""):
-    for r in online_list():
-        if r["id"] == eid: return r["name"]
-    for m in reversed(_chat):
-        if m["frm"] == eid: return m["frm_name"]
-        if m["to"] == eid: return m["to_name"]
-    return fallback or eid
-
-@app.route("/employee/chat")
+@app.route("/employee/group-chat")
 @need("employee")
-def employee_chat():
-    return page(CHAT, title="Chat")
+def employee_group_chat():
+    return page(CHAT, title="Group Chat")
 
-@app.route("/employee/chat/state")
+@app.route("/employee/group-chat/state")
 @need("employee")
-def chat_state():
-    """One poll answers everything: who is online, unread counts, new incoming messages (for pop-ups)
-    and - when a chat is open - the new messages of that conversation."""
-    me, peer = str(session.get("emp_id", "")), (request.args.get("with") or "").strip()
+def group_state():
+    """One poll: current group members (= online employees), unread count, new messages for pop-ups, and the group's messages."""
+    me = str(session.get("emp_id", ""))
     def _i(k):
         try: return int(request.args.get(k, -1))
         except ValueError: return -1
     since, after = _i("since"), _i("after")
-    online = [r for r in online_list() if r["id"] != me]
-    ids = {r["id"]: r for r in online}
-    with _chat_lock:
-        _chat_purge()
-        latest = max([m["id"] for m in _chat if m["to"] == me] or [0])
-        if peer and request.args.get("vis") == "1":                 # the open chat is on screen -> its messages count as read
-            _chat_read[(me, peer)] = max([m["id"] for m in _chat if m["frm"] == peer and m["to"] == me] or [_chat_read.get((me, peer), 0)])
-        unread = {}
-        for m in _chat:
-            if m["to"] == me and m["id"] > _chat_read.get((me, m["frm"]), 0): unread[m["frm"]] = unread.get(m["frm"], 0) + 1
-        incoming = [m for m in _chat if m["to"] == me and m["id"] > since][-20:] if since >= 0 else []
-        conv = [m for m in _chat if peer and ((m["frm"] == me and m["to"] == peer) or (m["frm"] == peer and m["to"] == me)) and m["id"] > after][-200:]
+    members = online_list()
+    ids = {r["id"] for r in members}
+    with _glock:
+        _gpurge()
+        for k in [k for k in _gread if k not in ids]: del _gread[k]      # left the group (offline) -> forget where they stopped reading
+        top = max([m["id"] for m in _gchat] or [0])
+        if me not in _gread or request.args.get("vis") == "1": _gread[me] = top   # joining: nothing counts as unread; open chat on screen: all read
+        unread = sum(1 for m in _gchat if m["frm"] != me and m["id"] > _gread[me])
+        incoming = [m for m in _gchat if m["frm"] != me and m["id"] > since][-20:] if since >= 0 else []
+        conv = [m for m in _gchat if m["id"] > after][-200:]
     pick = lambda m: dict(id=m["id"], frm=m["frm"], name=m["frm_name"], text=m["text"], t=m["t"], ts=m["ts"], mine=(m["frm"] == me))
-    return jsonify(online=[dict(id=r["id"], name=r["name"], status=r["status"]) for r in online], unread=unread, total=sum(unread.values()),
-                   latest=latest, now=time.time(), incoming=[pick(m) for m in incoming], messages=[pick(m) for m in conv],
-                   peer_status=(ids[peer]["status"] if peer in ids else "Offline") if peer else "",
-                   peer_name=_chat_name(peer) if peer else "")
+    return jsonify(members=[dict(id=r["id"], name=r["name"], status=r["status"], me=(r["id"] == me)) for r in members],
+                   total=unread, latest=top, now=time.time(), incoming=[pick(m) for m in incoming], messages=[pick(m) for m in conv])
 
-@app.route("/employee/chat/send", methods=["POST"])
+@app.route("/employee/group-chat/send", methods=["POST"])
 @need("employee")
-def chat_send():
-    me, to = str(session.get("emp_id", "")), (request.form.get("to") or "").strip()
+def group_send():
+    me = str(session.get("emp_id", ""))
     text = (request.form.get("text") or "").strip()[:CHAT_MAX_LEN]
-    if not text or not to or to == me: return jsonify(ok=False, error="Type a message first."), 400
-    online = {r["id"]: r for r in online_list()}
-    if to not in online: return jsonify(ok=False, error="This employee is offline now - message not sent."), 409
-    with _chat_lock:
-        _chat_purge()
-        _chat_seq[0] += 1
-        _chat.append(dict(id=_chat_seq[0], frm=me, frm_name=str(session.get("name", "")), to=to, to_name=online[to]["name"],
-                          text=text, t=now_local().strftime("%I:%M %p"), ts=time.time()))
-        del _chat[:-CHAT_KEEP]
-        _chat_read[(me, to)] = _chat_seq[0]
+    if not text: return jsonify(ok=False, error="Type a message first."), 400
+    if me not in {r["id"] for r in online_list()}: return jsonify(ok=False, error="You are offline - message not sent."), 409
+    with _glock:
+        _gpurge()
+        _gseq[0] += 1
+        _gchat.append(dict(id=_gseq[0], frm=me, frm_name=str(session.get("name", "")), text=text,
+                           t=now_local().strftime("%I:%M %p"), ts=time.time()))
+        del _gchat[:-CHAT_KEEP]
+        _gread[me] = _gseq[0]
     return jsonify(ok=True)
 
 CHAT = """<style>
-.ch{display:grid;grid-template-columns:270px 1fr;gap:14px;align-items:stretch}
+.ch{display:grid;grid-template-columns:260px 1fr;gap:14px;align-items:stretch}
 @media(max-width:760px){.ch{grid-template-columns:1fr}}
 .ch .pane{background:#fff;border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;min-height:440px;max-height:72vh;overflow:hidden}
 .ch h2{font-size:14px;margin:0;padding:12px 14px;border-bottom:1px solid var(--line)}
 #chl{overflow:auto;flex:1}
-.chp{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--line)}
-.chp:hover{background:#f5f6fc}.chp.sel{background:#eceffa}
+.chp{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line)}
 .chp .dot{width:9px;height:9px;border-radius:50%;background:#2fb26a;flex:none}.chp .dot.away{background:#e0a020}
 .chp .nm{flex:1;min-width:0}.chp .nm b{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.chp .nm small{color:var(--mut);font-size:11px}
-.chp .bd{background:#e5484d;color:#fff;border-radius:10px;font-size:11px;padding:1px 7px;font-weight:600}
-.cht{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);min-height:20px}
+.cht{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
 #chm{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:8px;background:#f8f9fd}
 .bub{max-width:76%;padding:8px 12px;border-radius:14px;font-size:13.5px;line-height:1.4;word-wrap:break-word;white-space:pre-wrap}
+.bub b{display:block;font-size:11px;color:#4f5bd5;margin-bottom:2px}
 .bub small{display:block;font-size:10px;opacity:.65;margin-top:3px}
 .bub.me{align-self:flex-end;background:#4f5bd5;color:#fff;border-bottom-right-radius:4px}
 .bub.th{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:4px}
 .chf{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}.chf input{flex:1;padding:9px 12px}
 .chempty{color:var(--mut);font-size:13px;padding:18px;text-align:center}
 </style>
-<div class="head"><h1>Chat</h1><p class="mut">Only employees who are online right now are listed. Messages are deleted automatically after 1 hour.</p></div>
+<div class="head"><h1>Group Chat</h1><p class="mut">Everyone who is online is in this group automatically. When you go offline you leave it, and you rejoin when you come back online. Messages are deleted after 1 hour.</p></div>
 <div class="ch" id="chat_root">
- <div class="pane"><h2>Online now <span class="pill in" id="chn">0</span></h2><div id="chl"><div class="chempty">Loading...</div></div></div>
- <div class="pane"><div class="cht"><b id="cht_n">Select an employee to start chatting</b><span id="cht_s"></span></div>
-  <div id="chm"><div class="chempty">Pick someone from the online list.</div></div>
-  <div class="chf"><input id="chi" maxlength="500" placeholder="Type a message..." autocomplete="off" disabled><button class="primary" id="chs" type="button" disabled>Send</button></div></div>
+ <div class="pane"><h2>Group members (online) <span class="pill in" id="chn">0</span></h2><div id="chl"><div class="chempty">Loading...</div></div></div>
+ <div class="pane"><div class="cht"><b>Online Group</b><span class="pill in" id="cht_c">0 online</span></div>
+  <div id="chm"><div class="chempty">No messages yet - say hello to everyone who is online.</div></div>
+  <div class="chf"><input id="chi" maxlength="500" placeholder="Message the group..." autocomplete="off" disabled><button class="primary" id="chs" type="button" disabled>Send</button></div></div>
 </div>"""
 
 @app.route("/employee/ping")

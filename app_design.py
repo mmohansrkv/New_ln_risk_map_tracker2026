@@ -51,6 +51,8 @@ Access rules (Update59):
   * Update78: Welcome Page opens first for Admin and Employee, no 'Continue' button, opens the Admin/Employee page by itself when it ends.
     Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
     melody, different from the earlier Mohanam tune), Welcome Page only.
+  * Update80: the old Chat button/page/routes are removed completely. NEW Group Chat icon (bottom-right, employee pages): opens a chat panel for the
+    employees who are online right now; join on login, leave on logout/offline; messages auto-delete after 1 hour; no audio.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -267,7 +269,7 @@ def _idle_auto_logout():
             session.clear()
             flash(f"You were logged out automatically after {SESSION_IDLE_MINUTES} minutes of inactivity.")
             return redirect("/admin/login" if was_admin else "/employee/login")
-        if request.endpoint in ("employee_ping", "group_state"):          # heartbeat: shows "online" but must NOT reset the idle timer
+        if request.endpoint in ("employee_ping", "gc_state"):          # heartbeat: shows "online" but must NOT reset the idle timer
             online_set(session.get("att_id"), session.get("att_eid"), session.get("att_name"), active=last)
             return
         session["last_seen"] = now_ts
@@ -1275,51 +1277,72 @@ function poll(){fetch('/admin/notify/poll?since='+since+'&first='+first,{credent
 poll();setInterval(poll,15000)})();
 </script>{% endif %}
 {% if session.role=='employee' %}<script>(function(){function p(){fetch('/employee/ping',{credentials:'same-origin',cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();</script>{% endif %}
-{% if session.role=='employee' and request.path!='/employee/welcome' %}{% if request.path!='/employee/group-chat' %}<a id="chatfab" href="/employee/group-chat" title="Chat" aria-label="Chat"
- style="position:fixed;right:20px;bottom:20px;z-index:98;padding:6px;display:block;text-decoration:none;transition:transform .15s ease" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='none'"><style>#chatfab svg *{transform-box:fill-box;transform-origin:center}#chatfab .cf-bot{animation:cfFloat 3.8s ease-in-out infinite;will-change:transform}#chatfab .cf-glow{animation:cfGlow 3.2s ease-in-out infinite}#chatfab .cf-eye{animation:cfBlink 5.5s infinite}#chatfab .cf-ant{animation:cfAnt 2s ease-in-out infinite}#chatfab .cf-w1{animation:cfWave 2.4s ease-in-out infinite}#chatfab .cf-w2{animation:cfWave 2.4s ease-in-out .6s infinite}#chatfab .cf-mouth{animation:cfMouth 3.2s ease-in-out infinite}@keyframes cfFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.5px)}}@keyframes cfGlow{0%,100%{opacity:.35;transform:scale(.92)}50%{opacity:.75;transform:scale(1.08)}}@keyframes cfBlink{0%,92%,100%{transform:scaleY(1)}95%{transform:scaleY(.1)}}@keyframes cfAnt{0%,100%{opacity:.6;transform:scale(.85)}50%{opacity:1;transform:scale(1.25)}}@keyframes cfWave{0%,100%{opacity:.25}50%{opacity:1}}@keyframes cfMouth{0%,100%{transform:scaleX(1)}50%{transform:scaleX(1.35)}}@media (prefers-reduced-motion:reduce){ #chatfab .cf-bot,#chatfab .cf-glow,#chatfab .cf-eye,#chatfab .cf-ant,#chatfab .cf-w1,#chatfab .cf-w2,#chatfab .cf-mouth{animation:none}}</style><svg viewBox="0 0 100 92" width="68" height="62" aria-hidden="true" focusable="false" style="display:block;overflow:visible"><defs><linearGradient id="cf_b" x1="0.15" y1="0" x2="0.85" y2="1"><stop offset="0" stop-color="#8fe3ff"/><stop offset="0.5" stop-color="#2eb4f7"/><stop offset="1" stop-color="#0d6fd0"/></linearGradient><linearGradient id="cf_bd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0f78c8"/><stop offset="1" stop-color="#084b94"/></linearGradient><linearGradient id="cf_h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#c3d9ee"/></linearGradient><linearGradient id="cf_f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a78c6"/><stop offset="1" stop-color="#0e2a57"/></linearGradient><radialGradient id="cf_e" cx="0.4" cy="0.35" r="0.75"><stop offset="0" stop-color="#e2f8ff"/><stop offset="0.55" stop-color="#5fd0ff"/><stop offset="1" stop-color="#1c8fe0"/></radialGradient><radialGradient id="cf_a" cx="0.35" cy="0.3" r="0.8"><stop offset="0" stop-color="#6fa6e8"/><stop offset="1" stop-color="#14335f"/></radialGradient><linearGradient id="cf_w" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4fc3fb"/><stop offset="1" stop-color="#1268c4"/></linearGradient><filter id="cf_s" x="-20%" y="-20%" width="140%" height="160%"><feGaussianBlur stdDeviation="2.2"/></filter></defs><ellipse cx="52" cy="87" rx="31" ry="3.500" fill="#0a2a55" opacity="0.28" filter="url(#cf_s)"/><g fill="none" stroke="url(#cf_w)" stroke-width="4" stroke-linecap="round"><path d="M12 31Q6 41 12 51"/><path d="M5 26Q-3 41 5 56"/><path d="M88 31Q94 41 88 51"/><path d="M95 26Q103 41 95 56"/></g><g transform="translate(0 4)"><ellipse cx="50" cy="40" rx="33" ry="32" fill="url(#cf_bd)"/><path d="M24 60L10 80L40 70Z" fill="url(#cf_bd)"/></g><ellipse cx="50" cy="40" rx="33" ry="32" fill="url(#cf_b)"/><path d="M24 60L10 80L40 70Z" fill="url(#cf_b)"/><ellipse cx="36" cy="18" rx="17" ry="7.500" transform="rotate(-28 36 18)" fill="#fff" opacity="0.38"/><path d="M50 21V13" stroke="#1a3d73" stroke-width="3" stroke-linecap="round"/><circle cx="50" cy="10" r="5" fill="url(#cf_a)"/><circle cx="48.500" cy="8.500" r="1.500" fill="#fff" opacity="0.85"/><rect x="21" y="34" width="7" height="14" rx="3.500" fill="#0e2a57"/><rect x="72" y="34" width="7" height="14" rx="3.500" fill="#0e2a57"/><rect x="26" y="24.500" width="48" height="36" rx="11" fill="#8aa8c6"/><rect x="26" y="21" width="48" height="36" rx="11" fill="url(#cf_h)"/><rect x="30" y="25.500" width="40" height="27" rx="9" fill="url(#cf_f)"/><path d="M35 28.500H65" stroke="#fff" stroke-width="1.600" stroke-linecap="round" opacity="0.28"/><circle cx="41" cy="38" r="4.800" fill="url(#cf_e)"/><circle cx="59" cy="38" r="4.800" fill="url(#cf_e)"/><circle cx="39.600" cy="36.400" r="1.400" fill="#fff"/><circle cx="57.600" cy="36.400" r="1.400" fill="#fff"/><path d="M44 46.500H56" stroke="#7fdcff" stroke-width="3" stroke-linecap="round"/></svg><span id="chatfab_n" style="display:none;position:absolute;top:0;right:2px;background:#ff3b30;color:#fff;border:2px solid #fff;border-radius:11px;font-size:11px;font-weight:700;padding:1px 6px;min-width:10px;text-align:center"></span></a>{% endif %}<script>
+{% if session.role=='employee' and request.path!='/employee/welcome' %}<style>
+#gcb{position:fixed;right:20px;bottom:20px;z-index:98;width:62px;height:62px;border-radius:50%;border:0;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center;
+ background:radial-gradient(circle at 32% 26%,#5fe0c8 0%,#1f9fd8 46%,#4a3fd0 100%);box-shadow:0 10px 22px #2b3fa866,0 2px 0 #ffffff66 inset,0 -4px 8px #1b1f7a55 inset;transition:transform .15s ease}
+#gcb:hover{transform:scale(1.08)}#gcb:focus-visible{outline:3px solid #9bb4ff;outline-offset:3px}
+#gcn{display:none;position:absolute;top:-3px;right:-3px;background:#ff3b30;color:#fff;border:2px solid #fff;border-radius:11px;font:700 11px/1 system-ui,sans-serif;padding:3px 6px;min-width:10px;text-align:center}
+#gcp{position:fixed;right:20px;bottom:96px;z-index:99;width:min(360px,calc(100vw - 24px));height:min(480px,calc(100vh - 120px));background:#fff;border:1px solid #d8dbe6;border-radius:16px;box-shadow:0 20px 50px #0003;display:flex;flex-direction:column;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+#gcp[hidden]{display:none}
+#gcp .gh{display:flex;align-items:center;gap:8px;padding:11px 14px;background:linear-gradient(120deg,#1f9fd8,#4a3fd0);color:#fff}
+#gcp .gh b{font-size:15px;flex:1}#gcp .gh span{font-size:12px;background:#ffffff33;border-radius:10px;padding:2px 8px}
+#gcp .gh button{background:none;border:0;color:#fff;font-size:20px;line-height:1;cursor:pointer;padding:0 2px}
+#gcm{display:flex;gap:6px;overflow-x:auto;padding:8px 10px;border-bottom:1px solid #e6e8f0;background:#f6f8ff;flex:none}
+#gcm i{font-style:normal;white-space:nowrap;font-size:12px;background:#fff;border:1px solid #d8dbe6;border-radius:12px;padding:3px 9px;color:#1c2340}
+#gcm i:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:#2fb26a;margin-right:5px}
+#gcm i.away:before{background:#e0a020}
+#gcl{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:7px;background:#f8f9fd}
+#gcl .b{max-width:80%;padding:7px 11px;border-radius:14px;font-size:13.5px;line-height:1.4;word-wrap:break-word;white-space:pre-wrap}
+#gcl .b b{display:block;font-size:11px;color:#4a3fd0;margin-bottom:2px}#gcl .b small{display:block;font-size:10px;opacity:.65;margin-top:3px}
+#gcl .b.me{align-self:flex-end;background:#4a3fd0;color:#fff;border-bottom-right-radius:4px}
+#gcl .b.th{align-self:flex-start;background:#fff;border:1px solid #d8dbe6;border-bottom-left-radius:4px}
+#gcl .e{color:#6b7390;font-size:13px;text-align:center;padding:18px}
+#gcp .gf{display:flex;gap:8px;padding:10px;border-top:1px solid #e6e8f0;flex:none}
+#gcp .gf input{flex:1;padding:9px 12px;border:1px solid #d8dbe6;border-radius:10px;font-size:14px;min-width:0}
+#gcp .gf button{padding:9px 14px;border:0;border-radius:10px;background:#4a3fd0;color:#fff;font-weight:600;cursor:pointer}
+@media print{ #gcb,#gcp{display:none}}
+</style>
+<button id="gcb" type="button" title="Group Chat - employees online now" aria-label="Group Chat" aria-expanded="false"><svg viewBox="0 0 64 64" width="42" height="42" aria-hidden="true" focusable="false"><defs><linearGradient id="gc_l" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#bfe0ff"/></linearGradient></defs><circle cx="17" cy="26" r="5.500" fill="#d6ecff" opacity="0.85"/><path d="M5 47Q5 35 17 35Q21 35 24 37L24 47Z" fill="#d6ecff" opacity="0.85"/><circle cx="47" cy="26" r="5.500" fill="#d6ecff" opacity="0.85"/><path d="M59 47Q59 35 47 35Q43 35 40 37L40 47Z" fill="#d6ecff" opacity="0.85"/><circle cx="32" cy="23" r="8" fill="url(#gc_l)"/><path d="M18 49Q18 34 32 34Q46 34 46 49Z" fill="url(#gc_l)"/></svg><span id="gcn"></span></button>
+<div id="gcp" hidden role="dialog" aria-label="Group Chat">
+ <div class="gh"><b>Group Chat</b><span id="gcc">0 online</span><button id="gcx" type="button" aria-label="Close">&times;</button></div>
+ <div id="gcm"></div>
+ <div id="gcl"><div class="e">No messages yet - say hello to everyone who is online.</div></div>
+ <div class="gf"><input id="gci" maxlength="500" placeholder="Message everyone online..." autocomplete="off"><button id="gcs" type="button">Send</button></div>
+</div>
+<script>
+/* Update80: NEW Group Chat. One group = the employees who are online right now (join on login / coming online, leave on logout / offline). Messages auto-delete after 1 hour. No audio. */
 (function(){
-var root=document.getElementById('chat_root'),busy=false,base=document.title,shown={},after=-1;
-function ss(k,v){try{if(v===undefined)return sessionStorage.getItem(k);sessionStorage.setItem(k,v)}catch(e){return null}}
-var notified=parseInt(ss('gchatNotified')||'-1',10);if(isNaN(notified))notified=-1;
+var btn=document.getElementById('gcb'),pan=document.getElementById('gcp'),listEl=document.getElementById('gcl'),memEl=document.getElementById('gcm'),
+    inp=document.getElementById('gci'),cnt=document.getElementById('gcc'),bdg=document.getElementById('gcn'),
+    open=false,busy=false,after=-1,shown={},base=document.title;
 function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e}
-var tw=el('div');tw.style.cssText='position:fixed;bottom:88px;right:16px;z-index:99;display:flex;flex-direction:column;gap:8px;max-width:320px';document.body.appendChild(tw);
-function toast(m){var d=el('div','toast','\\uD83D\\uDCAC '+m.name+': '+(m.text.length>60?m.text.slice(0,60)+'...':m.text));d.style.cursor='pointer';
- d.onclick=function(){window.location='/employee/group-chat'};
- tw.appendChild(d);setTimeout(function(){d.remove()},8000)}
-function badge(n){var a=document.querySelector('a[href="/employee/group-chat"]');
- if(a){if(!a.getAttribute('data-l'))a.setAttribute('data-l',a.textContent.trim());a.textContent=a.getAttribute('data-l')+(n?' ('+n+')':'')}
- var fb=document.getElementById('chatfab_n');if(fb){fb.textContent=n;fb.style.display=n?'block':'none'}
- document.title=(n?'('+n+') New message - ':'')+base}
-function drawMembers(list){var box=document.getElementById('chl');box.textContent='';document.getElementById('chn').textContent=list.length;document.getElementById('cht_c').textContent=list.length+' online';
- list.forEach(function(e){var r=el('div','chp');r.appendChild(el('span','dot'+(e.status==='Away'?' away':'')));
-  var n=el('div','nm');n.appendChild(el('b','',e.name+(e.me?' (You)':'')));n.appendChild(el('small','',e.id+' \\u00B7 '+(e.status==='Away'?'Online (away)':'Online')));r.appendChild(n);box.appendChild(r)})}
-function expire(now){var m=document.getElementById('chm');if(!m)return;   /* messages older than 1 hour disappear from the screen too */
- Array.prototype.slice.call(m.querySelectorAll('.bub')).forEach(function(b){if(now-parseFloat(b.getAttribute('data-ts'))>3600)b.remove()})}
-function drawMsgs(list){var m=document.getElementById('chm');if(!list.length)return;
- var e0=m.querySelector('.chempty');if(e0)e0.remove();
- var down=m.scrollHeight-m.scrollTop-m.clientHeight<80||after<0;
- list.forEach(function(x){if(shown[x.id])return;shown[x.id]=1;var b=el('div','bub '+(x.mine?'me':'th'));b.setAttribute('data-ts',x.ts);
-  if(!x.mine)b.appendChild(el('b','',x.name));b.appendChild(document.createTextNode(x.text));b.appendChild(el('small','',x.t));m.appendChild(b);after=Math.max(after,x.id)});
- if(down)m.scrollTop=m.scrollHeight}
-function apply(j){
- badge(j.total);
- if(!(root&&!document.hidden))j.incoming.forEach(toast);
- if(j.latest>notified||notified<0){notified=j.latest;ss('gchatNotified',String(notified))}
- if(!root)return;
- drawMembers(j.members);expire(j.now);drawMsgs(j.messages)}
+function badge(n){bdg.textContent=n>99?'99+':n;bdg.style.display=n?'block':'none';document.title=(n?'('+n+') New message - ':'')+base}
+function members(list){memEl.textContent='';cnt.textContent=list.length+' online';
+ list.forEach(function(m){memEl.appendChild(el('i',m.status==='Away'?'away':'',m.name+(m.me?' (You)':'')))})}
+function msgs(list,now){
+ Array.prototype.slice.call(listEl.querySelectorAll('.b')).forEach(function(b){if(now-parseFloat(b.getAttribute('data-ts'))>3600)b.remove()});
+ if(!list.length)return;
+ var e0=listEl.querySelector('.e');if(e0)e0.remove();
+ var down=listEl.scrollHeight-listEl.scrollTop-listEl.clientHeight<80||after<0;
+ list.forEach(function(x){if(shown[x.id])return;shown[x.id]=1;var b=el('div','b '+(x.mine?'me':'th'));b.setAttribute('data-ts',x.ts);
+  if(!x.mine)b.appendChild(el('b','',x.name));b.appendChild(document.createTextNode(x.text));b.appendChild(el('small','',x.t));listEl.appendChild(b);after=Math.max(after,x.id)});
+ if(down)listEl.scrollTop=listEl.scrollHeight}
 function poll(){if(busy)return;busy=true;
- var q='/employee/group-chat/state?since='+notified+(root?'&after='+after+'&vis='+(document.hidden?0:1):'');
- fetch(q,{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(j){busy=false;apply(j)}).catch(function(){busy=false})}
-function send(){var i=document.getElementById('chi'),t=i.value.trim();if(!t)return;
- var f=new URLSearchParams();f.set('text',t);i.value='';
- fetch('/employee/group-chat/send',{method:'POST',body:f,credentials:'same-origin'}).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
-  .then(function(x){if(!x.ok){var m=document.getElementById('chm');m.appendChild(el('div','chempty',x.j.error||'Not sent.'));m.scrollTop=m.scrollHeight}poll()}).catch(function(){})}
-if(root){document.getElementById('chs').onclick=send;
- document.getElementById('chi').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();send()}});
- document.getElementById('chi').disabled=false;document.getElementById('chs').disabled=false}
-poll();
-(function loop(){setTimeout(function(){if(!document.hidden||!root)poll();loop()},root?2000:5000)})();
+ fetch('/employee/gc/state?after='+after+'&open='+(open&&!document.hidden?1:0),{credentials:'same-origin',cache:'no-store'})
+ .then(function(r){return r.json()}).then(function(j){busy=false;badge(open?0:j.unread);members(j.members);msgs(j.messages,j.now)}).catch(function(){busy=false})}
+function setOpen(v){open=v;pan.hidden=!v;btn.setAttribute('aria-expanded',v?'true':'false');
+ if(v){badge(0);poll();setTimeout(function(){listEl.scrollTop=listEl.scrollHeight;inp.focus()},50)}}
+function send(){var t=inp.value.trim();if(!t)return;var f=new URLSearchParams();f.set('text',t);inp.value='';
+ fetch('/employee/gc/send',{method:'POST',body:f,credentials:'same-origin'}).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
+ .then(function(x){if(!x.ok){var e=el('div','e',x.j.error||'Not sent.');listEl.appendChild(e);listEl.scrollTop=listEl.scrollHeight;setTimeout(function(){e.remove()},4000)}poll()}).catch(function(){})}
+btn.onclick=function(){setOpen(!open)};
+document.getElementById('gcx').onclick=function(){setOpen(false)};
+document.getElementById('gcs').onclick=send;
+inp.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();send()}});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&open)setOpen(false)});
 document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()});
+poll();
+(function loop(){setTimeout(function(){if(!document.hidden||open)poll();loop()},open?2000:6000)})();
 })();
 </script>{% endif %}
 {% if session.role and request.path not in ['/employee/welcome','/admin/welcome'] %}<script>
@@ -2412,10 +2435,14 @@ WELCOME = """<style>
 
  /* Update79: ADMIN welcome = no voice, no music (animation only). EMPLOYEE welcome = AI voice first; ONLY AFTER the voice
     has finished does the Tamil bamboo-flute BGM start. The BGM never starts before the voice ends. */
- var AUDIO=null;
+ var AC=window.AudioContext||window.webkitAudioContext;
+ var ctx=null,master=null,verb=null,timer=null,muted=false,next=0,step=0,noiseBuf=null,lastF=0;
+ var btn={setAttribute:function(){}},bi={},bt={};
+ function get(k){return null}function put(k,v){}
+ """ + FLUTE_ENGINE + """
  function msg(t){var m=document.getElementById('wl_msg');if(m)m.textContent=t}
  function leave(){
-  try{ if(AUDIO){AUDIO.pause()} }catch(e){}
+  try{ if(timer)clearInterval(timer); if(ctx){ master.gain.cancelScheduledValues(ctx.currentTime); master.gain.value=0; ctx.close(); } }catch(e){}
   try{ if(window.speechSynthesis)window.speechSynthesis.cancel() }catch(e){}
   window.location.replace(DEST);
  }
@@ -2425,20 +2452,17 @@ WELCOME = """<style>
  var SS=window.speechSynthesis, hadStart=false, bgmBegun=false, guard=null, giveUp=null, ready=false;
  var TEXT='Welcome, '+NAME+'. Wishing you a productive day.';
 
- /* Update80: the old flute music is gone. After the voice ends, the NEW BGM file (route /welcome-bgm) plays. */
- var BGM_URL='/welcome-bgm';
- function playBgm(){ try{ if(!AUDIO){AUDIO=new Audio(BGM_URL);AUDIO.preload='auto';AUDIO.volume=0.7;
-    AUDIO.onerror=function(){ msg(''); setTimeout(leave,1200) }}   /* no BGM file installed: just continue */
-   var pr=AUDIO.play(); if(pr&&pr.catch)pr.catch(function(){ msg('\\u266A Click or move the mouse to play the music') }) }catch(e){} }
- function unlock(){ try{ if(!AUDIO){AUDIO=new Audio(BGM_URL);AUDIO.preload='auto'} }catch(e){} }   /* preload while the voice speaks */
- var uEv=['mousemove','pointerdown','keydown','touchstart'];
- function onUser(){ if(!ready)return; playBgm(); if(AUDIO&&!AUDIO.paused){uEv.forEach(function(t){document.removeEventListener(t,onUser,true)})} }
+ function unlock(){ try{ if(AC){ if(!ctx)build(); if(ctx.resume)ctx.resume() } }catch(e){} }   /* silent; just lets the BGM start later */
+ var uEv=['mousemove','pointermove','pointerdown','keydown','touchstart'];
+ function onUser(){ if(!AC||!ready)return; try{go()}catch(e){} if(ctx&&ctx.state==='running'){uEv.forEach(function(t){document.removeEventListener(t,onUser,true)})} }
  uEv.forEach(function(t){document.addEventListener(t,onUser,true)});
 
  function startBgm(){                                   /* called ONLY when the voice has finished */
   if(bgmBegun)return; bgmBegun=true; ready=true; clearTimeout(guard); clearTimeout(giveUp);
-  msg('\\u266A Music'); playBgm();
-  setTimeout(function(){ try{ if(AUDIO){var v=0.7,iv=setInterval(function(){v-=0.1;if(v<=0){AUDIO.volume=0;clearInterval(iv)}else AUDIO.volume=v},60)} }catch(e){} },PLAY_MS-1000);
+  if(!AC){ setTimeout(leave,1500); return; }
+  msg('\\u266A Tamil flute music'); try{go()}catch(e){}
+  setTimeout(function(){ if(!ctx||ctx.state!=='running')msg('\\u266A Move the mouse to play the flute music') },800);
+  setTimeout(function(){ try{stopAll()}catch(e){} },PLAY_MS-500);
   setTimeout(leave,PLAY_MS);
  }
  function pickVoice(){ var v=(SS.getVoices&&SS.getVoices())||[],i;
@@ -2470,117 +2494,65 @@ WELCOME = """<style>
 </script>
 <noscript><meta http-equiv="refresh" content="16;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
 
-# Update80: the Welcome Page BGM. Put the new audio file next to this script as  welcome_bgm.mp3  (or set WELCOME_BGM=/full/path/file.mp3).
-def _bgm_path():
-    p = os.getenv("WELCOME_BGM", "")
-    if p and os.path.isfile(p): return p
-    for n in ("welcome_bgm.mp3", "welcome_bgm.m4a", "welcome_bgm.ogg", "welcome_bgm.wav"):
-        q = os.path.join(os.path.dirname(os.path.abspath(__file__)), n)
-        if os.path.isfile(q): return q
-    return ""
-
-@app.route("/welcome-bgm")
-def welcome_bgm():
-    if not session.get("role"): abort(404)
-    p = _bgm_path()
-    if not p: abort(404)
-    from flask import send_file
-    return send_file(p, conditional=True, max_age=604800)
-
 @app.route("/admin/welcome")
 @need("admin")
 def admin_welcome():
     return page(WELCOME, title="Welcome", wl_gender="male")
 
-# ---------------------------------------------------------------- employee GROUP chat (Update77)
-# One group = every employee who is online right now. Nobody is "added" by hand: coming online joins the group, going offline leaves it.
-# Messages live in memory only and are deleted CHAT_TTL seconds (1 hour) after they were sent.
-_gchat, _gread, _gseq, _glock = [], {}, [0], threading.Lock()
-CHAT_MAX_LEN, CHAT_KEEP, CHAT_TTL = 500, 3000, 3600
+# ---------------------------------------------------------------- employee GROUP CHAT (Update80)
+# ONE group = every employee who is online right now. Nobody is added by hand: coming online joins the group, going offline leaves it.
+# The chat is a floating icon (bottom-right) on every employee page. Messages live in memory only and are deleted GC_TTL seconds (1 hour) after sending.
+_gc, _gc_read, _gc_seq, _gc_lock = [], {}, [0], threading.Lock()
+GC_MAX_LEN, GC_KEEP, GC_TTL = 500, 3000, 3600
 
-def _gpurge():
-    """Delete messages older than 1 hour (caller holds _glock)."""
-    cut = time.time() - CHAT_TTL
-    _gchat[:] = [m for m in _gchat if m["ts"] > cut]
+def _gc_purge():
+    """Delete messages older than 1 hour (caller holds _gc_lock)."""
+    cut = time.time() - GC_TTL
+    _gc[:] = [m for m in _gc if m["ts"] > cut]
 
-def _gsweeper():
+def _gc_sweeper():
     while True:
         time.sleep(60)
         try:
-            with _glock: _gpurge()
+            with _gc_lock: _gc_purge()
         except Exception: pass
-threading.Thread(target=_gsweeper, daemon=True).start()
+threading.Thread(target=_gc_sweeper, daemon=True).start()
 
-@app.route("/employee/group-chat")
+@app.route("/employee/gc/state")
 @need("employee")
-def employee_group_chat():
-    return page(CHAT, title="Group Chat")
-
-@app.route("/employee/group-chat/state")
-@need("employee")
-def group_state():
-    """One poll: current group members (= online employees), unread count, new messages for pop-ups, and the group's messages."""
+def gc_state():
+    """One poll: online members, unread count and the group's messages newer than ?after=. ?open=1 means the chat panel is on screen (all read)."""
     me = str(session.get("emp_id", ""))
-    def _i(k):
-        try: return int(request.args.get(k, -1))
-        except ValueError: return -1
-    since, after = _i("since"), _i("after")
+    try: after = int(request.args.get("after", -1))
+    except ValueError: after = -1
     members = online_list()
     ids = {r["id"] for r in members}
-    with _glock:
-        _gpurge()
-        for k in [k for k in _gread if k not in ids]: del _gread[k]      # left the group (offline) -> forget where they stopped reading
-        top = max([m["id"] for m in _gchat] or [0])
-        if me not in _gread or request.args.get("vis") == "1": _gread[me] = top   # joining: nothing counts as unread; open chat on screen: all read
-        unread = sum(1 for m in _gchat if m["frm"] != me and m["id"] > _gread[me])
-        incoming = [m for m in _gchat if m["frm"] != me and m["id"] > since][-20:] if since >= 0 else []
-        conv = [m for m in _gchat if m["id"] > after][-200:]
-    pick = lambda m: dict(id=m["id"], frm=m["frm"], name=m["frm_name"], text=m["text"], t=m["t"], ts=m["ts"], mine=(m["frm"] == me))
+    with _gc_lock:
+        _gc_purge()
+        for k in [k for k in _gc_read if k not in ids]: del _gc_read[k]      # went offline -> left the group
+        top = max([m["id"] for m in _gc] or [0])
+        if me not in _gc_read or request.args.get("open") == "1": _gc_read[me] = top   # just joined: nothing unread; panel open: all read
+        unread = sum(1 for m in _gc if m["frm"] != me and m["id"] > _gc_read[me])
+        conv = [m for m in _gc if m["id"] > after][-200:]
+    pick = lambda m: dict(id=m["id"], name=m["name"], text=m["text"], t=m["t"], ts=m["ts"], mine=(m["frm"] == me))
     return jsonify(members=[dict(id=r["id"], name=r["name"], status=r["status"], me=(r["id"] == me)) for r in members],
-                   total=unread, latest=top, now=time.time(), incoming=[pick(m) for m in incoming], messages=[pick(m) for m in conv])
+                   unread=unread, now=time.time(), messages=[pick(m) for m in conv])
 
-@app.route("/employee/group-chat/send", methods=["POST"])
+@app.route("/employee/gc/send", methods=["POST"])
 @need("employee")
-def group_send():
+def gc_send():
     me = str(session.get("emp_id", ""))
-    text = (request.form.get("text") or "").strip()[:CHAT_MAX_LEN]
+    text = (request.form.get("text") or "").strip()[:GC_MAX_LEN]
     if not text: return jsonify(ok=False, error="Type a message first."), 400
     if me not in {r["id"] for r in online_list()}: return jsonify(ok=False, error="You are offline - message not sent."), 409
-    with _glock:
-        _gpurge()
-        _gseq[0] += 1
-        _gchat.append(dict(id=_gseq[0], frm=me, frm_name=str(session.get("name", "")), text=text,
-                           t=now_local().strftime("%I:%M %p"), ts=time.time()))
-        del _gchat[:-CHAT_KEEP]
-        _gread[me] = _gseq[0]
+    with _gc_lock:
+        _gc_purge()
+        _gc_seq[0] += 1
+        _gc.append(dict(id=_gc_seq[0], frm=me, name=str(session.get("name", "")), text=text,
+                        t=now_local().strftime("%I:%M %p"), ts=time.time()))
+        del _gc[:-GC_KEEP]
+        _gc_read[me] = _gc_seq[0]
     return jsonify(ok=True)
-
-CHAT = """<style>
-.ch{display:grid;grid-template-columns:260px 1fr;gap:14px;align-items:stretch}
-@media(max-width:760px){.ch{grid-template-columns:1fr}}
-.ch .pane{background:#fff;border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;min-height:440px;max-height:72vh;overflow:hidden}
-.ch h2{font-size:14px;margin:0;padding:12px 14px;border-bottom:1px solid var(--line)}
-#chl{overflow:auto;flex:1}
-.chp{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line)}
-.chp .dot{width:9px;height:9px;border-radius:50%;background:#2fb26a;flex:none}.chp .dot.away{background:#e0a020}
-.chp .nm{flex:1;min-width:0}.chp .nm b{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.chp .nm small{color:var(--mut);font-size:11px}
-.cht{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
-#chm{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:8px;background:#f8f9fd}
-.bub{max-width:76%;padding:8px 12px;border-radius:14px;font-size:13.5px;line-height:1.4;word-wrap:break-word;white-space:pre-wrap}
-.bub b{display:block;font-size:11px;color:#4f5bd5;margin-bottom:2px}
-.bub small{display:block;font-size:10px;opacity:.65;margin-top:3px}
-.bub.me{align-self:flex-end;background:#4f5bd5;color:#fff;border-bottom-right-radius:4px}
-.bub.th{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:4px}
-.chf{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}.chf input{flex:1;padding:9px 12px}
-.chempty{color:var(--mut);font-size:13px;padding:18px;text-align:center}
-</style>
-<div class="head"><h1>Group Chat</h1><p class="mut">Everyone who is online is in this group automatically. When you go offline you leave it, and you rejoin when you come back online. Messages are deleted after 1 hour.</p></div>
-<div class="ch" id="chat_root">
- <div class="pane"><h2>Group members (online) <span class="pill in" id="chn">0</span></h2><div id="chl"><div class="chempty">Loading...</div></div></div>
- <div class="pane"><div class="cht"><b>Online Group</b><span class="pill in" id="cht_c">0 online</span></div>
-  <div id="chm"><div class="chempty">No messages yet - say hello to everyone who is online.</div></div>
-  <div class="chf"><input id="chi" maxlength="500" placeholder="Message the group..." autocomplete="off" disabled><button class="primary" id="chs" type="button" disabled>Send</button></div></div>
-</div>"""
 
 @app.route("/employee/ping")
 @need("employee")

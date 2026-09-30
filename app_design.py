@@ -119,6 +119,8 @@ HEADERS = {
     "Mahizhchi Log": ["Question", "A", "B", "C", "D", "Correct Answer"],
     "Mahizhchi Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
     "Mahizhchi Answers": ["Employee ID", "Employee name", "Question ID", "Question", "Answer", "Submitted at"],
+    # one row per employee: when they pressed Start (the timer runs from this SERVER time) and when the attempt was closed
+    "Mahizhchi Attempts": ["Employee ID", "Employee name", "Started at", "Closed at"],
 }
 PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                     "Emergency no", "Personal Email ID", "Office Email ID"]
@@ -1132,8 +1134,8 @@ def page(body, title="Productivity Tracker", **ctx):
             pass
         try:      # Admin-controlled: மகிழ்ச்சி appears only while it is published AND shared with this employee
             if mz_active(session.get("emp_id", "")): items.append(("/employee/mahizhchi", MZ_TITLE))
-        except Exception:
-            pass
+        except Exception as e:
+            print("மகிழ்ச்சி menu check failed (are the Mahizhchi sheets created? restart the app once):", e)
     nav = [(h, l, p == h or (h != "/employee" and p.startswith(h + "/")))
            for h, l in items]
     side_avatar = ""
@@ -3174,7 +3176,12 @@ def employee_audit_detail(acc, eid): return _audit_detail("/employee/audit", eid
 # and the correct answer is never included in anything sent to them. Reachable only while published AND shared.
 import re as _re, hashlib as _hl
 MZ_TITLE = "மகிழ்ச்சி"
-MZ_SHEET, MZ_ACCESS_SHEET, MZ_ANS_SHEET = "Mahizhchi Log", "Mahizhchi Access", "Mahizhchi Answers"
+MZ_SHEET, MZ_ACCESS_SHEET, MZ_ANS_SHEET, MZ_ATT_SHEET = "Mahizhchi Log", "Mahizhchi Access", "Mahizhchi Answers", "Mahizhchi Attempts"
+MZ_TIME_LIMIT = int(os.getenv("MZ_TIME_SECONDS", "120"))   # quiz time limit per employee (seconds) - 2 minutes
+MZ_GRACE = 8                                                # seconds of network delay tolerated when the page auto-submits at 0:00
+def _mz_dur(sec):
+    return f"{sec // 60} minute{'s' if sec // 60 != 1 else ''}" if sec % 60 == 0 else f"{sec} seconds"
+app.jinja_env.globals["mz_dur"] = _mz_dur
 MZ_LETTERS = "ABCD"
 MZ_TICKS = "✓✔☑✅"                      # any of these typed by Admin is treated as "the correct answer" and shown as ✓
 MZ_PUB_KEY = "Mahizhchi Log published"   # row in the Settings sheet: Yes / No
@@ -3236,6 +3243,22 @@ def mz_my_answers(eid, fresh=False):
     src = _fetch_rows(MZ_ANS_SHEET) if fresh else rows(MZ_ANS_SHEET)
     return {str(r.get("Question ID", "")).strip(): str(r.get("Answer", "")).strip().upper()
             for r in src if _key(r.get("Employee ID", "")) == _key(eid)}
+
+def mz_attempt(eid):
+    """This employee's attempt (always read fresh - the deadline must be exact), or None if they have not started."""
+    r = next((r for r in _fetch_rows(MZ_ATT_SHEET) if _key(r.get("Employee ID", "")) == _key(eid)), None)
+    if not r: return None
+    try: start = dt.datetime.strptime(str(r.get("Started at", "")).strip(), "%Y-%m-%d %H:%M:%S")
+    except ValueError: start = dt.datetime(2000, 1, 1)          # unreadable start time -> treat the attempt as long over
+    return dict(row=r["_row"], start=start, closed=bool(str(r.get("Closed at", "")).strip()))
+
+def mz_seconds_left(att):
+    return max(0, min(MZ_TIME_LIMIT, int(MZ_TIME_LIMIT - (now_local() - att["start"]).total_seconds())))
+
+def mz_close_attempt(att):
+    _with_retry(ws_of(MZ_ATT_SHEET).update, range_name=f"D{att['row']}",
+                values=[[now_local().strftime("%Y-%m-%d %H:%M:%S")]], value_input_option="RAW")
+    invalidate_cache(MZ_ATT_SHEET)
 
 def mz_results(qs):
     """{employee key: dict(answered, correct, last)} scored against the CURRENT correct answers (Admin side only)."""
@@ -3335,6 +3358,9 @@ MZ_CSS = """<style>
 .mz-row{font-size:12px;color:var(--mut);margin-top:6px}
 .mz-o.pick{cursor:pointer;align-items:center}.mz-o.pick:hover{background:#eef0ff;border-color:#d6d9ff}
 .mz-o.pick input{margin:0}.mz-o.mine{background:#eef0ff;border-color:#b9bdf5;font-weight:600}
+.mz-timer{position:sticky;top:0;z-index:5;background:#eef0ff;border:1px solid #d6d9ff;border-radius:10px;padding:9px 14px;margin:0 0 12px;font-weight:700}
+.mz-timer.low{background:#fef2f2;border-color:#fca5a5;color:#991b1b}
+.mz-locked .mz-o{opacity:.55;pointer-events:none}
 .mz-stats{display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 4px}
 </style>
 {% macro mzcard(q, n, admin) %}<div class="mz-q {{'bad' if q.issues}}"><h3><span class="no">{{n}}.</span>{{q.q}}</h3>
@@ -3354,7 +3380,7 @@ MZ_HEAD = """<div class="head"><div><h1>{{MZ_TITLE}}</h1>
 MZ_ADMIN_Q = MZ_CSS + MZ_HEAD + """
 <div class="card"><h2>Status: <span class="pill {{'in' if pub else 'out'}}">{{'Published' if pub else 'Not published'}}</span></h2>
 <div class="mz-stats"><span>Questions: <b>{{qs|length}}</b></span><span>Ready: <b>{{ok_n}}</b></span>
-<span>Need fixing: <b>{{qs|length - ok_n}}</b></span><span>Shared with: <b>{{shared_n}}</b> of <b>{{emp_n}}</b> employees</span></div>
+<span>Need fixing: <b>{{qs|length - ok_n}}</b></span><span>Shared with: <b>{{shared_n}}</b> of <b>{{emp_n}}</b> employees</span><span>Time limit: <b>{{mz_dur(limit)}}</b> per employee</span></div>
 <p class="mut">{% if pub %}Employees it is shared with can answer the {{ok_n}} ready question(s); the ✓ correct answer is never shown to them. Un-publish to hide it from everyone at once.
 {% else %}Nobody but you can see the log until you publish it <i>and</i> share it with employees (Share / Access tab).{% endif %}</p>
 <form method="post" action="/admin/mahizhchi/publish" style="display:inline">
@@ -3366,14 +3392,14 @@ MZ_ADMIN_Q = MZ_CSS + MZ_HEAD + """
 MZ_ADMIN_ACCESS = MZ_CSS + MZ_HEAD + """
 <div class="card"><h2>Who can see the {{MZ_TITLE}}</h2>
 <p class="mut">Status: <span class="pill {{'in' if pub else 'out'}}">{{'Published' if pub else 'Not published'}}</span>
-{% if not pub %} &mdash; sharing is saved, but employees see nothing until you publish (Questions tab).{% endif %}
+{% if not pub %} &mdash; nothing is visible to employees while un-published.{% endif %} Sharing with someone publishes it automatically.
 Employees who are not ticked here do not see the menu item and cannot open the page.</p>
 <form class="grid no-print" method="get"><input type="hidden" name="tab" value="access"><input name="q" value="{{q}}" placeholder="Search employee ID or name"><button class="primary">Search</button><a href="/admin/mahizhchi?tab=access">Reset</a></form>
 <form method="post" action="/admin/mahizhchi/access">
 <table><tr><th style="width:44px"><input type="checkbox" onclick="document.querySelectorAll('.mzc').forEach(c=>c.checked=this.checked)" title="Select all shown"></th>
-<th>Employee ID</th><th>Name</th><th>Designation</th><th>Access</th></tr>
+<th>Employee ID</th><th>Name</th><th>Designation</th><th>Employee sees the menu?</th></tr>
 {% for e in emps %}<tr><td><input class="mzc" type="checkbox" name="ids" value="{{e['Employee ID']}}"></td><td>{{e['Employee ID']}}</td><td>{{e['Name']}}</td><td>{{e.get('Designation','')}}</td>
-<td><span class="pill {{'in' if amap.get(e['Employee ID']|string|trim|upper) else 'out'}}">{{'Shared' if amap.get(e['Employee ID']|string|trim|upper) else 'No access'}}</span></td></tr>
+{% set sh = amap.get(e['Employee ID']|string|trim|upper) %}<td><span class="pill {{'in' if sh and pub else ('act' if sh else 'out')}}">{{'Visible to employee' if sh and pub else ('Shared - NOT published' if sh else 'No access')}}</span></td></tr>
 {% else %}<tr><td colspan="5">No employees found.</td></tr>{% endfor %}</table><br>
 <button class="primary" name="action" value="share_selected">Share with selected</button>
 <button class="danger" name="action" value="revoke_selected">Remove from selected</button>
@@ -3402,22 +3428,44 @@ MZ_ADMIN_RESULTS = MZ_CSS + MZ_HEAD + """
 <td>{% if r.answered %}<a href="/admin/mahizhchi?tab=results&emp={{r.id|urlencode}}">Details</a>{% endif %}</td></tr>
 {% else %}<tr><td colspan="7">No employee has access or answers yet.</td></tr>{% endfor %}</table></div>{% endif %}"""
 
-MZ_EMP = MZ_CSS + """<div class="head"><div><h1>{{MZ_TITLE}}</h1>
-<p class="mut">Tick the one answer you think is correct for each question, then press Submit. Answers are saved once and cannot be changed after submitting.</p></div></div>
-{% if qs and not todo %}<p class="flash">&#10003; You have answered all the questions. Thank you!</p>{% endif %}
-<form method="post" action="/employee/mahizhchi/submit">
+MZ_EMP = MZ_CSS + """<div class="head"><div><h1>{{MZ_TITLE}}</h1></div></div>
+{% if not qs %}<div class="card"><p>There are no questions in {{MZ_TITLE}} yet.</p></div>
+{% elif state=='intro' %}<div class="card"><h2>Ready?</h2>
+<p>There are <b>{{qs|length}}</b> question(s) and you have <b>{{mz_dur(limit)}}</b>. The timer starts when you press <b>Start</b> and cannot be paused or restarted.
+Tick one answer for each question. When time is over the answer buttons close automatically and the answers you ticked are submitted. You can attempt this only once.</p>
+<form method="post" action="/employee/mahizhchi/start"><button class="primary">Start</button></form></div>
+{% else %}
+{% if state=='active' %}<div class="mz-timer" id="mzbar">&#9201; Time left: <b id="mzt">{{mz_dur(limit)}}</b></div>
+{% elif todo %}<p class="flash">&#9201; Time is up &mdash; answer buttons are closed. Questions you did not answer stay unanswered.</p>
+{% else %}<p class="flash">&#10003; You have answered all the questions. Thank you!</p>{% endif %}
+<form method="post" action="/employee/mahizhchi/submit" id="mzform">
 {% for q in qs %}<div class="mz-q"><h3><span class="no">{{loop.index}}.</span>{{q.q}}</h3>
-{% for o in q.opts %}{% if q.mine %}<div class="mz-o {{'mine' if o.letter==q.mine}}"><span class="l">{{o.letter}}.</span><span>{{o.text}}{% if o.letter==q.mine %} <span class="tick" style="color:var(--pri)" title="Your answer">&#10003;</span>{% endif %}</span></div>
-{% else %}<label class="mz-o pick"><input type="radio" name="a_{{q.qid}}" value="{{o.letter}}" required><span class="l">{{o.letter}}.</span><span>{{o.text}}</span></label>{% endif %}{% endfor %}
-{% if q.mine %}<div class="mz-row">Your answer submitted</div>{% endif %}</div>
-{% else %}<div class="card"><p>There are no questions in {{MZ_TITLE}} yet.</p></div>{% endfor %}
-{% if todo %}<button class="primary">Submit my answers</button>{% endif %}</form>"""
+{% for o in q.opts %}{% if state=='active' and not q.mine %}<label class="mz-o pick"><input type="radio" name="a_{{q.qid}}" value="{{o.letter}}"><span class="l">{{o.letter}}.</span><span>{{o.text}}</span></label>
+{% else %}<div class="mz-o {{'mine' if o.letter==q.mine}}"><span class="l">{{o.letter}}.</span><span>{{o.text}}{% if o.letter==q.mine %} <span class="tick" style="color:var(--pri)" title="Your answer">&#10003;</span>{% endif %}</span></div>{% endif %}{% endfor %}
+{% if q.mine %}<div class="mz-row">Your answer submitted</div>{% elif state!='active' %}<div class="mz-row">Not answered</div>{% endif %}</div>{% endfor %}
+{% if state=='active' %}<button class="primary" id="mzsub">Submit my answers</button>{% endif %}</form>
+{% if state=='active' %}<script>(function(){
+var f=document.getElementById('mzform'),t=document.getElementById('mzt'),bar=document.getElementById('mzbar');
+var end=Date.now()+{{remaining}}*1000,over=false,iv;
+function fmt(s){return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2)}
+function lock(){                     /* keep what is ticked (disabled inputs are not sent), then close every answer button */
+  f.querySelectorAll('input[type=radio]:checked').forEach(function(r){var h=document.createElement('input');h.type='hidden';h.name=r.name;h.value=r.value;f.appendChild(h)});
+  f.querySelectorAll('input,button').forEach(function(x){x.disabled=true});f.classList.add('mz-locked')}
+function tick(){var s=Math.max(0,Math.ceil((end-Date.now())/1000));t.textContent=fmt(s);if(s<=30)bar.classList.add('low');
+  if(s<=0&&!over){over=true;clearInterval(iv);bar.textContent='\u23F1 Time is up \u2013 answers are closed, submitting\u2026';lock();f.submit()}}
+f.addEventListener('submit',function(e){if(over)return;
+  var names={},n=0,c=f.querySelectorAll('input[type=radio]:checked').length;
+  f.querySelectorAll('input[type=radio]').forEach(function(r){if(!names[r.name]){names[r.name]=1;n++}});
+  if(n>c&&!confirm((n-c)+' question(s) are not answered. Submit anyway? You cannot answer them later.')){e.preventDefault();return}
+  over=true;clearInterval(iv)});
+tick();iv=setInterval(tick,250);})();</script>{% endif %}
+{% endif %}"""
 
 # ---- Admin side (full control)
 @app.route("/admin/mahizhchi")
 @need("admin")
 def admin_mahizhchi():
-    prefetch(MZ_SHEET, MZ_ACCESS_SHEET, MZ_ANS_SHEET, "Employees", "Settings")
+    prefetch(MZ_SHEET, MZ_ACCESS_SHEET, MZ_ANS_SHEET, MZ_ATT_SHEET, "Employees", "Settings")
     tab = request.args.get("tab", "questions")
     if tab == "add":
         return page(MZ_ADMIN_ADD, title=MZ_TITLE, tab="add", sheet=MZ_SHEET, maxlen=MZ_MAX_PASTE)
@@ -3450,7 +3498,7 @@ def admin_mahizhchi():
     ids = {_key(e["Employee ID"]) for e in emps}
     return page(MZ_ADMIN_Q, title=MZ_TITLE, tab="questions", qs=qs, ok_n=sum(1 for x in qs if x["ok"]),
                 pub=mz_published(), shared_n=sum(1 for k, v in amap.items() if v and k in ids), emp_n=len(ids),
-                sheet=MZ_SHEET, sheet_id=SHEET_ID)
+                sheet=MZ_SHEET, sheet_id=SHEET_ID, limit=MZ_TIME_LIMIT)
 
 @app.route("/admin/mahizhchi/publish", methods=["POST"])
 @need("admin")
@@ -3478,8 +3526,13 @@ def admin_mahizhchi_access():
     else: abort(400)
     share = action.startswith("share")
     mz_set_access(chosen, share)
-    flash(f"{MZ_TITLE} {'shared with' if share else 'removed from'} {len(chosen)} employee(s)."
-          + ("" if not share or mz_published() else " It is not published yet, so employees will see it only after you publish."))
+    note = ""
+    if share and not mz_published(fresh=True):
+        if any(q["ok"] for q in mz_questions()):
+            mz_set_published(True); note = " It has also been published, so they can see it now."
+        else:
+            note = " Add at least one complete question (with one ✓) - until then employees cannot see anything."
+    flash(f"{MZ_TITLE} {'shared with' if share else 'removed from'} {len(chosen)} employee(s)." + note)
     return redirect("/admin/mahizhchi?tab=access")
 
 @app.route("/admin/mahizhchi/import", methods=["POST"])
@@ -3498,33 +3551,60 @@ def admin_mahizhchi_import():
     return redirect("/admin/mahizhchi" if good else "/admin/mahizhchi?tab=add")
 
 # ---- Employee side. The correct answer is deliberately NOT passed to the template (only qid / text / options / their own pick).
+# The time limit is enforced HERE on the server (start time is stored in the "Mahizhchi Attempts" sheet), not just by the page's clock.
 @app.route("/employee/mahizhchi", methods=["GET"])
 @need("employee")
 def employee_mahizhchi():
     eid = session.get("emp_id", "")
     if not mz_active(eid, fresh=True): abort(404)     # not published / not shared: page does not exist for them
-    done = mz_my_answers(eid, fresh=True)
+    done = mz_my_answers(eid, fresh=True); att = mz_attempt(eid)
     qs = [dict(qid=q["qid"], q=q["q"], opts=q["opts"], mine=done.get(q["qid"])) for q in mz_questions() if q["ok"]]
-    return page(MZ_EMP, title=MZ_TITLE, qs=qs, todo=[q for q in qs if not q["mine"]])
+    remaining = mz_seconds_left(att) if att and not att["closed"] else 0
+    if remaining > 0: state = "active"
+    elif att or done: state = "closed"
+    else: state = "intro"          # questions are not even sent to the browser until the employee presses Start
+    if state == "intro": qs_view = [dict(qid=q["qid"], q="", opts=[], mine=None) for q in qs]   # only the count is needed
+    else: qs_view = qs
+    return page(MZ_EMP, title=MZ_TITLE, qs=qs_view, state=state, remaining=remaining, limit=MZ_TIME_LIMIT,
+                todo=[q for q in qs if not q["mine"]])
+
+@app.route("/employee/mahizhchi/start", methods=["POST"])
+@need("employee")
+def employee_mahizhchi_start():
+    eid = session.get("emp_id", "")
+    if not mz_active(eid, fresh=True): abort(404)
+    if not any(q["ok"] for q in mz_questions()):
+        flash("There are no questions yet.", "error"); return redirect("/employee/mahizhchi")
+    if mz_attempt(eid) or mz_my_answers(eid, fresh=True):      # one attempt only; pressing Start again never restarts the clock
+        return redirect("/employee/mahizhchi")
+    _with_retry(ws_of(MZ_ATT_SHEET).append_row, [str(eid), session.get("name", ""),
+                now_local().strftime("%Y-%m-%d %H:%M:%S"), ""], value_input_option="RAW")
+    invalidate_cache(MZ_ATT_SHEET)
+    return redirect("/employee/mahizhchi")
 
 @app.route("/employee/mahizhchi/submit", methods=["POST"])
 @need("employee")
 def employee_mahizhchi_submit():
     eid = session.get("emp_id", "")
     if not mz_active(eid, fresh=True): abort(404)
-    done = mz_my_answers(eid, fresh=True)                               # already-saved answers can never be changed or duplicated
+    att = mz_attempt(eid)
+    if not att or att["closed"]:
+        flash("This quiz is already closed.", "error"); return redirect("/employee/mahizhchi")
+    if (now_local() - att["start"]).total_seconds() > MZ_TIME_LIMIT + MZ_GRACE:      # too late: nothing is accepted
+        mz_close_attempt(att)
+        flash(f"Time is over ({_mz_dur(MZ_TIME_LIMIT)}). Answers are closed.", "error"); return redirect("/employee/mahizhchi")
+    done = mz_my_answers(eid, fresh=True)
     picks = []
     for q in (q for q in mz_questions() if q["ok"] and q["qid"] not in done):
         a = request.form.get("a_" + q["qid"], "").strip().upper()
-        if a not in [o["letter"] for o in q["opts"]]:                   # must be one of THIS question's real options
-            flash("Please tick one answer for every question before submitting.", "error"); return redirect("/employee/mahizhchi")
-        picks.append((q, a))
-    if not picks:
-        flash("You have already answered all the questions."); return redirect("/employee/mahizhchi")
-    stamp = now_local().strftime("%Y-%m-%d %H:%M:%S")
-    _with_retry(ws_of(MZ_ANS_SHEET).append_rows,
-                [[str(eid), session.get("name", ""), q["qid"], q["q"], a, stamp] for q, a in picks], value_input_option="RAW")
-    invalidate_cache(MZ_ANS_SHEET)
+        if a in [o["letter"] for o in q["opts"]]:                        # must be one of THIS question's real options; blanks stay unanswered
+            picks.append((q, a))
+    if picks:
+        stamp = now_local().strftime("%Y-%m-%d %H:%M:%S")
+        _with_retry(ws_of(MZ_ANS_SHEET).append_rows,
+                    [[str(eid), session.get("name", ""), q["qid"], q["q"], a, stamp] for q, a in picks], value_input_option="RAW")
+        invalidate_cache(MZ_ANS_SHEET)
+    mz_close_attempt(att)                                                # attempt is over: nothing more can be answered
     flash(f"Thank you! {len(picks)} answer(s) submitted.")
     return redirect("/employee/mahizhchi")
 

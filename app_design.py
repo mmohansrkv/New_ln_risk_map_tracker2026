@@ -36,6 +36,10 @@ Access rules (Update59):
     refreshes every 5 s; heartbeat-based so a closed tab drops off). (2) Employee-page background music is now a soft solo
     Tamil bamboo flute (Pullangu Kuzhal, raga Mohanam) - no vocals, no drone, no percussion, no other instrument.
   * Update72: after employee login the Welcome Page starts the Tamil bamboo-flute music by itself (7 s welcome), instrumental only.
+  * Update73: Employee login page has NO music. Employee Welcome Page = AI welcome voice first, then (after the voice ends) only the
+    Tamil bamboo-flute instrumental. Admin pages unchanged.
+  * Update74: Employee Chat (sidebar 'Chat'). Lists only employees who are online right now; pick one to chat. Messages arrive within ~2 s,
+    unread badge + pop-up + tab-title alert on every employee page. Offline employees vanish from the list; their chat shows Offline.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -252,7 +256,7 @@ def _idle_auto_logout():
             session.clear()
             flash(f"You were logged out automatically after {SESSION_IDLE_MINUTES} minutes of inactivity.")
             return redirect("/admin/login" if was_admin else "/employee/login")
-        if request.endpoint == "employee_ping":          # heartbeat: shows "online" but must NOT reset the idle timer
+        if request.endpoint in ("employee_ping", "chat_state"):          # heartbeat: shows "online" but must NOT reset the idle timer
             online_set(session.get("att_id"), session.get("att_eid"), session.get("att_name"), active=last)
             return
         session["last_seen"] = now_ts
@@ -1260,6 +1264,57 @@ function poll(){fetch('/admin/notify/poll?since='+since+'&first='+first,{credent
 poll();setInterval(poll,15000)})();
 </script>{% endif %}
 {% if session.role=='employee' %}<script>(function(){function p(){fetch('/employee/ping',{credentials:'same-origin',cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();</script>{% endif %}
+{% if session.role=='employee' and request.path!='/employee/welcome' %}<script>
+(function(){
+var root=document.getElementById('chat_root'),peer=null,peerName='',after=-1,busy=false,base=document.title,shown={};
+function ss(k,v){try{if(v===undefined)return sessionStorage.getItem(k);sessionStorage.setItem(k,v)}catch(e){return null}}
+var notified=parseInt(ss('chatNotified')||'-1',10);if(isNaN(notified))notified=-1;
+function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e}
+var tw=el('div');tw.style.cssText='position:fixed;bottom:16px;right:16px;z-index:99;display:flex;flex-direction:column;gap:8px;max-width:320px';document.body.appendChild(tw);
+function toast(m){var d=el('div','toast','\\uD83D\\uDCAC '+m.name+': '+(m.text.length>60?m.text.slice(0,60)+'...':m.text));d.style.cursor='pointer';
+ d.onclick=function(){d.remove();if(root)pick(m.frm,m.name);else window.location='/employee/chat?with='+encodeURIComponent(m.frm)};
+ tw.appendChild(d);setTimeout(function(){d.remove()},8000)}
+function badge(n){var a=document.querySelector('a[href="/employee/chat"]');
+ if(a){if(!a.getAttribute('data-l'))a.setAttribute('data-l',a.textContent.trim());a.textContent=a.getAttribute('data-l')+(n?' ('+n+')':'')}
+ document.title=(n?'('+n+') New message - ':'')+base}
+function status(st){var s=document.getElementById('cht_s');if(!s)return;s.textContent='';
+ var p=el('span','pill '+(st==='Offline'?'out':(st==='Away'?'act':'in')),'\\u25CF '+(st==='Away'?'Online (away)':st));s.appendChild(p)}
+function lock(off){document.getElementById('chi').disabled=off;document.getElementById('chs').disabled=off;
+ document.getElementById('chi').placeholder=off?'This employee is offline':'Type a message...'}
+function pick(id,name){peer=id;peerName=name||id;after=-1;shown={};document.getElementById('cht_n').textContent=peerName;
+ var m=document.getElementById('chm');m.textContent='';status('Online');lock(false);poll();setTimeout(function(){document.getElementById('chi').focus()},50)}
+function drawList(list,unread){var box=document.getElementById('chl');box.textContent='';document.getElementById('chn').textContent=list.length;
+ if(!list.length){box.appendChild(el('div','chempty','No other employees are online right now.'));return}
+ list.forEach(function(e){var r=el('div','chp'+(e.id===peer?' sel':''));r.appendChild(el('span','dot'+(e.status==='Away'?' away':'')));
+  var n=el('div','nm');n.appendChild(el('b','',e.name));n.appendChild(el('small','',e.id+' \\u00B7 '+(e.status==='Away'?'Online (away)':'Online')));r.appendChild(n);
+  if(unread[e.id])r.appendChild(el('span','bd',unread[e.id]));
+  r.onclick=function(){pick(e.id,e.name)};box.appendChild(r)})}
+function drawMsgs(list){var m=document.getElementById('chm');if(!list.length)return;
+ var down=m.scrollHeight-m.scrollTop-m.clientHeight<80||after<0;
+ list.forEach(function(x){if(shown[x.id])return;shown[x.id]=1;var b=el('div','bub '+(x.mine?'me':'th'),x.text);b.appendChild(el('small','',x.t));m.appendChild(b);after=Math.max(after,x.id)});
+ if(down)m.scrollTop=m.scrollHeight}
+function apply(j){
+ badge(j.total);
+ j.incoming.forEach(function(m){if(!(root&&peer===m.frm&&!document.hidden))toast(m)});
+ if(j.latest>notified||notified<0){notified=j.latest;ss('chatNotified',String(notified))}
+ if(!root)return;
+ drawList(j.online,j.unread);
+ if(peer){status(j.peer_status);lock(j.peer_status==='Offline');if(j.peer_name)document.getElementById('cht_n').textContent=j.peer_name;drawMsgs(j.messages)}}
+function poll(){if(busy)return;busy=true;
+ var q='/employee/chat/state?since='+notified+(root&&peer?'&with='+encodeURIComponent(peer)+'&after='+after+'&vis='+(document.hidden?0:1):'');
+ fetch(q,{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(j){busy=false;apply(j)}).catch(function(){busy=false})}
+function send(){var i=document.getElementById('chi'),t=i.value.trim();if(!t||!peer)return;
+ var f=new URLSearchParams();f.set('to',peer);f.set('text',t);i.value='';
+ fetch('/employee/chat/send',{method:'POST',body:f,credentials:'same-origin'}).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
+  .then(function(x){if(!x.ok){var m=document.getElementById('chm');var n=el('div','chempty',x.j.error||'Not sent.');m.appendChild(n);m.scrollTop=m.scrollHeight}poll()}).catch(function(){})}
+if(root){document.getElementById('chs').onclick=send;
+ document.getElementById('chi').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();send()}});
+ var w=new URLSearchParams(location.search).get('with');if(w){peer=w;peerName=w;document.getElementById('cht_n').textContent=w;lock(false)}}
+poll();
+(function loop(){setTimeout(function(){if(!document.hidden||!root)poll();loop()},root?2000:5000)})();
+document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()});
+})();
+</script>{% endif %}
 {% if session.role=='employee' and request.path!='/employee/welcome' %}<button id="bgm" type="button" aria-label="Turn background music off" title="Background music (optional mute)" hidden>&#128266;</button><script>
 (function(){
 /* Update71: Employee-page background music = solo Tamil bamboo flute (Pullangu Kuzhal), raga Mohanam, synthesised live - no audio file.
@@ -1303,7 +1358,7 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
               ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log")],
-    "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
+    "employee": [("/employee", "Daily entry"), ("/employee/chat", "Chat"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
 
@@ -1409,7 +1464,7 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
   }
 })();
 </script>
-<button id="lgm" type="button" aria-label="Turn music off" title="Background music" hidden><span id="lgm_i">&#128266;</span><span id="lgm_t">Music on</span></button>
+{% if role=='admin' %}<button id="lgm" type="button" aria-label="Turn music off" title="Background music" hidden><span id="lgm_i">&#128266;</span><span id="lgm_t">Music on</span></button>{% endif %}
 <script>
 (function(){
 /* Update67: Tamil-style background music, synthesised live with Web Audio (no audio file, nothing to download).
@@ -2345,7 +2400,7 @@ WELCOME = """<style>
 .wl-card h1{font-family:Georgia,serif;font-size:27px;margin:0 0 4px;color:#5b4fb0;word-break:break-word}
 .wl-card p{margin:0 0 14px;color:#6b7390;font-size:13px}
 .wl-bar{height:6px;border-radius:4px;background:#e9e6fb;overflow:hidden}
-.wl-bar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#6d70f5,#f58a8a);transform-origin:left;transform:scaleX(0);animation:wlFill 7s linear forwards}
+.wl-bar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#6d70f5,#f58a8a);transform-origin:left;transform:scaleX(0);animation:wlFill 10s linear forwards}
 @keyframes wlFill{to{transform:scaleX(1)}}
 .wl-st{margin-top:10px;font:600 10px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;color:#8a90ad}
 </style>
@@ -2353,23 +2408,29 @@ WELCOME = """<style>
 """ + WL_SCENE.replace('{{role}}', "{{session.role}}").replace("role=='admin'", "session.role=='admin'") + """
  <div class="wl-card"><h1>Welcome, {{session.name}}</h1>
  <p>{{ 'Syncing live data from the server' if session.role=='admin' else 'Securely connecting to the server' }}&hellip;</p>
- <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div><div class="wl-st" style="margin-top:6px;font-weight:500">{% if session.role=='employee' %}&#9834; Flute music playing{% else %}&#9834; Move the mouse to play music{% endif %}</div></div>
+ <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div><div class="wl-st" style="margin-top:6px;font-weight:500">{% if session.role=='employee' %}&#9834; Flute music follows the welcome{% else %}&#9834; Move the mouse to play music{% endif %}</div></div>
 </div>
 <script>
 (function(){
  var ROLE={{session.role|tojson}}, NAME={{session.name|tojson}};
- var WL_MS=7000;                                       /* total time the welcome page is shown (long enough to move the mouse and hear the music) */
+ var WL_MS=10000;                                       /* total time the welcome page is shown (long enough to move the mouse and hear the music) */
 
  if(ROLE==='employee'){                                /* AI voice announcement - Employee welcome only, no BGM */
   try{
    if('speechSynthesis' in window){
     var utter=new SpeechSynthesisUtterance('Welcome, ' + NAME);
     utter.rate=1; utter.pitch=1.02; utter.volume=1;
+    utter.onend=function(){ startFlute(); };            /* flute begins only AFTER the AI welcome voice has finished */
+    utter.onerror=function(){ startFlute(); };
     window.speechSynthesis.cancel();                   // clear anything queued, then speak right away
     window.speechSynthesis.speak(utter);
    }
-  }catch(e){ /* speech unavailable/blocked - animation still runs fine without it */ }
+   }else{ setTimeout(function(){ startFlute(); },1500); }   /* no speech support: go straight to the flute */
+  }catch(e){ setTimeout(function(){ startFlute(); },1500); }
+  setTimeout(function(){ startFlute(); },5000);          /* safety: never wait for the voice longer than 5 s */
  }
+ var voiceDone=(ROLE!=='employee');
+ function startFlute(){ if(voiceDone)return; voiceDone=true; try{ go(); }catch(e){} }
 
   /* Music: NEVER automatic. It starts only when the user moves the mouse over this page (click / key / touch work as a fallback). */
  var ADMIN=(ROLE==='admin');
@@ -2380,16 +2441,12 @@ WELCOME = """<style>
  """ + "{% if session.role=='employee' %}" + FLUTE_ENGINE + "{% else %}" + WL_ENGINE + "{% endif %}" + """
  var mEv=['mousemove','pointermove','pointerdown','keydown','touchstart'];
  function onUser(){
-  if(!AC)return;
+  if(!AC||!voiceDone)return;                           /* employee: nothing plays while the AI voice is speaking */
   try{go()}catch(e){}
   if(ctx&&ctx.state==='running'){mEv.forEach(function(t){document.removeEventListener(t,onUser,true)})}   /* running: stop listening */
  }
  mEv.forEach(function(t){document.addEventListener(t,onUser,true)});
- if(AC && ROLE==='employee'){   /* Update72: flute starts on the Welcome Page itself; if the browser blocks autoplay, the first mouse move / click / key starts it */
-  try{ go(); }catch(e){}
-  setTimeout(function(){ try{ go(); }catch(e){} },400);
- }
-
+ 
  setTimeout(function(){                                /* welcome animation for 2s, then move on */
   try{ if(timer)clearInterval(timer); if(ctx){ master.gain.cancelScheduledValues(ctx.currentTime); master.gain.value=0; ctx.close(); } }catch(e){}
   if(ROLE==='employee' && 'speechSynthesis' in window){ try{ window.speechSynthesis.cancel(); }catch(e){} }
@@ -2397,12 +2454,100 @@ WELCOME = """<style>
  },WL_MS);
 })();
 </script>
-<noscript><meta http-equiv="refresh" content="7;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
+<noscript><meta http-equiv="refresh" content="10;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
 
 @app.route("/admin/welcome")
 @need("admin")
 def admin_welcome():
     return page(WELCOME, title="Welcome", wl_gender="male")
+
+# ---------------------------------------------------------------- employee chat (Update74)
+_chat, _chat_read, _chat_seq, _chat_lock = [], {}, [0], threading.Lock()   # in memory (like the online list): cleared on restart
+CHAT_MAX_LEN, CHAT_KEEP = 500, 3000
+
+def _chat_name(eid, fallback=""):
+    for r in online_list():
+        if r["id"] == eid: return r["name"]
+    for m in reversed(_chat):
+        if m["frm"] == eid: return m["frm_name"]
+        if m["to"] == eid: return m["to_name"]
+    return fallback or eid
+
+@app.route("/employee/chat")
+@need("employee")
+def employee_chat():
+    return page(CHAT, title="Chat")
+
+@app.route("/employee/chat/state")
+@need("employee")
+def chat_state():
+    """One poll answers everything: who is online, unread counts, new incoming messages (for pop-ups)
+    and - when a chat is open - the new messages of that conversation."""
+    me, peer = str(session.get("emp_id", "")), (request.args.get("with") or "").strip()
+    def _i(k):
+        try: return int(request.args.get(k, -1))
+        except ValueError: return -1
+    since, after = _i("since"), _i("after")
+    online = [r for r in online_list() if r["id"] != me]
+    ids = {r["id"]: r for r in online}
+    with _chat_lock:
+        latest = max([m["id"] for m in _chat if m["to"] == me] or [0])
+        if peer and request.args.get("vis") == "1":                 # the open chat is on screen -> its messages count as read
+            _chat_read[(me, peer)] = max([m["id"] for m in _chat if m["frm"] == peer and m["to"] == me] or [_chat_read.get((me, peer), 0)])
+        unread = {}
+        for m in _chat:
+            if m["to"] == me and m["id"] > _chat_read.get((me, m["frm"]), 0): unread[m["frm"]] = unread.get(m["frm"], 0) + 1
+        incoming = [m for m in _chat if m["to"] == me and m["id"] > since][-20:] if since >= 0 else []
+        conv = [m for m in _chat if peer and ((m["frm"] == me and m["to"] == peer) or (m["frm"] == peer and m["to"] == me)) and m["id"] > after][-200:]
+    pick = lambda m: dict(id=m["id"], frm=m["frm"], name=m["frm_name"], text=m["text"], t=m["t"], mine=(m["frm"] == me))
+    return jsonify(online=[dict(id=r["id"], name=r["name"], status=r["status"]) for r in online], unread=unread, total=sum(unread.values()),
+                   latest=latest, incoming=[pick(m) for m in incoming], messages=[pick(m) for m in conv],
+                   peer_status=(ids[peer]["status"] if peer in ids else "Offline") if peer else "",
+                   peer_name=_chat_name(peer) if peer else "")
+
+@app.route("/employee/chat/send", methods=["POST"])
+@need("employee")
+def chat_send():
+    me, to = str(session.get("emp_id", "")), (request.form.get("to") or "").strip()
+    text = (request.form.get("text") or "").strip()[:CHAT_MAX_LEN]
+    if not text or not to or to == me: return jsonify(ok=False, error="Type a message first."), 400
+    online = {r["id"]: r for r in online_list()}
+    if to not in online: return jsonify(ok=False, error="This employee is offline now - message not sent."), 409
+    with _chat_lock:
+        _chat_seq[0] += 1
+        _chat.append(dict(id=_chat_seq[0], frm=me, frm_name=str(session.get("name", "")), to=to, to_name=online[to]["name"],
+                          text=text, t=now_local().strftime("%I:%M %p")))
+        del _chat[:-CHAT_KEEP]
+        _chat_read[(me, to)] = _chat_seq[0]
+    return jsonify(ok=True)
+
+CHAT = """<style>
+.ch{display:grid;grid-template-columns:270px 1fr;gap:14px;align-items:stretch}
+@media(max-width:760px){.ch{grid-template-columns:1fr}}
+.ch .pane{background:#fff;border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;min-height:440px;max-height:72vh;overflow:hidden}
+.ch h2{font-size:14px;margin:0;padding:12px 14px;border-bottom:1px solid var(--line)}
+#chl{overflow:auto;flex:1}
+.chp{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--line)}
+.chp:hover{background:#f5f6fc}.chp.sel{background:#eceffa}
+.chp .dot{width:9px;height:9px;border-radius:50%;background:#2fb26a;flex:none}.chp .dot.away{background:#e0a020}
+.chp .nm{flex:1;min-width:0}.chp .nm b{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.chp .nm small{color:var(--mut);font-size:11px}
+.chp .bd{background:#e5484d;color:#fff;border-radius:10px;font-size:11px;padding:1px 7px;font-weight:600}
+.cht{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);min-height:20px}
+#chm{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:8px;background:#f8f9fd}
+.bub{max-width:76%;padding:8px 12px;border-radius:14px;font-size:13.5px;line-height:1.4;word-wrap:break-word;white-space:pre-wrap}
+.bub small{display:block;font-size:10px;opacity:.65;margin-top:3px}
+.bub.me{align-self:flex-end;background:#4f5bd5;color:#fff;border-bottom-right-radius:4px}
+.bub.th{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:4px}
+.chf{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}.chf input{flex:1;padding:9px 12px}
+.chempty{color:var(--mut);font-size:13px;padding:18px;text-align:center}
+</style>
+<div class="head"><h1>Chat</h1><p class="mut">Only employees who are online right now are listed. Messages appear instantly for both of you.</p></div>
+<div class="ch" id="chat_root">
+ <div class="pane"><h2>Online now <span class="pill in" id="chn">0</span></h2><div id="chl"><div class="chempty">Loading...</div></div></div>
+ <div class="pane"><div class="cht"><b id="cht_n">Select an employee to start chatting</b><span id="cht_s"></span></div>
+  <div id="chm"><div class="chempty">Pick someone from the online list.</div></div>
+  <div class="chf"><input id="chi" maxlength="500" placeholder="Type a message..." autocomplete="off" disabled><button class="primary" id="chs" type="button" disabled>Send</button></div></div>
+</div>"""
 
 @app.route("/employee/ping")
 @need("employee")

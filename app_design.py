@@ -41,6 +41,9 @@ Access rules (Update59):
   * Update74: Employee Chat (sidebar 'Chat'). Lists only employees who are online right now; pick one to chat. Messages arrive within ~2 s,
     unread badge + pop-up + tab-title alert on every employee page. Offline employees vanish from the list; their chat shows Offline.
   * Update75: Employee Welcome Page has no audio (no voice, no music). Fixed a JS syntax error that froze the Welcome Page (site would not open).
+  * Update76: Chat = floating chat button on every employee page + sidebar link; messages live 1 hour only (auto-deleted every minute and on
+    every access); Chat section has NO audio (the flute does not play there). New original Tamil bamboo-flute (Pullangu Kuzhal) instrumental
+    for the Employee Page, flute only.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -1265,18 +1268,20 @@ function poll(){fetch('/admin/notify/poll?since='+since+'&first='+first,{credent
 poll();setInterval(poll,15000)})();
 </script>{% endif %}
 {% if session.role=='employee' %}<script>(function(){function p(){fetch('/employee/ping',{credentials:'same-origin',cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();</script>{% endif %}
-{% if session.role=='employee' and request.path!='/employee/welcome' %}<script>
+{% if session.role=='employee' and request.path!='/employee/welcome' %}{% if request.path!='/employee/chat' %}<a id="chatfab" href="/employee/chat" title="Chat with online employees" aria-label="Chat"
+ style="position:fixed;right:22px;bottom:22px;z-index:98;width:54px;height:54px;border-radius:50%;background:#4f5bd5;color:#fff;display:flex;align-items:center;justify-content:center;font-size:25px;text-decoration:none;box-shadow:0 8px 22px #4f5bd566">&#128172;<span id="chatfab_n" style="display:none;position:absolute;top:-4px;right:-4px;background:#e5484d;color:#fff;border-radius:10px;font-size:11px;font-weight:700;padding:1px 6px;min-width:10px;text-align:center"></span></a>{% endif %}<script>
 (function(){
 var root=document.getElementById('chat_root'),peer=null,peerName='',after=-1,busy=false,base=document.title,shown={};
 function ss(k,v){try{if(v===undefined)return sessionStorage.getItem(k);sessionStorage.setItem(k,v)}catch(e){return null}}
 var notified=parseInt(ss('chatNotified')||'-1',10);if(isNaN(notified))notified=-1;
 function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e}
-var tw=el('div');tw.style.cssText='position:fixed;bottom:16px;right:16px;z-index:99;display:flex;flex-direction:column;gap:8px;max-width:320px';document.body.appendChild(tw);
+var tw=el('div');tw.style.cssText='position:fixed;bottom:88px;right:16px;z-index:99;display:flex;flex-direction:column;gap:8px;max-width:320px';document.body.appendChild(tw);
 function toast(m){var d=el('div','toast','\\uD83D\\uDCAC '+m.name+': '+(m.text.length>60?m.text.slice(0,60)+'...':m.text));d.style.cursor='pointer';
  d.onclick=function(){d.remove();if(root)pick(m.frm,m.name);else window.location='/employee/chat?with='+encodeURIComponent(m.frm)};
  tw.appendChild(d);setTimeout(function(){d.remove()},8000)}
 function badge(n){var a=document.querySelector('a[href="/employee/chat"]');
  if(a){if(!a.getAttribute('data-l'))a.setAttribute('data-l',a.textContent.trim());a.textContent=a.getAttribute('data-l')+(n?' ('+n+')':'')}
+ var fb=document.getElementById('chatfab_n');if(fb){fb.textContent=n;fb.style.display=n?'block':'none'}
  document.title=(n?'('+n+') New message - ':'')+base}
 function status(st){var s=document.getElementById('cht_s');if(!s)return;s.textContent='';
  var p=el('span','pill '+(st==='Offline'?'out':(st==='Away'?'act':'in')),'\\u25CF '+(st==='Away'?'Online (away)':st));s.appendChild(p)}
@@ -1290,16 +1295,18 @@ function drawList(list,unread){var box=document.getElementById('chl');box.textCo
   var n=el('div','nm');n.appendChild(el('b','',e.name));n.appendChild(el('small','',e.id+' \\u00B7 '+(e.status==='Away'?'Online (away)':'Online')));r.appendChild(n);
   if(unread[e.id])r.appendChild(el('span','bd',unread[e.id]));
   r.onclick=function(){pick(e.id,e.name)};box.appendChild(r)})}
+function expire(now){var m=document.getElementById('chm');if(!m)return;   /* messages older than 1 hour disappear from the screen too */
+ Array.prototype.slice.call(m.querySelectorAll('.bub')).forEach(function(b){if(now-parseFloat(b.getAttribute('data-ts'))>3600)b.remove()})}
 function drawMsgs(list){var m=document.getElementById('chm');if(!list.length)return;
  var down=m.scrollHeight-m.scrollTop-m.clientHeight<80||after<0;
- list.forEach(function(x){if(shown[x.id])return;shown[x.id]=1;var b=el('div','bub '+(x.mine?'me':'th'),x.text);b.appendChild(el('small','',x.t));m.appendChild(b);after=Math.max(after,x.id)});
+ list.forEach(function(x){if(shown[x.id])return;shown[x.id]=1;var b=el('div','bub '+(x.mine?'me':'th'),x.text);b.setAttribute('data-ts',x.ts);b.appendChild(el('small','',x.t));m.appendChild(b);after=Math.max(after,x.id)});
  if(down)m.scrollTop=m.scrollHeight}
 function apply(j){
  badge(j.total);
  j.incoming.forEach(function(m){if(!(root&&peer===m.frm&&!document.hidden))toast(m)});
  if(j.latest>notified||notified<0){notified=j.latest;ss('chatNotified',String(notified))}
  if(!root)return;
- drawList(j.online,j.unread);
+ drawList(j.online,j.unread);expire(j.now);
  if(peer){status(j.peer_status);lock(j.peer_status==='Offline');if(j.peer_name)document.getElementById('cht_n').textContent=j.peer_name;drawMsgs(j.messages)}}
 function poll(){if(busy)return;busy=true;
  var q='/employee/chat/state?since='+notified+(root&&peer?'&with='+encodeURIComponent(peer)+'&after='+after+'&vis='+(document.hidden?0:1):'');
@@ -1316,7 +1323,7 @@ poll();
 document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()});
 })();
 </script>{% endif %}
-{% if session.role=='employee' and request.path!='/employee/welcome' %}<button id="bgm" type="button" aria-label="Turn background music off" title="Background music (optional mute)" hidden>&#128266;</button><script>
+{% if session.role=='employee' and request.path!='/employee/welcome' and not request.path.startswith('/employee/chat') %}<button id="bgm" type="button" aria-label="Turn background music off" title="Background music (optional mute)" hidden>&#128266;</button><script>
 (function(){
 /* Update71: Employee-page background music = solo Tamil bamboo flute (Pullangu Kuzhal), raga Mohanam, synthesised live - no audio file.
    NEVER starts by itself: it starts when the employee moves the mouse anywhere on the page (click / key / touch also work).
@@ -2334,41 +2341,44 @@ FLUTE_ENGINE = r"""
 /* Update71: solo Tamil bamboo flute (Pullangu Kuzhal). Raga Mohanam (S R2 G3 P D2), slow and soft, with breathy attack,
    gentle vibrato that blooms on long notes, gamaka glides between swaras and breath pauses between phrases.
    ONLY the flute voice exists here: no vocals, no tanpura drone, no percussion. */
-var SA=220,BPM=62,SPB=60/BPM/2;
-var RAT=[1,9/8,5/4,3/2,5/3];
+var SA=233,BPM=66,SPB=60/BPM/2;
+var RAT=[1,9/8,5/4,3/2,5/3];   /* Mohanam: S R2 G3 P D2 */
 function fr(i){var o=Math.floor(i/5),d=((i%5)+5)%5;return SA*2*RAT[d]*Math.pow(2,o)}
-var PH=[[[2,2],[3,2],[4,4],[3,2],[2,2],[1,2],[0,6],[null,4]],
-        [[0,2],[1,2],[2,4],[3,2],[4,2],[5,4],[4,2],[3,2],[2,4],[null,4]],
-        [[3,2],[4,2],[5,6],[4,2],[3,2],[2,2],[1,2],[2,2],[0,8],[null,4]],
-        [[-1,2],[0,2],[1,2],[2,6],[1,2],[0,4],[-1,6],[null,4]]];
-var ORDER=[0,1,0,2,3,1,2,0];
+/* Original lilting Pullangu Kuzhal melody (not a copy of any film song): [swara index, length in half-beats, ornament]; null = breath pause; ornament 1 = quick grace note */
+var PH=[[[2,2],[3,2],[4,3,1],[3,1],[2,2],[3,2],[2,2],[1,2],[0,4],[null,2]],
+        [[0,2],[1,2],[2,3],[1,1],[2,2],[3,2],[4,4],[3,2],[2,2],[1,2],[2,4],[null,2]],
+        [[4,2],[5,3,1],[4,1],[5,2],[6,2],[5,2],[4,2],[3,4],[4,2],[3,2],[2,4],[null,2]],
+        [[3,2],[2,2],[1,3],[0,1],[1,2],[2,2],[1,2],[0,2],[-1,2],[0,6],[null,4]]];
+var ORDER=[0,1,0,1,2,2,3,0,1,3];
 var SEQ=[];
-(function(){var pos=0;ORDER.forEach(function(p){PH[p].forEach(function(n){SEQ.push([pos,n[0],n[1]]);pos+=n[1]})});SEQ.total=pos})();
+(function(){var pos=0;ORDER.forEach(function(p){PH[p].forEach(function(n){SEQ.push([pos,n[0],n[1],n[2]||0]);pos+=n[1]})});SEQ.total=pos})();
 var byStep={};SEQ.forEach(function(n){byStep[n[0]]=n});
 function icon(){bi.innerHTML=muted?'&#128263;':'&#128266;';bt.textContent=muted?'Music off':'Music on';
  btn.setAttribute('aria-label',muted?'Turn music on':'Turn music off')}
 function env(g,t,peak,att,dec,sus,dur,rel){g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(peak,t+att);
- g.gain.exponentialRampToValueAtTime(Math.max(peak*sus,0.0002),t+att+dec);g.gain.setValueAtTime(Math.max(peak*sus,0.0002),t+dur);
- g.gain.exponentialRampToValueAtTime(0.0001,t+dur+rel)}
-function flute(t,f,dur){
- var g=ctx.createGain(),lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=2800;
- var from=lastF>0?lastF:f,stop=t+dur+0.4,parts=[[1,1],[2,0.14],[3,0.04]],oscs=[];
+ g.gain.exponentialRampToValueAtTime(Math.max(peak*sus,0.0002),t+att+dec);g.gain.setValueAtTime(Math.max(peak*sus,0.0002),t+Math.max(dur,att+dec));
+ g.gain.exponentialRampToValueAtTime(0.0001,t+Math.max(dur,att+dec)+rel)}
+function flute(t,f,dur,q){
+ var g=ctx.createGain(),lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=3000;
+ var from=(!q&&lastF>0)?lastF:f,stop=t+dur+0.4,parts=[[1,1],[2,0.16],[3,0.05]],oscs=[];
  parts.forEach(function(p){var o=ctx.createOscillator(),pg=ctx.createGain();o.type='sine';pg.gain.value=p[1];
-  o.frequency.setValueAtTime(from*p[0],t);o.frequency.linearRampToValueAtTime(f*p[0],t+0.09);   /* gamaka: slide in from the previous swara */
+  o.frequency.setValueAtTime(from*p[0],t);o.frequency.linearRampToValueAtTime(f*p[0],t+(q?0.01:0.1));   /* gamaka: glide in from the previous swara */
   o.connect(pg);pg.connect(lp);oscs.push(o)});
- lastF=f;
- var nz=ctx.createBufferSource(),bp=ctx.createBiquadFilter(),ng=ctx.createGain();   /* breath / air of the bamboo */
- nz.buffer=noiseBuf;nz.loop=true;bp.type='bandpass';bp.frequency.value=Math.min(f*2,5000);bp.Q.value=1.2;
- nz.connect(bp);bp.connect(ng);ng.connect(g);env(ng,t,0.05,0.05,0.25,0.5,dur,0.2);nz.start(t);nz.stop(stop);
+ if(!q)lastF=f;
+ var nz=ctx.createBufferSource(),bp=ctx.createBiquadFilter(),ng=ctx.createGain();   /* breath of the bamboo */
+ nz.buffer=noiseBuf;nz.loop=true;bp.type='bandpass';bp.frequency.value=Math.min(f*2,5200);bp.Q.value=1.1;
+ nz.connect(bp);bp.connect(ng);ng.connect(g);env(ng,t,q?0.03:0.06,0.04,0.2,0.45,dur,0.2);nz.start(t);nz.stop(stop);
  lp.connect(g);g.connect(master);g.connect(verb);
- env(g,t,0.24,0.09,0.25,0.78,dur,0.28);
- if(dur>SPB*1.8){var l=ctx.createOscillator(),lg=ctx.createGain();l.frequency.value=5.2;   /* vibrato blooms after the note starts */
-  lg.gain.setValueAtTime(0,t);lg.gain.setValueAtTime(0,t+dur*0.25);lg.gain.linearRampToValueAtTime(11,t+dur*0.6);
+ if(q)env(g,t,0.2,0.02,0.05,0.8,dur,0.05);else env(g,t,0.24,0.09,0.25,0.78,dur,0.3);
+ if(!q&&dur>SPB*1.8){var l=ctx.createOscillator(),lg=ctx.createGain();l.frequency.value=5.4;   /* vibrato blooms on long notes */
+  lg.gain.setValueAtTime(0,t);lg.gain.setValueAtTime(0,t+dur*0.25);lg.gain.linearRampToValueAtTime(12,t+dur*0.6);
   l.connect(lg);oscs.forEach(function(o){lg.connect(o.detune)});l.start(t);l.stop(stop)}
  oscs.forEach(function(o){o.start(t);o.stop(stop)})}
 function play(n,t){
- var m=byStep[n%SEQ.total];
- if(m){if(m[1]===null){lastF=0}else flute(t,fr(m[1]),Math.max(m[2]*SPB*0.95,0.2))}}
+ var m=byStep[n%SEQ.total];if(!m)return;
+ if(m[1]===null){lastF=0;return}
+ var f=fr(m[1]),d=Math.max(m[2]*SPB*0.95,0.2);
+ if(m[3]===1){var gd=0.11;flute(t,fr(m[1]+1),gd,true);flute(t+gd,f,d-gd)}else flute(t,f,d)}
 function sched(){if(!ctx||ctx.state!=='running'||muted)return;
  while(next<ctx.currentTime+0.6){play(step,next);next+=SPB;step++}}
 function build(){
@@ -2449,6 +2459,22 @@ def admin_welcome():
 # ---------------------------------------------------------------- employee chat (Update74)
 _chat, _chat_read, _chat_seq, _chat_lock = [], {}, [0], threading.Lock()   # in memory (like the online list): cleared on restart
 CHAT_MAX_LEN, CHAT_KEEP = 500, 3000
+CHAT_TTL = 3600     # seconds: every message is deleted 1 hour after it was sent (nothing is kept permanently)
+
+def _chat_purge():
+    """Drop messages older than CHAT_TTL (caller holds _chat_lock) and read-markers of conversations that no longer exist."""
+    cut = time.time() - CHAT_TTL
+    _chat[:] = [m for m in _chat if m["ts"] > cut]
+    pairs = {(m["to"], m["frm"]) for m in _chat} | {(m["frm"], m["to"]) for m in _chat}
+    for k in [k for k in _chat_read if k not in pairs]: del _chat_read[k]
+
+def _chat_sweeper():
+    while True:
+        time.sleep(60)
+        try:
+            with _chat_lock: _chat_purge()
+        except Exception: pass
+threading.Thread(target=_chat_sweeper, daemon=True).start()
 
 def _chat_name(eid, fallback=""):
     for r in online_list():
@@ -2476,6 +2502,7 @@ def chat_state():
     online = [r for r in online_list() if r["id"] != me]
     ids = {r["id"]: r for r in online}
     with _chat_lock:
+        _chat_purge()
         latest = max([m["id"] for m in _chat if m["to"] == me] or [0])
         if peer and request.args.get("vis") == "1":                 # the open chat is on screen -> its messages count as read
             _chat_read[(me, peer)] = max([m["id"] for m in _chat if m["frm"] == peer and m["to"] == me] or [_chat_read.get((me, peer), 0)])
@@ -2484,9 +2511,9 @@ def chat_state():
             if m["to"] == me and m["id"] > _chat_read.get((me, m["frm"]), 0): unread[m["frm"]] = unread.get(m["frm"], 0) + 1
         incoming = [m for m in _chat if m["to"] == me and m["id"] > since][-20:] if since >= 0 else []
         conv = [m for m in _chat if peer and ((m["frm"] == me and m["to"] == peer) or (m["frm"] == peer and m["to"] == me)) and m["id"] > after][-200:]
-    pick = lambda m: dict(id=m["id"], frm=m["frm"], name=m["frm_name"], text=m["text"], t=m["t"], mine=(m["frm"] == me))
+    pick = lambda m: dict(id=m["id"], frm=m["frm"], name=m["frm_name"], text=m["text"], t=m["t"], ts=m["ts"], mine=(m["frm"] == me))
     return jsonify(online=[dict(id=r["id"], name=r["name"], status=r["status"]) for r in online], unread=unread, total=sum(unread.values()),
-                   latest=latest, incoming=[pick(m) for m in incoming], messages=[pick(m) for m in conv],
+                   latest=latest, now=time.time(), incoming=[pick(m) for m in incoming], messages=[pick(m) for m in conv],
                    peer_status=(ids[peer]["status"] if peer in ids else "Offline") if peer else "",
                    peer_name=_chat_name(peer) if peer else "")
 
@@ -2499,9 +2526,10 @@ def chat_send():
     online = {r["id"]: r for r in online_list()}
     if to not in online: return jsonify(ok=False, error="This employee is offline now - message not sent."), 409
     with _chat_lock:
+        _chat_purge()
         _chat_seq[0] += 1
         _chat.append(dict(id=_chat_seq[0], frm=me, frm_name=str(session.get("name", "")), to=to, to_name=online[to]["name"],
-                          text=text, t=now_local().strftime("%I:%M %p")))
+                          text=text, t=now_local().strftime("%I:%M %p"), ts=time.time()))
         del _chat[:-CHAT_KEEP]
         _chat_read[(me, to)] = _chat_seq[0]
     return jsonify(ok=True)
@@ -2526,7 +2554,7 @@ CHAT = """<style>
 .chf{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}.chf input{flex:1;padding:9px 12px}
 .chempty{color:var(--mut);font-size:13px;padding:18px;text-align:center}
 </style>
-<div class="head"><h1>Chat</h1><p class="mut">Only employees who are online right now are listed. Messages appear instantly for both of you.</p></div>
+<div class="head"><h1>Chat</h1><p class="mut">Only employees who are online right now are listed. Messages are deleted automatically after 1 hour.</p></div>
 <div class="ch" id="chat_root">
  <div class="pane"><h2>Online now <span class="pill in" id="chn">0</span></h2><div id="chl"><div class="chempty">Loading...</div></div></div>
  <div class="pane"><div class="cht"><b id="cht_n">Select an employee to start chatting</b><span id="cht_s"></span></div>

@@ -57,6 +57,9 @@ Access rules (Update59):
     Still starts only after the AI voice ends; no music on the Employee pages.
   * Update82: Group Chat can send files (5 MB max, programs/scripts blocked), images/photos (shown inline, click to enlarge) and emoji (picker + big emoji-only
     messages). Attachments are kept in memory only and deleted after 1 hour with the message.
+  * Update83: Admin -> Mahizhchi (Share / Access tab and Employee Info -> Mahizhchi Log): when an employee has access, "Mahizhchi" is shown as an
+    animated running-letter badge (wave + colour shimmer) with floating emoji. Sharing celebrates with a confetti banner and highlights the
+    rows that were just shared. Respects "reduce motion" settings.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -4037,7 +4040,38 @@ MZ_CSS = """<style>
 .mz-timer.low{background:#fef2f2;border-color:#fca5a5;color:#991b1b}
 .mz-locked .mz-o{opacity:.55;pointer-events:none}
 .mz-stats{display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 4px}
+/* Update83: animated "Mahizhchi" access highlight */
+.mz-run{display:inline-flex;font-weight:800;letter-spacing:.4px;white-space:nowrap}
+.mz-run span{display:inline-block;background:linear-gradient(90deg,#4f46e5,#ec4899,#f59e0b,#10b981,#4f46e5);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;
+animation:mzIn .45s ease both,mzWave 1.8s ease-in-out infinite,mzShine 4s linear infinite;
+animation-delay:calc(var(--i)*.08s),calc(var(--i)*.08s + .7s),calc(var(--i)*-.2s)}
+.mz-run.lg{font-size:24px}
+.mz-badge{position:relative;display:inline-flex;align-items:center;gap:8px;padding:2px 12px;border-radius:999px;border:1.5px solid transparent;
+background:linear-gradient(#fff,#fff) padding-box,linear-gradient(120deg,#4f46e5,#ec4899,#f59e0b) border-box;animation:mzGlow 2.4s ease-in-out infinite}
+.mz-badge .mz-lbl{font-size:11px;font-weight:700;color:#146c43;background:#e3f6ec;border-radius:10px;padding:1px 8px}
+.mz-em{position:absolute;font-size:13px;line-height:1;pointer-events:none;opacity:0;animation:mzFloat 2.8s ease-in-out infinite}
+.mz-em.e1{left:-8px;top:-9px}.mz-em.e2{right:14px;top:-13px;animation-delay:.7s}.mz-em.e3{left:42%;top:-14px;animation-delay:1.4s}.mz-em.e4{right:-9px;bottom:-9px;animation-delay:2.1s}
+.mz-badge:not(.burst) .mz-em{display:none}
+tr.mz-new td{animation:mzRow 2.6s ease-out 1}
+.mz-cele{position:relative;overflow:hidden;display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-radius:14px;padding:14px 18px;margin:0 0 14px;
+background:linear-gradient(120deg,#eef0ff,#fdf2f8,#fff7e6);border:1px solid #d6d9ff;animation:mzDrop .6s cubic-bezier(.2,1.2,.4,1) both}
+.mz-cele .big{font-size:26px;animation:mzBounce 1.2s ease-in-out infinite}
+.mz-cele .txt{color:var(--ink);font-weight:600}
+.mz-conf{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.mz-conf span{position:absolute;top:-24px;font-size:16px;opacity:0;animation:mzFall 3s linear 2}
+@keyframes mzIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes mzWave{0%,55%,100%{transform:translateY(0) scale(1)}25%{transform:translateY(-5px) scale(1.18)}}
+@keyframes mzShine{to{background-position:300% 0}}
+@keyframes mzGlow{0%,100%{box-shadow:0 0 0 0 rgba(79,70,229,.0)}50%{box-shadow:0 0 12px 2px rgba(236,72,153,.28)}}
+@keyframes mzFloat{0%{opacity:0;transform:translateY(6px) scale(.5) rotate(0)}25%{opacity:1}70%{opacity:1;transform:translateY(-8px) scale(1.1) rotate(14deg)}100%{opacity:0;transform:translateY(-17px) scale(.6) rotate(-10deg)}}
+@keyframes mzRow{0%,30%{background:#e9e7ff}100%{background:transparent}}
+@keyframes mzDrop{from{opacity:0;transform:translateY(-14px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes mzBounce{0%,100%{transform:translateY(0) rotate(-6deg)}50%{transform:translateY(-6px) rotate(8deg)}}
+@keyframes mzFall{0%{opacity:0;transform:translateY(0) rotate(0)}10%{opacity:1}100%{opacity:0;transform:translateY(120px) rotate(280deg)}}
+@media(prefers-reduced-motion:reduce){.mz-run span{animation:none!important;opacity:1}.mz-em,.mz-conf{display:none}.mz-badge,.mz-cele .big,tr.mz-new td{animation:none!important}}
 </style>
+{% macro mzrun() %}<span class="mz-run" aria-label="Mahizhchi">{% for ch in 'Mahizhchi' %}<span aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</span>{% endmacro %}
+{% macro mzbadge(label, burst) %}<span class="mz-badge {{'burst' if burst}}"><span class="mz-em e1">✨</span><span class="mz-em e2">🎉</span><span class="mz-em e3">🌟</span><span class="mz-em e4">🎊</span>{{ mzrun() }}<span class="mz-lbl">{{label}}</span></span>{% endmacro %}
 {% macro mzcard(q, n, admin) %}<div class="mz-q {{'bad' if q.issues}}"><h3><span class="no">{{n}}.</span>{{q.q}}</h3>
 {% for o in q.opts %}<div class="mz-o {{'ok' if o.letter==q.correct}}"><span class="l">{{o.letter}}.</span><span>{{o.text}}{% if o.letter==q.correct %} <span class="tick" title="Correct answer">&#10003;</span>{% endif %}</span></div>{% endfor %}
 {% for i in q.issues %}<p class="mz-issue">&#9888; {{i}}</p>{% endfor %}
@@ -4065,6 +4099,8 @@ MZ_ADMIN_Q = MZ_CSS + MZ_HEAD + """
 {% for q in qs %}{{ mzcard(q, loop.index, true) }}{% else %}<div class="card"><p>No questions yet. Add rows in the Google Sheet or use <a href="/admin/mahizhchi?tab=add">Paste questions</a>.</p></div>{% endfor %}"""
 
 MZ_ADMIN_ACCESS = MZ_CSS + MZ_HEAD + """
+{% if granted %}<div class="mz-cele"><span class="mz-conf" aria-hidden="true">{% for em in ['🎉','✨','🎊','⭐','💫','🎈','🌟','🎉','✨','🎊'] %}<span style="left:{{ 4 + loop.index0*10 }}%;animation-delay:{{ loop.index0*0.25 }}s">{{em}}</span>{% endfor %}</span>
+<span class="big">🎉</span>{{ mzrun() }}<span class="txt">access granted to {{granted}} employee{{'s' if granted != 1}}!</span></div>{% endif %}
 <div class="card"><h2>Who can see the {{MZ_TITLE}}</h2>
 <p class="mut">Status: <span class="pill {{'in' if pub else 'out'}}">{{'Published' if pub else 'Not published'}}</span>
 {% if not pub %} &mdash; nothing is visible to employees while un-published.{% endif %} Sharing with someone publishes it automatically.
@@ -4073,8 +4109,8 @@ Employees who are not ticked here do not see the menu item and cannot open the p
 <form method="post" action="/admin/mahizhchi/access">
 <table><tr><th style="width:44px"><input type="checkbox" onclick="document.querySelectorAll('.mzc').forEach(c=>c.checked=this.checked)" title="Select all shown"></th>
 <th>Employee ID</th><th>Name</th><th>Designation</th><th>Employee sees the menu?</th></tr>
-{% for e in emps %}<tr><td><input class="mzc" type="checkbox" name="ids" value="{{e['Employee ID']}}"></td><td>{{e['Employee ID']}}</td><td>{{e['Name']}}</td><td>{{e.get('Designation','')}}</td>
-{% set sh = amap.get(e['Employee ID']|string|trim|upper) %}<td><span class="pill {{'in' if sh and pub else ('act' if sh else 'out')}}">{{'Visible to employee' if sh and pub else ('Shared - NOT published' if sh else 'No access')}}</span></td></tr>
+{% for e in emps %}{% set sh = amap.get(e['Employee ID']|string|trim|upper) %}{% set isnew = sh and (newall or (e['Employee ID']|string|trim|upper) in newset) %}<tr class="{{'mz-new' if isnew}}"><td><input class="mzc" type="checkbox" name="ids" value="{{e['Employee ID']}}"></td><td>{{e['Employee ID']}}</td><td>{{e['Name']}}</td><td>{{e.get('Designation','')}}</td>
+<td>{% if sh and pub %}{{ mzbadge('Access enabled', isnew) }}{% else %}<span class="pill {{'act' if sh else 'out'}}">{{'Shared - NOT published' if sh else 'No access'}}</span>{% endif %}</td></tr>
 {% else %}<tr><td colspan="5">No employees found.</td></tr>{% endfor %}</table><br>
 <button class="primary" name="action" value="share_selected">Share with selected</button>
 <button class="danger" name="action" value="revoke_selected">Remove from selected</button>
@@ -4089,7 +4125,8 @@ A question is skipped, and reported, if it has no ✓, more than one ✓, or few
 <textarea name="text" rows="14" maxlength="{{maxlen}}" required style="width:100%;font-family:inherit" placeholder="1. Which is the largest ocean on Earth?&#10;A. Atlantic Ocean&#10;B. Indian Ocean&#10;C. Pacific Ocean ✓&#10;D. Arctic Ocean"></textarea><br><br>
 <button class="primary">Add to sheet</button> <a href="/admin/mahizhchi">Cancel</a></form></div>"""
 
-MZ_DETAIL = """<div class="card"><h2>{{detail.name}} &mdash; {{detail.correct}} / {{detail.total}} correct ({{detail.pct}}%)</h2>
+MZ_DETAIL = """{% if detail.shared and detail.pub %}<div class="mz-cele" style="animation:none;padding:10px 16px">{{ mzbadge('Access enabled', true) }}<span class="txt">{{detail.name}} can open the Mahizhchi Log.</span></div>{% endif %}
+<div class="card"><h2>{{detail.name}} &mdash; {{detail.correct}} / {{detail.total}} correct ({{detail.pct}}%)</h2>
 <p class="mut">Status: <b>{{detail.status}}</b>{% if detail.started %} &middot; started {{detail.started|t12}}{% endif %} &middot; answered {{detail.answered}} of {{detail.total}}
 {% if not detail.shared %} &middot; <span class="pill out">Not shared with this employee</span>{% elif not detail.pub %} &middot; <span class="pill act">Shared - not published</span>{% endif %}
 {% if back %} &middot; <a href="{{back}}">&larr; All results</a>{% endif %}</p></div>
@@ -4166,7 +4203,10 @@ def admin_mahizhchi():
     if tab == "access":
         q = request.args.get("q", "").strip()
         shown = [e for e in emps if not q or q.lower() in str(e["Employee ID"]).lower() or q.lower() in str(e["Name"]).lower()]
-        return page(MZ_ADMIN_ACCESS, title=MZ_TITLE, tab="access", emps=shown, amap=amap, q=q, pub=mz_published())
+        fresh = session.pop("mz_new", None) or {}          # Update83: set by the Share action, shown once (celebration)
+        ids = fresh.get("ids")
+        return page(MZ_ADMIN_ACCESS, title=MZ_TITLE, tab="access", emps=shown, amap=amap, q=q, pub=mz_published(),
+                    granted=fresh.get("n", 0), newall=bool(fresh) and ids is None, newset=set(ids or []))
     qs = mz_questions()
     ids = {_key(e["Employee ID"]) for e in emps}
     return page(MZ_ADMIN_Q, title=MZ_TITLE, tab="questions", qs=qs, ok_n=sum(1 for x in qs if x["ok"]),
@@ -4199,6 +4239,8 @@ def admin_mahizhchi_access():
     else: abort(400)
     share = action.startswith("share")
     mz_set_access(chosen, share)
+    if share:
+        session["mz_new"] = dict(n=len(chosen), ids=[_key(e["Employee ID"]) for e in chosen] if len(chosen) <= 25 else None)
     note = ""
     if share and not mz_published(fresh=True):
         if any(q["ok"] for q in mz_questions()):

@@ -40,6 +40,7 @@ Access rules (Update59):
     Tamil bamboo-flute instrumental. Admin pages unchanged.
   * Update74: Employee Chat (sidebar 'Chat'). Lists only employees who are online right now; pick one to chat. Messages arrive within ~2 s,
     unread badge + pop-up + tab-title alert on every employee page. Offline employees vanish from the list; their chat shows Offline.
+  * Update75: Employee Welcome Page has no audio (no voice, no music). Fixed a JS syntax error that froze the Welcome Page (site would not open).
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -2400,7 +2401,7 @@ WELCOME = """<style>
 .wl-card h1{font-family:Georgia,serif;font-size:27px;margin:0 0 4px;color:#5b4fb0;word-break:break-word}
 .wl-card p{margin:0 0 14px;color:#6b7390;font-size:13px}
 .wl-bar{height:6px;border-radius:4px;background:#e9e6fb;overflow:hidden}
-.wl-bar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#6d70f5,#f58a8a);transform-origin:left;transform:scaleX(0);animation:wlFill 10s linear forwards}
+.wl-bar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#6d70f5,#f58a8a);transform-origin:left;transform:scaleX(0);animation:wlFill 4s linear forwards}
 @keyframes wlFill{to{transform:scaleX(1)}}
 .wl-st{margin-top:10px;font:600 10px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;color:#8a90ad}
 </style>
@@ -2408,53 +2409,37 @@ WELCOME = """<style>
 """ + WL_SCENE.replace('{{role}}', "{{session.role}}").replace("role=='admin'", "session.role=='admin'") + """
  <div class="wl-card"><h1>Welcome, {{session.name}}</h1>
  <p>{{ 'Syncing live data from the server' if session.role=='admin' else 'Securely connecting to the server' }}&hellip;</p>
- <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div><div class="wl-st" style="margin-top:6px;font-weight:500">{% if session.role=='employee' %}&#9834; Flute music follows the welcome{% else %}&#9834; Move the mouse to play music{% endif %}</div></div>
+ <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div><div class="wl-st" style="margin-top:6px;font-weight:500">{% if session.role=='admin' %}&#9834; Move the mouse to play music{% endif %}</div></div>
 </div>
 <script>
 (function(){
  var ROLE={{session.role|tojson}}, NAME={{session.name|tojson}};
- var WL_MS=10000;                                       /* total time the welcome page is shown (long enough to move the mouse and hear the music) */
+ var WL_MS=4000;                                       /* total time the welcome page is shown */
 
- if(ROLE==='employee'){                                /* AI voice announcement - Employee welcome only, no BGM */
-  try{
-   if('speechSynthesis' in window){
-    var utter=new SpeechSynthesisUtterance('Welcome, ' + NAME);
-    utter.rate=1; utter.pitch=1.02; utter.volume=1;
-    utter.onend=function(){ startFlute(); };            /* flute begins only AFTER the AI welcome voice has finished */
-    utter.onerror=function(){ startFlute(); };
-    window.speechSynthesis.cancel();                   // clear anything queued, then speak right away
-    window.speechSynthesis.speak(utter);
-   }
-   }else{ setTimeout(function(){ startFlute(); },1500); }   /* no speech support: go straight to the flute */
-  }catch(e){ setTimeout(function(){ startFlute(); },1500); }
-  setTimeout(function(){ startFlute(); },5000);          /* safety: never wait for the voice longer than 5 s */
- }
- var voiceDone=(ROLE!=='employee');
- function startFlute(){ if(voiceDone)return; voiceDone=true; try{ go(); }catch(e){} }
-
-  /* Music: NEVER automatic. It starts only when the user moves the mouse over this page (click / key / touch work as a fallback). */
- var ADMIN=(ROLE==='admin');
+ /* Update75: the EMPLOYEE welcome page has NO audio at all (no voice, no music). Only the animation runs, then the dashboard opens.
+    The ADMIN welcome page keeps its existing behaviour (Tamil-style music only after the mouse moves). */
  var AC=window.AudioContext||window.webkitAudioContext;
+ var ADMIN=(ROLE==='admin');
  var ctx=null,master=null,verb=null,timer=null,muted=false,next=0,step=0,noiseBuf=null,lastF=0;
  var btn={setAttribute:function(){}},bi={},bt={};
  function get(k){return null}function put(k,v){}
- """ + "{% if session.role=='employee' %}" + FLUTE_ENGINE + "{% else %}" + WL_ENGINE + "{% endif %}" + """
+ """ + "{% if session.role=='admin' %}" + WL_ENGINE + """
  var mEv=['mousemove','pointermove','pointerdown','keydown','touchstart'];
  function onUser(){
-  if(!AC||!voiceDone)return;                           /* employee: nothing plays while the AI voice is speaking */
+  if(!AC)return;
   try{go()}catch(e){}
-  if(ctx&&ctx.state==='running'){mEv.forEach(function(t){document.removeEventListener(t,onUser,true)})}   /* running: stop listening */
+  if(ctx&&ctx.state==='running'){mEv.forEach(function(t){document.removeEventListener(t,onUser,true)})}
  }
  mEv.forEach(function(t){document.addEventListener(t,onUser,true)});
- 
- setTimeout(function(){                                /* welcome animation for 2s, then move on */
+ {% endif %}""" + """
+
+ setTimeout(function(){                                /* welcome animation, then move on */
   try{ if(timer)clearInterval(timer); if(ctx){ master.gain.cancelScheduledValues(ctx.currentTime); master.gain.value=0; ctx.close(); } }catch(e){}
-  if(ROLE==='employee' && 'speechSynthesis' in window){ try{ window.speechSynthesis.cancel(); }catch(e){} }
   window.location.replace({{ ('/admin/summary' if session.role=='admin' else '/employee') | tojson }});
  },WL_MS);
 })();
 </script>
-<noscript><meta http-equiv="refresh" content="10;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
+<noscript><meta http-equiv="refresh" content="4;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
 
 @app.route("/admin/welcome")
 @need("admin")

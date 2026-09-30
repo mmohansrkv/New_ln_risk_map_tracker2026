@@ -21,6 +21,8 @@ Access rules (Update59):
     (Processes -> "Target count / 8 hrs"; the per-hour rate is derived = target / 8, and vice versa). An employee whose
     entry is below the target for the hours logged gets a red alert when saving, a dashboard alert (last 7 days) and a live
     warning in the entry form.
+  * Update66: Productivity log shows each entry's Target count, Completed count and a Target met / Not met badge (plus a
+    met / not-met tally). Employee Info in the admin sidebar expands to Employees / Notifications / Mahizhchi.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
@@ -551,6 +553,13 @@ def load_subs(emp_id=None):
         s["earned"] = sum(p["earned"] for p in s["procs"])     # hours' worth of standard output
         s["pct"] = min(round(s["prod"] / T * 100), 100) if T else 0  # target hrs (set by Admin) logged = 100%
         s["off"] = is_off(s["date"])                            # weekly-off entry: saved, not counted
+        # Update66: Admin-set Target Count vs. what the employee completed (target pro-rated to the hours booked)
+        s["tgt_total"] = round(sum(p["hour"] * tph.get(p["name"], 0) for p in s["procs"]), 2)
+        s["cnt_total"] = round(sum(p["count"] for p in s["procs"] if tph.get(p["name"], 0) > 0), 2)
+        s["tgt_miss"] = [p["name"] for p in s["procs"]
+                         if tph.get(p["name"], 0) > 0 and p["count"] + 1e-9 < p["hour"] * tph[p["name"]]]
+        s["tgt_state"] = ("off" if s["off"] else "none" if s["tgt_total"] <= 0
+                          else "miss" if s["tgt_miss"] else "met")
     return sorted(subs.values(), key=lambda s: s["date"], reverse=True)
 
 def get_sub(sid):
@@ -1114,13 +1123,26 @@ table td small,table th small{font-size:10.5px!important}
 #tgtBadge{display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;vertical-align:middle}
 #tgtBadge.met{background:#d9f7e3;color:#146c43}
 #tgtBadge.miss{background:#fbe0e0;color:#a52a2a}
+.tg-badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;white-space:nowrap}
+.tg-badge.met{background:#d9f7e3;color:#146c43}.tg-badge.miss{background:#fbe0e0;color:#a52a2a}
+/* Update66: expandable sidebar group (Employee Info > Employees / Notifications / Mahizhchi) */
+aside .ng>a.ng-h{display:flex;justify-content:space-between;align-items:center;border:1px solid transparent}
+aside .ng>a.ng-h .chev{font-size:11px;opacity:.85;transition:transform .2s}
+aside .ng.open>a.ng-h{border:1.5px solid #fff;background:transparent;color:#fff;box-shadow:none;transform:none}
+aside .ng.open>a.ng-h .chev{transform:rotate(180deg)}
+aside .ng .kids{display:none;flex-direction:column;gap:2px;padding:4px 0 4px 14px}
+aside .ng.open .kids{display:flex}
+aside .ng .kids a{font-size:13px;padding:7px 12px}
+aside .ng .kids a.on{background:transparent;color:#fff;font-weight:700;box-shadow:none;transform:none;border-left:3px solid #8ea8ff;border-radius:0 8px 8px 0}
 #bgm{position:fixed;right:14px;bottom:14px;z-index:60;width:38px;height:38px;border-radius:50%;border:1px solid var(--line,#d8dbe6);background:#fff;color:#1c2340;font-size:17px;line-height:1;cursor:pointer;box-shadow:0 2px 10px #0002;opacity:.85;padding:0}
 #bgm:hover{opacity:1}
 @media print{ #bgm{display:none}}
 </style></head><body>
 {% if session.role %}<div class="app"><aside class="emp">
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
-{% for h,l,on in nav %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endfor %}
+{% for h,l,on,kids in nav %}{% if kids %}<div class="ng{{' open' if on else ''}}"><a class="ng-h" href="{{h}}">{{l}}<span class="chev">&#9650;</span></a>
+<div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
+{% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
 <div class="prof"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
@@ -1174,8 +1196,7 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/employees", "Employees"),
               ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
               ("/admin/leave-permission", "Leave & Permission Log"),
-              ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log"),
-              ("/admin/mahizhchi", "Mahizhchi")],
+              ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
@@ -1193,8 +1214,14 @@ def page(body, title="Productivity Tracker", **ctx):
             if mz_active(session.get("emp_id", "")): items.append(("/employee/mahizhchi", MZ_TITLE))
         except Exception as e:
             print("Mahizhchi menu check failed (are the Mahizhchi sheets created? restart the app once):", e)
-    nav = [(h, l, p == h or (h != "/employee" and p.startswith(h + "/")))
-           for h, l in items]
+    nav = [(h, l, p == h or (h != "/employee" and p.startswith(h + "/")), []) for h, l in items]
+    if session.get("role") == "admin":      # Update66: Employee Info expands to Employees / Notifications / Mahizhchi
+        view = request.args.get("view", "")
+        kids = [("/admin/employee-info", "Employees", p.startswith("/admin/employee-info") and view != "notifications"),
+                ("/admin/employee-info?view=notifications", "Notifications", p == "/admin/employee-info" and view == "notifications"),
+                ("/admin/mahizhchi", "Mahizhchi", p.startswith("/admin/mahizhchi"))]
+        nav = [(h, l, on or any(k[2] for k in kids), kids) if h == "/admin/employee-info" else (h, l, on, [])
+               for h, l, on, _k in nav]
     side_avatar = ""
     if session.get("role") == "admin":
         side_avatar = '<div class="av-flat" role="img" aria-label="Admin profile picture"><span>A</span></div>'
@@ -1295,9 +1322,12 @@ EDIT = """<div class="card"><h2>Edit {{title}}</h2>{% if kind=='processes' %}<p 
 {% if locked %}<p class="mut">Personal details (grayed out) are entered by the employee on their own Personal details page.</p>{% endif %}</div>"""
 
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th><th>Designation</th>{% endif %}
-<th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Productivity</th><th></th></tr>
+<th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Target count</th><th>Completed</th><th>Target status</th><th>Productivity</th><th></th></tr>
 {% for s in subs %}<tr><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; {{s.emp_name}}</td><td>{{s.designation}}</td>{% endif %}
-<td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td><td>{{ 'Weekend - not counted' if s.off else (s.pct ~ '%') }}</td>
+<td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
+<td>{{ (s.tgt_total|g) if s.tgt_state in ('met','miss') else '-' }}</td><td>{{ (s.cnt_total|g) if s.tgt_state in ('met','miss') else '-' }}</td>
+<td>{% if s.tgt_state=='met' %}<span class="tg-badge met">&#10003; Target met</span>{% elif s.tgt_state=='miss' %}<span class="tg-badge miss" title="Below target: {{s.tgt_miss|join(', ')}}">&#9888; Not met</span>{% else %}-{% endif %}</td>
+<td>{{ 'Weekend - not counted' if s.off else (s.pct ~ '%') }}</td>
 <td class="act"><a href="/entry/{{s.id}}/view">View</a><a href="/entry/{{s.id}}">Edit</a>
 <form method="post" action="/entry/{{s.id}}/delete" onsubmit="return confirm('Delete this entry?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="8">Nothing yet.</td></tr>{% endfor %}</table>"""
@@ -1506,7 +1536,9 @@ LOG_TOP = """<div class="card"><div class="loghead"><h2>Productivity log</h2>
 {% if emp %}<p class="mut">Reports below are limited to employee filter: <b>{{emp}}</b></p>{% endif %}
 <form class="grid"><label>Date<input type="date" name="date" value="{{request.args.get('date','')}}"></label>
 <label>Employee ID / name<input name="emp" value="{{request.args.get('emp','')}}"></label>
-<button class="primary pbtn">Filter</button> <a href="/admin/log">Clear</a></form></div>"""
+<button class="primary pbtn">Filter</button> <a href="/admin/log">Clear</a></form>
+<p class="totals no-print">Target check (Admin-set Target Count): <span class="tg-badge met">{{tg_met}} met</span> <span class="tg-badge miss">{{tg_miss}} not met</span>
+<span class="mut">&middot; targets are set on the <a href="/admin/processes">Processes</a> page.</span></p></div>"""
 
 def period_range(period, on=None):
     """(start, end, label) for the month or Monday-Sunday week containing `on` (default today)."""
@@ -1566,6 +1598,7 @@ def admin_log():
     subs = [s for s in load_subs() if (not d or s["date"] == d) and
             (not e or e in (str(s["emp_id"]).lower(), str(s["emp_name"]).lower()))]
     return page(LOG_TOP + LIST, title="Productivity log", subs=subs, emp=request.args.get("emp", "").strip(),
+                tg_met=sum(1 for s in subs if s["tgt_state"] == "met"), tg_miss=sum(1 for s in subs if s["tgt_state"] == "miss"),
                 month_label=period_range("month")[2], week_label=period_range("week")[2])
 
 @app.route("/admin/log/report")

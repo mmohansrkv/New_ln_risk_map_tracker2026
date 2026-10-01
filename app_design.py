@@ -4262,7 +4262,7 @@ MZ_EMP = MZ_CSS + """<style>.mz-sets{display:flex;gap:8px;flex-wrap:wrap;margin:
 <p>This Set has <b>{{per}}</b> questions and you have <b>{{mz_dur(limit)}}</b>. The timer starts when you press <b>Start</b> and cannot be paused or restarted. Your questions appear in your own order.
 Answer <b>all {{per}}</b> questions and get at least <b>{{need}}</b> right to win the Set and unlock the next one. When time is over the Set closes automatically and your ticked answers are submitted. Each Set can be attempted only once.</p>
 <form method="post" action="/employee/mahizhchi/start"><button class="primary">Start Set {{cur}}</button></form></div>
-{% elif state=='active' %}<div class="mz-timer" id="mzbar">&#9201; Set {{cur}} &middot; Time left: <b id="mzt">{{mz_dur(limit)}}</b></div>
+{% elif state=='active' %}<div class="mz-timer" id="mzbar">&#9201; Mahizhchi Log &middot; Set {{cur}} &middot; <b id="mzt">{{"%d:%02d"|format(limit//60, limit%60)}}</b></div>
 <form method="post" action="/employee/mahizhchi/submit" id="mzform">
 {% for q in qs %}<div class="mz-q"><h3><span class="no">{{loop.index}}.</span>{{q.q}}</h3>
 {% for o in q.opts %}<label class="mz-o pick"><input type="radio" name="a_{{q.qid}}" value="{{o.letter}}"><span class="l">{{o.letter}}.</span><span>{{o.text}}</span></label>{% endfor %}</div>{% endfor %}

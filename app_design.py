@@ -60,7 +60,8 @@ Access rules (Update59):
   * Update84: Mahizhchi quiz = 5 Sets x 10 questions (rows 1-10 of the Mahizhchi Log = Set 1, 11-20 = Set 2 ...). 2 min 30 s per Set, enforced
     on the server; the Set closes by itself at 0:00. A Set is WON by answering all 10 with >= MZ_WIN_CORRECT right (default 10); Set N+1 opens only after
     Set N is won; Winner = all 5 Sets won. Each employee gets their own random (seeded) question order per Set. Attempts sheet now has one row per
-    employee per Set (columns Set / Answered / Correct / Result added). Env: MZ_SETS, MZ_PER_SET, MZ_WIN_CORRECT, MZ_TIME_SECONDS.
+    employee per Set (columns Set / Answered / Correct / Result / Extra seconds added). Admin -> Results -> Details can ADD TIME to a Set
+    (also after it expired or closed - it is re-opened; the employee gets the added time from that moment). Env: MZ_SETS, MZ_PER_SET, MZ_WIN_CORRECT, MZ_TIME_SECONDS.
   * Update83: Admin -> Mahizhchi (Share / Access tab and Employee Info -> Mahizhchi Log): when an employee has access, "Mahizhchi" is shown as an
     animated running-letter badge (wave + colour shimmer) with floating emoji. Sharing celebrates with a confetti banner and highlights the
     rows that were just shared. Respects "reduce motion" settings.
@@ -172,7 +173,7 @@ HEADERS = {
     "Mahizhchi Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
     "Mahizhchi Answers": ["Employee ID", "Employee name", "Question ID", "Question", "Answer", "Submitted at"],
     # Update84: one row per employee PER SET: when they pressed Start (timer runs from this SERVER time), when the Set closed, and its result
-    "Mahizhchi Attempts": ["Employee ID", "Employee name", "Started at", "Closed at", "Set", "Answered", "Correct", "Result"],
+    "Mahizhchi Attempts": ["Employee ID", "Employee name", "Started at", "Closed at", "Set", "Answered", "Correct", "Result", "Extra seconds"],
 }
 PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                     "Emergency no", "Personal Email ID", "Office Email ID"]
@@ -3961,7 +3962,9 @@ def mz_attempts_from(src, eid):
         if n in out: continue
         try: start = dt.datetime.strptime(str(r.get("Started at", "")).strip(), "%Y-%m-%d %H:%M:%S")
         except ValueError: start = dt.datetime(2000, 1, 1)          # unreadable start time -> treat the Set as long over
-        out[n] = dict(row=r["_row"], start=start, closed=bool(str(r.get("Closed at", "")).strip()), set=n)
+        try: extra = max(0, int(str(r.get("Extra seconds", "")).strip() or 0))      # Update84: time Admin has added to this Set
+        except ValueError: extra = 0
+        out[n] = dict(row=r["_row"], start=start, closed=bool(str(r.get("Closed at", "")).strip()), set=n, extra=extra)
     return out
 
 def mz_attempts(eid):
@@ -3969,7 +3972,20 @@ def mz_attempts(eid):
     return mz_attempts_from(_fetch_rows(MZ_ATT_SHEET), eid)
 
 def mz_seconds_left(att):
-    return max(0, min(MZ_TIME_LIMIT, int(MZ_TIME_LIMIT - (now_local() - att["start"]).total_seconds())))
+    lim = MZ_TIME_LIMIT + att.get("extra", 0)
+    return max(0, min(lim, int(lim - (now_local() - att["start"]).total_seconds())))
+
+def mz_extend(att, add_sec):
+    """Update84: Admin adds time to ONE employee's Set - even after it expired or closed. The employee then gets exactly
+    add_sec seconds from now (if the Set is still running the time is simply added to what is left). A closed Set is re-opened."""
+    el = (now_local() - att["start"]).total_seconds()
+    lim = MZ_TIME_LIMIT + att.get("extra", 0)
+    extra = att.get("extra", 0) + add_sec if el <= lim else int(el - MZ_TIME_LIMIT) + add_sec
+    r = att["row"]; upd = [{"range": f"I{r}", "values": [[extra]]}]
+    if att["closed"] or el > lim:
+        upd += [{"range": f"D{r}", "values": [[""]]}, {"range": f"F{r}:H{r}", "values": [["", "", ""]]}]
+    _with_retry(ws_of(MZ_ATT_SHEET).batch_update, upd, value_input_option="RAW")
+    invalidate_cache(MZ_ATT_SHEET)
 
 def mz_close_attempt(att, answered, correct, won):
     r = att["row"]
@@ -4018,10 +4034,10 @@ def mz_detail(emp):
     sets = []
     for p, sq in zip(prog, sets_q):
         order = mz_order(eid, p["n"], sq)
-        sets.append(dict(n=p["n"], status=p["status"], answered=p["answered"], correct=p["correct"], total=p["total"],
+        sets.append(dict(n=p["n"], status=p["status"], extra=p["att"]["extra"] if p["att"] else 0, can_add=bool(p["att"]) and p["status"] != "won", answered=p["answered"], correct=p["correct"], total=p["total"],
                          started=p["att"]["start"].strftime("%Y-%m-%d %H:%M:%S") if p["att"] else "",
                          lines=[dict(q=q, mine=mine.get(q["qid"])) for q in order]))
-    return dict(name=emp["Name"], sets=sets, nsets=MZ_SETS, won_n=sum(1 for p in prog if p["status"] == "won"),
+    return dict(eid=eid, name=emp["Name"], sets=sets, nsets=MZ_SETS, won_n=sum(1 for p in prog if p["status"] == "won"),
                 status=mz_status_text(prog), need=MZ_WIN_CORRECT, per=MZ_PER_SET,
                 shared=mz_access_map().get(_key(eid), False), pub=mz_published())
 
@@ -4238,7 +4254,11 @@ MZ_DETAIL = """{% if detail.shared and detail.pub %}<div class="mz-cele" style="
 {% if not detail.shared %} &middot; <span class="pill out">Not shared with this employee</span>{% elif not detail.pub %} &middot; <span class="pill act">Shared - not published</span>{% endif %}
 {% if back %} &middot; <a href="{{back}}">&larr; All results</a>{% endif %}</p></div>
 {% for st in detail.sets %}<div class="card"><h2>Set {{st.n}} &mdash; <span class="pill {{'in' if st.status=='won' else ('out' if st.status=='failed' else 'act')}}">{{ {'won':'Won','failed':'Not won','active':'In progress','open':'Not started','locked':'Locked'}[st.status] }}</span></h2>
-<p class="mut">Answered {{st.answered}} of {{st.total}} &middot; correct {{st.correct}}{% if st.started %} &middot; started {{st.started|t12}}{% endif %} &middot; questions shown to this employee in their own order</p></div>
+<p class="mut">Answered {{st.answered}} of {{st.total}} &middot; correct {{st.correct}}{% if st.started %} &middot; started {{st.started|t12}}{% endif %} &middot; questions shown to this employee in their own order{% if st.extra %} &middot; extra time given: <b>{{mz_dur(st.extra)}}</b>{% endif %}</p>
+{% if st.can_add %}<form method="post" action="/admin/mahizhchi/extend" class="no-print" style="margin-top:8px" onsubmit="return confirm('Give {{detail.name}} more time on Set {{st.n}}? A closed Set is re-opened and the employee can answer the questions still unanswered.')">
+<input type="hidden" name="emp" value="{{detail.eid}}"><input type="hidden" name="set" value="{{st.n}}">
+<b>Add time:</b> <input type="number" name="min" min="0" max="60" value="1" style="width:70px"> min <input type="number" name="sec" min="0" max="59" value="0" style="width:70px"> sec
+<button class="primary">Add time</button> <span class="mut">(the employee gets this much time from now, even if the Set already expired)</span></form>{% endif %}</div>
 {% for d in st.lines %}<div class="mz-q"><h3><span class="no">{{loop.index}}.</span>{{d.q.q}}</h3>
 {% for o in d.q.opts %}<div class="mz-o {{'ok' if o.letter==d.q.correct else ('mine' if o.letter==d.mine else '')}}"><span class="l">{{o.letter}}.</span>
 <span>{{o.text}}{% if o.letter==d.q.correct %} <span class="tick">&#10003;</span>{% endif %}{% if o.letter==d.mine %} <span class="pill {{'in' if d.mine==d.q.correct else 'out'}}">employee&rsquo;s answer</span>{% endif %}</span></div>{% endfor %}
@@ -4372,6 +4392,27 @@ def admin_mahizhchi_access():
     flash(f"{MZ_TITLE} {'shared with' if share else 'removed from'} {len(chosen)} employee(s)." + note)
     return redirect("/admin/mahizhchi?tab=access")
 
+@app.route("/admin/mahizhchi/extend", methods=["POST"])
+@need("admin")
+def admin_mahizhchi_extend():
+    """Update84: Admin adds time to one employee's Set (also after the time limit has expired)."""
+    emp = emp_or_404(request.form.get("emp", "").strip()); eid = str(emp["Employee ID"])
+    back = "/admin/mahizhchi?tab=results&emp=" + eid
+    try: n = int(request.form.get("set", "0")); add = int(request.form.get("min", "0") or 0) * 60 + int(request.form.get("sec", "0") or 0)
+    except ValueError: abort(400)
+    if not 1 <= add <= 3600:
+        flash("Enter between 1 second and 60 minutes to add.", "error"); return redirect(back)
+    att = mz_attempts(eid).get(n)
+    if not att:
+        flash(f"{emp['Name']} has not started Set {n}, so there is no time to add.", "error"); return redirect(back)
+    sets_q = mz_split(mz_questions())
+    if n > len(sets_q): abort(404)
+    if mz_score(sets_q[n - 1], mz_my_answers(eid, fresh=True))[2]:
+        flash(f"Set {n} is already won by {emp['Name']}.", "error"); return redirect(back)
+    mz_extend(att, add)
+    flash(f"{_mz_dur(add)} added for {emp['Name']} on Set {n}. They can continue from their Mahizhchi page now.")
+    return redirect(back)
+
 @app.route("/admin/mahizhchi/import", methods=["POST"])
 @need("admin")
 def admin_mahizhchi_import():
@@ -4446,7 +4487,7 @@ def employee_mahizhchi_submit():
     if act is None:
         flash("This Set is already closed.", "error"); return redirect("/employee/mahizhchi")
     att, sq = atts[act], sets_q[act - 1]
-    if (now_local() - att["start"]).total_seconds() > MZ_TIME_LIMIT + MZ_GRACE:      # too late: nothing is accepted
+    if (now_local() - att["start"]).total_seconds() > MZ_TIME_LIMIT + att.get("extra", 0) + MZ_GRACE:      # too late: nothing is accepted
         a, c, won = mz_score(sq, done); mz_close_attempt(att, a, c, won)
         flash(f"Time is over ({_mz_dur(MZ_TIME_LIMIT)}). Set {act} is closed.", "error"); return redirect("/employee/mahizhchi")
     picks = []

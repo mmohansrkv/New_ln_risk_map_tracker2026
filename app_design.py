@@ -51,6 +51,8 @@ Access rules (Update59):
   * Update78: Welcome Page opens first for Admin and Employee, no 'Continue' button, opens the Admin/Employee page by itself when it ends.
     Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
     melody, different from the earlier Mohanam tune), Welcome Page only.
+  * Update88: fixed "Method Not Allowed" when moving between Mahizhchi Sets (game POST routes now also accept GET and redirect; global 405 handler redirects);
+    Admin pages auto-refresh every 2 minutes (admin browser only - employees are unaffected); Admin -> Mahizhchi "Connection Game" tab removed.
   * Update80: the old Chat button/page/routes are removed completely. NEW Group Chat icon (bottom-right, employee pages): opens a chat panel for the
     employees who are online right now; join on login, leave on logout/offline; messages auto-delete after 1 hour; no audio.
   * Update81: NEW Tamil BGM on the Employee Welcome Page (original raga Hamsadhwani instrumental: veena-style melody, tanpura, light mridangam) replacing the flute tune.
@@ -242,6 +244,14 @@ def _compress(resp):
     resp.headers["Vary"] = "Accept-Encoding"
     resp.headers["Content-Length"] = resp.content_length
     return resp
+
+@app.errorhandler(405)
+def _method_not_allowed(e):
+    """Update88: never show "Method Not Allowed" to a user - send them back to a page that works for their role."""
+    if session.get("role") == "employee":
+        return redirect("/employee/mahizhchi" if request.path.startswith("/employee/mahizhchi") else "/employee")
+    if session.get("role") == "admin": return redirect("/admin/summary")
+    return redirect("/")
 
 @app.errorhandler(APIError)
 def _handle_sheets_api_error(e):
@@ -1518,6 +1528,9 @@ document.addEventListener('visibilitychange',function(){if(!document.hidden)poll
 poll();
 (function loop(){setTimeout(function(){if(!document.hidden||open)poll();loop()},open?2000:6000)})();
 })();
+</script>{% endif %}
+{% if session.role=='admin' and request.path not in ['/admin/welcome'] %}<script>/* Update88: Admin page auto-refresh every 2 minutes (same as F5), repeating. Admin browser only. */
+setInterval(function(){location.reload()},120000);
 </script>{% endif %}
 {% if session.role and request.path not in ['/employee/welcome','/admin/welcome'] %}<script>
 /* Update79: one short, identical click sound for every button / link / control on the Admin and Employee pages. No music here. */
@@ -4426,7 +4439,6 @@ background:linear-gradient(120deg,#eef0ff,#fdf2f8,#fff7e6);border:1px solid #d6d
 MZ_TABS = """<div class="tabs no-print"><a href="/admin/mahizhchi" class="{{'on' if tab=='questions' else ''}}">Questions</a>
 <a href="/admin/mahizhchi?tab=access" class="{{'on' if tab=='access' else ''}}">Share / Access</a>
 <a href="/admin/mahizhchi?tab=add" class="{{'on' if tab=='add' else ''}}">Paste questions</a>
-<a href="/admin/mahizhchi?tab=connect" class="{{'on' if tab=='connect' else ''}}">Connection Game</a>
 <a href="/admin/mahizhchi?tab=results" class="{{'on' if tab=='results' else ''}}">Results</a></div>"""
 
 MZ_HEAD = """<div class="head"><div><h1>{{MZ_TITLE}}</h1>
@@ -4589,9 +4601,7 @@ def admin_mahizhchi():
     tab = request.args.get("tab", "questions")
     if tab == "add":
         return page(MZ_ADMIN_ADD, title=MZ_TITLE, tab="add", sheet=MZ_SHEET, maxlen=MZ_MAX_PASTE)
-    if tab == "connect":
-        return page(MZ_ADMIN_CONN, title=MZ_TITLE, tab="connect", puzzles=list(mz_conn_puzzles().values()), sheet=MZ_CSHEET,
-                    limit=MZ_CONN_TIME, max_m=MZ_CONN_MISTAKES, nsets=MZ_SETS, maxlen=MZ_MAX_PASTE)
+    if tab == "connect": return redirect("/admin/mahizhchi")      # Update88: the Connection Game admin tab was removed
     amap = mz_access_map()
     emps = rows("Employees")
     if tab == "results":
@@ -4696,7 +4706,7 @@ def admin_mahizhchi_connect_import():
         flash(f"{len(good) // 4} Connection puzzle(s) added.")
     elif not bad: flash("Nothing to add - no puzzles were found in the pasted text.", "error")
     for b in bad[:10]: flash("Skipped: " + b, "error")
-    return redirect("/admin/mahizhchi?tab=connect")
+    return redirect("/admin/mahizhchi?tab=results")
 
 @app.route("/admin/mahizhchi/connect/extend", methods=["POST"])
 @need("admin")
@@ -4785,9 +4795,10 @@ def employee_mahizhchi_bg():
     resp = send_file(bg, mimetype="image/png"); resp.headers["Cache-Control"] = "private, max-age=3600"
     return resp
 
-@app.route("/employee/mahizhchi/start", methods=["POST"])
+@app.route("/employee/mahizhchi/start", methods=["GET", "POST"])
 @need("employee")
 def employee_mahizhchi_start():
+    if request.method != "POST": return redirect("/employee/mahizhchi")      # Update88: a stray GET (reload / back / re-login) is never a 405
     eid = session.get("emp_id", "")
     if not mz_active(eid, fresh=True): abort(404)
     sets_q = mz_split(mz_questions())
@@ -4806,9 +4817,10 @@ def employee_mahizhchi_start():
     invalidate_cache(MZ_ATT_SHEET)
     return redirect("/employee/mahizhchi")
 
-@app.route("/employee/mahizhchi/submit", methods=["POST"])
+@app.route("/employee/mahizhchi/submit", methods=["GET", "POST"])
 @need("employee")
 def employee_mahizhchi_submit():
+    if request.method != "POST": return redirect("/employee/mahizhchi")      # Update88: a stray GET (reload / back / re-login) is never a 405
     eid = session.get("emp_id", "")
     if not mz_active(eid, fresh=True): abort(404)
     sets_q = mz_split(mz_questions()); atts = mz_attempts(eid); done = mz_my_answers(eid, fresh=True)
@@ -4840,9 +4852,10 @@ def employee_mahizhchi_submit():
     else: flash(f"Set {act} not won: {a} of {len(sq)} answered, {c} correct (need all answered and at least {MZ_WIN_CORRECT} correct).", "error")
     return redirect("/employee/mahizhchi")
 
-@app.route("/employee/mahizhchi/connect/start", methods=["POST"])
+@app.route("/employee/mahizhchi/connect/start", methods=["GET", "POST"])
 @need("employee")
 def employee_mahizhchi_connect_start():
+    if request.method != "POST": return redirect("/employee/mahizhchi")      # Update88: a stray GET (reload / back / re-login) is never a 405
     eid = session.get("emp_id", "")
     if not mz_active(eid, fresh=True) or not mz_all_won(eid): abort(404)      # bonus round: all Sets must be won first
     if mz_conn_attempt(eid): return redirect("/employee/mahizhchi")           # one play only; Start again never restarts the clock
@@ -4854,9 +4867,10 @@ def employee_mahizhchi_connect_start():
     invalidate_cache(MZ_CATT_SHEET)
     return redirect("/employee/mahizhchi")
 
-@app.route("/employee/mahizhchi/connect/guess", methods=["POST"])
+@app.route("/employee/mahizhchi/connect/guess", methods=["GET", "POST"])
 @need("employee")
 def employee_mahizhchi_connect_guess():
+    if request.method != "POST": return redirect("/employee/mahizhchi")      # Update88: a stray GET (reload / back / re-login) is never a 405
     eid = session.get("emp_id", "")
     if not mz_active(eid, fresh=True) or not mz_all_won(eid): abort(404)
     att = mz_conn_attempt(eid); puz = mz_conn_puzzles().get(att["game"]) if att else None

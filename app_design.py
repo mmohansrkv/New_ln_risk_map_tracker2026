@@ -57,6 +57,10 @@ Access rules (Update59):
     Still starts only after the AI voice ends; no music on the Employee pages.
   * Update82: Group Chat can send files (5 MB max, programs/scripts blocked), images/photos (shown inline, click to enlarge) and emoji (picker + big emoji-only
     messages). Attachments are kept in memory only and deleted after 1 hour with the message.
+  * Update84: Mahizhchi quiz = 5 Sets x 10 questions (rows 1-10 of the Mahizhchi Log = Set 1, 11-20 = Set 2 ...). 2 min 30 s per Set, enforced
+    on the server; the Set closes by itself at 0:00. A Set is WON by answering all 10 with >= MZ_WIN_CORRECT right (default 10); Set N+1 opens only after
+    Set N is won; Winner = all 5 Sets won. Each employee gets their own random (seeded) question order per Set. Attempts sheet now has one row per
+    employee per Set (columns Set / Answered / Correct / Result added). Env: MZ_SETS, MZ_PER_SET, MZ_WIN_CORRECT, MZ_TIME_SECONDS.
   * Update83: Admin -> Mahizhchi (Share / Access tab and Employee Info -> Mahizhchi Log): when an employee has access, "Mahizhchi" is shown as an
     animated running-letter badge (wave + colour shimmer) with floating emoji. Sharing celebrates with a confetti banner and highlights the
     rows that were just shared. Respects "reduce motion" settings.
@@ -167,8 +171,8 @@ HEADERS = {
     "Mahizhchi Log": ["Question", "A", "B", "C", "D", "Correct Answer"],
     "Mahizhchi Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
     "Mahizhchi Answers": ["Employee ID", "Employee name", "Question ID", "Question", "Answer", "Submitted at"],
-    # one row per employee: when they pressed Start (the timer runs from this SERVER time) and when the attempt was closed
-    "Mahizhchi Attempts": ["Employee ID", "Employee name", "Started at", "Closed at"],
+    # Update84: one row per employee PER SET: when they pressed Start (timer runs from this SERVER time), when the Set closed, and its result
+    "Mahizhchi Attempts": ["Employee ID", "Employee name", "Started at", "Closed at", "Set", "Answered", "Correct", "Result"],
 }
 PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                     "Emergency no", "Personal Email ID", "Office Email ID"]
@@ -3864,6 +3868,9 @@ import re as _re, hashlib as _hl
 MZ_TITLE = "Mahizhchi"
 MZ_SHEET, MZ_ACCESS_SHEET, MZ_ANS_SHEET, MZ_ATT_SHEET = "Mahizhchi Log", "Mahizhchi Access", "Mahizhchi Answers", "Mahizhchi Attempts"
 MZ_TIME_LIMIT = int(os.getenv("MZ_TIME_SECONDS", "150"))   # quiz time limit per employee (seconds) - 2 minutes 30 seconds
+MZ_SETS = int(os.getenv("MZ_SETS", "5"))                      # Update84: number of Sets in the quiz
+MZ_PER_SET = int(os.getenv("MZ_PER_SET", "10"))              # questions in each Set (ALL must be answered to complete a Set)
+MZ_WIN_CORRECT = min(MZ_PER_SET, int(os.getenv("MZ_WIN_CORRECT", str(MZ_PER_SET))))   # correct answers needed to WIN a Set (default: all 10)
 MZ_GRACE = 8                                                # seconds of network delay tolerated when the page auto-submits at 0:00
 def _mz_dur(sec):
     m, r = divmod(int(sec), 60)
@@ -3932,45 +3939,108 @@ def mz_my_answers(eid, fresh=False):
     return {str(r.get("Question ID", "")).strip(): str(r.get("Answer", "")).strip().upper()
             for r in src if _key(r.get("Employee ID", "")) == _key(eid)}
 
-def mz_attempt(eid):
-    """This employee's attempt (always read fresh - the deadline must be exact), or None if they have not started."""
-    r = next((r for r in _fetch_rows(MZ_ATT_SHEET) if _key(r.get("Employee ID", "")) == _key(eid)), None)
-    if not r: return None
-    try: start = dt.datetime.strptime(str(r.get("Started at", "")).strip(), "%Y-%m-%d %H:%M:%S")
-    except ValueError: start = dt.datetime(2000, 1, 1)          # unreadable start time -> treat the attempt as long over
-    return dict(row=r["_row"], start=start, closed=bool(str(r.get("Closed at", "")).strip()))
+def mz_split(qs):
+    """Update84: ready questions in sheet order -> Sets. Questions 1-10 = Set 1, 11-20 = Set 2 ... Only FULL Sets are offered."""
+    ok = [q for q in qs if q["ok"]]
+    return [ok[i * MZ_PER_SET:(i + 1) * MZ_PER_SET] for i in range(MZ_SETS) if len(ok[i * MZ_PER_SET:(i + 1) * MZ_PER_SET]) == MZ_PER_SET]
+
+def mz_order(eid, setno, setqs):
+    """Update84: this employee's own random order for a Set. Seeded by employee ID + Set, so it differs between employees
+    but stays the same for the same employee if the page is reloaded."""
+    seed = int(_hl.sha1(f"mz|{_key(eid)}|{setno}".encode("utf-8")).hexdigest()[:12], 16)
+    out = list(setqs); random.Random(seed).shuffle(out)
+    return out
+
+def mz_attempts_from(src, eid):
+    """{set number: attempt} for one employee from Attempts-sheet rows (rows with no Set value are old Update62 rows = Set 1)."""
+    out = {}
+    for r in src:
+        if _key(r.get("Employee ID", "")) != _key(eid): continue
+        try: n = int(str(r.get("Set", "")).strip() or 1)
+        except ValueError: n = 1
+        if n in out: continue
+        try: start = dt.datetime.strptime(str(r.get("Started at", "")).strip(), "%Y-%m-%d %H:%M:%S")
+        except ValueError: start = dt.datetime(2000, 1, 1)          # unreadable start time -> treat the Set as long over
+        out[n] = dict(row=r["_row"], start=start, closed=bool(str(r.get("Closed at", "")).strip()), set=n)
+    return out
+
+def mz_attempts(eid):
+    """This employee's Set attempts (always read fresh - the deadline must be exact)."""
+    return mz_attempts_from(_fetch_rows(MZ_ATT_SHEET), eid)
 
 def mz_seconds_left(att):
     return max(0, min(MZ_TIME_LIMIT, int(MZ_TIME_LIMIT - (now_local() - att["start"]).total_seconds())))
 
-def mz_close_attempt(att):
-    _with_retry(ws_of(MZ_ATT_SHEET).update, range_name=f"D{att['row']}",
-                values=[[now_local().strftime("%Y-%m-%d %H:%M:%S")]], value_input_option="RAW")
+def mz_close_attempt(att, answered, correct, won):
+    r = att["row"]
+    _with_retry(ws_of(MZ_ATT_SHEET).batch_update,
+                [{"range": f"D{r}", "values": [[now_local().strftime("%Y-%m-%d %H:%M:%S")]]},
+                 {"range": f"E{r}:H{r}", "values": [[att["set"], answered, correct, "Won" if won else "Not won"]]}],
+                value_input_option="RAW")
     invalidate_cache(MZ_ATT_SHEET)
+
+def mz_score(setqs, done):
+    """(answered, correct, won) for one Set. A Set is WON only when every question is answered AND >= MZ_WIN_CORRECT are right."""
+    a = sum(1 for q in setqs if q["qid"] in done)
+    c = sum(1 for q in setqs if done.get(q["qid"]) == q["correct"])
+    return a, c, (a == len(setqs) and c >= MZ_WIN_CORRECT)
+
+def mz_progress(eid, sets_q, atts, done, finalize=False):
+    """Per-Set status: won / failed / active / open (can start now) / locked (earlier Set not won yet).
+    finalize=True also closes (and records the result of) any Set whose time has run out - the Set closes by itself."""
+    out, prev_won = [], True
+    for n, sq in enumerate(sets_q, start=1):
+        att = atts.get(n); a, c, won = mz_score(sq, done); left = 0
+        if att:
+            left = 0 if att["closed"] else mz_seconds_left(att)
+            if left > 0: st = "active"
+            else:
+                if finalize and not att["closed"]: mz_close_attempt(att, a, c, won)
+                st = "won" if won else "failed"
+        else: st = "open" if prev_won else "locked"
+        out.append(dict(n=n, status=st, answered=a, correct=c, total=len(sq), left=left, att=att))
+        prev_won = prev_won and st == "won"
+    return out
+
+def mz_status_text(prog):
+    if prog and all(p["status"] == "won" for p in prog) and len(prog) >= MZ_SETS: return "Winner"
+    won_n = sum(1 for p in prog if p["status"] == "won")
+    f = next((p for p in prog if p["status"] == "failed"), None)
+    if f: return f"Not won - stopped at Set {f['n']}"
+    a = next((p for p in prog if p["status"] == "active"), None)
+    if a: return f"In progress - Set {a['n']}"
+    return f"Next: Set {won_n + 1}" if won_n else "Not started"
 
 def mz_detail(emp):
     """Everything Admin sees about ONE employee's Mahizhchi attempt (used by Results and by Employee Info -> Mahizhchi Log)."""
-    eid = str(emp["Employee ID"]); qs = [q for q in mz_questions() if q["ok"]]; total = len(qs)
-    d = mz_results(qs).get(_key(eid), dict(answered=0, correct=0, last=""))
-    mine = mz_my_answers(eid); att = mz_attempt(eid)
-    if att and att["closed"]: status = "Completed" if d["answered"] else "Closed - no answers (time over)"
-    elif att: status = "In progress" if mz_seconds_left(att) > 0 else "Time over"
-    else: status = "Completed" if mine else "Not started"
-    return dict(name=emp["Name"], answered=d["answered"], correct=d["correct"], total=total,
-                pct=round(d["correct"] / total * 100) if total else 0, status=status,
-                started=att["start"].strftime("%Y-%m-%d %H:%M:%S") if att else "", last=d["last"],
-                shared=mz_access_map().get(_key(eid), False), pub=mz_published(),
-                lines=[dict(q=q, mine=mine.get(q["qid"])) for q in qs])
+    eid = str(emp["Employee ID"]); sets_q = mz_split(mz_questions())
+    mine = mz_my_answers(eid); prog = mz_progress(eid, sets_q, mz_attempts(eid), mine)
+    sets = []
+    for p, sq in zip(prog, sets_q):
+        order = mz_order(eid, p["n"], sq)
+        sets.append(dict(n=p["n"], status=p["status"], answered=p["answered"], correct=p["correct"], total=p["total"],
+                         started=p["att"]["start"].strftime("%Y-%m-%d %H:%M:%S") if p["att"] else "",
+                         lines=[dict(q=q, mine=mine.get(q["qid"])) for q in order]))
+    return dict(name=emp["Name"], sets=sets, nsets=MZ_SETS, won_n=sum(1 for p in prog if p["status"] == "won"),
+                status=mz_status_text(prog), need=MZ_WIN_CORRECT, per=MZ_PER_SET,
+                shared=mz_access_map().get(_key(eid), False), pub=mz_published())
 
 def mz_results(qs):
-    """{employee key: dict(answered, correct, last)} scored against the CURRENT correct answers (Admin side only)."""
-    byq = {q["qid"]: q for q in qs if q["ok"]}; per = {}
+    """{employee key: dict(last, answered, prog)} scored against the CURRENT correct answers (Admin side only)."""
+    sets_q = mz_split(qs); valid = {q["qid"] for sq in sets_q for q in sq}
+    ans, last = {}, {}
     for r in rows(MZ_ANS_SHEET):
-        q = byq.get(str(r.get("Question ID", "")).strip())
-        if not q: continue
-        d = per.setdefault(_key(r.get("Employee ID", "")), dict(answered=0, correct=0, last=""))
-        d["answered"] += 1; d["correct"] += int(str(r.get("Answer", "")).strip().upper() == q["correct"])
-        d["last"] = max(d["last"], str(r.get("Submitted at", "")))
+        qid = str(r.get("Question ID", "")).strip()
+        if qid not in valid: continue
+        k = _key(r.get("Employee ID", ""))
+        ans.setdefault(k, {})[qid] = str(r.get("Answer", "")).strip().upper()
+        last[k] = max(last.get(k, ""), str(r.get("Submitted at", "")))
+    att_rows = rows(MZ_ATT_SHEET); per = {}
+    for k in set(ans) | {_key(r.get("Employee ID", "")) for r in att_rows}:
+        if not k: continue
+        prog = mz_progress(k, sets_q, mz_attempts_from(att_rows, k), ans.get(k, {}))
+        per[k] = dict(last=last.get(k, ""), answered=sum(p["answered"] for p in prog), prog=prog,
+                      won_n=sum(1 for p in prog if p["status"] == "won"), status=mz_status_text(prog))
     return per
 
 def mz_published(fresh=False):
@@ -4111,7 +4181,7 @@ background:linear-gradient(120deg,#eef0ff,#fdf2f8,#fff7e6);border:1px solid #d6d
 {% macro mzcard(q, n, admin) %}<div class="mz-q {{'bad' if q.issues}}"><h3><span class="no">{{n}}.</span>{{q.q}}</h3>
 {% for o in q.opts %}<div class="mz-o {{'ok' if o.letter==q.correct}}"><span class="l">{{o.letter}}.</span><span>{{o.text}}{% if o.letter==q.correct %} <span class="tick" title="Correct answer">&#10003;</span>{% endif %}</span></div>{% endfor %}
 {% for i in q.issues %}<p class="mz-issue">&#9888; {{i}}</p>{% endfor %}
-{% if admin %}<div class="mz-row">Sheet row {{q.row}}{% if not q.issues %} &middot; correct answer: <b>{{q.correct}}</b>{% else %} &middot; <b>hidden from employees until fixed</b>{% endif %}</div>{% endif %}</div>{% endmacro %}
+{% if admin %}<div class="mz-row">Sheet row {{q.row}}{% if q.set %} &middot; <b>Set {{q.set}}</b>{% endif %}{% if not q.issues %} &middot; correct answer: <b>{{q.correct}}</b>{% else %} &middot; <b>hidden from employees until fixed</b>{% endif %}</div>{% endif %}</div>{% endmacro %}
 """
 
 MZ_TABS = """<div class="tabs no-print"><a href="/admin/mahizhchi" class="{{'on' if tab=='questions' else ''}}">Questions</a>
@@ -4125,7 +4195,8 @@ MZ_HEAD = """<div class="head"><div><h1>{{MZ_TITLE}}</h1>
 MZ_ADMIN_Q = MZ_CSS + MZ_HEAD + """
 <div class="card"><h2>Status: <span class="pill {{'in' if pub else 'out'}}">{{'Published' if pub else 'Not published'}}</span></h2>
 <div class="mz-stats"><span>Questions: <b>{{qs|length}}</b></span><span>Ready: <b>{{ok_n}}</b></span>
-<span>Need fixing: <b>{{qs|length - ok_n}}</b></span><span>Shared with: <b>{{shared_n}}</b> of <b>{{emp_n}}</b> employees</span><span>Time limit: <b>{{mz_dur(limit)}}</b> per employee</span></div>
+<span>Need fixing: <b>{{qs|length - ok_n}}</b></span><span>Shared with: <b>{{shared_n}}</b> of <b>{{emp_n}}</b> employees</span><span>Sets ready: <b>{{sets_n}}</b> of <b>{{nsets}}</b> ({{per}} questions each)</span><span>Time limit: <b>{{mz_dur(limit)}}</b> per Set</span><span>To win a Set: answer all {{per}}, at least <b>{{need}}</b> correct</span></div>
+{% if sets_n < nsets %}<p class="mz-issue">&#9888; Only {{sets_n}} full Set(s) are ready. Questions are grouped in sheet order: rows 1-{{per}} = Set 1, next {{per}} = Set 2 and so on. Add {{nsets*per - ok_n}} more ready question(s) so all {{nsets}} Sets can be played.</p>{% endif %}
 <p class="mut">{% if pub %}Employees it is shared with can answer the {{ok_n}} ready question(s); the ✓ correct answer is never shown to them. Un-publish to hide it from everyone at once.
 {% else %}Nobody but you can see the log until you publish it <i>and</i> share it with employees (Share / Access tab).{% endif %}</p>
 <form method="post" action="/admin/mahizhchi/publish" style="display:inline">
@@ -4162,54 +4233,58 @@ A question is skipped, and reported, if it has no ✓, more than one ✓, or few
 <button class="primary">Add to sheet</button> <a href="/admin/mahizhchi">Cancel</a></form></div>"""
 
 MZ_DETAIL = """{% if detail.shared and detail.pub %}<div class="mz-cele" style="animation:none;padding:10px 16px">{{ mzbadge('Access enabled', true) }}<span class="txt">{{detail.name}} can open the Mahizhchi Log.</span></div>{% endif %}
-<div class="card"><h2>{{detail.name}} &mdash; {{detail.correct}} / {{detail.total}} correct ({{detail.pct}}%)</h2>
-<p class="mut">Status: <b>{{detail.status}}</b>{% if detail.started %} &middot; started {{detail.started|t12}}{% endif %} &middot; answered {{detail.answered}} of {{detail.total}}
+<div class="card"><h2>{{detail.name}} &mdash; {{detail.won_n}} / {{detail.nsets}} Sets won{% if detail.status=='Winner' %} &#127942; Winner{% endif %}</h2>
+<p class="mut">Status: <b>{{detail.status}}</b> &middot; a Set is won by answering all {{detail.per}} questions with at least {{detail.need}} correct
 {% if not detail.shared %} &middot; <span class="pill out">Not shared with this employee</span>{% elif not detail.pub %} &middot; <span class="pill act">Shared - not published</span>{% endif %}
 {% if back %} &middot; <a href="{{back}}">&larr; All results</a>{% endif %}</p></div>
-{% for d in detail.lines %}<div class="mz-q"><h3><span class="no">{{loop.index}}.</span>{{d.q.q}}</h3>
+{% for st in detail.sets %}<div class="card"><h2>Set {{st.n}} &mdash; <span class="pill {{'in' if st.status=='won' else ('out' if st.status=='failed' else 'act')}}">{{ {'won':'Won','failed':'Not won','active':'In progress','open':'Not started','locked':'Locked'}[st.status] }}</span></h2>
+<p class="mut">Answered {{st.answered}} of {{st.total}} &middot; correct {{st.correct}}{% if st.started %} &middot; started {{st.started|t12}}{% endif %} &middot; questions shown to this employee in their own order</p></div>
+{% for d in st.lines %}<div class="mz-q"><h3><span class="no">{{loop.index}}.</span>{{d.q.q}}</h3>
 {% for o in d.q.opts %}<div class="mz-o {{'ok' if o.letter==d.q.correct else ('mine' if o.letter==d.mine else '')}}"><span class="l">{{o.letter}}.</span>
 <span>{{o.text}}{% if o.letter==d.q.correct %} <span class="tick">&#10003;</span>{% endif %}{% if o.letter==d.mine %} <span class="pill {{'in' if d.mine==d.q.correct else 'out'}}">employee&rsquo;s answer</span>{% endif %}</span></div>{% endfor %}
-{% if not d.mine %}<p class="mz-issue">Not answered</p>{% endif %}</div>{% else %}<div class="card"><p>No questions in Mahizhchi yet.</p></div>{% endfor %}"""
+{% if not d.mine %}<p class="mz-issue">Not answered</p>{% endif %}</div>{% endfor %}{% else %}<div class="card"><p>No full Set of questions in Mahizhchi yet.</p></div>{% endfor %}"""
 MZ_EMPINFO = MZ_CSS + MZ_DETAIL
-MZ_ADMIN_RESULTS = MZ_CSS + MZ_HEAD + "{% if detail %}" + MZ_DETAIL + """{% else %}<div class="card"><h2>Results</h2><p class="mut">Scored against the current ✓ correct answers of the {{total}} ready question(s).</p>
-<table><tr><th>Employee ID</th><th>Name</th><th>Answered</th><th>Correct</th><th>Score</th><th>Last submitted</th><th></th></tr>
-{% for r in res %}<tr><td>{{r.id}}</td><td>{{r.name}}</td><td>{{r.answered}} / {{total}}</td><td>{{r.correct}}</td>
-<td>{% if r.answered %}<b>{{r.pct}}%</b>{% else %}<span class="pill out">Not answered</span>{% endif %}</td><td>{{r.last|t12}}</td>
-<td>{% if r.answered %}<a href="/admin/mahizhchi?tab=results&emp={{r.id|urlencode}}">Details</a>{% endif %}</td></tr>
-{% else %}<tr><td colspan="7">No employee has access or answers yet.</td></tr>{% endfor %}</table></div>{% endif %}"""
+MZ_ADMIN_RESULTS = MZ_CSS + MZ_HEAD + "{% if detail %}" + MZ_DETAIL + """{% else %}<div class="card"><h2>Results</h2><p class="mut">{{nsets}} Sets of {{per}} questions. A Set is won by answering all {{per}} with at least {{need}} correct; the next Set opens only after the previous one is won. Winner = all {{nsets}} Sets won.</p>
+<table><tr><th>Employee ID</th><th>Name</th><th>Sets won</th>{% for i in range(1, nsets+1) %}<th>Set {{i}}</th>{% endfor %}<th>Status</th><th>Last submitted</th><th></th></tr>
+{% for r in res %}<tr><td>{{r.id}}</td><td>{{r.name}}</td><td><b>{{r.won_n}} / {{nsets}}</b></td>
+{% for i in range(1, nsets+1) %}{% set p = r.prog[i-1] if r.prog|length >= i else none %}<td>{% if not p or p.status in ('locked','open') %}&mdash;{% elif p.status=='won' %}<span class="pill in">&#10003; {{p.correct}}/{{p.total}}</span>{% elif p.status=='failed' %}<span class="pill out">{{p.correct}}/{{p.total}} - not won</span>{% else %}<span class="pill act">playing</span>{% endif %}</td>{% endfor %}
+<td>{% if r.status=='Winner' %}<span class="pill in">&#127942; Winner</span>{% else %}{{r.status}}{% endif %}</td><td>{{r.last|t12}}</td>
+<td>{% if r.answered or r.prog|selectattr('att')|list %}<a href="/admin/mahizhchi?tab=results&emp={{r.id|urlencode}}">Details</a>{% endif %}</td></tr>
+{% else %}<tr><td colspan="{{nsets+6}}">No employee has access or answers yet.</td></tr>{% endfor %}</table></div>{% endif %}"""
 
-MZ_EMP = MZ_CSS + """<div class="mz-stage{{' has-bg' if bg_v}}"{% if bg_v %} style="--mzbg:url('/employee/mahizhchi/bg?v={{bg_v}}')"{% endif %}>
+MZ_EMP = MZ_CSS + """<style>.mz-sets{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}.mz-sets span{padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.95);font-weight:700;font-size:13px;border:1px solid #d6d9ff}
+.mz-sets .won{background:#e3f6ec;border-color:#9bd7b5;color:#146c43}.mz-sets .failed{background:#fef2f2;border-color:#fca5a5;color:#991b1b}.mz-sets .active,.mz-sets .open{background:#eef0ff;border-color:#4f46e5;color:#3730a3}.mz-sets .locked{opacity:.6}</style>
+<div class="mz-stage{{' has-bg' if bg_v}}"{% if bg_v %} style="--mzbg:url('/employee/mahizhchi/bg?v={{bg_v}}')"{% endif %}>
 <div class="head"><div><h1>{{ mzrun() }}</h1></div></div>
-{% if not qs %}<div class="card"><p>There are no questions in {{MZ_TITLE}} yet.</p></div>
-{% elif state=='intro' %}<div class="card"><h2>Ready?</h2>
-<p>There are <b>{{qs|length}}</b> question(s) and you have <b>{{mz_dur(limit)}}</b>. The timer starts when you press <b>Start</b> and cannot be paused or restarted.
-Tick one answer for each question. When time is over the answer buttons close automatically and the answers you ticked are submitted. You can attempt this only once.</p>
-<form method="post" action="/employee/mahizhchi/start"><button class="primary">Start</button></form></div>
-{% else %}
-{% if state=='active' %}<div class="mz-timer" id="mzbar">&#9201; Time left: <b id="mzt">{{mz_dur(limit)}}</b></div>
-{% elif todo %}<p class="flash">&#9201; Time is up &mdash; answer buttons are closed. Questions you did not answer stay unanswered.</p>
-{% else %}<p class="flash">&#10003; You have answered all the questions. Thank you!</p>{% endif %}
+{% if not prog %}<div class="card"><p>There are not enough questions in {{MZ_TITLE}} yet.</p></div>
+{% else %}<div class="mz-sets">{% for p in prog %}<span class="{{p.status}}">Set {{p.n}}: {{ {'won':'Won \u2713','failed':'Not won','active':'In progress','open':'Ready','locked':'Locked'}[p.status] }}</span>{% endfor %}</div>
+{% if state=='intro' %}<div class="card"><h2>Set {{cur}} of {{prog|length}}</h2>
+<p>This Set has <b>{{per}}</b> questions and you have <b>{{mz_dur(limit)}}</b>. The timer starts when you press <b>Start</b> and cannot be paused or restarted. Your questions appear in your own order.
+Answer <b>all {{per}}</b> questions and get at least <b>{{need}}</b> right to win the Set and unlock the next one. When time is over the Set closes automatically and your ticked answers are submitted. Each Set can be attempted only once.</p>
+<form method="post" action="/employee/mahizhchi/start"><button class="primary">Start Set {{cur}}</button></form></div>
+{% elif state=='active' %}<div class="mz-timer" id="mzbar">&#9201; Set {{cur}} &middot; Time left: <b id="mzt">{{mz_dur(limit)}}</b></div>
 <form method="post" action="/employee/mahizhchi/submit" id="mzform">
 {% for q in qs %}<div class="mz-q"><h3><span class="no">{{loop.index}}.</span>{{q.q}}</h3>
-{% for o in q.opts %}{% if state=='active' and not q.mine %}<label class="mz-o pick"><input type="radio" name="a_{{q.qid}}" value="{{o.letter}}"><span class="l">{{o.letter}}.</span><span>{{o.text}}</span></label>
-{% else %}<div class="mz-o {{'mine' if o.letter==q.mine}}"><span class="l">{{o.letter}}.</span><span>{{o.text}}{% if o.letter==q.mine %} <span class="tick" style="color:var(--pri)" title="Your answer">&#10003;</span>{% endif %}</span></div>{% endif %}{% endfor %}
-{% if q.mine %}<div class="mz-row">Your answer submitted</div>{% elif state!='active' %}<div class="mz-row">Not answered</div>{% endif %}</div>{% endfor %}
-{% if state=='active' %}<button class="primary" id="mzsub">Submit my answers</button>{% endif %}</form>
-{% if state=='active' %}<script>(function(){
+{% for o in q.opts %}<label class="mz-o pick"><input type="radio" name="a_{{q.qid}}" value="{{o.letter}}"><span class="l">{{o.letter}}.</span><span>{{o.text}}</span></label>{% endfor %}</div>{% endfor %}
+<button class="primary" id="mzsub">Submit Set {{cur}}</button></form>
+<script>(function(){
 var f=document.getElementById('mzform'),t=document.getElementById('mzt'),bar=document.getElementById('mzbar');
 var end=Date.now()+{{remaining}}*1000,over=false,iv;
 function fmt(s){return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2)}
-function lock(){                     /* keep what is ticked (disabled inputs are not sent), then close every answer button */
+function lock(){
   f.querySelectorAll('input[type=radio]:checked').forEach(function(r){var h=document.createElement('input');h.type='hidden';h.name=r.name;h.value=r.value;f.appendChild(h)});
   f.querySelectorAll('input,button').forEach(function(x){x.disabled=true});f.classList.add('mz-locked')}
 function tick(){var s=Math.max(0,Math.ceil((end-Date.now())/1000));t.textContent=fmt(s);if(s<=30)bar.classList.add('low');
-  if(s<=0&&!over){over=true;clearInterval(iv);bar.textContent='\u23F1 Time is up \u2013 answers are closed, submitting\u2026';lock();f.submit()}}
+  if(s<=0&&!over){over=true;clearInterval(iv);bar.textContent='\u23F1 Time is up \u2013 this Set is closed, submitting\u2026';lock();f.submit()}}
 f.addEventListener('submit',function(e){if(over)return;
   var names={},n=0,c=f.querySelectorAll('input[type=radio]:checked').length;
   f.querySelectorAll('input[type=radio]').forEach(function(r){if(!names[r.name]){names[r.name]=1;n++}});
-  if(n>c&&!confirm((n-c)+' question(s) are not answered. Submit anyway? You cannot answer them later.')){e.preventDefault();return}
+  if(n>c&&!confirm((n-c)+' question(s) are not answered. You need to answer all of them to win this Set. Submit anyway? You cannot answer them later.')){e.preventDefault();return}
   over=true;clearInterval(iv)});
-tick();iv=setInterval(tick,250);})();</script>{% endif %}
+tick();iv=setInterval(tick,250);})();</script>
+{% elif state=='winner' %}<div class="mz-cele"><span class="mz-conf" aria-hidden="true">{% for em in ['🎉','✨','🎊','⭐','💫','🎈','🌟','🎉','✨','🎊'] %}<span style="left:{{ 4 + loop.index0*10 }}%;animation-delay:{{ loop.index0*0.25 }}s">{{em}}</span>{% endfor %}</span>
+<span class="big">🏆</span><span class="txt">Congratulations! You won all {{prog|length}} Sets &mdash; you are a Mahizhchi winner!</span></div>
+{% else %}<div class="card"><h2>Set {{failed.n}} &mdash; not won</h2><p>You answered {{failed.answered}} of {{failed.total}} questions and got {{failed.correct}} correct. To win a Set you must answer all {{failed.total}} within the time and get at least {{need}} right, so the next Set stays locked. Thank you for taking part!</p></div>{% endif %}
 {% endif %}</div>"""
 
 def mz_bg_path():
@@ -4230,7 +4305,7 @@ def admin_mahizhchi():
     amap = mz_access_map()
     emps = rows("Employees")
     if tab == "results":
-        qs = [q for q in mz_questions() if q["ok"]]; per = mz_results(qs); total = len(qs)
+        qs = [q for q in mz_questions() if q["ok"]]; per = mz_results(qs)
         eid = request.args.get("emp", "").strip()
         if eid:
             detail = mz_detail(emp_or_404(eid))
@@ -4239,11 +4314,11 @@ def admin_mahizhchi():
         for e in emps:
             k = _key(e["Employee ID"]); d = per.get(k)
             if not d and not amap.get(k): continue
-            d = d or dict(answered=0, correct=0, last="")
-            res.append(dict(id=e["Employee ID"], name=e["Name"], answered=d["answered"], correct=d["correct"], last=d["last"],
-                            pct=round(d["correct"] / total * 100) if total else 0))
-        res.sort(key=lambda r: str(r["name"]).lower())
-        return page(MZ_ADMIN_RESULTS, title=MZ_TITLE, tab="results", detail=None, res=res, total=total)
+            d = d or dict(answered=0, last="", prog=[], won_n=0, status="Not started")
+            res.append(dict(id=e["Employee ID"], name=e["Name"], answered=d["answered"], last=d["last"], prog=d["prog"],
+                            won_n=d["won_n"], status=d["status"]))
+        res.sort(key=lambda r: (-r["won_n"], str(r["name"]).lower()))        # winners first
+        return page(MZ_ADMIN_RESULTS, title=MZ_TITLE, tab="results", detail=None, res=res, nsets=MZ_SETS, per=MZ_PER_SET, need=MZ_WIN_CORRECT)
     if tab == "access":
         q = request.args.get("q", "").strip()
         shown = [e for e in emps if not q or q.lower() in str(e["Employee ID"]).lower() or q.lower() in str(e["Name"]).lower()]
@@ -4252,10 +4327,13 @@ def admin_mahizhchi():
         return page(MZ_ADMIN_ACCESS, title=MZ_TITLE, tab="access", emps=shown, amap=amap, q=q, pub=mz_published(),
                     granted=fresh.get("n", 0), newall=bool(fresh) and ids is None, newset=set(ids or []))
     qs = mz_questions()
+    for n, sq in enumerate(mz_split(qs), start=1):          # Update84: label each ready question with its Set
+        for q in sq: q["set"] = n
     ids = {_key(e["Employee ID"]) for e in emps}
     return page(MZ_ADMIN_Q, title=MZ_TITLE, tab="questions", qs=qs, ok_n=sum(1 for x in qs if x["ok"]),
                 pub=mz_published(), shared_n=sum(1 for k, v in amap.items() if v and k in ids), emp_n=len(ids),
-                sheet=MZ_SHEET, sheet_id=SHEET_ID, limit=MZ_TIME_LIMIT)
+                sheet=MZ_SHEET, sheet_id=SHEET_ID, limit=MZ_TIME_LIMIT,
+                sets_n=len(mz_split(qs)), nsets=MZ_SETS, per=MZ_PER_SET, need=MZ_WIN_CORRECT)
 
 @app.route("/admin/mahizhchi/publish", methods=["POST"])
 @need("admin")
@@ -4316,17 +4394,21 @@ def admin_mahizhchi_import():
 def employee_mahizhchi():
     eid = session.get("emp_id", "")
     if not mz_active(eid, fresh=True): abort(404)     # not published / not shared: page does not exist for them
-    done = mz_my_answers(eid, fresh=True); att = mz_attempt(eid)
-    qs = [dict(qid=q["qid"], q=q["q"], opts=q["opts"], mine=done.get(q["qid"])) for q in mz_questions() if q["ok"]]
-    remaining = mz_seconds_left(att) if att and not att["closed"] else 0
-    if remaining > 0: state = "active"
-    elif att or done: state = "closed"
-    else: state = "intro"          # questions are not even sent to the browser until the employee presses Start
-    if state == "intro": qs_view = [dict(qid=q["qid"], q="", opts=[], mine=None) for q in qs]   # only the count is needed
-    else: qs_view = qs
+    sets_q = mz_split(mz_questions()); done = mz_my_answers(eid, fresh=True)
+    prog = mz_progress(eid, sets_q, mz_attempts(eid), done, finalize=True)      # a Set whose time ran out is closed here too
+    act = next((p for p in prog if p["status"] == "active"), None)
+    opn = next((p for p in prog if p["status"] == "open"), None)
+    failed = next((p for p in prog if p["status"] == "failed"), None)
+    qs, cur, remaining = [], 0, 0
+    if act:
+        state, cur, remaining = "active", act["n"], act["left"]
+        qs = [dict(qid=q["qid"], q=q["q"], opts=q["opts"]) for q in mz_order(eid, cur, sets_q[cur - 1])]   # this employee's own order
+    elif opn: state, cur = "intro", opn["n"]                 # questions are not sent to the browser until the employee presses Start
+    elif prog and not failed and len(prog) >= MZ_SETS: state = "winner"
+    else: state = "closed"
     bg = mz_bg_path()
-    return page(MZ_EMP, title=MZ_TITLE, qs=qs_view, state=state, remaining=remaining, limit=MZ_TIME_LIMIT,
-                todo=[q for q in qs if not q["mine"]], bg_v=int(os.path.getmtime(bg)) if bg else 0)
+    return page(MZ_EMP, title=MZ_TITLE, prog=prog, qs=qs, state=state, cur=cur, remaining=remaining, limit=MZ_TIME_LIMIT,
+                per=MZ_PER_SET, need=MZ_WIN_CORRECT, failed=failed, bg_v=int(os.path.getmtime(bg)) if bg else 0)
 
 @app.route("/employee/mahizhchi/bg")
 @need("employee")
@@ -4342,12 +4424,15 @@ def employee_mahizhchi_bg():
 def employee_mahizhchi_start():
     eid = session.get("emp_id", "")
     if not mz_active(eid, fresh=True): abort(404)
-    if not any(q["ok"] for q in mz_questions()):
-        flash("There are no questions yet.", "error"); return redirect("/employee/mahizhchi")
-    if mz_attempt(eid) or mz_my_answers(eid, fresh=True):      # one attempt only; pressing Start again never restarts the clock
+    sets_q = mz_split(mz_questions())
+    if not sets_q:
+        flash("There are not enough questions yet.", "error"); return redirect("/employee/mahizhchi")
+    prog = mz_progress(eid, sets_q, mz_attempts(eid), mz_my_answers(eid, fresh=True), finalize=True)
+    opn = next((p for p in prog if p["status"] == "open"), None)
+    if not opn or any(p["status"] == "active" for p in prog):      # only the next unlocked Set can start; Start again never restarts a clock
         return redirect("/employee/mahizhchi")
     _with_retry(ws_of(MZ_ATT_SHEET).append_row, [str(eid), session.get("name", ""),
-                now_local().strftime("%Y-%m-%d %H:%M:%S"), ""], value_input_option="RAW")
+                now_local().strftime("%Y-%m-%d %H:%M:%S"), "", opn["n"], "", "", ""], value_input_option="RAW")
     invalidate_cache(MZ_ATT_SHEET)
     return redirect("/employee/mahizhchi")
 
@@ -4356,15 +4441,16 @@ def employee_mahizhchi_start():
 def employee_mahizhchi_submit():
     eid = session.get("emp_id", "")
     if not mz_active(eid, fresh=True): abort(404)
-    att = mz_attempt(eid)
-    if not att or att["closed"]:
-        flash("This quiz is already closed.", "error"); return redirect("/employee/mahizhchi")
+    sets_q = mz_split(mz_questions()); atts = mz_attempts(eid); done = mz_my_answers(eid, fresh=True)
+    act = next((n for n, a in sorted(atts.items()) if not a["closed"] and n <= len(sets_q)), None)
+    if act is None:
+        flash("This Set is already closed.", "error"); return redirect("/employee/mahizhchi")
+    att, sq = atts[act], sets_q[act - 1]
     if (now_local() - att["start"]).total_seconds() > MZ_TIME_LIMIT + MZ_GRACE:      # too late: nothing is accepted
-        mz_close_attempt(att)
-        flash(f"Time is over ({_mz_dur(MZ_TIME_LIMIT)}). Answers are closed.", "error"); return redirect("/employee/mahizhchi")
-    done = mz_my_answers(eid, fresh=True)
+        a, c, won = mz_score(sq, done); mz_close_attempt(att, a, c, won)
+        flash(f"Time is over ({_mz_dur(MZ_TIME_LIMIT)}). Set {act} is closed.", "error"); return redirect("/employee/mahizhchi")
     picks = []
-    for q in (q for q in mz_questions() if q["ok"] and q["qid"] not in done):
+    for q in (q for q in sq if q["qid"] not in done):                    # ONLY this Set's questions are accepted
         a = request.form.get("a_" + q["qid"], "").strip().upper()
         if a in [o["letter"] for o in q["opts"]]:                        # must be one of THIS question's real options; blanks stay unanswered
             picks.append((q, a))
@@ -4373,8 +4459,12 @@ def employee_mahizhchi_submit():
         _with_retry(ws_of(MZ_ANS_SHEET).append_rows,
                     [[str(eid), session.get("name", ""), q["qid"], q["q"], a, stamp] for q, a in picks], value_input_option="RAW")
         invalidate_cache(MZ_ANS_SHEET)
-    mz_close_attempt(att)                                                # attempt is over: nothing more can be answered
-    flash(f"Thank you! {len(picks)} answer(s) submitted.")
+        done = dict(done); done.update({q["qid"]: a for q, a in picks})
+    a, c, won = mz_score(sq, done)
+    mz_close_attempt(att, a, c, won)                                     # Set is over: nothing more can be answered
+    if won and act < len(sets_q) and act < MZ_SETS: flash(f"Set {act} won! You answered all {len(sq)} questions with {c} correct. Set {act + 1} is now open.")
+    elif won: flash("Congratulations - you have won every Set!")
+    else: flash(f"Set {act} not won: {a} of {len(sq)} answered, {c} correct (need all answered and at least {MZ_WIN_CORRECT} correct).", "error")
     return redirect("/employee/mahizhchi")
 
 if __name__ == "__main__":

@@ -57,6 +57,9 @@ Access rules (Update59):
     Still starts only after the AI voice ends; no music on the Employee pages.
   * Update82: Group Chat can send files (5 MB max, programs/scripts blocked), images/photos (shown inline, click to enlarge) and emoji (picker + big emoji-only
     messages). Attachments are kept in memory only and deleted after 1 hour with the message.
+  * Update87 (Fun Friday): EVERY Set is retryable by default (MZ_RETRY_SETS=all): an incomplete Set shows "Try again" and can be attempted again
+    until all its questions are correct. All Sets won = "Completed". The FIRST employee to complete all Sets (earliest time their last Set was won) is the
+    OVERALL WINNER, announced by toast to every logged-in employee and shown on the winner board / Admin Results. Only correct answers are shown, only after a Set is won.
   * Update86 (Fun Friday): Set 1 (MZ_RETRY_SETS) keeps showing the questions not yet answered correctly - fresh 2:30 timer each round - until all 10 are
     correct; after a Set is won ONLY the correct answers are shown to the employee (never wrong picks). The FIRST employee to win each Set is that Set's
     winner ("Set N Winner: name"); every logged-in employee (MZ_ANNOUNCE_TO=all) gets a live toast "<trophy> <name> has completed Set N first!" and the winner
@@ -1327,11 +1330,13 @@ poll();setInterval(poll,15000)})();
 try{var raw=sessionStorage.getItem(K);seen=raw?JSON.parse(raw):null}catch(e){seen=null}
 function toast(t){var d=document.createElement('div');d.className='toast';d.textContent=t;document.getElementById('toasts').appendChild(d);setTimeout(function(){d.remove()},12000)}
 function board(j){var b=document.getElementById('mzboard');if(!b)return;b.textContent='';
+ if(j.overall){var o=document.createElement('div');o.className='mz-win';o.style.fontWeight='700';o.textContent='🏆 Overall Winner: '+j.overall.name+' — first to complete all Sets';b.appendChild(o)}
  j.board.forEach(function(x){var d=document.createElement('div');d.className='mz-win'+(x.name?'':' none');
   d.textContent=x.name?('🏆 Set '+x.n+' Winner: '+x.name):('Set '+x.n+' — no winner yet');b.appendChild(d)})}
 function poll(){fetch('/employee/mahizhchi/winners',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(j){
- if(!j.show)return;board(j);var cur=j.winners.map(function(w){return w.set});
- if(seen===null){seen=cur}else{j.winners.forEach(function(w){if(seen.indexOf(w.set)<0){seen.push(w.set);toast(w.text)}})}
+ if(!j.show)return;board(j);var cur=j.winners.map(function(w){return w.set});if(j.overall)cur.push('ALL');
+ if(seen===null){seen=cur}else{j.winners.forEach(function(w){if(seen.indexOf(w.set)<0){seen.push(w.set);toast(w.text)}});
+  if(j.overall&&seen.indexOf('ALL')<0){seen.push('ALL');toast(j.overall.text)}}
  try{sessionStorage.setItem(K,JSON.stringify(seen))}catch(e){}}).catch(function(){})}
 poll();setInterval(poll,10000)})();</script>
 <script>(function(){function p(){fetch('/employee/ping',{credentials:'same-origin',cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();</script>{% endif %}
@@ -3897,7 +3902,8 @@ MZ_WIN_CORRECT = min(MZ_PER_SET, int(os.getenv("MZ_WIN_CORRECT", str(MZ_PER_SET)
 MZ_CSHEET, MZ_CATT_SHEET = "Mahizhchi Connections", "Mahizhchi Connection Attempts"
 MZ_CONN_TIME = int(os.getenv("MZ_CONN_SECONDS", "180"))       # Update85: Connection Game time limit (seconds)
 MZ_CONN_MISTAKES = int(os.getenv("MZ_CONN_MISTAKES", "4"))    # wrong guesses allowed before the game is lost
-MZ_RETRY_SETS = {int(x) for x in os.getenv("MZ_RETRY_SETS", "1").replace(" ", "").split(",") if x.isdigit()}   # Update86: Sets that keep coming back until every question is answered correctly
+_rs = os.getenv("MZ_RETRY_SETS", "all").replace(" ", "").lower()      # Update87: "all" (default) = EVERY Set can be retried until it is completed
+MZ_RETRY_SETS = set(range(1, MZ_SETS + 1)) if _rs == "all" else {int(x) for x in _rs.split(",") if x.isdigit()}   # Update86: Sets that keep coming back until every question is answered correctly
 MZ_ANNOUNCE_TO = os.getenv("MZ_ANNOUNCE_TO", "all")           # Update86: "all" = every logged-in employee sees set winners; "access" = only employees who can open Mahizhchi
 MZ_GRACE = 8                                                # seconds of network delay tolerated when the page auto-submits at 0:00
 def _mz_dur(sec):
@@ -4047,12 +4053,14 @@ def mz_progress(eid, sets_q, atts, done, finalize=False):
     return out
 
 def mz_status_text(prog):
-    if prog and all(p["status"] == "won" for p in prog) and len(prog) >= MZ_SETS: return "Winner"
+    if prog and all(p["status"] == "won" for p in prog) and len(prog) >= MZ_SETS: return "Completed"
     won_n = sum(1 for p in prog if p["status"] == "won")
     f = next((p for p in prog if p["status"] == "failed"), None)
     if f: return f"Not won - stopped at Set {f['n']}"
     a = next((p for p in prog if p["status"] == "active"), None)
     if a: return f"In progress - Set {a['n']}"
+    t = next((p for p in prog if p["status"] == "open" and p["att"]), None)
+    if t: return f"Try again - Set {t['n']}"                        # Update87: an incomplete Set that can be attempted again
     return f"Next: Set {won_n + 1}" if won_n else "Not started"
 
 def mz_detail(emp):
@@ -4246,6 +4254,23 @@ def mz_set_winners():
         key = (at, r["_row"])
         if n not in best or key < best[n][0]: best[n] = (key, r)
     return {n: dict(id=str(r.get("Employee ID", "")), name=str(r.get("Employee name", "")), at=k[0]) for n, (k, r) in best.items()}
+
+def mz_overall_winner(nsets):
+    """Update87: the FIRST employee to complete ALL Sets = overall winner. Completion time = when their LAST Set was won; ties -> sheet order."""
+    if nsets < 1: return None
+    per = {}
+    for r in rows(MZ_ATT_SHEET):
+        if str(r.get("Result", "")).strip() != "Won": continue
+        at = str(r.get("Closed at", "")).strip()
+        try: n = int(str(r.get("Set", "")).strip() or 1)
+        except ValueError: continue
+        if not at or not 1 <= n <= nsets: continue
+        d = per.setdefault(_key(r.get("Employee ID", "")), dict(id=str(r.get("Employee ID", "")), name=str(r.get("Employee name", "")), row=r["_row"], sets={}))
+        if n not in d["sets"] or at < d["sets"][n]: d["sets"][n] = at
+    done = [(max(d["sets"].values()), d["row"], d) for d in per.values() if len(d["sets"]) == nsets]
+    if not done: return None
+    at, _row, d = min(done, key=lambda x: (x[0], x[1]))
+    return dict(id=d["id"], name=d["name"], at=at, text="🏆 " + d["name"] + " is the overall winner - first to complete all Sets!")
 
 def mz_board(nsets):
     w = mz_set_winners()
@@ -4457,7 +4482,7 @@ A question is skipped, and reported, if it has no ✓, more than one ✓, or few
 <button class="primary">Add to sheet</button> <a href="/admin/mahizhchi">Cancel</a></form></div>"""
 
 MZ_DETAIL = """{% if detail.shared and detail.pub %}<div class="mz-cele" style="animation:none;padding:10px 16px">{{ mzbadge('Access enabled', true) }}<span class="txt">{{detail.name}} can open the Mahizhchi Log.</span></div>{% endif %}
-<div class="card"><h2>{{detail.name}} &mdash; {{detail.won_n}} / {{detail.nsets}} Sets won{% if detail.status=='Winner' %} &#127942; Winner{% endif %}</h2>
+<div class="card"><h2>{{detail.name}} &mdash; {{detail.won_n}} / {{detail.nsets}} Sets won{% if detail.status=='Completed' %} &#9989; Completed{% endif %}</h2>
 <p class="mut">Status: <b>{{detail.status}}</b> &middot; a Set is won by answering all {{detail.per}} questions with at least {{detail.need}} correct
 {% if not detail.shared %} &middot; <span class="pill out">Not shared with this employee</span>{% elif not detail.pub %} &middot; <span class="pill act">Shared - not published</span>{% endif %}
 {% if back %} &middot; <a href="{{back}}">&larr; All results</a>{% endif %}</p></div>
@@ -4476,12 +4501,12 @@ MZ_DETAIL = """{% if detail.shared and detail.pub %}<div class="mz-cele" style="
 {% if detail.conn.can_add %}<form method="post" action="/admin/mahizhchi/connect/extend" class="no-print" onsubmit="return confirm('Give {{detail.name}} more time on the Connection Game?')">
 <input type="hidden" name="emp" value="{{detail.eid}}"><b>Add time:</b> <input type="number" name="min" min="0" max="60" value="1" style="width:70px"> min <input type="number" name="sec" min="0" max="59" value="0" style="width:70px"> sec <button class="primary">Add time</button></form>{% endif %}</div>{% endif %}"""
 MZ_EMPINFO = MZ_CSS + MZ_DETAIL
-MZ_ADMIN_RESULTS = MZ_CSS + MZ_HEAD + "{% if detail %}" + MZ_DETAIL + """{% else %}<div class="card"><h2>&#127942; Set winners (first to complete)</h2>{% for b in board %}{% if b.name %}<div class="mz-win">&#127942; Set {{b.n}} Winner: <b>{{b.name}}</b></div>{% else %}<div class="mz-win none">Set {{b.n}} &mdash; no winner yet</div>{% endif %}{% endfor %}</div>
-<div class="card"><h2>Results</h2><p class="mut">{{nsets}} Sets of {{per}} questions. A Set is won by answering all {{per}} with at least {{need}} correct; the next Set opens only after the previous one is won. Winner = all {{nsets}} Sets won.</p>
+MZ_ADMIN_RESULTS = MZ_CSS + MZ_HEAD + "{% if detail %}" + MZ_DETAIL + """{% else %}<div class="card"><h2>&#127942; Winners</h2>{% if overall %}<div class="mz-win" style="font-weight:700">&#127942; Overall Winner: <b>{{overall.name}}</b> &mdash; first to complete all Sets ({{overall.at|t12}})</div>{% endif %}{% for b in board %}{% if b.name %}<div class="mz-win">&#127942; Set {{b.n}} Winner: <b>{{b.name}}</b></div>{% else %}<div class="mz-win none">Set {{b.n}} &mdash; no winner yet</div>{% endif %}{% endfor %}</div>
+<div class="card"><h2>Results</h2><p class="mut">{{nsets}} Sets of {{per}} questions. A Set is won by answering all {{per}} with at least {{need}} correct; the next Set opens only after the previous one is won. Completed = all {{nsets}} Sets won; the first employee to complete them all is the overall winner.</p>
 <table><tr><th>Employee ID</th><th>Name</th><th>Sets won</th>{% for i in range(1, nsets+1) %}<th>Set {{i}}</th>{% endfor %}<th>Status</th><th>Connection Game</th><th>Last submitted</th><th></th></tr>
 {% for r in res %}<tr><td>{{r.id}}</td><td>{{r.name}}</td><td><b>{{r.won_n}} / {{nsets}}</b></td>
 {% for i in range(1, nsets+1) %}{% set p = r.prog[i-1] if r.prog|length >= i else none %}<td>{% if not p or p.status in ('locked','open') %}&mdash;{% elif p.status=='won' %}<span class="pill in">&#10003; {{p.correct}}/{{p.total}}</span>{% elif p.status=='failed' %}<span class="pill out">{{p.correct}}/{{p.total}} - not won</span>{% else %}<span class="pill act">playing</span>{% endif %}</td>{% endfor %}
-<td>{% if r.status=='Winner' %}<span class="pill in">&#127942; Winner</span>{% else %}{{r.status}}{% endif %}</td><td>{% if r.conn=='Won' %}<span class="pill in">&#127942; Won</span>{% elif r.conn=='Lost' %}<span class="pill out">Lost</span>{% else %}{{r.conn}}{% endif %}</td><td>{{r.last|t12}}</td>
+<td>{% if r.status=='Completed' %}<span class="pill in">&#9989; Completed</span>{% else %}{{r.status}}{% endif %}</td><td>{% if r.conn=='Won' %}<span class="pill in">&#127942; Won</span>{% elif r.conn=='Lost' %}<span class="pill out">Lost</span>{% else %}{{r.conn}}{% endif %}</td><td>{{r.last|t12}}</td>
 <td>{% if r.answered or r.prog|selectattr('att')|list %}<a href="/admin/mahizhchi?tab=results&emp={{r.id|urlencode}}">Details</a>{% endif %}</td></tr>
 {% else %}<tr><td colspan="{{nsets+7}}">No employee has access or answers yet.</td></tr>{% endfor %}</table></div>{% endif %}"""
 
@@ -4498,7 +4523,7 @@ MZ_EMP = MZ_CSS + """<style>.mz-sets{display:flex;gap:8px;flex-wrap:wrap;margin:
 <div class="mz-stage{{' has-bg' if bg_v}}"{% if bg_v %} style="--mzbg:url('/employee/mahizhchi/bg?v={{bg_v}}')"{% endif %}>
 <div class="head"><div><h1>{{ mzrun() }}</h1></div></div>
 {% if not prog %}<div class="card"><p>There are not enough questions in {{MZ_TITLE}} yet.</p></div>
-{% else %}{% if board %}<div class="card" id="mzboardcard"><h2>&#127942; Set winners</h2><div id="mzboard">{% for b in board %}{% if b.name %}<div class="mz-win">&#127942; Set {{b.n}} Winner: <b>{{b.name}}</b></div>{% else %}<div class="mz-win none">Set {{b.n}} &mdash; no winner yet</div>{% endif %}{% endfor %}</div></div>{% endif %}
+{% else %}{% if board %}<div class="card" id="mzboardcard"><h2>&#127942; Winners</h2><div id="mzboard">{% if overall %}<div class="mz-win" style="font-weight:700">&#127942; Overall Winner: <b>{{overall.name}}</b> &mdash; first to complete all Sets</div>{% endif %}{% for b in board %}{% if b.name %}<div class="mz-win">&#127942; Set {{b.n}} Winner: <b>{{b.name}}</b></div>{% else %}<div class="mz-win none">Set {{b.n}} &mdash; no winner yet</div>{% endif %}{% endfor %}</div></div>{% endif %}
 <div class="mz-sets">{% for p in prog %}<span class="{{p.status}}">Set {{p.n}}: {% if p.status=='open' and p.att %}Try again{% else %}{{ {'won':'Won \u2713','failed':'Not won','active':'In progress','open':'Ready','locked':'Locked'}[p.status] }}{% endif %}</span>{% endfor %}</div>
 {% if state=='intro' %}<div class="card"><h2>Set {{cur}} of {{prog|length}}</h2>
 <p>This Set has <b>{{per}}</b> questions and you have <b>{{mz_dur(limit)}}</b>. The timer starts when you press <b>Start</b> and cannot be paused or restarted. Your questions appear in your own order.
@@ -4526,7 +4551,7 @@ f.addEventListener('submit',function(e){if(over)return;
   over=true;clearInterval(iv)});
 tick();iv=setInterval(tick,250);})();</script>
 {% elif state=='winner' %}<div class="mz-cele"><span class="mz-conf" aria-hidden="true">{% for em in ['🎉','✨','🎊','⭐','💫','🎈','🌟','🎉','✨','🎊'] %}<span style="left:{{ 4 + loop.index0*10 }}%;animation-delay:{{ loop.index0*0.25 }}s">{{em}}</span>{% endfor %}</span>
-<span class="big">🏆</span><span class="txt">Congratulations! You won all {{prog|length}} Sets &mdash; you are a Mahizhchi winner!</span></div>
+<span class="big">🏆</span><span class="txt">&#9989; Completed! You have won all {{prog|length}} Sets.{% if overall and overall.id|upper == me|upper %} You are the <b>overall winner</b> &mdash; the first to complete every Set!{% elif overall %} The overall winner is <b>{{overall.name}}</b>.{% endif %}</span></div>
 {% if conn %}<div class="card"><h2>&#128279; Bonus round: Connection Game</h2>
 {% for g in conn.solved %}<div class="cg-band {{g.tone}}">{{g.name}}<small>{{g.words|join(', ')}}</small></div>{% endfor %}
 {% if conn.state=='intro' %}<p>Find the <b>4 hidden groups of 4 words</b>. Pick 4 words you think belong together and press <b>Submit group</b>. You have <b>{{mz_dur(conn.limit)}}</b> and can make at most <b>{{conn.max_m}}</b> mistakes. You can play only once.</p>
@@ -4583,7 +4608,7 @@ def admin_mahizhchi():
             res.append(dict(id=e["Employee ID"], name=e["Name"], answered=d["answered"], last=d["last"], prog=d["prog"],
                             won_n=d["won_n"], status=d["status"], conn=d["conn"]))
         res.sort(key=lambda r: (-r["won_n"], str(r["name"]).lower()))        # winners first
-        return page(MZ_ADMIN_RESULTS, title=MZ_TITLE, tab="results", detail=None, res=res, nsets=MZ_SETS, per=MZ_PER_SET, need=MZ_WIN_CORRECT, board=mz_board(len(mz_split(qs))))
+        return page(MZ_ADMIN_RESULTS, title=MZ_TITLE, tab="results", detail=None, res=res, nsets=MZ_SETS, per=MZ_PER_SET, need=MZ_WIN_CORRECT, board=mz_board(len(mz_split(qs))), overall=mz_overall_winner(len(mz_split(qs))))
     if tab == "access":
         q = request.args.get("q", "").strip()
         shown = [e for e in emps if not q or q.lower() in str(e["Employee ID"]).lower() or q.lower() in str(e["Name"]).lower()]
@@ -4735,7 +4760,7 @@ def employee_mahizhchi():
                                                 for q in mz_order(eid, p["n"], sets_q[p["n"] - 1])]))
     conn = mz_conn_ctx(eid) if state == "winner" else None            # Update85: bonus round only after all Sets are won
     return page(MZ_EMP, title=MZ_TITLE, conn=conn, prog=prog, retry=cur in MZ_RETRY_SETS, todo_n=todo_n, reveal=reveal,
-                board=mz_board(len(sets_q)) if mz_can_see_board(eid) else [], pn_started=bool(prog and cur and prog[cur - 1]["att"]), qs=qs, state=state, cur=cur, remaining=remaining, limit=MZ_TIME_LIMIT,
+                board=mz_board(len(sets_q)) if mz_can_see_board(eid) else [], overall=mz_overall_winner(len(sets_q)) if mz_can_see_board(eid) else None, me=eid, pn_started=bool(prog and cur and prog[cur - 1]["att"]), qs=qs, state=state, cur=cur, remaining=remaining, limit=MZ_TIME_LIMIT,
                 per=MZ_PER_SET, need=MZ_WIN_CORRECT, failed=failed, bg_v=int(os.path.getmtime(bg)) if bg else 0)
 
 @app.route("/employee/mahizhchi/winners")
@@ -4744,7 +4769,9 @@ def employee_mahizhchi_winners():
     """Polled by every logged-in employee page (see BASE): who completed each Set first. Names only - never answers."""
     if not mz_can_see_board(session.get("emp_id", "")): return jsonify(show=False, sets=0, winners=[])
     b = mz_board(len(mz_split(mz_questions())))
+    ov = mz_overall_winner(len(b))
     resp = jsonify(show=True, sets=len(b), board=[dict(n=x["n"], name=x["name"]) for x in b],
+                   overall=dict(name=ov["name"], text=ov["text"]) if ov else None,
                    winners=[dict(set=x["n"], name=x["name"], text=x["text"]) for x in b if x["name"]])
     resp.headers["Cache-Control"] = "no-store"
     return resp
@@ -4806,7 +4833,9 @@ def employee_mahizhchi_submit():
     a, c, won = mz_score(sq, done, act)
     mz_close_attempt(att, a, c, won)                                     # Set is over: nothing more can be answered
     if won and act < len(sets_q) and act < MZ_SETS: flash(f"Set {act} won! You answered all {len(sq)} questions with {c} correct. Set {act + 1} is now open.")
-    elif won: flash("Congratulations - you have won every Set!")
+    elif won:
+        ov = mz_overall_winner(len(sets_q))
+        flash("You are the OVERALL WINNER - first to complete every Set!" if ov and _key(ov["id"]) == _key(eid) else "Completed! You have won every Set.")
     elif act in MZ_RETRY_SETS: flash(f"{c} of {len(sq)} correct so far. The questions you have not answered correctly will keep coming back - press Try again.", "error")
     else: flash(f"Set {act} not won: {a} of {len(sq)} answered, {c} correct (need all answered and at least {MZ_WIN_CORRECT} correct).", "error")
     return redirect("/employee/mahizhchi")

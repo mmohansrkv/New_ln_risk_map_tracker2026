@@ -57,6 +57,10 @@ Access rules (Update59):
     Still starts only after the AI voice ends; no music on the Employee pages.
   * Update82: Group Chat can send files (5 MB max, programs/scripts blocked), images/photos (shown inline, click to enlarge) and emoji (picker + big emoji-only
     messages). Attachments are kept in memory only and deleted after 1 hour with the message.
+  * Update85: Mahizhchi Connection Game = BONUS round for employees who won all 5 Sets. 16 words, find 4 hidden groups of 4 (env MZ_CONN_SECONDS
+    default 180, MZ_CONN_MISTAKES default 4). Puzzles live in sheet "Mahizhchi Connections" (or Admin -> Mahizhchi -> Connection Game paste). Guesses are
+    judged on the server; groups are never sent to the browser until solved. Own random word order per employee. Admin Results shows a Connection
+    column and Details can add time. New sheets are created automatically.
   * Update84: Mahizhchi quiz = 5 Sets x 10 questions (rows 1-10 of the Mahizhchi Log = Set 1, 11-20 = Set 2 ...). 2 min 30 s per Set, enforced
     on the server; the Set closes by itself at 0:00. A Set is WON by answering all 10 with >= MZ_WIN_CORRECT right (default 10); Set N+1 opens only after
     Set N is won; Winner = all 5 Sets won. Each employee gets their own random (seeded) question order per Set. Attempts sheet now has one row per
@@ -174,6 +178,9 @@ HEADERS = {
     "Mahizhchi Answers": ["Employee ID", "Employee name", "Question ID", "Question", "Answer", "Submitted at"],
     # Update84: one row per employee PER SET: when they pressed Start (timer runs from this SERVER time), when the Set closed, and its result
     "Mahizhchi Attempts": ["Employee ID", "Employee name", "Started at", "Closed at", "Set", "Answered", "Correct", "Result", "Extra seconds"],
+    # Update85: Connection Game (bonus round after all 5 Sets are won). 4 rows per Game = 4 groups of 4 words.
+    "Mahizhchi Connections": ["Game", "Group name", "Word 1", "Word 2", "Word 3", "Word 4"],
+    "Mahizhchi Connection Attempts": ["Employee ID", "Employee name", "Game", "Started at", "Closed at", "Solved", "Mistakes", "Result", "Extra seconds"],
 }
 PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                     "Emergency no", "Personal Email ID", "Office Email ID"]
@@ -3872,6 +3879,9 @@ MZ_TIME_LIMIT = int(os.getenv("MZ_TIME_SECONDS", "150"))   # quiz time limit per
 MZ_SETS = int(os.getenv("MZ_SETS", "5"))                      # Update84: number of Sets in the quiz
 MZ_PER_SET = int(os.getenv("MZ_PER_SET", "10"))              # questions in each Set (ALL must be answered to complete a Set)
 MZ_WIN_CORRECT = min(MZ_PER_SET, int(os.getenv("MZ_WIN_CORRECT", str(MZ_PER_SET))))   # correct answers needed to WIN a Set (default: all 10)
+MZ_CSHEET, MZ_CATT_SHEET = "Mahizhchi Connections", "Mahizhchi Connection Attempts"
+MZ_CONN_TIME = int(os.getenv("MZ_CONN_SECONDS", "180"))       # Update85: Connection Game time limit (seconds)
+MZ_CONN_MISTAKES = int(os.getenv("MZ_CONN_MISTAKES", "4"))    # wrong guesses allowed before the game is lost
 MZ_GRACE = 8                                                # seconds of network delay tolerated when the page auto-submits at 0:00
 def _mz_dur(sec):
     m, r = divmod(int(sec), 60)
@@ -4039,7 +4049,7 @@ def mz_detail(emp):
                          lines=[dict(q=q, mine=mine.get(q["qid"])) for q in order]))
     return dict(eid=eid, name=emp["Name"], sets=sets, nsets=MZ_SETS, won_n=sum(1 for p in prog if p["status"] == "won"),
                 status=mz_status_text(prog), need=MZ_WIN_CORRECT, per=MZ_PER_SET,
-                shared=mz_access_map().get(_key(eid), False), pub=mz_published())
+                shared=mz_access_map().get(_key(eid), False), pub=mz_published(), conn=mz_conn_detail(eid))
 
 def mz_results(qs):
     """{employee key: dict(last, answered, prog)} scored against the CURRENT correct answers (Admin side only)."""
@@ -4051,13 +4061,160 @@ def mz_results(qs):
         k = _key(r.get("Employee ID", ""))
         ans.setdefault(k, {})[qid] = str(r.get("Answer", "")).strip().upper()
         last[k] = max(last.get(k, ""), str(r.get("Submitted at", "")))
-    att_rows = rows(MZ_ATT_SHEET); per = {}
+    att_rows = rows(MZ_ATT_SHEET); crows = rows(MZ_CATT_SHEET); per = {}
     for k in set(ans) | {_key(r.get("Employee ID", "")) for r in att_rows}:
         if not k: continue
         prog = mz_progress(k, sets_q, mz_attempts_from(att_rows, k), ans.get(k, {}))
-        per[k] = dict(last=last.get(k, ""), answered=sum(p["answered"] for p in prog), prog=prog,
+        ca = next((mz_conn_parse(r) for r in crows if _key(r.get("Employee ID", "")) == k), None)
+        per[k] = dict(last=last.get(k, ""), answered=sum(p["answered"] for p in prog), prog=prog, conn=mz_conn_status(ca),
                       won_n=sum(1 for p in prog if p["status"] == "won"), status=mz_status_text(prog))
     return per
+
+# ---- Update85: Connection Game - BONUS ROUND, playable only by employees who have won all Sets.
+# Find 4 hidden groups of 4 words (16 words). Every guess is checked on the SERVER; the groups are never sent to the browser
+# until they are solved (or the game is over). Each employee sees the 16 words in their own random order.
+def mz_conn_puzzles():
+    """{game id: puzzle} from the 'Mahizhchi Connections' sheet. A puzzle is ready only with exactly 4 groups of 4 distinct words."""
+    out = {}
+    for r in rows(MZ_CSHEET):
+        gid = str(r.get("Game", "")).strip(); name = " ".join(str(r.get("Group name", "")).split())
+        if not gid and not name: continue
+        p = out.setdefault(gid, dict(id=gid, groups=[], issues=[], ok=False))
+        p["groups"].append(dict(name=name, words=[" ".join(str(r.get(f"Word {i}", "")).split()) for i in range(1, 5)], row=r.get("_row")))
+    for p in out.values():
+        if len(p["groups"]) != 4: p["issues"].append(f"Needs exactly 4 groups (has {len(p['groups'])})")
+        seen = set()
+        for g in p["groups"]:
+            if not g["name"]: p["issues"].append("A group has no name")
+            if any(not w for w in g["words"]): p["issues"].append(f"Group “{g['name']}” needs 4 words")
+            for w in g["words"]:
+                if w and w.casefold() in seen: p["issues"].append(f"Word “{w}” appears twice (all 16 words must be different)")
+                seen.add(w.casefold())
+        p["ok"] = not p["issues"]
+    return out
+
+def mz_conn_parse_paste(text, next_id):
+    """Paste layout: one group per line  'Group name: word1, word2, word3, word4'; 4 lines = one puzzle; blank line between puzzles."""
+    blocks, cur = [], []
+    for line in str(text).replace("\r", "").split("\n"):
+        if line.strip(): cur.append(line.strip())
+        elif cur: blocks.append(cur); cur = []
+    if cur: blocks.append(cur)
+    good, bad, gid = [], [], next_id
+    for n, b in enumerate(blocks, start=1):
+        rws, why, seen = [], None, set()
+        for ln in b:
+            m = _re.match(r"^(.+?)\s*[:\-\u2013]\s*(.+)$", ln)
+            if not m: why = f"line “{_short(ln, 30)}” should look like  Group name: w1, w2, w3, w4"; break
+            ws = [" ".join(w.split()) for w in _re.split(r"[,|]", m.group(2)) if w.strip()]
+            if len(ws) != 4: why = f"group “{_short(m.group(1), 30)}” has {len(ws)} words (need 4)"; break
+            for w in ws:
+                if w.casefold() in seen: why = f"word “{w}” appears twice"; break
+                seen.add(w.casefold())
+            if why: break
+            rws.append([str(gid), m.group(1).strip()] + ws)
+        if not why and len(rws) != 4: why = f"has {len(rws)} groups (need exactly 4)"
+        if why: bad.append(f"Puzzle {n}: {why}"); continue
+        good += rws; gid += 1
+    return good, bad
+
+def mz_conn_parse(r):
+    try: start = dt.datetime.strptime(str(r.get("Started at", "")).strip(), "%Y-%m-%d %H:%M:%S")
+    except ValueError: start = dt.datetime(2000, 1, 1)
+    try: extra = max(0, int(str(r.get("Extra seconds", "")).strip() or 0))
+    except ValueError: extra = 0
+    try: mist = int(str(r.get("Mistakes", "")).strip() or 0)
+    except ValueError: mist = 0
+    solved = [int(x) for x in str(r.get("Solved", "")).split(",") if x.strip().isdigit()]
+    return dict(row=r["_row"], game=str(r.get("Game", "")).strip(), start=start, closed=bool(str(r.get("Closed at", "")).strip()),
+                solved=solved, mistakes=mist, result=str(r.get("Result", "")).strip(), extra=extra)
+
+def mz_conn_attempt(eid, fresh=True):
+    src = _fetch_rows(MZ_CATT_SHEET) if fresh else rows(MZ_CATT_SHEET)
+    r = next((r for r in src if _key(r.get("Employee ID", "")) == _key(eid)), None)
+    return mz_conn_parse(r) if r else None
+
+def mz_conn_left(att):
+    lim = MZ_CONN_TIME + att["extra"]
+    return max(0, min(lim, int(lim - (now_local() - att["start"]).total_seconds())))
+
+def mz_conn_status(att):
+    if not att: return "—"
+    if att["result"]: return att["result"]
+    return "Playing" if mz_conn_left(att) > 0 else "Lost"
+
+def mz_conn_save(att, solved, mistakes, result):
+    r = att["row"]; closed = now_local().strftime("%Y-%m-%d %H:%M:%S") if result else ""
+    _with_retry(ws_of(MZ_CATT_SHEET).update, range_name=f"E{r}:H{r}",
+                values=[[closed, ",".join(str(i) for i in solved), mistakes, result]], value_input_option="RAW")
+    invalidate_cache(MZ_CATT_SHEET)
+    att.update(solved=list(solved), mistakes=mistakes, result=result, closed=bool(result))
+
+def mz_conn_norm(w): return " ".join(str(w).split()).casefold()
+
+def mz_conn_judge(puz, solved, pick):
+    """-> ('invalid'|'correct'|'one_away'|'wrong', group index or None) for a guess of 4 words."""
+    pk = {mz_conn_norm(w) for w in pick}
+    open_g = [i for i in range(len(puz["groups"])) if i not in solved]
+    pool = {mz_conn_norm(w) for i in open_g for w in puz["groups"][i]["words"]}
+    if len(pk) != 4 or not pk <= pool: return "invalid", None
+    best = 0
+    for i in open_g:
+        gs = {mz_conn_norm(w) for w in puz["groups"][i]["words"]}
+        if gs == pk: return "correct", i
+        best = max(best, len(gs & pk))
+    return ("one_away" if best == 3 else "wrong"), None
+
+def mz_all_won(eid):
+    sets_q = mz_split(mz_questions())
+    if len(sets_q) < MZ_SETS: return False
+    prog = mz_progress(eid, sets_q, mz_attempts(eid), mz_my_answers(eid, fresh=True))
+    return len(prog) >= MZ_SETS and all(p["status"] == "won" for p in prog)
+
+def mz_conn_pick(eid, puzzles):
+    ready = sorted((p for p in puzzles.values() if p["ok"]), key=lambda p: p["id"])
+    if not ready: return None
+    return ready[int(_hl.sha1(f"cg|{_key(eid)}".encode("utf-8")).hexdigest()[:8], 16) % len(ready)]
+
+TONES = ["t0", "t1", "t2", "t3"]
+
+def mz_conn_ctx(eid):
+    """What the employee page shows for the Connection Game (None = nothing to show)."""
+    puzzles = mz_conn_puzzles(); att = mz_conn_attempt(eid)
+    base = dict(limit=MZ_CONN_TIME, max_m=MZ_CONN_MISTAKES)
+    if not att:
+        return dict(base, state="intro") if mz_conn_pick(eid, puzzles) else None
+    puz = puzzles.get(att["game"])
+    if not puz or not puz["ok"]: return None
+    if not att["result"] and mz_conn_left(att) == 0: mz_conn_save(att, att["solved"], att["mistakes"], "Lost")     # time over -> closes by itself
+    solved = [dict(name=puz["groups"][i]["name"], words=puz["groups"][i]["words"], tone=TONES[i]) for i in att["solved"]]
+    allw = [w for g in puz["groups"] for w in g["words"]]
+    random.Random(int(_hl.sha1(f"cgw|{_key(eid)}|{puz['id']}".encode("utf-8")).hexdigest()[:12], 16)).shuffle(allw)
+    done_w = {mz_conn_norm(w) for sg in solved for w in sg["words"]}
+    words = [w for w in allw if mz_conn_norm(w) not in done_w]
+    ctx = dict(base, state=("won" if att["result"] == "Won" else "lost" if att["result"] else "active"), solved=solved, words=words,
+               mistakes=att["mistakes"], remaining=0 if att["result"] else mz_conn_left(att), reveal=[])
+    if ctx["state"] == "lost":
+        ctx["reveal"] = [dict(name=puz["groups"][i]["name"], words=puz["groups"][i]["words"], tone=TONES[i])
+                         for i in range(4) if i not in att["solved"]]
+    return ctx
+
+def mz_conn_detail(eid):
+    att = mz_conn_attempt(eid)
+    if not att: return None
+    return dict(status=mz_conn_status(att), solved=len(att["solved"]), mistakes=att["mistakes"], max_m=MZ_CONN_MISTAKES, extra=att["extra"],
+                started=att["start"].strftime("%Y-%m-%d %H:%M:%S"), game=att["game"],
+                can_add=att["result"] != "Won" and att["mistakes"] < MZ_CONN_MISTAKES)
+
+def mz_conn_extend(att, add_sec):
+    """Admin adds time (also after it expired): the employee gets add_sec seconds from now; a time-closed game is re-opened."""
+    el = (now_local() - att["start"]).total_seconds(); lim = MZ_CONN_TIME + att["extra"]
+    extra = att["extra"] + add_sec if el <= lim else int(el - MZ_CONN_TIME) + add_sec
+    r = att["row"]
+    upd = [{"range": f"I{r}", "values": [[extra]]}]
+    if att["closed"] or el > lim: upd += [{"range": f"E{r}", "values": [[""]]}, {"range": f"H{r}", "values": [[""]]}]
+    _with_retry(ws_of(MZ_CATT_SHEET).batch_update, upd, value_input_option="RAW")
+    invalidate_cache(MZ_CATT_SHEET)
 
 def mz_published(fresh=False):
     src = _fetch_rows("Settings") if fresh else rows("Settings")
@@ -4203,6 +4360,7 @@ background:linear-gradient(120deg,#eef0ff,#fdf2f8,#fff7e6);border:1px solid #d6d
 MZ_TABS = """<div class="tabs no-print"><a href="/admin/mahizhchi" class="{{'on' if tab=='questions' else ''}}">Questions</a>
 <a href="/admin/mahizhchi?tab=access" class="{{'on' if tab=='access' else ''}}">Share / Access</a>
 <a href="/admin/mahizhchi?tab=add" class="{{'on' if tab=='add' else ''}}">Paste questions</a>
+<a href="/admin/mahizhchi?tab=connect" class="{{'on' if tab=='connect' else ''}}">Connection Game</a>
 <a href="/admin/mahizhchi?tab=results" class="{{'on' if tab=='results' else ''}}">Results</a></div>"""
 
 MZ_HEAD = """<div class="head"><div><h1>{{MZ_TITLE}}</h1>
@@ -4240,6 +4398,15 @@ Employees who are not ticked here do not see the menu item and cannot open the p
 <button class="primary" name="action" value="share_all" onclick="return confirm('Share the {{MZ_TITLE}} with ALL employees?')">Share with all</button>
 <button class="danger" name="action" value="revoke_all" onclick="return confirm('Remove access from ALL employees?')">Remove from all</button></form></div>"""
 
+MZ_ADMIN_CONN = MZ_CSS + MZ_HEAD + """<div class="card"><h2>Connection Game &mdash; bonus round</h2>
+<p class="mut">Only employees who have <b>won all {{nsets}} Sets</b> can play. They must find the <b>4 hidden groups of 4 words</b> within <b>{{mz_dur(limit)}}</b> with at most <b>{{max_m}}</b> mistakes.
+Each employee sees the 16 words in their own order. If several ready puzzles exist, each employee is given one of them automatically. Sheet tab: <b>{{sheet}}</b> (columns Game, Group name, Word 1&ndash;4; 4 rows per Game).</p>
+<form method="post" action="/admin/mahizhchi/connect/import"><textarea name="text" rows="9" maxlength="{{maxlen}}" required style="width:100%;font-family:inherit" placeholder="Planets: Mars, Venus, Saturn, Mercury&#10;Fruits: Apple, Mango, Grape, Lemon&#10;Colours: Red, Blue, Green, Yellow&#10;Metals: Iron, Copper, Gold, Silver&#10;&#10;(leave a blank line, then paste the next puzzle)"></textarea><br><br>
+<button class="primary">Add puzzle(s) to sheet</button></form></div>
+{% for p in puzzles %}<div class="card"><h2>Puzzle {{p.id}} <span class="pill {{'in' if p.ok else 'out'}}">{{'Ready' if p.ok else 'Needs fixing - hidden from employees'}}</span></h2>
+{% for g in p.groups %}<div class="mz-o ok"><span class="l">{{loop.index}}.</span><span><b>{{g.name}}</b>: {{g.words|join(', ')}}</span></div>{% endfor %}
+{% for i in p.issues %}<p class="mz-issue">&#9888; {{i}}</p>{% endfor %}</div>{% else %}<div class="card"><p>No Connection puzzles yet. Paste one above or add rows in the Google Sheet.</p></div>{% endfor %}"""
+
 MZ_ADMIN_ADD = MZ_CSS + MZ_HEAD + """
 <div class="card"><h2>Paste questions</h2>
 <p class="mut">Paste questions in this layout &mdash; one ✓ on the correct option. They are added to the <b>{{sheet}}</b> sheet (existing rows are not changed).
@@ -4262,18 +4429,29 @@ MZ_DETAIL = """{% if detail.shared and detail.pub %}<div class="mz-cele" style="
 {% for d in st.lines %}<div class="mz-q"><h3><span class="no">{{loop.index}}.</span>{{d.q.q}}</h3>
 {% for o in d.q.opts %}<div class="mz-o {{'ok' if o.letter==d.q.correct else ('mine' if o.letter==d.mine else '')}}"><span class="l">{{o.letter}}.</span>
 <span>{{o.text}}{% if o.letter==d.q.correct %} <span class="tick">&#10003;</span>{% endif %}{% if o.letter==d.mine %} <span class="pill {{'in' if d.mine==d.q.correct else 'out'}}">employee&rsquo;s answer</span>{% endif %}</span></div>{% endfor %}
-{% if not d.mine %}<p class="mz-issue">Not answered</p>{% endif %}</div>{% endfor %}{% else %}<div class="card"><p>No full Set of questions in Mahizhchi yet.</p></div>{% endfor %}"""
+{% if not d.mine %}<p class="mz-issue">Not answered</p>{% endif %}</div>{% endfor %}{% else %}<div class="card"><p>No full Set of questions in Mahizhchi yet.</p></div>{% endfor %}
+{% if detail.conn %}<div class="card"><h2>&#128279; Connection Game &mdash; <span class="pill {{'in' if detail.conn.status=='Won' else ('out' if detail.conn.status=='Lost' else 'act')}}">{{detail.conn.status}}</span></h2>
+<p class="mut">Puzzle {{detail.conn.game}} &middot; groups found {{detail.conn.solved}} of 4 &middot; mistakes {{detail.conn.mistakes}} of {{detail.conn.max_m}} &middot; started {{detail.conn.started|t12}}{% if detail.conn.extra %} &middot; extra time given: <b>{{mz_dur(detail.conn.extra)}}</b>{% endif %}</p>
+{% if detail.conn.can_add %}<form method="post" action="/admin/mahizhchi/connect/extend" class="no-print" onsubmit="return confirm('Give {{detail.name}} more time on the Connection Game?')">
+<input type="hidden" name="emp" value="{{detail.eid}}"><b>Add time:</b> <input type="number" name="min" min="0" max="60" value="1" style="width:70px"> min <input type="number" name="sec" min="0" max="59" value="0" style="width:70px"> sec <button class="primary">Add time</button></form>{% endif %}</div>{% endif %}"""
 MZ_EMPINFO = MZ_CSS + MZ_DETAIL
 MZ_ADMIN_RESULTS = MZ_CSS + MZ_HEAD + "{% if detail %}" + MZ_DETAIL + """{% else %}<div class="card"><h2>Results</h2><p class="mut">{{nsets}} Sets of {{per}} questions. A Set is won by answering all {{per}} with at least {{need}} correct; the next Set opens only after the previous one is won. Winner = all {{nsets}} Sets won.</p>
-<table><tr><th>Employee ID</th><th>Name</th><th>Sets won</th>{% for i in range(1, nsets+1) %}<th>Set {{i}}</th>{% endfor %}<th>Status</th><th>Last submitted</th><th></th></tr>
+<table><tr><th>Employee ID</th><th>Name</th><th>Sets won</th>{% for i in range(1, nsets+1) %}<th>Set {{i}}</th>{% endfor %}<th>Status</th><th>Connection Game</th><th>Last submitted</th><th></th></tr>
 {% for r in res %}<tr><td>{{r.id}}</td><td>{{r.name}}</td><td><b>{{r.won_n}} / {{nsets}}</b></td>
 {% for i in range(1, nsets+1) %}{% set p = r.prog[i-1] if r.prog|length >= i else none %}<td>{% if not p or p.status in ('locked','open') %}&mdash;{% elif p.status=='won' %}<span class="pill in">&#10003; {{p.correct}}/{{p.total}}</span>{% elif p.status=='failed' %}<span class="pill out">{{p.correct}}/{{p.total}} - not won</span>{% else %}<span class="pill act">playing</span>{% endif %}</td>{% endfor %}
-<td>{% if r.status=='Winner' %}<span class="pill in">&#127942; Winner</span>{% else %}{{r.status}}{% endif %}</td><td>{{r.last|t12}}</td>
+<td>{% if r.status=='Winner' %}<span class="pill in">&#127942; Winner</span>{% else %}{{r.status}}{% endif %}</td><td>{% if r.conn=='Won' %}<span class="pill in">&#127942; Won</span>{% elif r.conn=='Lost' %}<span class="pill out">Lost</span>{% else %}{{r.conn}}{% endif %}</td><td>{{r.last|t12}}</td>
 <td>{% if r.answered or r.prog|selectattr('att')|list %}<a href="/admin/mahizhchi?tab=results&emp={{r.id|urlencode}}">Details</a>{% endif %}</td></tr>
-{% else %}<tr><td colspan="{{nsets+6}}">No employee has access or answers yet.</td></tr>{% endfor %}</table></div>{% endif %}"""
+{% else %}<tr><td colspan="{{nsets+7}}">No employee has access or answers yet.</td></tr>{% endfor %}</table></div>{% endif %}"""
 
 MZ_EMP = MZ_CSS + """<style>.mz-sets{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}.mz-sets span{padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.95);font-weight:700;font-size:13px;border:1px solid #d6d9ff}
-.mz-sets .won{background:#e3f6ec;border-color:#9bd7b5;color:#146c43}.mz-sets .failed{background:#fef2f2;border-color:#fca5a5;color:#991b1b}.mz-sets .active,.mz-sets .open{background:#eef0ff;border-color:#4f46e5;color:#3730a3}.mz-sets .locked{opacity:.6}</style>
+.mz-sets .won{background:#e3f6ec;border-color:#9bd7b5;color:#146c43}.mz-sets .failed{background:#fef2f2;border-color:#fca5a5;color:#991b1b}.mz-sets .active,.mz-sets .open{background:#eef0ff;border-color:#4f46e5;color:#3730a3}.mz-sets .locked{opacity:.6}
+.cg-band{border-radius:10px;padding:10px 14px;margin:0 0 8px;text-align:center;font-weight:700}.cg-band small{display:block;font-weight:500}
+.t0{background:#fde68a}.t1{background:#bbf7d0}.t2{background:#bfdbfe}.t3{background:#ddd6fe}
+.cg-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}.cg-t{display:block;cursor:pointer}.cg-t input{position:absolute;opacity:0;pointer-events:none}
+.cg-t span{display:flex;align-items:center;justify-content:center;text-align:center;min-height:56px;padding:6px;border-radius:10px;background:#f1f2f6;border:2px solid transparent;font-weight:700;font-size:14px;word-break:break-word}
+.cg-t input:checked+span{background:#4f46e5;color:#fff}.cg-t input:disabled+span{opacity:.5;cursor:default}
+.cg-dot{display:inline-block;width:11px;height:11px;border-radius:50%;background:#cbd0e0;margin-left:4px}.cg-dot.on{background:#4f46e5}
+@media(max-width:600px){.cg-grid{grid-template-columns:repeat(2,1fr)}}</style>
 <div class="mz-stage{{' has-bg' if bg_v}}"{% if bg_v %} style="--mzbg:url('/employee/mahizhchi/bg?v={{bg_v}}')"{% endif %}>
 <div class="head"><div><h1>{{ mzrun() }}</h1></div></div>
 {% if not prog %}<div class="card"><p>There are not enough questions in {{MZ_TITLE}} yet.</p></div>
@@ -4304,6 +4482,23 @@ f.addEventListener('submit',function(e){if(over)return;
 tick();iv=setInterval(tick,250);})();</script>
 {% elif state=='winner' %}<div class="mz-cele"><span class="mz-conf" aria-hidden="true">{% for em in ['🎉','✨','🎊','⭐','💫','🎈','🌟','🎉','✨','🎊'] %}<span style="left:{{ 4 + loop.index0*10 }}%;animation-delay:{{ loop.index0*0.25 }}s">{{em}}</span>{% endfor %}</span>
 <span class="big">🏆</span><span class="txt">Congratulations! You won all {{prog|length}} Sets &mdash; you are a Mahizhchi winner!</span></div>
+{% if conn %}<div class="card"><h2>&#128279; Bonus round: Connection Game</h2>
+{% for g in conn.solved %}<div class="cg-band {{g.tone}}">{{g.name}}<small>{{g.words|join(', ')}}</small></div>{% endfor %}
+{% if conn.state=='intro' %}<p>Find the <b>4 hidden groups of 4 words</b>. Pick 4 words you think belong together and press <b>Submit group</b>. You have <b>{{mz_dur(conn.limit)}}</b> and can make at most <b>{{conn.max_m}}</b> mistakes. You can play only once.</p>
+<form method="post" action="/employee/mahizhchi/connect/start"><button class="primary">Start Connection Game</button></form>
+{% elif conn.state=='active' %}<div class="mz-timer" id="cgbar">&#9201; Connection Game &middot; <b id="cgt">{{mz_dur(conn.limit)}}</b> &middot; Mistakes left: {% for i in range(conn.max_m) %}<span class="cg-dot{{' on' if i < conn.max_m - conn.mistakes}}"></span>{% endfor %}</div>
+<form method="post" action="/employee/mahizhchi/connect/guess" id="cgform"><div class="cg-grid">{% for w in conn.words %}<label class="cg-t"><input type="checkbox" name="w" value="{{w}}"><span>{{w}}</span></label>{% endfor %}</div>
+<button class="primary" id="cgsub" disabled>Submit group (<span id="cgn">0</span>/4)</button></form>
+<script>(function(){var f=document.getElementById('cgform');if(!f)return;var b=document.getElementById('cgsub'),n=document.getElementById('cgn');
+var boxes=[].slice.call(f.querySelectorAll('input[type=checkbox]'));
+function upd(){var c=boxes.filter(function(x){return x.checked}).length;b.disabled=c!==4;n.textContent=c;boxes.forEach(function(x){if(!x.checked)x.disabled=c>=4})}
+boxes.forEach(function(x){x.addEventListener('change',upd)});upd();
+var t=document.getElementById('cgt'),end=Date.now()+{{conn.remaining}}*1000,iv;
+function tick(){var s=Math.max(0,Math.ceil((end-Date.now())/1000));t.textContent=Math.floor(s/60)+':'+('0'+(s%60)).slice(-2);
+ if(s<=0){clearInterval(iv);boxes.forEach(function(x){x.disabled=true});b.disabled=true;location.reload()}}
+tick();iv=setInterval(tick,250);})();</script>
+{% elif conn.state=='won' %}<p><b>&#127881; Brilliant! You found all 4 groups.</b></p>
+{% else %}{% for g in conn.reveal %}<div class="cg-band {{g.tone}}">{{g.name}}<small>{{g.words|join(', ')}}</small></div>{% endfor %}<p>The Connection Game is over (time up or no mistakes left). The groups you missed are shown above. Thank you for playing!</p>{% endif %}</div>{% endif %}
 {% else %}<div class="card"><h2>Set {{failed.n}} &mdash; not won</h2><p>You answered {{failed.answered}} of {{failed.total}} questions and got {{failed.correct}} correct. To win a Set you must answer all {{failed.total}} within the time and get at least {{need}} right, so the next Set stays locked. Thank you for taking part!</p></div>{% endif %}
 {% endif %}</div>"""
 
@@ -4318,10 +4513,13 @@ def mz_bg_path():
 @app.route("/admin/mahizhchi")
 @need("admin")
 def admin_mahizhchi():
-    prefetch(MZ_SHEET, MZ_ACCESS_SHEET, MZ_ANS_SHEET, MZ_ATT_SHEET, "Employees", "Settings")
+    prefetch(MZ_SHEET, MZ_ACCESS_SHEET, MZ_ANS_SHEET, MZ_ATT_SHEET, MZ_CSHEET, MZ_CATT_SHEET, "Employees", "Settings")
     tab = request.args.get("tab", "questions")
     if tab == "add":
         return page(MZ_ADMIN_ADD, title=MZ_TITLE, tab="add", sheet=MZ_SHEET, maxlen=MZ_MAX_PASTE)
+    if tab == "connect":
+        return page(MZ_ADMIN_CONN, title=MZ_TITLE, tab="connect", puzzles=list(mz_conn_puzzles().values()), sheet=MZ_CSHEET,
+                    limit=MZ_CONN_TIME, max_m=MZ_CONN_MISTAKES, nsets=MZ_SETS, maxlen=MZ_MAX_PASTE)
     amap = mz_access_map()
     emps = rows("Employees")
     if tab == "results":
@@ -4334,9 +4532,9 @@ def admin_mahizhchi():
         for e in emps:
             k = _key(e["Employee ID"]); d = per.get(k)
             if not d and not amap.get(k): continue
-            d = d or dict(answered=0, last="", prog=[], won_n=0, status="Not started")
+            d = d or dict(answered=0, last="", prog=[], won_n=0, status="Not started", conn="—")
             res.append(dict(id=e["Employee ID"], name=e["Name"], answered=d["answered"], last=d["last"], prog=d["prog"],
-                            won_n=d["won_n"], status=d["status"]))
+                            won_n=d["won_n"], status=d["status"], conn=d["conn"]))
         res.sort(key=lambda r: (-r["won_n"], str(r["name"]).lower()))        # winners first
         return page(MZ_ADMIN_RESULTS, title=MZ_TITLE, tab="results", detail=None, res=res, nsets=MZ_SETS, per=MZ_PER_SET, need=MZ_WIN_CORRECT)
     if tab == "access":
@@ -4413,6 +4611,38 @@ def admin_mahizhchi_extend():
     flash(f"{_mz_dur(add)} added for {emp['Name']} on Set {n}. They can continue from their Mahizhchi page now.")
     return redirect(back)
 
+@app.route("/admin/mahizhchi/connect/import", methods=["POST"])
+@need("admin")
+def admin_mahizhchi_connect_import():
+    ids = []
+    for r in _fetch_rows(MZ_CSHEET):
+        try: ids.append(int(str(r.get("Game", "")).strip()))
+        except ValueError: pass
+    good, bad = mz_conn_parse_paste(request.form.get("text", "")[:MZ_MAX_PASTE], max(ids, default=0) + 1)
+    if good:
+        _with_retry(ws_of(MZ_CSHEET).append_rows, good, value_input_option="RAW"); invalidate_cache(MZ_CSHEET)
+        flash(f"{len(good) // 4} Connection puzzle(s) added.")
+    elif not bad: flash("Nothing to add - no puzzles were found in the pasted text.", "error")
+    for b in bad[:10]: flash("Skipped: " + b, "error")
+    return redirect("/admin/mahizhchi?tab=connect")
+
+@app.route("/admin/mahizhchi/connect/extend", methods=["POST"])
+@need("admin")
+def admin_mahizhchi_connect_extend():
+    emp = emp_or_404(request.form.get("emp", "").strip()); eid = str(emp["Employee ID"])
+    back = "/admin/mahizhchi?tab=results&emp=" + eid
+    try: add = int(request.form.get("min", "0") or 0) * 60 + int(request.form.get("sec", "0") or 0)
+    except ValueError: abort(400)
+    if not 1 <= add <= 3600:
+        flash("Enter between 1 second and 60 minutes to add.", "error"); return redirect(back)
+    att = mz_conn_attempt(eid)
+    if not att: flash(f"{emp['Name']} has not started the Connection Game.", "error"); return redirect(back)
+    if att["result"] == "Won" or att["mistakes"] >= MZ_CONN_MISTAKES:
+        flash("This Connection Game is already won, or ended because all mistakes were used - time cannot help.", "error"); return redirect(back)
+    mz_conn_extend(att, add)
+    flash(f"{_mz_dur(add)} added for {emp['Name']} on the Connection Game.")
+    return redirect(back)
+
 @app.route("/admin/mahizhchi/import", methods=["POST"])
 @need("admin")
 def admin_mahizhchi_import():
@@ -4448,7 +4678,8 @@ def employee_mahizhchi():
     elif prog and not failed and len(prog) >= MZ_SETS: state = "winner"
     else: state = "closed"
     bg = mz_bg_path()
-    return page(MZ_EMP, title=MZ_TITLE, prog=prog, qs=qs, state=state, cur=cur, remaining=remaining, limit=MZ_TIME_LIMIT,
+    conn = mz_conn_ctx(eid) if state == "winner" else None            # Update85: bonus round only after all Sets are won
+    return page(MZ_EMP, title=MZ_TITLE, conn=conn, prog=prog, qs=qs, state=state, cur=cur, remaining=remaining, limit=MZ_TIME_LIMIT,
                 per=MZ_PER_SET, need=MZ_WIN_CORRECT, failed=failed, bg_v=int(os.path.getmtime(bg)) if bg else 0)
 
 @app.route("/employee/mahizhchi/bg")
@@ -4506,6 +4737,45 @@ def employee_mahizhchi_submit():
     if won and act < len(sets_q) and act < MZ_SETS: flash(f"Set {act} won! You answered all {len(sq)} questions with {c} correct. Set {act + 1} is now open.")
     elif won: flash("Congratulations - you have won every Set!")
     else: flash(f"Set {act} not won: {a} of {len(sq)} answered, {c} correct (need all answered and at least {MZ_WIN_CORRECT} correct).", "error")
+    return redirect("/employee/mahizhchi")
+
+@app.route("/employee/mahizhchi/connect/start", methods=["POST"])
+@need("employee")
+def employee_mahizhchi_connect_start():
+    eid = session.get("emp_id", "")
+    if not mz_active(eid, fresh=True) or not mz_all_won(eid): abort(404)      # bonus round: all Sets must be won first
+    if mz_conn_attempt(eid): return redirect("/employee/mahizhchi")           # one play only; Start again never restarts the clock
+    puz = mz_conn_pick(eid, mz_conn_puzzles())
+    if not puz:
+        flash("The Connection Game is not ready yet.", "error"); return redirect("/employee/mahizhchi")
+    _with_retry(ws_of(MZ_CATT_SHEET).append_row, [str(eid), session.get("name", ""), puz["id"],
+                now_local().strftime("%Y-%m-%d %H:%M:%S"), "", "", 0, "", ""], value_input_option="RAW")
+    invalidate_cache(MZ_CATT_SHEET)
+    return redirect("/employee/mahizhchi")
+
+@app.route("/employee/mahizhchi/connect/guess", methods=["POST"])
+@need("employee")
+def employee_mahizhchi_connect_guess():
+    eid = session.get("emp_id", "")
+    if not mz_active(eid, fresh=True) or not mz_all_won(eid): abort(404)
+    att = mz_conn_attempt(eid); puz = mz_conn_puzzles().get(att["game"]) if att else None
+    if not att or not puz or not puz["ok"] or att["result"]:
+        flash("The Connection Game is not open.", "error"); return redirect("/employee/mahizhchi")
+    if (now_local() - att["start"]).total_seconds() > MZ_CONN_TIME + att["extra"] + MZ_GRACE:      # too late: nothing is accepted
+        mz_conn_save(att, att["solved"], att["mistakes"], "Lost")
+        flash("Time is over. The Connection Game is closed.", "error"); return redirect("/employee/mahizhchi")
+    kind, gi = mz_conn_judge(puz, att["solved"], request.form.getlist("w"))
+    solved, mist, result = list(att["solved"]), att["mistakes"], ""
+    if kind == "invalid":
+        flash("Pick exactly 4 of the words shown.", "error"); return redirect("/employee/mahizhchi")
+    if kind == "correct":
+        solved.append(gi); flash(f"Correct! That group is “{puz['groups'][gi]['name']}”.")
+        if len(solved) == 4: result = "Won"; flash("You found all 4 groups - you win the Connection Game!")
+    else:
+        mist += 1
+        flash(("One away! " if kind == "one_away" else "Not a group. ") + f"Mistakes left: {max(0, MZ_CONN_MISTAKES - mist)}.", "error")
+        if mist >= MZ_CONN_MISTAKES: result = "Lost"; flash("No mistakes left - the Connection Game is over.", "error")
+    mz_conn_save(att, solved, mist, result)
     return redirect("/employee/mahizhchi")
 
 if __name__ == "__main__":

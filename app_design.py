@@ -51,6 +51,10 @@ Access rules (Update59):
   * Update78: Welcome Page opens first for Admin and Employee, no 'Continue' button, opens the Admin/Employee page by itself when it ends.
     Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
     melody, different from the earlier Mohanam tune), Welcome Page only.
+  * Update93: (1) New Admin menu item "Missed Entries Log" (/admin/missed-log): every employee with missed dates, a View page per employee (dates, which
+    were already e-mailed, e-mail history) and the Send e-mail button + Automatic e-mail switch (moved here from the Missed entries page).
+    (2) New process "Training": the employee enters Hours + Description only (no Count, none required); it adds its hours to productivity and never
+    has a count target, even if a target is typed for it in Admin > Processes.
   * Update92: Admin > Missed entries has a "Missed entries e-mail" panel. (1) Manual: a Send e-mail button per employee (also on the employee's own
     Missed Entries tab) mails the missed dates to the employee's Office Email ID. (2) Automatic: Admin switches it ON/OFF and sets the time; every
     day at that time each employee with missed dates this month that were NOT e-mailed before gets one e-mail with only the NEW dates. Every send is
@@ -540,6 +544,7 @@ def process_targets():
         hourly, daily = num(r.get("Target count / hour")), num(r.get("Target count / 8 hrs"))
         if hourly <= 0 < daily: hourly = daily / TARGET_BASIS_HOURS
         elif daily <= 0 < hourly: daily = hourly * TARGET_BASIS_HOURS
+        if is_training(r["Process name"]): continue          # Update93: Training never has a count target
         out[r["Process name"]] = dict(rate=hourly, daily=daily)
     return out
 
@@ -642,7 +647,7 @@ def load_subs(emp_id=None):
             h = eff_hours(r["Process / Description"], h)          # Update90: "Other" always shows / counts as 8 hrs
             rate = tph.get(r["Process / Description"], 0)
             c = num(r["Count"]); t = h * rate
-            s["procs"].append(dict(name=r["Process / Description"], hour=h, count=c,
+            s["procs"].append(dict(name=r["Process / Description"], hour=h, count=c, training=is_training(r["Process / Description"]),
                                    desc=str(r.get("Description", "")),
                                    target=round(t, 1), pct=round(c / t * 100) if t else None,
                                    earned=(c / rate) if rate else 0.0))
@@ -671,6 +676,9 @@ def get_sub(sid):
     if not s: abort(404)
     if session["role"] == "employee" and s["emp_id"] != session["emp_id"]: abort(403)
     return s
+
+TRAINING_PROCESS = "Training"      # Update93: Hours + Description only - no Count, no count target; its hours simply add to productivity
+def is_training(name): return str(name or "").strip().lower() == TRAINING_PROCESS.lower()
 
 OTHER_PROCESS = "Other"
 OTHER_HOURS = 8.0          # Update90: the "Other" process always counts as a full 8-hour day, whatever hours were typed
@@ -725,7 +733,7 @@ def parse_form(emp_id):
     try: d = dt.date.fromisoformat(date)
     except ValueError: d = None
     rows_p = list(zip(g("pn"), g("ph"), g("pc"), g("pd")))
-    procs = [(n, eff_hours(n, num(h)), num(c), desc.strip()) for n, h, c, desc in rows_p]     # Update90: "Other" = 8 hrs, others = hours entered
+    procs = [(n, eff_hours(n, num(h)), (0.0 if is_training(n) else num(c)), desc.strip()) for n, h, c, desc in rows_p]     # Update90: "Other" = 8 hrs, others = hours entered
     notes = [(t.strip(), num(h)) for t, h in zip(g("nd"), g("nh")) if num(h) > 0]
     tot = sum(p[1] for p in procs) + sum(n[1] for n in notes)
     half = any(num(h) <= 0 and t.strip() for t, h in zip(g("nd"), g("nh")))
@@ -733,9 +741,9 @@ def parse_form(emp_id):
     elif session.get("role") == "employee" and is_holiday(date):
         err = f"{date} is a holiday{(' (' + holiday_name(date) + ')') if holiday_name(date) else ''}. Productivity entries cannot be submitted or updated for a holiday."
     elif not procs: err = "Add at least one process entry."
-    elif any(not str(n).strip() or not str(h).strip() or not str(c).strip() or not desc.strip() or num(h) <= 0
+    elif any(not str(n).strip() or not str(h).strip() or (not str(c).strip() and not is_training(n)) or not desc.strip() or num(h) <= 0
              for n, h, c, desc in rows_p):
-        err = "All Process Entry fields (Process, Hour, Count and Description) are mandatory - please fill every field before saving."
+        err = "All Process Entry fields (Process, Hour, Count and Description) are mandatory - please fill every field before saving. (Training needs only Hour and Description.)"
     elif half: err = "Please enter the Hour for every note you filled in - a note without hours is not saved."
     elif sum(1 for p_ in procs if is_other(p_[0])) > 1: err = "\u201cOther\u201d can be added only once per day (it already counts as 8 hours)."
     elif tot > day_limit():
@@ -1627,7 +1635,7 @@ setInterval(function(){location.reload()},120000);
 </body></html>"""
 
 NAVS = {
-    "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"),
+    "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"), ("/admin/missed-log", "Missed Entries Log"),
               ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
@@ -1883,14 +1891,15 @@ Productivity: <b id="tpct">0</b>% &middot; <b id="tstat"></b> <span class="mut">
 <script>
 const WORK={{workday|g}}, PERM={{perm|tojson}}, MAXD={{maxdate|tojson}};
 const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}}, OTHER_H={{other_hours|g}};
-const isOther=v=>String(v==null?'':v).trim().toLowerCase()==='other';
+const isOther=v=>String(v==null?'':v).trim().toLowerCase()==='other', isTrain=v=>String(v==null?'':v).trim().toLowerCase()==='training';
 const effH=(nm,h)=>(isOther(nm)&&h>0)?OTHER_H:h;      // "Other" always counts as 8 hrs
 function rowH(r){return effH((r.querySelector('[name=pn]')||{}).value,+((r.querySelector('[name=ph]')||{}).value)||0)}
-function otherUI(r){const o=isOther((r.querySelector('[name=pn]')||{}).value),d=r.querySelector('[name=pd]');if(!d)return;
+function otherUI(r){const pv=(r.querySelector('[name=pn]')||{}).value,o=isOther(pv),tr=isTrain(pv),d=r.querySelector('[name=pd]'),c=r.querySelector('[name=pc]');if(!d)return;
  let n=r.querySelector('.oth-note');
- if(o){d.placeholder='Description of the work done *';d.size=48;d.style.minWidth='320px';
+ if(c){if(tr){c.type='hidden';c.required=false;c.value='0'}else{if(c.type==='hidden'){c.type='number';c.value=''}c.required=true}}      // Training: Count is not shown / not required
+ if(o||tr){d.placeholder=tr?'Training details *':'Description of the work done *';d.size=48;d.style.minWidth='320px';
   if(!n){n=document.createElement('div');n.className='oth-note mut';n.style.cssText='flex-basis:100%;font-size:.85em;color:#b45309';r.insertBefore(n,r.querySelector('button.danger'))}
-  n.textContent='"Other": enter the work details in Description, plus Hours and Count. It is always counted as '+OTHER_H+' working hours, whatever hours you enter.'}
+  n.textContent=tr?'"Training": enter the Hours and a Description only - no Count is needed. Productivity is calculated from the hours entered.':'"Other": enter the work details in Description, plus Hours and Count. It is always counted as '+OTHER_H+' working hours, whatever hours you enter.'}
  else{d.placeholder='Description *';d.size=28;d.style.minWidth='';if(n)n.remove()}}
 const E=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function row(h){const d=document.createElement('div');d.className='r';
@@ -1944,7 +1953,7 @@ document.querySelector('form[action="{{action}}"]').addEventListener('submit',fu
 
 VIEW = """<div class="card"><h2>{{s.date}} &middot; {{s.emp_name}} ({{s.emp_id}}{% if s.designation %}, {{s.designation}}{% endif %}, Band {{s.band}})</h2>
 <table><tr><th>Process</th><th>Description</th><th>Hour</th><th>Count</th><th>Target count</th><th>Achievement</th></tr>
-{% for p in s.procs %}<tr><td>{{p.name}}</td><td>{{p.desc}}</td><td>{{p.hour|g}}</td><td>{{p.count|g}}</td><td>{{p.target|g}}</td>
+{% for p in s.procs %}<tr><td>{{p.name}}</td><td>{{p.desc}}</td><td>{{p.hour|g}}</td><td>{{ '-' if p.training else (p.count|g) }}</td><td>{{ '-' if p.training else (p.target|g) }}</td>
 <td>{{ (p.pct ~ '%') if p.pct is not none else '-' }}</td></tr>{% endfor %}</table><br>
 <table><tr><th>Notes</th><th>Hour</th></tr>{% for n in s.notes %}<tr><td>{{n.desc}}</td><td>{{n.hour|g}}</td></tr>{% endfor %}</table>
 <div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day|g}} hrs &middot; {% if s.off %}<b>Weekend entry - not counted</b>{% else %}Productivity: <b>{{s.pct}}%</b> ({{s.avail|g}} hrs = 100%{% if s.ded %} &ndash; {{target|g}}-hr day less {{s.ded|g}} hr permission / half-day leave{% endif %}){% endif %}</div>
@@ -2597,6 +2606,7 @@ def form_page(sub, action, heading):
     procs = rows("Processes")
     names = [r["Process name"] for r in procs]
     if not any(is_other(n) for n in names): names.append(OTHER_PROCESS)       # Update90: "Other" is always available
+    if not any(is_training(n) for n in names): names.insert(max(len(names) - 1, 0), TRAINING_PROCESS)       # Update93: "Training" is always available (just before "Other")
     tph = process_rates()
     perm = {d: h for (_k, d), h in deduction_map(sub.get("emp_id")).items()}      # approved permission + half-day leave hours, by date
     maxdate = ""          # no upper limit on the entry date - employees may pick any date they need
@@ -3241,7 +3251,7 @@ EMP_TARGET = """{% if tgt_miss %}<div class="warn"><b>&#9888; Target not achieve
 ADMIN_ALERT = """{% if miss or pend %}<div class="warn"><b>&#9888; Missed entries - {{mlabel}}</b>
 {% for r in miss %}<div>{{r.id}} &middot; {{r.name}}: {{r.days|length}} day(s) - {{r.days|join(', ')}}</div>{% endfor %}
 {% if pend %}<div>Not submitted today: {{pend|join(', ')}}</div>{% endif %}
-<div><a href="/admin/missed">View full missed entries log</a></div></div>{% endif %}"""
+<div><a href="/admin/missed-log">View full Missed Entries Log</a></div></div>{% endif %}"""
 
 KPI = """<div class="kpis">
 <div class="kpi"><span>{{lab1}}</span><b>{{a1}}%</b><i class="bar {{a1|tone}}"><u style="width:{{[a1,100]|min}}%"></u></i></div>
@@ -3454,19 +3464,7 @@ MISSED = """<div class="head"><div><h1>Missed entries</h1>
 <button class="primary">Show</button><a href="/admin/missed">Reset</a><a href="/admin/missed?month=all">All time</a></form></div>
 <div class="kpis"><div class="kpi"><span>Missed entries</span><b>{{data|length}}</b></div>
 <div class="kpi"><span>Employees affected</span><b>{{n_emp}}</b></div></div>
-<div class="card no-print"><h2>Missed entries e-mail</h2>
-<p class="mut">Sends the employee's missed productivity entry dates to their registered Office Email ID. Dates shown follow the filter above ({{label}}).</p>
-{% if not smtp_ok %}<div class="warn">E-mail is not set up on the server yet (SMTP_HOST / MAIL_FROM) - nothing can be sent until it is.</div>{% endif %}
-<form method="post" action="/admin/missed/auto" class="grid" style="align-items:end">
-<label>Automatic e-mail<select name="enabled"><option value="Yes"{{' selected' if auto_on else ''}}>Enabled</option><option value="No"{{'' if auto_on else ' selected'}}>Disabled</option></select></label>
-<label>Send every day at<input type="time" name="time" value="{{auto_time}}" required></label>
-<button class="primary">Save</button></form>
-<p class="mut">{% if auto_on %}Automatic e-mail is <b>ON</b>: every day at {{auto_time}} each employee with missed dates this month gets one e-mail listing only the dates not e-mailed before.{% else %}Automatic e-mail is <b>OFF</b>.{% endif %}</p>
-<table><tr><th>Employee</th><th>E-mail</th><th>Missed dates</th><th>Not yet e-mailed</th><th>Last e-mailed</th><th></th></tr>
-{% for x in summary %}<tr><td>{{x.id}} &middot; {{x.name}}</td><td>{{x.email or '-'}}</td><td>{{x.dates|length}}: {{x.dates|join(', ')}}</td><td>{{x.new}}</td><td>{{(x.last|t12) if x.last else 'Never'}}</td>
-<td class="act"><form method="post" action="/admin/missed/send" onsubmit="return confirm('Send the Missed Entries e-mail to {{x.name}}?')"><input type="hidden" name="eid" value="{{x.id}}"><input type="hidden" name="month" value="{{month}}"><input type="hidden" name="next" value="/admin/missed?month={{month}}">
-<button class="primary"{{' disabled title="No valid Office Email ID"' if not x.email else ''}}>Send e-mail</button></form></td></tr>
-{% else %}<tr><td colspan="6">No employee has missed entries for this period.</td></tr>{% endfor %}</table></div>
+<p class="no-print"><a class="btnl" href="/admin/missed-log?month={{month}}">&#9993; Open the Missed Entries Log (view per employee &amp; send e-mail)</a></p>
 <table><tr><th>Date</th><th>Day</th><th>Employee</th><th>Designation</th><th>Band</th></tr>
 {% for r in data %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td></tr>
 {% else %}<tr><td colspan="5">No missed entries.</td></tr>{% endfor %}</table>"""
@@ -3519,21 +3517,8 @@ def admin_missed():
                              id=e["Employee ID"], name=e["Name"], band=e["Band"],
                              designation=e.get("Designation", "")))
     data.sort(key=lambda r: (r["date"], str(r["name"])), reverse=True)
-    # Update92: one line per employee for the e-mail panel (+ when they were last e-mailed)
-    em_by = {_key(e["Employee ID"]): e for e in emps}
-    last, notified = missed_mail_history()
-    summary = {}
-    for r in sorted(data, key=lambda r: r["date"]):
-        sm = summary.setdefault(r["id"], dict(id=r["id"], name=r["name"], email=employee_office_email(em_by.get(_key(r["id"]), {})), dates=[]))
-        sm["dates"].append(r["date"])
-    summary = sorted(summary.values(), key=lambda x: str(x["name"]))
-    for sm in summary:
-        sm["last"] = last.get(_key(sm["id"]), "")
-        sm["new"] = len([d for d in sm["dates"] if d not in notified.get(_key(sm["id"]), set())])
-    auto_on, auto_time = missed_auto_settings()
     return page(MISSED, title="Missed entries", data=data, n_emp=len({r["id"] for r in data}),
-                month=month, label=label, emp=request.args.get("emp", ""),
-                summary=summary, auto_on=auto_on, auto_time=auto_time, smtp_ok=bool(SMTP_HOST and MAIL_FROM))
+                month=month, label=label, emp=request.args.get("emp", ""))
 
 
 @app.route("/admin/leave", methods=["GET", "POST"])
@@ -5285,7 +5270,7 @@ def send_missed_mails(items, mode, by):
 @need("admin")
 def admin_missed_send():
     nxt = (request.form.get("next") or "").strip()
-    back = nxt if (nxt.startswith("/admin/") and "//" not in nxt and "\\" not in nxt and "\n" not in nxt) else "/admin/missed"
+    back = nxt if (nxt.startswith("/admin/") and "//" not in nxt and "\\" not in nxt and "\n" not in nxt) else "/admin/missed-log"
     if not (SMTP_HOST and MAIL_FROM):
         flash("E-mail is not set up on the server (SMTP_HOST / MAIL_FROM).", "error"); return redirect(back)
     eid = (request.form.get("eid") or "").strip()
@@ -5314,10 +5299,105 @@ def admin_missed_send():
 def admin_missed_auto():
     on = request.form.get("enabled") == "Yes"
     t = (request.form.get("time") or "").strip()
-    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t): flash("Choose a valid time.", "error"); return redirect("/admin/missed")
+    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t): flash("Choose a valid time.", "error"); return redirect("/admin/missed-log")
     _set_setting(MISSED_TIME_KEY, t); _set_setting(MISSED_AUTO_KEY, "Yes" if on else "No")
     flash(f"Automatic Missed Entries e-mail {'enabled - sends every day at ' + t if on else 'disabled'}.")
-    return redirect("/admin/missed")
+    return redirect("/admin/missed-log")
+
+# ---------------------------------------------------------------- Update93: MISSED ENTRIES LOG (separate Admin page)
+MLOG = '''<div class="head"><div><h1>Missed Entries Log</h1>
+<p class="mut">{{label}} &middot; Every employee with working days (weekly off / holidays excluded) that have no productivity entry and no leave. Today is not included.</p></div>
+<form class="grid no-print" method="get"><input type="month" name="month" value="{{month if month!='all' else ''}}">
+<input name="emp" placeholder="Employee ID / name" value="{{emp}}">
+<button class="primary">Show</button><a href="/admin/missed-log">Reset</a><a href="/admin/missed-log?month=all">All time</a></form></div>
+<div class="kpis"><div class="kpi"><span>Missed entries</span><b>{{total}}</b></div>
+<div class="kpi"><span>Employees affected</span><b>{{summary|length}}</b></div></div>
+<div class="card no-print"><h2>Missed entries e-mail</h2>
+<p class="mut">Sends the employee's missed productivity entry dates to their registered Office Email ID. Dates shown follow the filter above ({{label}}).</p>
+{% if not smtp_ok %}<div class="warn">E-mail is not set up on the server yet (SMTP_HOST / MAIL_FROM) - nothing can be sent until it is.</div>{% endif %}
+<form method="post" action="/admin/missed/auto" class="grid" style="align-items:end">
+<label>Automatic e-mail<select name="enabled"><option value="Yes"{{' selected' if auto_on else ''}}>Enabled</option><option value="No"{{'' if auto_on else ' selected'}}>Disabled</option></select></label>
+<label>Send every day at<input type="time" name="time" value="{{auto_time}}" required></label>
+<button class="primary">Save</button></form>
+<p class="mut">{% if auto_on %}Automatic e-mail is <b>ON</b>: every day at {{auto_time}} each employee with missed dates this month gets one e-mail listing only the dates not e-mailed before.{% else %}Automatic e-mail is <b>OFF</b>.{% endif %}</p>
+<table><tr><th>Employee</th><th>E-mail</th><th>Missed dates</th><th>Not yet e-mailed</th><th>Last e-mailed</th><th></th></tr>
+{% for x in summary %}<tr><td><a href="/admin/missed-log/{{x.id|urlencode}}?month={{month}}">{{x.id}} &middot; {{x.name}}</a></td><td>{{x.email or '-'}}</td><td>{{x.dates|length}}: {{x.dates|join(', ')}}</td><td>{{x.new}}</td><td>{{(x.last|t12) if x.last else 'Never'}}</td>
+<td class="act"><a href="/admin/missed-log/{{x.id|urlencode}}?month={{month}}">View</a>
+<form method="post" action="/admin/missed/send" onsubmit="return confirm('Send the Missed Entries e-mail to {{x.name}}?')"><input type="hidden" name="eid" value="{{x.id}}"><input type="hidden" name="month" value="{{month}}"><input type="hidden" name="next" value="/admin/missed-log?month={{month}}">
+<button class="primary"{{' disabled title="No valid Office Email ID"' if not x.email else ''}}>Send e-mail</button></form></td></tr>
+{% else %}<tr><td colspan="6">No employee has missed entries for this period.</td></tr>{% endfor %}</table></div>
+<div class="card"><h2>E-mails sent</h2>
+<table><tr><th>Sent at</th><th>Employee</th><th>E-mail</th><th>Dates</th><th>Mode</th><th>Status</th></tr>
+{% for h in history %}<tr><td>{{h['Sent at']|t12}}</td><td>{{h['Employee ID']}} &middot; {{h['Employee name']}}</td><td>{{h['Email']}}</td><td>{{h['Missed dates']}}</td><td>{{h['Mode']}}</td><td>{{h['Status']}}</td></tr>
+{% else %}<tr><td colspan="6">No e-mail has been sent yet.</td></tr>{% endfor %}</table></div>'''
+
+MLOG_EMP = '''<div class="head"><div><h1>{{emp['Name']}} &middot; Missed entries</h1>
+<p class="mut">{{emp['Employee ID']}} &middot; {{email or 'No Office Email ID'}} &middot; {{label}}</p></div>
+<form class="grid no-print" method="get"><input type="month" name="month" value="{{month if month!='all' else ''}}">
+<button class="primary">Show</button><a href="?">This month</a><a href="?month=all">All time</a></form></div>
+<p class="no-print"><a href="/admin/missed-log?month={{month}}">&larr; Missed Entries Log</a></p>
+<div class="kpis"><div class="kpi"><span>Missed entries</span><b>{{dates|length}}</b></div>
+<div class="kpi"><span>Not yet e-mailed</span><b>{{new_count}}</b></div></div>
+<div class="card no-print"><form method="post" action="/admin/missed/send" onsubmit="return confirm('Send the Missed Entries e-mail to this employee?')"><input type="hidden" name="eid" value="{{emp['Employee ID']}}"><input type="hidden" name="month" value="{{month}}"><input type="hidden" name="next" value="/admin/missed-log/{{emp['Employee ID']|urlencode}}?month={{month}}">
+<button class="primary"{{' disabled' if not (email and dates) else ''}}>&#9993; Send Missed Entries e-mail</button>
+{% if not smtp_ok %}<span class="mut"> E-mail is not set up on the server yet.</span>{% elif not email %}<span class="mut"> No valid Office Email ID.</span>{% elif not dates %}<span class="mut"> Nothing to send.</span>{% endif %}</form></div>
+<table><tr><th>Date</th><th>Day</th><th>E-mailed</th></tr>
+{% for d in dates %}<tr><td>{{d.date}}</td><td>{{d.day}}</td><td>{{'Yes' if d.sent else 'No'}}</td></tr>
+{% else %}<tr><td colspan="3">No missed entries.</td></tr>{% endfor %}</table>
+<div class="card"><h2>E-mail history</h2><table><tr><th>Sent at</th><th>Dates</th><th>Mode</th><th>Status</th></tr>
+{% for h in history %}<tr><td>{{h['Sent at']|t12}}</td><td>{{h['Missed dates']}}</td><td>{{h['Mode']}}</td><td>{{h['Status']}}</td></tr>
+{% else %}<tr><td colspan="4">No e-mail has been sent to this employee yet.</td></tr>{% endfor %}</table></div>'''
+
+def missed_scope(month, subs, leaves):
+    today = today_local(); end = today - dt.timedelta(days=1)
+    if month == "all":
+        ds = [x["date"] for x in subs] + [l["Date"] for l in leaves]
+        return (dt.date.fromisoformat(min(ds)) if ds else today), end, "All time"
+    st, en = month_range(month)
+    return st, min(en, end), st.strftime("%B %Y")
+
+def mail_history(eid=None, limit=40):
+    out = [r for r in rows(MISSED_LOG) if str(r.get("Employee ID", "")) != "__RUN__" and (eid is None or _key(r.get("Employee ID", "")) == _key(eid))]
+    return sorted(out, key=lambda r: str(r.get("Sent at", "")), reverse=True)[:limit]
+
+@app.route("/admin/missed-log")
+@need("admin")
+def admin_missed_log():
+    prefetch("Employees", "Productivity log", "Leave", "Holidays", "Settings", MISSED_LOG)
+    month = request.args.get("month") or today_local().strftime("%Y-%m")
+    q = request.args.get("emp", "").strip().lower()
+    subs, leaves, emps = load_subs(), rows("Leave"), rows("Employees")
+    start, end, label = missed_scope(month, subs, leaves)
+    last, notified = missed_mail_history()
+    summary, total = [], 0
+    for e in emps:
+        if q and q not in str(e["Employee ID"]).lower() and q not in str(e["Name"]).lower(): continue
+        k = _key(e["Employee ID"])
+        dates = missing_dates(e["Employee ID"], [x for x in subs if _key(x["emp_id"]) == k], [l for l in leaves if _key(l["Employee ID"]) == k], start, end, fmt="%Y-%m-%d")
+        if not dates: continue
+        total += len(dates)
+        summary.append(dict(id=e["Employee ID"], name=e["Name"], email=employee_office_email(e), dates=sorted(dates), last=last.get(k, ""),
+                            new=len([d for d in dates if d not in notified.get(k, set())])))
+    summary.sort(key=lambda x: str(x["name"]))
+    on, t = missed_auto_settings()
+    return page(MLOG, title="Missed Entries Log", month=month, label=label, emp=request.args.get("emp", ""), summary=summary, total=total,
+                auto_on=on, auto_time=t, smtp_ok=bool(SMTP_HOST and MAIL_FROM), history=mail_history())
+
+@app.route("/admin/missed-log/<eid>")
+@need("admin")
+def admin_missed_log_emp(eid):
+    prefetch("Employees", "Productivity log", "Leave", "Holidays", MISSED_LOG)
+    e = next((x for x in rows("Employees") if _key(x["Employee ID"]) == _key(eid)), None)
+    if not e: abort(404)
+    month = request.args.get("month") or today_local().strftime("%Y-%m")
+    k = _key(eid)
+    subs = [x for x in load_subs() if _key(x["emp_id"]) == k]; leaves = [l for l in rows("Leave") if _key(l["Employee ID"]) == k]
+    start, end, label = missed_scope(month, subs, leaves)
+    _l, notified = missed_mail_history(); sent = notified.get(k, set())
+    ds = sorted(missing_dates(eid, subs, leaves, start, end, fmt="%Y-%m-%d"), reverse=True)
+    dates = [dict(date=d, day=dt.date.fromisoformat(d).strftime("%a"), sent=d in sent) for d in ds]
+    return page(MLOG_EMP, title="Missed entries - " + str(e["Name"]), emp=e, email=employee_office_email(e), month=month, label=label, dates=dates,
+                new_count=sum(1 for d in dates if not d["sent"]), smtp_ok=bool(SMTP_HOST and MAIL_FROM), history=mail_history(eid))
 
 def run_auto_missed(date=None):
     """One automatic run: each employee with missed dates this month NOT e-mailed before gets one e-mail with only the new dates.

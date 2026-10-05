@@ -51,7 +51,7 @@ Access rules (Update59):
   * Update78: Welcome Page opens first for Admin and Employee, no 'Continue' button, opens the Admin/Employee page by itself when it ends.
     Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
     melody, different from the earlier Mohanam tune), Welcome Page only.
-  * Update89: Leave & Permission - (1) employees can EDIT their own Permission requests (hours + reason, this month's records; an edit of an
+  * Update89: Leave & Permission - (1) employees can EDIT their own Permission requests (hours + reason, this month's and later records; an edit of an
     Approved/Rejected request goes back to Pending for Admin). (2) Productivity now follows the hours actually available in the day: a 2-hr
     Permission = 6 working hrs, a Half-Day Leave = 4 working hrs (8-hr day). Leave has a new "Day type" column (Full day / Half day).
   * Update88: fixed "Method Not Allowed" when moving between Mahizhchi Sets (game POST routes now also accept GET and redirect; global 405 handler redirects);
@@ -2384,7 +2384,7 @@ T_LEAVE = """<p class="mut">This month's balance (working days / hours used agai
 onsubmit="return confirm('Delete this leave?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="6">No leave records.</td></tr>{% endfor %}</table>
 <h2>Permission requests</h2>
-<p class="mut">Employees can apply for permission only for the current day, up to {{PERMISSION_MONTHLY_LIMIT|g}} hrs total per month. Review pending requests below.</p>
+<p class="mut">Employees choose the permission date themselves, up to {{PERMISSION_MONTHLY_LIMIT|g}} hrs total per month. Review pending requests below.</p>
 <table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th><th>Reviewed at</th><th class="no-print"></th></tr>
 {% for r in perms %}<tr><td>{{r['Date']}}</td><td>{{r['Hours']|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']|t12}}</td>
 <td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td><td>{{(r['Reviewed at'] or '-')|t12}}</td>
@@ -3101,14 +3101,18 @@ def permission_hours_used(eid, month):
                if str(r["Employee ID"]) == eid and str(r["Date"]).startswith(month)
                and str(r.get("Status", "")).strip() != "Rejected")
 
-def add_permission(emp, reason, hours):
-    """Employees may only apply for permission for the current day, once per day, and only up to
-    PERMISSION_MONTHLY_LIMIT hrs total (Pending + Approved) per calendar month."""
-    eid, date = str(emp["Employee ID"]), str(today_local())
+def add_permission(emp, reason, hours, date=None):
+    """Permission is applied for a date picked in the same date picker as Apply Leave (default: today), once per date, and only
+    up to PERMISSION_MONTHLY_LIMIT hrs total (Pending + Approved) per calendar month (the month of the chosen date)."""
+    eid = str(emp["Employee ID"])
+    date = str(date or today_local()).strip()
+    try: date = str(dt.date.fromisoformat(date))                  # same date handling as leave: a real YYYY-MM-DD date
+    except ValueError: raise ValueError("Choose a valid date.")
     if is_holiday(date):
-        raise ValueError(f"Today ({date}) is a holiday - permission cannot be applied for a holiday.")
-    if any(str(r["Employee ID"]) == eid and r["Date"] == date for r in rows("Permissions")):
-        raise ValueError("You have already applied for permission today.")
+        raise ValueError(f"{date} is a holiday - permission cannot be applied for a holiday.")
+    if any(str(r["Employee ID"]) == eid and str(r["Date"]) == date for r in rows("Permissions")):
+        raise ValueError("You have already applied for permission today." if date == str(today_local())
+                         else f"You have already applied for permission on {date}.")
     try:
         hours = round(float(hours), 2)
     except (TypeError, ValueError):
@@ -3119,7 +3123,7 @@ def add_permission(emp, reason, hours):
     used = permission_hours_used(eid, month)
     if used + hours > PERMISSION_MONTHLY_LIMIT:
         raise ValueError(f"Monthly permission limit is {PERMISSION_MONTHLY_LIMIT:g} hrs. "
-                          f"You have {round(PERMISSION_MONTHLY_LIMIT - used, 2):g} hr(s) remaining this month.")
+                          f"You have {round(PERMISSION_MONTHLY_LIMIT - used, 2):g} hr(s) remaining for {month}.")
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
     pid = uuid.uuid4().hex[:10]
     ws_of("Permissions").append_row(
@@ -3262,23 +3266,23 @@ LEAVE_EMP = """<style>
 <td>{% if st=='Pending' %}<form method="post" action="/employee/leave/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this leave?')"><button class="danger">Cancel</button></form>{% else %}-{% endif %}</td></tr>
 {% else %}<tr><td colspan="5">No leave yet.</td></tr>{% endfor %}</table>
 
-<div class="card"><h2>Apply permission</h2><p class="mut">Permission can only be applied for today ({{today}}) - use it if you need to arrive late, leave early, or step out during work hours. One request per day, up to {{perm_limit|g}} hrs total per month.</p>
+<div class="card"><h2>Apply permission</h2><p class="mut">Pick the date for your permission (it opens on today, {{today}}) - use it if you need to arrive late, leave early, or step out during work hours. One request per date, up to {{perm_limit|g}} hrs total per calendar month.</p>
 <ul class="lpsum"><li>Monthly Limit: <b>{{perm_limit|g}} hrs</b></li><li>Used This Month: <b>{{perm_used|g}} hrs</b></li><li>Remaining: <b>{{perm_remaining|g}} hrs</b></li></ul>
 <form method="post" action="/employee/permission" class="grid">
-<label>Date<input value="{{today}}" readonly></label>
+<label>Date<input type="date" name="date" value="{{today}}" required></label>
 <label>Hours<input type="number" name="hours" step="0.25" min="0.25" max="{{perm_limit}}" placeholder="e.g. 1" required></label>
 <label>Reason<input name="reason" size="30" placeholder="Reason for permission" required></label>
 <button class="primary">Submit request</button></form></div>
 <h2>My permission requests</h2><table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
 {% for r in perm_data %}<tr><td>{{r['Date']}}</td><td>{{r['Hours']|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']|t12}}</td>
 <td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td>
-<td>{% if r['Date'][:7]==today[:7] %}<details><summary class="mut" style="cursor:pointer">Edit</summary>
+<td>{% if r['Date'][:7]>=today[:7] %}<details><summary class="mut" style="cursor:pointer">Edit</summary>
 <form method="post" action="/employee/permission/{{r['_row']}}/edit" class="grid" style="margin-top:6px"><input type="hidden" name="pid" value="{{r['Permission ID']}}">
 <label>Hours<input type="number" name="hours" step="0.25" min="0.25" max="{{perm_limit}}" value="{{r['Hours']|g}}" required></label>
 <label>Reason<input name="reason" size="24" value="{{r['Reason']}}" required></label>
 <button class="primary">Save</button></form>
 {% if r['Status']!='Pending' %}<p class="mut">Saving a change sends this request back to Pending for admin approval.</p>{% endif %}</details>{% endif %}
-{% if r['Status']=='Pending' %}<form method="post" action="/employee/permission/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this request?')"><button class="danger">Cancel</button></form>{% elif r['Date'][:7]!=today[:7] %}-{% endif %}</td></tr>
+{% if r['Status']=='Pending' %}<form method="post" action="/employee/permission/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this request?')"><button class="danger">Cancel</button></form>{% elif r['Date'][:7]<today[:7] %}-{% endif %}</td></tr>
 {% else %}<tr><td colspan="6">No permission requests yet.</td></tr>{% endfor %}</table></div>"""
 
 LEAVE_ADMIN = """<div class="head"><h1>Leave log</h1></div>
@@ -3565,10 +3569,11 @@ def employee_leave_delete(row):
 @need("employee")
 def employee_permission():
     try:
-        add_permission(my_emp(), request.form.get("reason", "").strip(), request.form.get("hours", ""))
-        log_change(SEC_LEAVE, "Added", f"Permission request for {today_local()} ({_fmt_num(round(float(request.form.get('hours', 0)), 2))} hr) "
+        pdate = request.form.get("date", "").strip() or str(today_local())
+        add_permission(my_emp(), request.form.get("reason", "").strip(), request.form.get("hours", ""), pdate)
+        log_change(SEC_LEAVE, "Added", f"Permission request for {pdate} ({_fmt_num(round(float(request.form.get('hours', 0)), 2))} hr) "
                                         f"\u2013 {_short(request.form.get('reason', '').strip() or 'Permission', 80)}")
-        flash("Permission request submitted for today.")
+        flash("Permission request submitted for today." if pdate == str(today_local()) else f"Permission request submitted for {pdate}.")
     except ValueError as e:
         flash(str(e))
     return redirect("/employee/leave")
@@ -3577,8 +3582,8 @@ def update_permission(r, hours, reason):
     """Employee edits ONE of their own permission requests (hours + reason). Same rules as applying: > 0 hrs, monthly limit
     (this request's own hours are not counted twice). A change to an Approved / Rejected request returns it to Pending."""
     eid, row = str(r["Employee ID"]), r["_row"]
-    if str(r.get("Date", ""))[:7] != str(today_local())[:7]:
-        raise ValueError("Only this month's permission requests can be edited.")
+    if str(r.get("Date", ""))[:7] < str(today_local())[:7]:
+        raise ValueError("Permission requests of earlier months cannot be edited.")
     try: hours = round(float(hours), 2)
     except (TypeError, ValueError): raise ValueError("Enter a valid number of permission hours.")
     if hours <= 0: raise ValueError("Permission hours must be greater than 0.")

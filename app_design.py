@@ -3015,12 +3015,20 @@ def report(employees, subs, leaves, start, end):
         prod_hrs = sum(s["prod"] for s in mine)                       # hours really worked
         # 100% = the hours AVAILABLE on each day worked: target (8) less approved permission / half-day leave (2-hr permission = 6, half day = 4)
         base = sum(max(T - dmap.get((_key(eid), str(d)), 0.0), 0.0) for d in days)
+        # ---- ATTENDANCE from each working day's real status:  Present = 1 day (100%) | Half day = 0.5 (50%) | Absent = 0 (0%)
+        full = days - half                                              # worked days that are not half-day-leave days
+        today_s = str(today_local())
+        # today is still running: with no entry / leave yet it is "not marked" - it is NOT counted as Absent until the day is over
+        pending_today = 1 if (a <= today_s <= b and not is_off(today_s) and today_s not in (days | lv | half)) else 0
+        wd_e = wd - pending_today                                       # working days that have a status so far
+        credit = len(full) + 0.5 * len(half)                            # Present 1 + Half day 0.5 + Absent 0
+        present_n = credit
         leave_n = len(lv) + 0.5 * len(half)
-        absent_n = max(wd - len(days | lv) - 0.5 * len(half - days), 0)
-        out.append(dict(id=eid, name=e["Name"], band=e["Band"], designation=e.get("Designation", ""), present=len(days),
-                        leave=int(leave_n) if leave_n == int(leave_n) else leave_n,
-                        absent=int(absent_n) if absent_n == int(absent_n) else absent_n, wd=wd,
-                        att=min(round(len(days) / wd * 100), 100) if wd else 0,
+        absent_n = max(wd_e - len(full | lv | half), 0)
+        _n = lambda v: int(v) if v == int(v) else v
+        out.append(dict(id=eid, name=e["Name"], band=e["Band"], designation=e.get("Designation", ""), present=_n(present_n),
+                        leave=_n(leave_n), absent=_n(absent_n), wd=wd, counted=wd_e,
+                        att=min(round(credit / wd_e * 100), 100) if wd_e else 0,
                         pct=min(round(prod_hrs / base * 100), 100) if base else 0,
                         prod=prod_hrs, non=sum(s["non"] for s in mine), perm=perm_hrs))
     return out
@@ -3808,7 +3816,8 @@ def _aud_att_days(eid, subs, sess, start, end):
     while d <= end:
         ds = str(d); ss = sorted(by.get(ds, []), key=lambda r: str(r["Login time"]))
         note = ""
-        if ds in present: st = "Present"
+        if ds in half_days and not is_off(d): st = "Half day"
+        elif ds in present: st = "Present"
         elif ds in leave: st, note = "Leave", leave[ds] + " leave"
         elif ds in holiday_map(): st, note = "Holiday", holiday_name(ds)
         elif is_off(d): st = "Weekly off"

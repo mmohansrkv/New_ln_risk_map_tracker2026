@@ -252,9 +252,9 @@ def missing_personal(emp_row):
 # Columns shown on Admin -> Employees, in this display order (personal fields live on the
 # Personal details pages). Display order != sheet column order, so reads/writes map by name.
 LIST_HEADERS = {"Employees": ["Employee ID", "Name", "Designation", "Band", "Email", "Password"],
-                "Processes": ["Process name", "Target hours", "Target 100%", "Target count / 8 hrs"]}   # Update69: per-hour column hidden
+                "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour"]}   # Update94: Admin sets the count per hour; the 8-hr figure is derived internally
 def list_heads(sheet): return LIST_HEADERS.get(sheet, HEADERS[sheet])
-OPTIONAL_FIELDS = set(PERSONAL_FIELDS) | {"Status", "Reviewed at", "Reviewed by", "Target count / hour", "Target count / 8 hrs"}   # Processes: fill EITHER target column   # not required when admin adds/edits an employee
+OPTIONAL_FIELDS = set(PERSONAL_FIELDS) | {"Status", "Reviewed at", "Reviewed by", "Target count / 8 hrs"}   # Processes: fill EITHER target column   # not required when admin adds/edits an employee
 LOCKED_FIELDS = {}   # nothing locked: admin can add/edit personal details; employees can also edit their own via /employee/profile
 KINDS = {"employees": "Employees", "processes": "Processes", "leave": "Leave", "holidays": "Holidays"}
 
@@ -571,12 +571,9 @@ def proc_targets_sync(h, d, old_h="", old_d=""):
     B = TARGET_BASIS_HOURS
     hn, dn, ohn, odn = num(h), num(d), num(old_h), num(old_d)
     if hn <= 0 and dn <= 0:
-        return "", "", "Enter the target count for 8 hours (or the count per hour) - it must be more than 0."
-    odn = odn if odn > 0 else ohn * B
-    if dn > 0 >= hn: hn = dn / B
-    elif hn > 0 >= dn: dn = hn * B
-    elif abs(dn - odn) > 1e-9 or abs(hn - ohn) <= 1e-9: hn = dn / B
-    else: dn = hn * B
+        return "", "", "Enter the Target count / hour - it must be more than 0."
+    if hn > 0: dn = hn * B                  # Update94: Target count / hour is what Admin sets; the 8-hr figure follows it
+    else: hn = dn / B                       # legacy rows that only have the 8-hr figure
     return _g4(hn), _g4(dn), None
 
 def miss_lines(date, items):
@@ -596,9 +593,9 @@ def sub_misses(s):
     return [] if s.get("off") else miss_lines(s["date"], [(p["name"], p["hour"], p["count"]) for p in s["procs"]])
 
 def target_alert_text(miss):
-    return ("\u26A0 Target not achieved (8-hour target) \u2013 "
+    return ("\u26A0 Target not achieved (target = count per hour \u00D7 hours worked) \u2013 "
             + "; ".join(f"{m['name']}: {_fmt_num(m['count'])} of {_fmt_num(m['target'])} ({m['pct']}%)" for m in miss)
-            + ". Please complete the target within 8 hours.")
+            + ". Please complete the target for the hours worked.")
 
 TARGET_KEY = "Daily productivity target (hours)"
 def target_hours():
@@ -1862,18 +1859,18 @@ if(document.readyState==='complete')start();else window.addEventListener('load',
 </script>"""
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
-<form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
+<form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}{% if h=='Target count / hour' %} (count in 1 hr, e.g. 1000){% endif %}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
 <button class="primary">Add</button></form>
-{% if kind=='processes' %}<p class="mut">Set the <b>Target count / 8 hrs</b> &mdash; the count an employee must complete in a full 8-hour day. The per-hour rate is worked out automatically (target &divide; 8). If an employee's count is below the target for the hours they logged, they get an alert.</p>{% endif %}
+{% if kind=='processes' %}<p class="mut">Set the <b>Target count / hour</b> &mdash; the count to complete in 1 hour (e.g. <b>1000 / 1</b> hr). The target for an entry is worked out automatically from the hours the employee logs: 8 hrs &rarr; 8 &times; the hourly count, 4 hrs &rarr; 4 &times;, 2 hrs &rarr; 2 &times;. If the employee's count is below that target, they get an alert.</p>{% endif %}
 {% if missing %}<p class="mut">&#9888; {{missing}} employee(s) have no Designation yet. Use Edit to set it; it then fills in automatically on their daily entry page.</p>{% endif %}
 {% if locked %}<p class="mut">Personal details are managed on the Personal details page. Office Email ID follows the login Email.</p>{% endif %}</div>
 <table><tr>{% for h in heads %}<th>{{h}}</th>{% endfor %}<th></th></tr>
-{% for r in data %}<tr>{% for h in heads %}<td>{{r[h]}}</td>{% endfor %}
+{% for r in data %}<tr>{% for h in heads %}<td>{{r[h]}}{% if h=='Target count / hour' and r[h] %} / 1{% endif %}</td>{% endfor %}
 <td class="act"><a href="/admin/{{kind}}/{{r['_row']}}">Edit</a>
 <form method="post" action="/admin/{{kind}}/{{r['_row']}}/delete" onsubmit="return confirm('Delete?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="9">No records yet.</td></tr>{% endfor %}</table>"""
 
-EDIT = """<div class="card"><h2>Edit {{title}}</h2>{% if kind=='processes' %}<p class="mut">Set the <b>Target count / 8 hrs</b> &mdash; the count an employee must complete in a full 8-hour day. The per-hour rate is worked out automatically (target &divide; 8). If an employee's count is below the target for the hours they logged, they get an alert.</p>{% endif %}<form method="post" class="grid">
+EDIT = """<div class="card"><h2>Edit {{title}}</h2>{% if kind=='processes' %}<p class="mut">Set the <b>Target count / hour</b> &mdash; the count to complete in 1 hour (e.g. <b>1000 / 1</b> hr). The target for an entry is worked out automatically from the hours the employee logs: 8 hrs &rarr; 8 &times; the hourly count, 4 hrs &rarr; 4 &times;, 2 hrs &rarr; 2 &times;. If the employee's count is below that target, they get an alert.</p>{% endif %}<form method="post" class="grid">
 {% for h in heads %}<label>{{h}}<input name="f{{loop.index0}}" value="{{vals[loop.index0]}}"{% if h not in optional %} required{% endif %}{% if h in locked %} readonly{% endif %}></label>{% endfor %}
 <button class="primary">Save</button> <a href="/admin/{{kind}}">Cancel</a></form>
 {% if locked %}<p class="mut">Personal details (grayed out) are entered by the employee on their own Personal details page.</p>{% endif %}</div>"""
@@ -1954,7 +1951,7 @@ function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e
  tgtBadge.className=met?'met':'miss';
  const low=[];prows.forEach(row=>{const nm=(row.querySelector('[name=pn]')||{}).value,rate=T[nm]||0,hr=rowH(row),ct=+((row.querySelector('[name=pc]')||{}).value)||0,need=rate*hr;
   if(need>0&&ct<need)low.push(nm+': '+ct+' of '+Math.round(need*100)/100)});
- tgtMsg.textContent=low.length?('⚠ Target not achieved (8-hour target) – '+low.join(' | ')):'';tgtMsg.style.display=low.length?'block':'none'}
+ tgtMsg.textContent=low.length?('⚠ Target not achieved (count per hour × hours worked) – '+low.join(' | ')):'';tgtMsg.style.display=low.length?'block':'none'}
 document.querySelector('[name=date]').addEventListener('change',calc);
 function showErr(m){formerr.textContent=m;formerr.style.display='block';formerr.scrollIntoView({behavior:'smooth',block:'center'})}
 document.querySelector('form[action="{{action}}"]').addEventListener('submit',function(e){
@@ -2049,7 +2046,7 @@ def admin_list(kind):
             flash("Added.")
         return redirect(request.path)
     data = rows(sheet)
-    if sheet == "Processes":                      # show the derived figure for processes saved before the 8-hour column existed
+    if sheet == "Processes":                      # show the hourly figure for processes saved with only the 8-hour column
         tg = process_targets()
         for r in data:
             t = tg.get(r["Process name"])
@@ -2080,9 +2077,9 @@ def admin_edit(kind, row):
     cur = ws.row_values(row); cur += [""] * (len(HEADERS[sheet]) - len(cur))
     vals = [cur[HEADERS[sheet].index(h)] for h in heads]
     if sheet == "Processes":                      # prefill the derived figure so the form never looks empty
-        idl = heads.index("Target count / 8 hrs"); hcur = cur[HEADERS[sheet].index("Target count / hour")]
-        h_, d_, _e = proc_targets_sync(hcur, vals[idl], hcur, vals[idl])
-        if not _e: vals[idl] = d_
+        ihv = heads.index("Target count / hour"); dcur = cur[HEADERS[sheet].index("Target count / 8 hrs")]
+        h_, d_, _e = proc_targets_sync(vals[ihv], dcur, vals[ihv], dcur)
+        if not _e: vals[ihv] = h_
     return page(EDIT, title=sheet, heads=heads, vals=vals, kind=kind,
                 optional=OPTIONAL_FIELDS, locked=LOCKED_FIELDS.get(sheet, set()))
 

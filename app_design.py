@@ -51,9 +51,12 @@ Access rules (Update59):
   * Update78: Welcome Page opens first for Admin and Employee, no 'Continue' button, opens the Admin/Employee page by itself when it ends.
     Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
     melody, different from the earlier Mohanam tune), Welcome Page only.
+  * Update91: Productivity Info (Employee page) has a month picker - "<Month Year> - Productivity" - for the CURRENT and the PREVIOUS month. Picking
+    e.g. September 2026 in October shows that month's complete log (totals + permission requests) with View / Edit / Delete on every entry; after
+    an edit / delete the employee comes back to the same month. Employees can only ever open, edit or delete their OWN entries (get_sub -> 403).
   * Update90: (1) Process Entries: choosing the "Other" process shows a work-details Description box; Hours and Count are still entered, but "Other"
     is ALWAYS counted as 8 working hours (5, 6 or 7 entered = 8). Every other process keeps the hours actually entered. (2) Automatic reminder e-mail:
-    every day at 02:00 PM (REMINDER_TIME, app timezone) each employee who may submit the Daily Productivity Entry and has NOT yet submitted it for
+    every day at 1:35 PM (REMINDER_TIME, app timezone) each employee who may submit the Daily Productivity Entry and has NOT yet submitted it for
     today gets an e-mail on their Office Email ID. Needs SMTP_* environment variables (see REMINDER MAIL section). Sheets "Productivity Access"
     (optional switch-off list) and "Email Log" are created automatically.
   * Update89: Leave & Permission - (1) employees can EDIT their own Permission requests (hours + reason, this month's and later records; an edit of an
@@ -95,6 +98,7 @@ Access rules (Update59):
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
 from functools import wraps
+import urllib.parse
 import gspread
 from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
@@ -1002,6 +1006,13 @@ def need(role=None):
 def home():
     return "/admin/log" if session.get("role") == "admin" else "/employee"
 
+def next_url():
+    """Update91: where View / Edit / Delete return to. Only an employee's own Productivity Info month page is accepted (no open redirect)."""
+    n = (request.values.get("next") or "").strip()
+    ok = (session.get("role") == "employee" and n.startswith("/employee/productivity")
+          and "//" not in n and "\\" not in n and "\n" not in n and "\r" not in n)
+    return n if ok else ""
+
 # ---------------------------------------------------------------- templates
 BASE = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{{title}}</title>
@@ -1840,9 +1851,9 @@ LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th
 <td>{{ (s.tgt_total|g) if s.tgt_state in ('met','miss') else '-' }}</td><td>{{ (s.cnt_total|g) if s.tgt_state in ('met','miss') else '-' }}</td>
 <td>{% if s.tgt_state=='met' %}<span class="tg-badge met">&#10003; Target met</span>{% elif s.tgt_state=='miss' %}<span class="tg-badge miss" title="Below target: {{s.tgt_miss|join(', ')}}">&#9888; Not met</span>{% else %}-{% endif %}</td>
 <td>{{ 'Weekend - not counted' if s.off else (s.pct ~ '%') }}</td>
-<td class="act"><a href="/entry/{{s.id}}/view">View</a><a href="/entry/{{s.id}}">Edit</a>
-<form method="post" action="/entry/{{s.id}}/delete" onsubmit="return confirm('Delete this entry?')"><button class="danger">Delete</button></form></td></tr>
-{% else %}<tr><td colspan="8">Nothing yet.</td></tr>{% endfor %}</table>"""
+<td class="act"><a href="/entry/{{s.id}}/view{{ ('?next=' ~ (nxt|urlencode)) if nxt else '' }}">View</a><a href="/entry/{{s.id}}{{ ('?next=' ~ (nxt|urlencode)) if nxt else '' }}">Edit</a>
+<form method="post" action="/entry/{{s.id}}/delete{{ ('?next=' ~ (nxt|urlencode)) if nxt else '' }}" onsubmit="return confirm('Delete this entry?')"><button class="danger">Delete</button></form></td></tr>
+{% else %}<tr><td colspan="{{ 10 if session.role=='admin' else 8 }}">{{ empty_msg or 'Nothing yet.' }}</td></tr>{% endfor %}</table>"""
 
 FORM = """<div class="card" id="entryCard"><h2>{{heading}} <span id="tgtBadge"></span></h2>
 <form method="post" action="{{action}}">
@@ -2918,15 +2929,26 @@ def employee_home():
                 today_perm=today_perm, perm_limit=PERMISSION_MONTHLY_LIMIT, perm_used=perm_used,
                 perm_remaining=round(PERMISSION_MONTHLY_LIMIT - perm_used, 2), **ctx)
 
+def prod_months():
+    """Update91: months an employee can open on Productivity Info - the current month and the previous month."""
+    t = today_local(); cur = t.replace(day=1)
+    prev = (cur - dt.timedelta(days=1)).replace(day=1)
+    return [cur, prev]
+
 @app.route("/employee/productivity")
 @need("employee")
 def employee_productivity():
-    """Productivity Info: this employee's current-month submissions. The month always follows
-    today's date automatically, so this page never needs a month picker."""
+    """Productivity Info: this employee's submissions for the chosen month (current month by default; the previous month is also
+    available from the month picker, with View / Edit / Delete on every entry). Only the employee's OWN entries are ever listed."""
     prefetch("Productivity log", "Processes", "Employees", "Settings", "Permissions", "Holidays")
     today = today_local()
+    months = prod_months()
+    pick = (request.args.get("month") or "").strip()
+    sel = next((m for m in months if str(m)[:7] == pick), months[0])
+    month = str(sel)[:7]                                # e.g. 2026-09
+    is_cur = sel == months[0]
+    mlabel = sel.strftime("%B %Y")
     all_mine = [s for s in load_subs(session["emp_id"]) if s["emp_id"] == session["emp_id"]]
-    month = str(today)[:7]                              # e.g. 2026-09
     month_subs = sorted((s for s in all_mine if str(s["date"]).startswith(month)),
                         key=lambda s: s["date"], reverse=True)
     counted = [s for s in month_subs if not s["off"]]    # weekly-off entries are not calculated
@@ -2940,9 +2962,15 @@ def employee_productivity():
     m_ded = sum(s["ded"] for s in counted)               # approved permission + half-day leave hours taken off the days worked
     m_avail = sum(s["avail"] for s in counted)           # working hours available (100%)
     m_pct = min(round(m_prod / m_avail * 100), 100) if m_avail > 0 else 0
+    nxt = "/employee/productivity?month=" + month        # View / Edit / Delete come back to this month
     body = (
         '<div class="head"><h1>Productivity Info</h1></div>'
-        '<h2>This month (' + today.strftime("%B %Y") + ')</h2>'
+        '<form method="get" action="/employee/productivity" class="card no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+        '<label style="margin:0"><b>Month</b> <select name="month" onchange="this.form.submit()">'
+        '{% for m in months %}<option value="{{m.strftime(\'%Y-%m\')}}"{{\' selected\' if m==sel else \'\'}}>{{m.strftime(\'%B %Y\')}} &ndash; Productivity</option>{% endfor %}'
+        '</select></label><noscript><button class="primary">Show</button></noscript>'
+        '{% if not is_cur %}<span class="mut">Previous month &ndash; you can view, edit or delete your own entries.</span>{% endif %}</form>'
+        '<h2>{{ \'This month\' if is_cur else \'Previous month\' }} ({{mlabel}})</h2>'
         '<div class="totals">Entries: <b>{{m_count}}</b> &middot; '
         'Productive: <b>{{m_prod|g}}</b> hrs &middot; '
         'Non-productive: <b>{{m_non|g}}</b> hrs &middot; '
@@ -2950,13 +2978,15 @@ def employee_productivity():
         'Working hours available: <b>{{m_avail|g}}</b> hrs (after <b>{{m_ded|g}}</b> hrs approved permission / half-day leave) &middot; '
         'Productivity: <b>{{m_pct}}%</b></div>'
         + LIST.replace("in subs", "in msubs")
-        + '<h2>Permission requests (' + today.strftime("%B %Y") + ')</h2>'
+        + '<h2>Permission requests ({{mlabel}})</h2>'
         + '<table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th></tr>'
         + '{% for r in perms %}<tr><td>{{r["Date"]}}</td><td>{{r["Hours"]|g}}</td><td>{{r["Reason"]}}</td><td>{{r["Applied at"]|t12}}</td>'
         + '<td><span class="pill {{r["Status"]|ppill}}">{{r["Status"]}}</span></td></tr>'
-        + '{% else %}<tr><td colspan="5">No permission requests this month.</td></tr>{% endfor %}</table>')
+        + '{% else %}<tr><td colspan="5">No permission requests in {{mlabel}}.</td></tr>{% endfor %}</table>')
     return page(body, title="Productivity Info", msubs=month_subs, m_count=m_count, m_prod=m_prod, m_non=m_non,
-                m_perm=m_perm, perms=perms, m_ded=m_ded, m_avail=m_avail, m_pct=m_pct)
+                m_perm=m_perm, perms=perms, m_ded=m_ded, m_avail=m_avail, m_pct=m_pct,
+                months=months, sel=sel, is_cur=is_cur, mlabel=mlabel, nxt=nxt,
+                empty_msg="No productivity entries for " + mlabel + ".")
 
 @app.route("/employee/save", methods=["POST"])
 @need("employee")
@@ -2982,7 +3012,7 @@ def entry_edit(sid):
         if not err and duplicate_entry(s["emp_id"], date, skip_sid=sid):
             err = f"An entry for {date} already exists. Choose a different date or edit that entry."
         if err:
-            flash(err, "error"); return redirect(request.path)
+            flash(err, "error"); return redirect(request.full_path.rstrip("?"))
         changed = entry_diff(s, date, procs, notes)          # compare with the saved entry before it is replaced
         delete_rows(s["rows"])
         write_sub(sid, date, (s["band"], s["emp_id"], s["emp_name"]), procs, notes)
@@ -2990,14 +3020,15 @@ def entry_edit(sid):
         flash("Updated." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else ""))
         miss = [] if is_off(date) or session.get("role") != "employee" else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
         if miss: flash(target_alert_text(miss), "error")
-        return redirect(home())
-    body, ctx = form_page(s, request.path, "Edit entry")
+        return redirect(next_url() or home())
+    nx = next_url()
+    body, ctx = form_page(s, request.path + (("?next=" + urllib.parse.quote(nx, safe="")) if nx else ""), "Edit entry")
     return page(body, title="Edit entry", **ctx)
 
 @app.route("/entry/<sid>/view")
 @need()
 def entry_view(sid):
-    return page(VIEW, title="Entry", s=get_sub(sid), day=day_limit(), target=target_hours(), back=home())
+    return page(VIEW, title="Entry", s=get_sub(sid), day=day_limit(), target=target_hours(), back=next_url() or home())
 
 @app.route("/entry/<sid>/delete", methods=["POST"])
 @need()
@@ -3006,7 +3037,7 @@ def entry_delete(sid):
     delete_rows(s["rows"])
     log_change(SEC_PROD, "Deleted",
                f"Entry {s['date']} ({_fmt_num(s['prod'])} productive hr, {_fmt_num(s['non'])} non-productive hr)")
-    flash("Deleted."); return redirect(home())
+    flash("Deleted."); return redirect(next_url() or home())
 
 # ---------------------------------------------------------------- leave + reports
 app.jinja_env.filters["tone"] = lambda v: "" if v >= 90 else ("a" if v >= 75 else "r")

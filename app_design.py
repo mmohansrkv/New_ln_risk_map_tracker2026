@@ -51,6 +51,10 @@ Access rules (Update59):
   * Update78: Welcome Page opens first for Admin and Employee, no 'Continue' button, opens the Admin/Employee page by itself when it ends.
     Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
     melody, different from the earlier Mohanam tune), Welcome Page only.
+  * Update92: Admin > Missed entries has a "Missed entries e-mail" panel. (1) Manual: a Send e-mail button per employee (also on the employee's own
+    Missed Entries tab) mails the missed dates to the employee's Office Email ID. (2) Automatic: Admin switches it ON/OFF and sets the time; every
+    day at that time each employee with missed dates this month that were NOT e-mailed before gets one e-mail with only the NEW dates. Every send is
+    recorded in the "Missed Email Log" sheet (employee, dates, time, Manual/Auto, status) - the record that prevents duplicates. Uses the same SMTP_* settings.
   * Update91: Productivity Info (Employee page) has a month picker - "<Month Year> - Productivity" - for the CURRENT and the PREVIOUS month. Picking
     e.g. September 2026 in October shows that month's complete log (totals + permission requests) with View / Edit / Delete on every entry; after
     an edit / delete the employee comes back to the same month. Employees can only ever open, edit or delete their OWN entries (get_sub -> 403).
@@ -98,7 +102,7 @@ Access rules (Update59):
 """
 import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
 from functools import wraps
-import urllib.parse
+import urllib.parse, re
 import gspread
 from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
@@ -205,6 +209,9 @@ HEADERS = {
     "Productivity Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
     # Update90: one row per reminder e-mail (and one \"__RUN__\" row per day = the worker that sends that day's batch, so workers never double-send)
     "Email Log": ["Date", "Employee ID", "Employee name", "Email", "Sent at", "Status"],
+    # Update92: one row per Missed Entries e-mail. "Dates" = the missed dates in that mail (used so the same date is never e-mailed twice by Auto).
+    # A "__RUN__" row (Mode = Auto) claims one automatic run per day so several workers never double-send.
+    "Missed Email Log": ["Date sent", "Employee ID", "Employee name", "Email", "Missed dates", "Count", "Sent at", "Mode", "Status", "Sent by"],
     "Mahizhchi Connection Attempts": ["Employee ID", "Employee name", "Game", "Started at", "Closed at", "Solved", "Mistakes", "Result", "Extra seconds"],
 }
 PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
@@ -2401,6 +2408,7 @@ T_MISSED = """<form class="grid no-print" method="get"><input type="hidden" name
 <a href="?tab=missed">This month</a><a href="?tab=missed&month=all">All time</a></form>
 <div class="kpis"><div class="kpi"><span>Missed entries &middot; {{label}}</span><b>{{data|length}}</b></div></div>
 <p class="mut">Working days (weekly off excluded) with no productivity entry and no leave. Today is not included.</p>
+{% if data %}<form method="post" action="/admin/missed/send" class="no-print" onsubmit="return confirm('Send the Missed Entries e-mail to this employee?')"><input type="hidden" name="eid" value="{{emp['Employee ID']}}"><input type="hidden" name="month" value="{{month}}"><input type="hidden" name="next" value="/admin/employee-info/{{emp['Employee ID']|urlencode}}?tab=missed&month={{month}}"><button class="primary">&#9993; Send Missed Entries e-mail</button></form>{% endif %}
 <table><tr><th>Date</th><th>Day</th></tr>
 {% for r in data %}<tr><td>{{r.date}}</td><td>{{r.day}}</td></tr>
 {% else %}<tr><td colspan="2">No missed entries.</td></tr>{% endfor %}</table>"""
@@ -3446,6 +3454,19 @@ MISSED = """<div class="head"><div><h1>Missed entries</h1>
 <button class="primary">Show</button><a href="/admin/missed">Reset</a><a href="/admin/missed?month=all">All time</a></form></div>
 <div class="kpis"><div class="kpi"><span>Missed entries</span><b>{{data|length}}</b></div>
 <div class="kpi"><span>Employees affected</span><b>{{n_emp}}</b></div></div>
+<div class="card no-print"><h2>Missed entries e-mail</h2>
+<p class="mut">Sends the employee's missed productivity entry dates to their registered Office Email ID. Dates shown follow the filter above ({{label}}).</p>
+{% if not smtp_ok %}<div class="warn">E-mail is not set up on the server yet (SMTP_HOST / MAIL_FROM) - nothing can be sent until it is.</div>{% endif %}
+<form method="post" action="/admin/missed/auto" class="grid" style="align-items:end">
+<label>Automatic e-mail<select name="enabled"><option value="Yes"{{' selected' if auto_on else ''}}>Enabled</option><option value="No"{{'' if auto_on else ' selected'}}>Disabled</option></select></label>
+<label>Send every day at<input type="time" name="time" value="{{auto_time}}" required></label>
+<button class="primary">Save</button></form>
+<p class="mut">{% if auto_on %}Automatic e-mail is <b>ON</b>: every day at {{auto_time}} each employee with missed dates this month gets one e-mail listing only the dates not e-mailed before.{% else %}Automatic e-mail is <b>OFF</b>.{% endif %}</p>
+<table><tr><th>Employee</th><th>E-mail</th><th>Missed dates</th><th>Not yet e-mailed</th><th>Last e-mailed</th><th></th></tr>
+{% for x in summary %}<tr><td>{{x.id}} &middot; {{x.name}}</td><td>{{x.email or '-'}}</td><td>{{x.dates|length}}: {{x.dates|join(', ')}}</td><td>{{x.new}}</td><td>{{(x.last|t12) if x.last else 'Never'}}</td>
+<td class="act"><form method="post" action="/admin/missed/send" onsubmit="return confirm('Send the Missed Entries e-mail to {{x.name}}?')"><input type="hidden" name="eid" value="{{x.id}}"><input type="hidden" name="month" value="{{month}}"><input type="hidden" name="next" value="/admin/missed?month={{month}}">
+<button class="primary"{{' disabled title="No valid Office Email ID"' if not x.email else ''}}>Send e-mail</button></form></td></tr>
+{% else %}<tr><td colspan="6">No employee has missed entries for this period.</td></tr>{% endfor %}</table></div>
 <table><tr><th>Date</th><th>Day</th><th>Employee</th><th>Designation</th><th>Band</th></tr>
 {% for r in data %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td></tr>
 {% else %}<tr><td colspan="5">No missed entries.</td></tr>{% endfor %}</table>"""
@@ -3498,8 +3519,21 @@ def admin_missed():
                              id=e["Employee ID"], name=e["Name"], band=e["Band"],
                              designation=e.get("Designation", "")))
     data.sort(key=lambda r: (r["date"], str(r["name"])), reverse=True)
+    # Update92: one line per employee for the e-mail panel (+ when they were last e-mailed)
+    em_by = {_key(e["Employee ID"]): e for e in emps}
+    last, notified = missed_mail_history()
+    summary = {}
+    for r in sorted(data, key=lambda r: r["date"]):
+        sm = summary.setdefault(r["id"], dict(id=r["id"], name=r["name"], email=employee_office_email(em_by.get(_key(r["id"]), {})), dates=[]))
+        sm["dates"].append(r["date"])
+    summary = sorted(summary.values(), key=lambda x: str(x["name"]))
+    for sm in summary:
+        sm["last"] = last.get(_key(sm["id"]), "")
+        sm["new"] = len([d for d in sm["dates"] if d not in notified.get(_key(sm["id"]), set())])
+    auto_on, auto_time = missed_auto_settings()
     return page(MISSED, title="Missed entries", data=data, n_emp=len({r["id"] for r in data}),
-                month=month, label=label, emp=request.args.get("emp", ""))
+                month=month, label=label, emp=request.args.get("emp", ""),
+                summary=summary, auto_on=auto_on, auto_time=auto_time, smtp_ok=bool(SMTP_HOST and MAIL_FROM))
 
 
 @app.route("/admin/leave", methods=["GET", "POST"])
@@ -5181,6 +5215,153 @@ def _reminder_loop():
             print("Reminder mail error:", ex)
 if REMINDER_ENABLED and os.getenv("WERKZEUG_RUN_MAIN", "true") == "true":       # not in the debug reloader's parent process
     threading.Thread(target=_reminder_loop, daemon=True).start()
+
+
+# ---------------------------------------------------------------- Update92: MISSED ENTRIES E-MAIL (manual + automatic)
+MISSED_AUTO_KEY, MISSED_TIME_KEY = "Missed Email Auto", "Missed Email Time"
+MISSED_LOG = "Missed Email Log"
+_missed_auto_done = set()
+
+def _setting(key, fresh=False):
+    r = next((r for r in (_fetch_rows("Settings") if fresh else rows("Settings")) if str(r.get("Key", "")).strip() == key), None)
+    return str(r.get("Value", "")).strip() if r else ""
+
+def _set_setting(key, val):
+    ws = ws_of("Settings"); keys = ws.col_values(1)
+    if key in keys: ws.update(range_name=f"B{keys.index(key) + 1}", values=[[val]], value_input_option="RAW")
+    else: ws.append_row([key, val], value_input_option="RAW")
+    invalidate_cache("Settings")
+
+def missed_auto_settings(fresh=False):
+    on = _setting(MISSED_AUTO_KEY, fresh).lower() == "yes"
+    t = _setting(MISSED_TIME_KEY, fresh)
+    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t or ""): t = "10:00"          # default 10:00 AM until Admin chooses a time
+    return on, t
+
+def missed_mail_history(fresh=False):
+    """-> ({EMP: last sent-at}, {EMP: set of dates already e-mailed successfully})."""
+    last, done = {}, {}
+    for r in (_fetch_rows(MISSED_LOG) if fresh else rows(MISSED_LOG)):
+        if str(r.get("Employee ID", "")) == "__RUN__" or str(r.get("Status", "")) != "Sent": continue
+        k = _key(r.get("Employee ID", ""))
+        last[k] = max(last.get(k, ""), str(r.get("Sent at", "")))
+        done.setdefault(k, set()).update(x.strip() for x in str(r.get("Missed dates", "")).split(",") if x.strip())
+    return last, done
+
+def missed_dates_for(eid, start, end):
+    subs = [s_ for s_ in load_subs() if _key(s_["emp_id"]) == _key(eid)]
+    leaves = [l for l in rows("Leave") if _key(l["Employee ID"]) == _key(eid)]
+    return missing_dates(eid, subs, leaves, start, end, fmt="%Y-%m-%d")
+
+def missed_message(emp, dates):
+    """Same layout as the Daily Productivity reminder (greeting, bold statement, instruction, link, sign-off) with the missed dates listed."""
+    pretty = [dt.date.fromisoformat(d).strftime("%d %b %Y (%a)") for d in dates]
+    n = len(pretty)
+    msg = EmailMessage()
+    msg["Subject"] = f"Reminder: Daily Productivity Entry missed for {n} date{'s' if n != 1 else ''}"
+    msg["From"] = formataddr(("Productivity Tracker", MAIL_FROM)); msg["To"] = emp["email"]
+    link = f"\n\nSubmit it here: {APP_URL}/employee" if APP_URL else ""
+    msg.set_content(f"Hello {emp['name']},\n\nYour Daily Productivity Entry has not been submitted for the following date{'s' if n != 1 else ''}:\n\n"
+                    + "\n".join("  - " + x for x in pretty)
+                    + f"\n\nPlease log in and submit the missing entr{'ies' if n != 1 else 'y'} (or apply for leave if you were away).{link}\n\nThank you,\nProductivity Tracker")
+    h = (f'<p>Hello {emp["name"]},</p><p><b>Your Daily Productivity Entry has not been submitted for the following date{"s" if n != 1 else ""}:</b></p><ul>'
+         + "".join(f"<li>{x}</li>" for x in pretty) + "</ul>"
+         f'<p>Please log in and submit the missing entr{"ies" if n != 1 else "y"} (or apply for leave if you were away).</p>')
+    if APP_URL: h += f'<p><a href="{APP_URL}/employee">Open the Daily Productivity Entry</a></p>'
+    msg.add_alternative(h + "<p>Thank you,<br>Productivity Tracker</p>", subtype="html")
+    return msg
+
+def send_missed_mails(items, mode, by):
+    """items = [(emp dict(eid,name,email), [dates])]. One SMTP connection; every outcome is written to the Missed Email Log. Returns {eid: status}."""
+    res = _smtp_send([missed_message(e, d) for e, d in items])
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S"); today = now[:10]
+    out = {e["eid"]: res.get(e["email"], "Failed") for e, _d in items}
+    ws_of(MISSED_LOG).append_rows([[today, e["eid"], e["name"], e["email"], ", ".join(d), len(d), now, mode, out[e["eid"]], by] for e, d in items],
+                                  value_input_option="RAW")
+    invalidate_cache(MISSED_LOG)
+    return out
+
+@app.route("/admin/missed/send", methods=["POST"])
+@need("admin")
+def admin_missed_send():
+    nxt = (request.form.get("next") or "").strip()
+    back = nxt if (nxt.startswith("/admin/") and "//" not in nxt and "\\" not in nxt and "\n" not in nxt) else "/admin/missed"
+    if not (SMTP_HOST and MAIL_FROM):
+        flash("E-mail is not set up on the server (SMTP_HOST / MAIL_FROM).", "error"); return redirect(back)
+    eid = (request.form.get("eid") or "").strip()
+    e = next((x for x in rows("Employees") if _key(x["Employee ID"]) == _key(eid)), None)
+    if not e: flash("Employee not found.", "error"); return redirect(back)
+    mail = employee_office_email(e)
+    if "@" not in mail: flash(f"{e['Name']} has no valid Office Email ID.", "error"); return redirect(back)
+    today = today_local(); month = request.form.get("month") or today.strftime("%Y-%m")
+    end = today - dt.timedelta(days=1)
+    if month == "all":
+        ds = [s_["date"] for s_ in load_subs() if _key(s_["emp_id"]) == _key(eid)] + [l["Date"] for l in rows("Leave") if _key(l["Employee ID"]) == _key(eid)]
+        start = dt.date.fromisoformat(min(ds)) if ds else today
+    else:
+        start = month_range(month)[0]; end = min(month_range(month)[1], end)
+    dates = missed_dates_for(eid, start, end)
+    if not dates: flash(f"{e['Name']} has no missed entries for this period - nothing to send.", "error"); return redirect(back)
+    emp = dict(eid=str(e["Employee ID"]), name=str(e["Name"]), email=mail)
+    try: st = send_missed_mails([(emp, dates)], "Manual", session.get("name", "admin"))[emp["eid"]]
+    except Exception as ex_: st = "Failed: " + str(ex_)[:150]; print("Missed mail error:", ex_)
+    if st == "Sent": flash(f"Missed Entries e-mail sent to {e['Name']} ({mail}) - {len(dates)} date(s).")
+    else: flash(f"E-mail to {e['Name']} could not be sent: {st}", "error")
+    return redirect(back)
+
+@app.route("/admin/missed/auto", methods=["POST"])
+@need("admin")
+def admin_missed_auto():
+    on = request.form.get("enabled") == "Yes"
+    t = (request.form.get("time") or "").strip()
+    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t): flash("Choose a valid time.", "error"); return redirect("/admin/missed")
+    _set_setting(MISSED_TIME_KEY, t); _set_setting(MISSED_AUTO_KEY, "Yes" if on else "No")
+    flash(f"Automatic Missed Entries e-mail {'enabled - sends every day at ' + t if on else 'disabled'}.")
+    return redirect("/admin/missed")
+
+def run_auto_missed(date=None):
+    """One automatic run: each employee with missed dates this month NOT e-mailed before gets one e-mail with only the new dates.
+    Duplicate protection: (a) a __RUN__ row claims the day so only one worker/server sends, (b) dates already in a 'Sent' log row are never repeated."""
+    date = date or str(today_local())
+    if not (SMTP_HOST and MAIL_FROM): print("Missed mail: SMTP not configured - skipped."); return 0
+    ws = ws_of(MISSED_LOG)
+    ws.append_row([date, "__RUN__", _WORKER_ID, "", "", 0, now_local().strftime("%Y-%m-%d %H:%M:%S"), "Auto", "Claimed", "system"], value_input_option="RAW")
+    invalidate_cache(MISSED_LOG)
+    runs = [r for r in _fetch_rows(MISSED_LOG) if str(r.get("Date sent", "")).strip() == date and str(r.get("Employee ID", "")) == "__RUN__" and str(r.get("Mode", "")) == "Auto"]
+    if not runs or str(runs[0].get("Employee name", "")) != _WORKER_ID: return 0         # another worker owns today's run
+    t = dt.date.fromisoformat(date); start = t.replace(day=1); end = t - dt.timedelta(days=1)
+    if end < start: return 0
+    _last, notified = missed_mail_history(fresh=True)
+    access = _fetch_rows("Productivity Access"); subs_all = load_subs(); leaves = _fetch_rows("Leave")
+    items = []
+    for e in _fetch_rows("Employees"):
+        k = _key(e.get("Employee ID", "")); mail = employee_office_email(e)
+        if not k or "@" not in mail or not productivity_access(k, access): continue
+        dates = missing_dates(k, [s_ for s_ in subs_all if _key(s_["emp_id"]) == k], [l for l in leaves if _key(l["Employee ID"]) == k], start, end, fmt="%Y-%m-%d")
+        new = [d for d in dates if d not in notified.get(k, set())]
+        if new: items.append((dict(eid=str(e["Employee ID"]), name=str(e.get("Name", "")), email=mail), new))
+    if not items: return 0
+    res = send_missed_mails(items, "Auto", "system")
+    return sum(1 for v in res.values() if v == "Sent")
+
+def _missed_auto_loop():
+    while True:
+        time.sleep(30)
+        try:
+            now = now_local(); today = str(now.date())
+            if today in _missed_auto_done: continue
+            on, t = missed_auto_settings()                                     # cached read (a few seconds old at most)
+            hh, mm = int(t[:2]), int(t[3:])
+            due = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if not on or not (due <= now <= due + dt.timedelta(minutes=REMINDER_GRACE_MIN)): continue
+            on, t = missed_auto_settings(fresh=True)                           # confirm with the sheet right before sending
+            if not on: continue
+            _missed_auto_done.add(today)
+            print(f"Missed mail {today}: {run_auto_missed(today)} sent")
+        except Exception as ex:
+            print("Missed mail error:", ex)
+if REMINDER_ENABLED and os.getenv("WERKZEUG_RUN_MAIN", "true") == "true":
+    threading.Thread(target=_missed_auto_loop, daemon=True).start()
 
 if __name__ == "__main__":
     # NOTE: Flask's built-in dev server (even with threaded=True) is still not

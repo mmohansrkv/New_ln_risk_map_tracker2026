@@ -1912,6 +1912,21 @@ BLOOM = """{% if bloom %}<style>
 for(var i=0;i<46;i++){var p=document.createElement('span');p.textContent=e[i%e.length];p.style.left=(Math.random()*96)+'%';p.style.fontSize=(22+Math.random()*26)+'px';p.style.animationDelay=(Math.random()*0.9)+'s';p.style.animationDuration=(1.9+Math.random()*1.0)+'s';b.appendChild(p)}
 setTimeout(function(){if(b.parentNode)b.parentNode.removeChild(b)},3000)})();</script>{% endif %}"""
 
+SAVED_ANIM = """{% if saved_anim %}<style>
+#svwrap{position:fixed;inset:0;z-index:100000;pointer-events:none;display:flex;justify-content:center;align-items:flex-start;padding-top:12vh;perspective:900px;animation:svwrap 3s linear forwards}
+@keyframes svwrap{0%,88%{opacity:1}100%{opacity:0}}
+#svcard{position:relative;transform-style:preserve-3d;display:flex;align-items:center;gap:14px;padding:16px 26px 16px 18px;border-radius:16px;color:#fff;background:linear-gradient(135deg,#16a34a,#22c55e 55%,#4ade80);box-shadow:0 1px 0 #ffffff66 inset,0 8px 0 #166534,0 26px 40px -10px #14532d99;animation:svcard 3s cubic-bezier(.22,1,.36,1) forwards;will-change:transform}
+@keyframes svcard{0%{transform:rotateX(-70deg) rotateY(-90deg) translateZ(-300px) scale(.4);opacity:0}18%{transform:rotateX(12deg) rotateY(10deg) translateZ(40px) scale(1.04);opacity:1}30%{transform:rotateX(0) rotateY(0) translateZ(0) scale(1)}55%{transform:rotateX(4deg) rotateY(-6deg) translateZ(10px) scale(1)}80%{transform:rotateX(0) rotateY(0) translateZ(0) scale(1);opacity:1}100%{transform:rotateX(60deg) rotateY(90deg) translateZ(-260px) scale(.5);opacity:0}}
+#svcoin{width:48px;height:48px;border-radius:50%;background:#fff;color:#16a34a;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;box-shadow:0 4px 0 #bbf7d0,0 8px 14px #0003;transform-style:preserve-3d;animation:svspin 1.2s .25s ease-in-out 2 both}
+@keyframes svspin{from{transform:rotateY(0)}to{transform:rotateY(360deg)}}
+#svcard b{display:block;font-size:17px;letter-spacing:.2px;text-shadow:0 2px 0 #14532d66}
+#svcard small{display:block;font-size:12.5px;opacity:.92;margin-top:2px}
+#svcard::after{content:"";position:absolute;inset:0;border-radius:16px;background:linear-gradient(100deg,transparent 30%,#ffffff66 50%,transparent 70%);transform:translateX(-120%);animation:svshine 1.1s .5s ease forwards;pointer-events:none}
+@keyframes svshine{to{transform:translateX(120%)}}
+@media (prefers-reduced-motion:reduce){ #svcard,#svcoin,#svcard::after{animation-duration:3s} }
+</style><div id="svwrap" role="status" aria-live="polite"><div id="svcard"><div id="svcoin">&#10003;</div><div><b>Saved successfully!</b><small>Your daily productivity entry is saved.</small></div></div></div>
+<script>setTimeout(function(){var w=document.getElementById('svwrap');if(w&&w.parentNode)w.parentNode.removeChild(w)},3000);</script>{% endif %}"""
+
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th><th>Designation</th>{% endif %}
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Target count</th><th>Completed</th><th>Target status</th><th>Productivity</th><th></th></tr>
 {% for s in subs %}<tr><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; {{s.emp_name}}</td><td>{{s.designation}}</td>{% endif %}
@@ -1940,7 +1955,7 @@ Non-productive: <b id="tn">0</b> hrs &middot; Balance: <b id="tb">{{day|g}}</b> 
 Productivity: <b id="tpct">0</b>% &middot; <b id="tstat"></b> <span class="mut">({{target|g}} productive hrs = 100%, target set by Admin)</span></div>
 <div id="tgtMsg" class="flash err" style="display:none" role="alert"></div>
 <div id="formerr" class="flash err" style="display:none" role="alert"></div>
-<button class="primary sm">Save</button> <button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='{{ '/admin/summary' if session.role=='admin' else '/employee' }}'">Back</button></form></div>
+<button class="primary sm">Save</button> {% if heading == 'Daily productivity entry' %}<button type="button" class="back sm" onclick="event.preventDefault();window.scrollTo({top:0,behavior:'smooth'});var d=document.querySelector('#entryCard [name=date]');if(d)d.focus({preventScroll:true});return false">Back</button>{% else %}<button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='{{ '/admin/summary' if session.role=='admin' else '/employee' }}'">Back</button>{% endif %}</form></div>
 <script>
 const WORK={{workday|g}}, PERM={{perm|tojson}}, MAXD={{maxdate|tojson}};
 const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}}, OTHER_H={{other_hours|g}};
@@ -2994,8 +3009,9 @@ def employee_home():
     perm_used = permission_hours_used(session["emp_id"], today[:7])
     cut = str(t0 - dt.timedelta(days=6))
     tgt_miss = [m for s_ in all_mine if s_["date"] >= cut for m in sub_misses(s_)][:12]     # newest entries first
-    return page(EMP_MARQUEE + EMP_TOP + EMP_ALERT + EMP_TARGET + body + '<h2>Submitted today</h2>' + LIST + BLOOM,
+    return page(EMP_MARQUEE + EMP_TOP + EMP_ALERT + EMP_TARGET + body + '<h2>Submitted today</h2>' + LIST + BLOOM + SAVED_ANIM,
                 title="Daily productivity", missed=missed, subs=mine, tgt_miss=tgt_miss, bloom=bool(session.pop("bloom", False)),
+                saved_anim=bool(session.pop("saved_anim", False)),
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
                 a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete, missing_fields=missing_fields,
                 today_perm=today_perm, perm_limit=PERMISSION_MONTHLY_LIMIT, perm_used=perm_used,
@@ -3070,6 +3086,7 @@ def employee_save():
         flash(err, "error"); return redirect("/employee")
     write_sub(uuid.uuid4().hex[:10], date, (session["band"], session["emp_id"], session["name"]), procs, notes)
     log_change(SEC_PROD, "Added", entry_added_details(date, procs, notes))
+    session["saved_anim"] = True       # Update95: 3-second 3D "Saved successfully" animation, shown on the same page after the data is saved
     flash("Saved." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else ""))
     miss = [] if is_off(date) else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
     if miss: flash(target_alert_text(miss), "error")           # employee is told straight away that the target was missed

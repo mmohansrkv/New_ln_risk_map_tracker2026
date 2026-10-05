@@ -51,6 +51,11 @@ Access rules (Update59):
   * Update78: Welcome Page opens first for Admin and Employee, no 'Continue' button, opens the Admin/Employee page by itself when it ends.
     Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
     melody, different from the earlier Mohanam tune), Welcome Page only.
+  * Update90: (1) Process Entries: choosing the "Other" process shows a work-details Description box; Hours and Count are still entered, but "Other"
+    is ALWAYS counted as 8 working hours (5, 6 or 7 entered = 8). Every other process keeps the hours actually entered. (2) Automatic reminder e-mail:
+    every day at 1:35 PM (REMINDER_TIME, app timezone) each employee who may submit the Daily Productivity Entry and has NOT yet submitted it for
+    today gets an e-mail on their Office Email ID. Needs SMTP_* environment variables (see REMINDER MAIL section). Sheets "Productivity Access"
+    (optional switch-off list) and "Email Log" are created automatically.
   * Update89: Leave & Permission - (1) employees can EDIT their own Permission requests (hours + reason, this month's and later records; an edit of an
     Approved/Rejected request goes back to Pending for Admin). (2) Productivity now follows the hours actually available in the day: a 2-hr
     Permission = 6 working hrs, a Half-Day Leave = 4 working hrs (8-hr day). Leave has a new "Day type" column (Full day / Half day).
@@ -192,6 +197,10 @@ HEADERS = {
     "Mahizhchi Attempts": ["Employee ID", "Employee name", "Started at", "Closed at", "Set", "Answered", "Correct", "Result", "Extra seconds"],
     # Update85: Connection Game (bonus round after all 5 Sets are won). 4 rows per Game = 4 groups of 4 words.
     "Mahizhchi Connections": ["Game", "Group name", "Word 1", "Word 2", "Word 3", "Word 4"],
+    # Update90: optional list to SWITCH OFF the Daily Productivity Entry for an employee (Enabled = No). No row / Enabled = Yes -> has access.
+    "Productivity Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
+    # Update90: one row per reminder e-mail (and one \"__RUN__\" row per day = the worker that sends that day's batch, so workers never double-send)
+    "Email Log": ["Date", "Employee ID", "Employee name", "Email", "Sent at", "Status"],
     "Mahizhchi Connection Attempts": ["Employee ID", "Employee name", "Game", "Started at", "Closed at", "Solved", "Mistakes", "Result", "Extra seconds"],
 }
 PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
@@ -619,6 +628,7 @@ def load_subs(emp_id=None):
         s["rows"].append(r["_row"])
         h = num(r["Hour"])
         if r["Type"] == "Process":
+            h = eff_hours(r["Process / Description"], h)          # Update90: "Other" always shows / counts as 8 hrs
             rate = tph.get(r["Process / Description"], 0)
             c = num(r["Count"]); t = h * rate
             s["procs"].append(dict(name=r["Process / Description"], hour=h, count=c,
@@ -650,6 +660,13 @@ def get_sub(sid):
     if not s: abort(404)
     if session["role"] == "employee" and s["emp_id"] != session["emp_id"]: abort(403)
     return s
+
+OTHER_PROCESS = "Other"
+OTHER_HOURS = 8.0          # Update90: the "Other" process always counts as a full 8-hour day, whatever hours were typed
+def is_other(name): return str(name or "").strip().lower() == OTHER_PROCESS.lower()
+def eff_hours(name, hours):
+    """Hours that count for a process line: 8 for "Other" (as long as some hours were entered), the entered hours for every other process."""
+    return OTHER_HOURS if (is_other(name) and hours > 0) else hours
 
 def approved_perm_hours(emp_id, date):
     """Approved permission hours for one employee on one date (they reduce the hours that must be logged)."""
@@ -697,7 +714,7 @@ def parse_form(emp_id):
     try: d = dt.date.fromisoformat(date)
     except ValueError: d = None
     rows_p = list(zip(g("pn"), g("ph"), g("pc"), g("pd")))
-    procs = [(n, num(h), num(c), desc.strip()) for n, h, c, desc in rows_p]
+    procs = [(n, eff_hours(n, num(h)), num(c), desc.strip()) for n, h, c, desc in rows_p]     # Update90: "Other" = 8 hrs, others = hours entered
     notes = [(t.strip(), num(h)) for t, h in zip(g("nd"), g("nh")) if num(h) > 0]
     tot = sum(p[1] for p in procs) + sum(n[1] for n in notes)
     half = any(num(h) <= 0 and t.strip() for t, h in zip(g("nd"), g("nh")))
@@ -709,7 +726,9 @@ def parse_form(emp_id):
              for n, h, c, desc in rows_p):
         err = "All Process Entry fields (Process, Hour, Count and Description) are mandatory - please fill every field before saving."
     elif half: err = "Please enter the Hour for every note you filled in - a note without hours is not saved."
-    elif tot > day_limit(): err = f"Total {tot:g} hrs is more than {day_limit():g} hrs."
+    elif sum(1 for p_ in procs if is_other(p_[0])) > 1: err = "\u201cOther\u201d can be added only once per day (it already counts as 8 hours)."
+    elif tot > day_limit():
+        err = f"Total {tot:g} hrs is more than {day_limit():g} hrs." + (" (\u201cOther\u201d always counts as 8 hours.)" if any(is_other(p_[0]) for p_ in procs) else "")
     else:
         need_h = required_hours(emp_id, date)
         if tot + 1e-9 < need_h:
@@ -1845,21 +1864,31 @@ Productivity: <b id="tpct">0</b>% &middot; <b id="tstat"></b> <span class="mut">
 <button class="primary">Save</button></form></div>
 <script>
 const WORK={{workday|g}}, PERM={{perm|tojson}}, MAXD={{maxdate|tojson}};
-const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}};
+const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}}, OTHER_H={{other_hours|g}};
+const isOther=v=>String(v==null?'':v).trim().toLowerCase()==='other';
+const effH=(nm,h)=>(isOther(nm)&&h>0)?OTHER_H:h;      // "Other" always counts as 8 hrs
+function rowH(r){return effH((r.querySelector('[name=pn]')||{}).value,+((r.querySelector('[name=ph]')||{}).value)||0)}
+function otherUI(r){const o=isOther((r.querySelector('[name=pn]')||{}).value),d=r.querySelector('[name=pd]');if(!d)return;
+ let n=r.querySelector('.oth-note');
+ if(o){d.placeholder='Description of the work done *';d.size=48;d.style.minWidth='320px';
+  if(!n){n=document.createElement('div');n.className='oth-note mut';n.style.cssText='flex-basis:100%;font-size:.85em;color:#b45309';r.insertBefore(n,r.querySelector('button.danger'))}
+  n.textContent='"Other": enter the work details in Description, plus Hours and Count. It is always counted as '+OTHER_H+' working hours, whatever hours you enter.'}
+ else{d.placeholder='Description *';d.size=28;d.style.minWidth='';if(n)n.remove()}}
 const E=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function row(h){const d=document.createElement('div');d.className='r';
  d.innerHTML=h+'<button type="button" class="danger" onclick="this.parentNode.remove();calc()">X</button>';return d}
-function addProc(p){p=p||{};document.getElementById('procs').appendChild(row(
- '<select name="pn" required onchange="calc()">'+P.map(n=>'<option '+(n==p.name?'selected':'')+'>'+E(n)+'</option>').join('')+'</select>'+
+function addProc(p){p=p||{};const _r=row(
+ '<select name="pn" required onchange="otherUI(this.parentNode);calc()">'+P.map(n=>'<option '+(n==p.name?'selected':'')+'>'+E(n)+'</option>').join('')+'</select>'+
  '<input name="ph" type="number" step="0.25" min="0.25" required placeholder="Hour *" value="'+(p.hour||'')+'" oninput="calc()">'+
  '<input name="pc" type="number" min="0" required placeholder="Count *" value="'+(p.count||'')+'" oninput="calc()">'+
- '<input name="pd" required placeholder="Description *" size="28" value="'+E(p.desc)+'">'));calc()}
+ '<input name="pd" required placeholder="Description *" size="28" value="'+E(p.desc)+'">');
+ document.getElementById('procs').appendChild(_r);otherUI(_r);calc()}
 function addNote(n){n=n||{};document.getElementById('notes').appendChild(row(
  '<input name="nd" placeholder="Description" size="30" value="'+E(n.desc)+'">'+
  '<input name="nh" type="number" step="0.25" min="0" placeholder="Hour" value="'+(n.hour||'')+'" oninput="calc()">'));calc()}
 function reqHrs(){const d=document.querySelector('[name=date]').value;return Math.max(WORK-(PERM[d]||0),0)}
 function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e.value||0),0);
- const p=s('[name=ph]'),n=s('[name=nh]'),b=DAY-p-n;
+ const p=[...document.querySelectorAll('#procs .r')].reduce((a,r)=>a+rowH(r),0),n=s('[name=nh]'),b=DAY-p-n;
  tp.textContent=p;tn.textContent=n;tb.textContent=b;tb.style.color=b<0?'red':'';
  tpct.textContent=Math.min(Math.round(p/TGT*100),100);
  const r=reqHrs(),left=Math.round((r-p-n)*100)/100;
@@ -1868,7 +1897,7 @@ function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e
  const prows=[...document.querySelectorAll('#procs .r')];                 // Target Count/Hour check (Admin-set, per process)
  const met=prows.length>0 && prows.every(row=>{
   const rate=T[(row.querySelector('[name=pn]')||{}).value]||0;
-  const hr=+((row.querySelector('[name=ph]')||{}).value)||0;
+  const hr=rowH(row);
   const ct=+((row.querySelector('[name=pc]')||{}).value)||0;
   const need=rate*hr;
   return need<=0 || ct>=need;                                             // no target set for that process = counted as met
@@ -1877,7 +1906,7 @@ function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e
  entryCard.classList.toggle('tgt-miss',!met);
  tgtBadge.textContent=met?'Target: Met':'Target: Not met';
  tgtBadge.className=met?'met':'miss';
- const low=[];prows.forEach(row=>{const nm=(row.querySelector('[name=pn]')||{}).value,rate=T[nm]||0,hr=+((row.querySelector('[name=ph]')||{}).value)||0,ct=+((row.querySelector('[name=pc]')||{}).value)||0,need=rate*hr;
+ const low=[];prows.forEach(row=>{const nm=(row.querySelector('[name=pn]')||{}).value,rate=T[nm]||0,hr=rowH(row),ct=+((row.querySelector('[name=pc]')||{}).value)||0,need=rate*hr;
   if(need>0&&ct<need)low.push(nm+': '+ct+' of '+Math.round(need*100)/100)});
  tgtMsg.textContent=low.length?('⚠ Target not achieved (8-hour target) – '+low.join(' | ')):'';tgtMsg.style.display=low.length?'block':'none'}
 document.querySelector('[name=date]').addEventListener('change',calc);
@@ -1889,7 +1918,7 @@ document.querySelector('form[action="{{action}}"]').addEventListener('submit',fu
  if(!document.querySelector('[name=pn]')){e.preventDefault();return showErr('Add at least one process entry.')}
  const bad=[...document.querySelectorAll('#procs [name]')].some(x=>!String(x.value).trim());
  if(bad){e.preventDefault();return showErr('All Process Entry fields are mandatory - fill every field before saving.')}
- const t=[...document.querySelectorAll('[name=ph],[name=nh]')].reduce((a,x)=>a+(+x.value||0),0),r=reqHrs();
+ const t=[...document.querySelectorAll('#procs .r')].reduce((a,r2)=>a+rowH(r2),0)+[...document.querySelectorAll('[name=nh]')].reduce((a,x)=>a+(+x.value||0),0),r=reqHrs();
  if(t+1e-9<r){e.preventDefault();showErr('Entry incomplete: '+t+' of the required '+r+' working hours logged. Complete all '+r+' hours before saving.')}
 });
 {{sub.procs|tojson}}.forEach(addProc);{{sub.notes|tojson}}.forEach(addNote);
@@ -2548,11 +2577,12 @@ def employee_login():
 def form_page(sub, action, heading):
     procs = rows("Processes")
     names = [r["Process name"] for r in procs]
+    if not any(is_other(n) for n in names): names.append(OTHER_PROCESS)       # Update90: "Other" is always available
     tph = process_rates()
     perm = {d: h for (_k, d), h in deduction_map(sub.get("emp_id")).items()}      # approved permission + half-day leave hours, by date
     maxdate = ""          # no upper limit on the entry date - employees may pick any date they need
     return FORM, dict(sub=sub, action=action, heading=heading, names=names, tph=tph, day=day_limit(), target=target_hours(),
-                      workday=float(DAY_HOURS), perm=perm, maxdate=maxdate)
+                      workday=float(DAY_HOURS), perm=perm, maxdate=maxdate, other_hours=OTHER_HOURS)
 
 def gender_of(emp):
     g = str(emp.get("Gender", "")).strip().lower()
@@ -5007,6 +5037,119 @@ def employee_mahizhchi_connect_guess():
         if mist >= MZ_CONN_MISTAKES: result = "Lost"; flash("No mistakes left - the Connection Game is over.", "error")
     mz_conn_save(att, solved, mist, result)
     return redirect("/employee/mahizhchi")
+
+
+# ---------------------------------------------------------------- Update90: REMINDER MAIL (Daily Productivity Entry not submitted)
+# Every day at REMINDER_TIME (default 13:35, app timezone) each employee who may submit the Daily Productivity Entry and has not
+# submitted it for today receives an e-mail on their registered Office Email ID.
+# Environment variables:  SMTP_HOST (required), SMTP_PORT (587; 465 = SSL), SMTP_USER, SMTP_PASS, MAIL_FROM (default SMTP_USER),
+#                         REMINDER_TIME ("13:35"), REMINDER_GRACE_MIN (30 = still sends if the server starts up to 30 min late),
+#                         REMINDER_ENABLED ("1"), APP_URL (optional link placed in the mail).
+import smtplib, ssl
+from email.message import EmailMessage
+from email.utils import formataddr
+REMINDER_ENABLED = os.getenv("REMINDER_ENABLED", "1") == "1"
+REMINDER_TIME = os.getenv("REMINDER_TIME", "13:35")
+REMINDER_GRACE_MIN = int(os.getenv("REMINDER_GRACE_MIN", "30"))
+SMTP_HOST, SMTP_PORT = os.getenv("SMTP_HOST", "").strip(), int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER, SMTP_PASS = os.getenv("SMTP_USER", "").strip(), os.getenv("SMTP_PASS", "")
+MAIL_FROM = os.getenv("MAIL_FROM", "").strip() or SMTP_USER
+APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
+_WORKER_ID = uuid.uuid4().hex[:8]
+_reminder_done = set()          # dates this process has already handled
+
+def productivity_access(eid, access_rows):
+    """Everyone may submit the Daily Productivity Entry unless the 'Productivity Access' sheet has a row for them with Enabled = No."""
+    for r in access_rows:
+        if _key(r.get("Employee ID", "")) == _key(eid):
+            return str(r.get("Enabled", "")).strip().lower() not in ("no", "n", "false", "0", "disabled")
+    return True
+
+def employee_office_email(e):
+    return str(e.get("Office Email ID") or e.get("Email") or "").strip()      # Office Email ID mirrors the login Email
+
+def reminder_recipients(date):
+    """Employees who have access to the entry, have not submitted it for `date`, and are not off that day (weekly off / holiday / full-day leave)."""
+    if is_off(date): return []
+    emps = _fetch_rows("Employees"); access = _fetch_rows("Productivity Access")
+    done = {_key(r.get("Employee ID", "")) for r in _fetch_rows("Productivity log") if str(r.get("Date", "")).strip() == date}
+    on_leave = {_key(l.get("Employee ID", "")) for l in _fetch_rows("Leave")
+                if str(l.get("Date", "")).strip() == date and leave_status(l) == "Approved" and not leave_is_half(l)}
+    out = []
+    for e in emps:
+        k = _key(e.get("Employee ID", ""))
+        mail = employee_office_email(e)
+        if not k or not mail or "@" not in mail: continue
+        if k in done or k in on_leave or not productivity_access(k, access): continue
+        out.append(dict(eid=str(e["Employee ID"]), name=str(e.get("Name", "")), email=mail))
+    return out
+
+def reminder_message(emp, date):
+    d = dt.date.fromisoformat(date).strftime("%d %b %Y")
+    msg = EmailMessage()
+    msg["Subject"] = f"Reminder: Daily Productivity Entry for {d} not yet submitted"
+    msg["From"] = formataddr(("Productivity Tracker", MAIL_FROM)); msg["To"] = emp["email"]
+    link = f"\n\nSubmit it here: {APP_URL}/employee" if APP_URL else ""
+    msg.set_content(f"Hello {emp['name']},\n\nYour Daily Productivity Entry for today ({d}) has not yet been submitted.\n"
+                    f"Please log in and submit it as soon as possible.{link}\n\nThank you,\nProductivity Tracker")
+    h = f'<p>Hello {emp["name"]},</p><p><b>Your Daily Productivity Entry for today ({d}) has not yet been submitted.</b><br>Please log in and submit it as soon as possible.</p>'
+    if APP_URL: h += f'<p><a href="{APP_URL}/employee">Open the Daily Productivity Entry</a></p>'
+    msg.add_alternative(h + "<p>Thank you,<br>Productivity Tracker</p>", subtype="html")
+    return msg
+
+def _smtp_send(messages):
+    """Send all messages over ONE SMTP connection. Returns {email: 'Sent' | 'Failed: reason'}."""
+    res = {}
+    ctx = ssl.create_default_context()
+    srv = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ctx, timeout=30) if SMTP_PORT == 465 else smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30)
+    try:
+        if SMTP_PORT != 465:
+            srv.ehlo(); srv.starttls(context=ctx); srv.ehlo()
+        if SMTP_USER: srv.login(SMTP_USER, SMTP_PASS)
+        for m in messages:
+            try: srv.send_message(m); res[m["To"]] = "Sent"
+            except Exception as ex: res[m["To"]] = ("Failed: " + str(ex))[:200]
+    finally:
+        try: srv.quit()
+        except Exception: pass
+    return res
+
+def run_daily_reminder(date=None):
+    """Send today's reminders once. Safe with several workers/servers: the first worker to log the '__RUN__' row for the date sends the batch."""
+    date = date or str(today_local())
+    if not SMTP_HOST or not MAIL_FROM:
+        print("Reminder mail: SMTP_HOST / MAIL_FROM not set - no reminder e-mails sent."); return 0
+    ws = ws_of("Email Log")
+    ws.append_row([date, "__RUN__", _WORKER_ID, "", now_local().strftime("%Y-%m-%d %H:%M:%S"), "Claimed"], value_input_option="RAW")
+    invalidate_cache("Email Log")
+    runs = [r for r in _fetch_rows("Email Log") if str(r.get("Date", "")).strip() == date and str(r.get("Employee ID", "")) == "__RUN__"]
+    if not runs or str(runs[0].get("Employee name", "")) != _WORKER_ID: return 0          # another worker already owns today's batch
+    already = {_key(r.get("Employee ID", "")) for r in _fetch_rows("Email Log")
+               if str(r.get("Date", "")).strip() == date and str(r.get("Status", "")) == "Sent"}
+    todo = [e for e in reminder_recipients(date) if _key(e["eid"]) not in already]
+    if not todo: return 0
+    res = _smtp_send([reminder_message(e, date) for e in todo])
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S")
+    ws.append_rows([[date, e["eid"], e["name"], e["email"], now, res.get(e["email"], "Failed")] for e in todo], value_input_option="RAW")
+    invalidate_cache("Email Log")
+    return sum(1 for v in res.values() if v == "Sent")
+
+def _reminder_loop():
+    try: hh, mm = (int(x) for x in REMINDER_TIME.split(":")[:2])
+    except Exception: hh, mm = 13, 35
+    while True:
+        time.sleep(20)
+        try:
+            now = now_local(); today = str(now.date())
+            due = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if today in _reminder_done or not (due <= now <= due + dt.timedelta(minutes=REMINDER_GRACE_MIN)): continue
+            _reminder_done.add(today)
+            n = run_daily_reminder(today)
+            print(f"Reminder mail {today}: {n} sent")
+        except Exception as ex:
+            print("Reminder mail error:", ex)
+if REMINDER_ENABLED and os.getenv("WERKZEUG_RUN_MAIN", "true") == "true":       # not in the debug reloader's parent process
+    threading.Thread(target=_reminder_loop, daemon=True).start()
 
 if __name__ == "__main__":
     # NOTE: Flask's built-in dev server (even with threaded=True) is still not

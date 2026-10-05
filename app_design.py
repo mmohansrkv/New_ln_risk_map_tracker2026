@@ -51,6 +51,9 @@ Access rules (Update59):
   * Update78: Welcome Page opens first for Admin and Employee, no 'Continue' button, opens the Admin/Employee page by itself when it ends.
     Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
     melody, different from the earlier Mohanam tune), Welcome Page only.
+  * Update89: Leave & Permission - (1) employees can EDIT their own Permission requests (hours + reason, this month's records; an edit of an
+    Approved/Rejected request goes back to Pending for Admin). (2) Productivity now follows the hours actually available in the day: a 2-hr
+    Permission = 6 working hrs, a Half-Day Leave = 4 working hrs (8-hr day). Leave has a new "Day type" column (Full day / Half day).
   * Update88: fixed "Method Not Allowed" when moving between Mahizhchi Sets (game POST routes now also accept GET and redirect; global 405 handler redirects);
     Admin pages auto-refresh every 2 minutes (admin browser only - employees are unaffected); Admin -> Mahizhchi "Connection Game" tab removed.
   * Update80: the old Chat button/page/routes are removed completely. NEW Group Chat icon (bottom-right, employee pages): opens a chat panel for the
@@ -168,7 +171,7 @@ HEADERS = {
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
     "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at",
-              "Status", "Reviewed at", "Reviewed by"],
+              "Status", "Reviewed at", "Reviewed by", "Day type"],
     "Permissions": ["Permission ID", "Date", "Employee ID", "Employee name", "Band", "Hours", "Reason",
                      "Applied at", "Status", "Reviewed at", "Reviewed by"],
     "Holidays": ["Date", "Name"],
@@ -604,6 +607,7 @@ def load_subs(emp_id=None):
     T = target_hours()
     dm = desig_map()
     tph = process_rates()
+    ded = deduction_map(emp_id)
     subs = {}
     want = _key(emp_id) if emp_id is not None else None
     for r in rows("Productivity log"):
@@ -628,7 +632,9 @@ def load_subs(emp_id=None):
         s["non"] = sum(n["hour"] for n in s["notes"])
         s["total"] = s["prod"] + s["non"]
         s["earned"] = sum(p["earned"] for p in s["procs"])     # hours' worth of standard output
-        s["pct"] = min(round(s["prod"] / T * 100), 100) if T else 0  # target hrs (set by Admin) logged = 100%
+        s["ded"] = ded.get((_key(s["emp_id"]), str(s["date"])), 0.0)          # approved permission / half-day leave hours that day
+        s["avail"] = max(T - s["ded"], 0.0)                                   # working hours left = target hrs less those hours
+        s["pct"] = (min(round(s["prod"] / s["avail"] * 100), 100) if s["avail"] > 0 else (100 if s["prod"] > 0 else 0))   # available hrs logged = 100%
         s["off"] = is_off(s["date"])                            # weekly-off entry: saved, not counted
         # Update66: Admin-set Target Count vs. what the employee completed (target pro-rated to the hours booked)
         s["tgt_total"] = round(sum(p["hour"] * tph.get(p["name"], 0) for p in s["procs"]), 2)
@@ -651,9 +657,38 @@ def approved_perm_hours(emp_id, date):
                if str(r.get("Employee ID")) == str(emp_id) and str(r.get("Date")) == str(date)
                and str(r.get("Status", "")).strip() == "Approved")
 
+HALF_DAY_HOURS = DAY_HOURS / 2.0          # a Half-Day Leave removes half of the 8-hour working day (4 hrs)
+
+def leave_is_half(l):
+    return str(l.get("Day type", "")).strip().lower().startswith("half")
+app.jinja_env.filters["lhalf"] = leave_is_half
+
+def deduction_map(emp_id=None):
+    """{(EMPLOYEE ID key, 'YYYY-MM-DD'): hours taken OFF that working day} = APPROVED permission hours + 4 hrs for an APPROVED
+    Half-Day Leave. One pass over the (cached) Permissions + Leave sheets; pass emp_id to look at one employee only."""
+    want = _key(emp_id) if emp_id is not None else None
+    out = {}
+    for r in rows("Permissions"):
+        if str(r.get("Status", "")).strip() != "Approved": continue
+        k = _key(r.get("Employee ID", ""))
+        if want is not None and k != want: continue
+        key = (k, str(r.get("Date", "")))
+        out[key] = out.get(key, 0.0) + num(r.get("Hours"))
+    for l in rows("Leave"):
+        if leave_status(l) != "Approved" or not leave_is_half(l): continue
+        k = _key(l.get("Employee ID", ""))
+        if want is not None and k != want: continue
+        key = (k, str(l.get("Date", "")))
+        out[key] = out.get(key, 0.0) + HALF_DAY_HOURS
+    return {k: min(v, float(DAY_HOURS)) for k, v in out.items()}
+
+def day_deduction(emp_id, date):
+    return deduction_map(emp_id).get((_key(emp_id), str(date)), 0.0)
+
 def required_hours(emp_id, date):
-    """Hours that must be logged for a day to be complete: the 8-hour working day minus approved permission."""
-    return max(float(DAY_HOURS) - approved_perm_hours(emp_id, date), 0.0)
+    """Hours that must be logged for a day to be complete: the 8-hour working day minus approved permission / half-day leave
+    (2-hr permission = 6 hrs, half-day leave = 4 hrs)."""
+    return max(float(DAY_HOURS) - day_deduction(emp_id, date), 0.0)
 
 def parse_form(emp_id):
     f = request.form; g = f.getlist
@@ -680,7 +715,9 @@ def parse_form(emp_id):
     else:
         need_h = required_hours(emp_id, date)
         if tot + 1e-9 < need_h:
-            err = (f"Entry incomplete: {tot:g} of the required {need_h:g} working hours logged "
+            cut = float(DAY_HOURS) - need_h
+            why = f" ({DAY_HOURS:g}-hour day less {cut:g} hr approved permission / half-day leave)" if cut > 0 else ""
+            err = (f"Entry incomplete: {tot:g} of the required {need_h:g} working hours logged{why} "
                    f"({need_h - tot:g} hrs remaining). Complete all {need_h:g} hours before saving.")
     return date, procs, notes, err
 
@@ -1865,7 +1902,7 @@ VIEW = """<div class="card"><h2>{{s.date}} &middot; {{s.emp_name}} ({{s.emp_id}}
 {% for p in s.procs %}<tr><td>{{p.name}}</td><td>{{p.desc}}</td><td>{{p.hour|g}}</td><td>{{p.count|g}}</td><td>{{p.target|g}}</td>
 <td>{{ (p.pct ~ '%') if p.pct is not none else '-' }}</td></tr>{% endfor %}</table><br>
 <table><tr><th>Notes</th><th>Hour</th></tr>{% for n in s.notes %}<tr><td>{{n.desc}}</td><td>{{n.hour|g}}</td></tr>{% endfor %}</table>
-<div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day|g}} hrs &middot; {% if s.off %}<b>Weekend entry - not counted</b>{% else %}Productivity: <b>{{s.pct}}%</b> ({{target|g}} hrs = 100%){% endif %}</div>
+<div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day|g}} hrs &middot; {% if s.off %}<b>Weekend entry - not counted</b>{% else %}Productivity: <b>{{s.pct}}%</b> ({{s.avail|g}} hrs = 100%{% if s.ded %} &ndash; {{target|g}}-hr day less {{s.ded|g}} hr permission / half-day leave{% endif %}){% endif %}</div>
 <a href="{{back}}">Back</a></div>"""
 
 # ---------------------------------------------------------------- routes: common
@@ -2215,7 +2252,7 @@ def admin_leave_permission():
         for first, last, n, applied, reason, lrows in _leave_runs(rows("Leave")):
             if str(last["Date"]) < m0 or str(first["Date"]) > m1: continue
             r = dict(who(first["Employee ID"], first["Employee name"], first["Band"]), type="Leave",
-                     start=first["Date"], end=last["Date"], dur=f"{n} day{'s' if n != 1 else ''}", days=n, hrs=0,
+                     start=first["Date"], end=last["Date"], dur=("Half day (4 hrs)" if leave_is_half(first) else f"{n} day{'s' if n != 1 else ''}"), days=(0.5 if leave_is_half(first) else n), hrs=0,
                      reason=reason, applied=applied, status=leave_status(first), reviewed=first.get("Reviewed at", ""),
                      by=first.get("Reviewed by", ""), row=first["_row"], lrows=",".join(map(str, lrows)))
             if match(r): out.append(r)
@@ -2337,9 +2374,10 @@ T_LEAVE = """<p class="mut">This month's balance (working days / hours used agai
 <div class="kpi"><span>Permission remaining</span><b>{{perm_remaining|g}} hrs</b></div></div>
 <div class="card no-print"><h2>Add leave</h2><form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/leave" class="grid">
 <label>From date<input type="date" name="d1" required></label><label>To date<input type="date" name="d2" required></label>
+<label>Day type<select name="daytype"><option value="Full day">Full day</option><option value="Half day">Half day (4 hrs)</option></select></label>
 <label>Reason<input name="reason" placeholder="Reason"></label><button class="primary">Add leave</button></form></div>
 <table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th><th>Reviewed at</th><th class="no-print"></th></tr>
-{% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']|t12}}</td>
+{% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}{% if r|lhalf %} <span class="pill act">Half day</span>{% endif %}</td><td>{{r['Applied at']|t12}}</td>
 <td><span class="pill {{st|ppill}}">{{st}}</span></td><td>{{(r['Reviewed at'] or '-')|t12}}</td>
 <td class="act no-print">{% if st!='Approved' %}<form method="post" action="/admin/leave-permission/leave-review"><input type="hidden" name="eid" value="{{emp['Employee ID']}}"><input type="hidden" name="rows" value="{{r['_row']}}"><input type="hidden" name="status" value="Approved"><input type="hidden" name="next" value="/admin/employee-info/{{emp['Employee ID']|urlencode}}?tab=leave"><button class="primary">Approve</button></form>{% endif %}
 {% if st!='Rejected' %}<form method="post" action="/admin/leave-permission/leave-review" onsubmit="return confirm('Reject this leave?')"><input type="hidden" name="eid" value="{{emp['Employee ID']}}"><input type="hidden" name="rows" value="{{r['_row']}}"><input type="hidden" name="status" value="Rejected"><input type="hidden" name="next" value="/admin/employee-info/{{emp['Employee ID']|urlencode}}?tab=leave"><button class="danger">Reject</button></form>{% endif %}<form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/leave/{{r['_row']}}/delete"
@@ -2453,7 +2491,7 @@ def admin_employee_leave_add(eid):
     emp = emp_or_404(eid)
     try:
         leave_range_check(request.form['d1'], request.form['d2'])
-        flash(f"{add_leave(emp, request.form['d1'], request.form['d2'], request.form['reason'].strip(), status="Approved")} leave day(s) added (holiday dates are skipped).")
+        flash(f"{add_leave(emp, request.form['d1'], request.form['d2'], request.form['reason'].strip(), status="Approved", day_type=request.form.get('daytype', 'Full day'))} leave day(s) added (holiday dates are skipped).")
     except (ValueError, TypeError) as e:
         flash(str(e))
     return redirect(f"/admin/employee-info/{eid}?tab=leave")
@@ -2513,10 +2551,7 @@ def form_page(sub, action, heading):
     procs = rows("Processes")
     names = [r["Process name"] for r in procs]
     tph = process_rates()
-    perm = {}
-    for r in rows("Permissions"):
-        if str(r.get("Employee ID")) == str(sub.get("emp_id")) and str(r.get("Status", "")).strip() == "Approved":
-            perm[str(r.get("Date"))] = perm.get(str(r.get("Date")), 0) + num(r.get("Hours"))
+    perm = {d: h for (_k, d), h in deduction_map(sub.get("emp_id")).items()}      # approved permission + half-day leave hours, by date
     maxdate = str(today_local()) if session.get("role") == "employee" else ""
     return FORM, dict(sub=sub, action=action, heading=heading, names=names, tph=tph, day=day_limit(), target=target_hours(),
                       workday=float(DAY_HOURS), perm=perm, maxdate=maxdate)
@@ -2873,15 +2908,20 @@ def employee_productivity():
                     if str(r["Employee ID"]) == session["emp_id"] and str(r["Date"]).startswith(month)),
                    key=lambda r: r["Applied at"], reverse=True)
     m_perm = sum(num(r.get("Hours")) for r in perms if str(r.get("Status", "")).strip() == "Approved")
-    m_prod = sum(s["prod"] for s in counted) + m_perm   # approved permission hours count toward productivity
+    m_prod = sum(s["prod"] for s in counted)             # hours really worked
     m_non = sum(s["non"] for s in counted)
+    m_ded = sum(s["ded"] for s in counted)               # approved permission + half-day leave hours taken off the days worked
+    m_avail = sum(s["avail"] for s in counted)           # working hours available (100%)
+    m_pct = min(round(m_prod / m_avail * 100), 100) if m_avail > 0 else 0
     body = (
         '<div class="head"><h1>Productivity Info</h1></div>'
         '<h2>This month (' + today.strftime("%B %Y") + ')</h2>'
         '<div class="totals">Entries: <b>{{m_count}}</b> &middot; '
-        'Productive: <b>{{m_prod|g}}</b> hrs (incl. <b>{{m_perm|g}}</b> approved permission hrs) &middot; '
+        'Productive: <b>{{m_prod|g}}</b> hrs &middot; '
         'Non-productive: <b>{{m_non|g}}</b> hrs &middot; '
-        'Total: <b>{{(m_prod + m_non)|g}}</b> hrs</div>'
+        'Total: <b>{{(m_prod + m_non)|g}}</b> hrs<br>'
+        'Working hours available: <b>{{m_avail|g}}</b> hrs (after <b>{{m_ded|g}}</b> hrs approved permission / half-day leave) &middot; '
+        'Productivity: <b>{{m_pct}}%</b></div>'
         + LIST.replace("in subs", "in msubs")
         + '<h2>Permission requests (' + today.strftime("%B %Y") + ')</h2>'
         + '<table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th></tr>'
@@ -2889,7 +2929,7 @@ def employee_productivity():
         + '<td><span class="pill {{r["Status"]|ppill}}">{{r["Status"]}}</span></td></tr>'
         + '{% else %}<tr><td colspan="5">No permission requests this month.</td></tr>{% endfor %}</table>')
     return page(body, title="Productivity Info", msubs=month_subs, m_count=m_count, m_prod=m_prod, m_non=m_non,
-                m_perm=m_perm, perms=perms)
+                m_perm=m_perm, perms=perms, m_ded=m_ded, m_avail=m_avail, m_pct=m_pct)
 
 @app.route("/employee/save", methods=["POST"])
 @need("employee")
@@ -2963,19 +3003,26 @@ def report(employees, subs, leaves, start, end):
     wd, a, b, out = workdays(start, end), str(start), str(end), []
     T = target_hours()
     perms = rows("Permissions")     # fetched once, filtered per employee below
+    dmap = deduction_map()          # approved permission / half-day leave hours per employee and date
     leaves = live_leaves(leaves)    # rejected leave does not count
     for e in employees:
         eid = str(e["Employee ID"])
         mine = [s for s in subs if str(s["emp_id"]) == eid and a <= s["date"] <= b and not s["off"]]
         days = {s["date"] for s in mine}
-        lv = {l["Date"] for l in leaves if str(l["Employee ID"]) == eid and a <= l["Date"] <= b and not is_off(l["Date"])}
+        mylv = [l for l in leaves if str(l["Employee ID"]) == eid and a <= l["Date"] <= b and not is_off(l["Date"])]
+        lv = {l["Date"] for l in mylv if not leave_is_half(l)}          # full-day leave: the whole day is excused
+        half = {l["Date"] for l in mylv if leave_is_half(l)}            # half-day leave: 4 hrs still have to be worked
         perm_hrs = sum(num(r.get("Hours")) for r in perms
                        if str(r["Employee ID"]) == eid and a <= str(r["Date"]) <= b
                        and str(r.get("Status", "")).strip() == "Approved")
-        prod_hrs = sum(s["prod"] for s in mine) + perm_hrs   # approved permission hours count toward productivity
-        base = len(days) * T                             # target hrs (set by Admin) per present day = 100%
-        out.append(dict(id=eid, name=e["Name"], band=e["Band"], designation=e.get("Designation", ""), present=len(days), leave=len(lv),
-                        absent=max(wd - len(days | lv), 0), wd=wd,
+        prod_hrs = sum(s["prod"] for s in mine)                       # hours really worked
+        # 100% = the hours AVAILABLE on each day worked: target (8) less approved permission / half-day leave (2-hr permission = 6, half day = 4)
+        base = sum(max(T - dmap.get((_key(eid), str(d)), 0.0), 0.0) for d in days)
+        leave_n = len(lv) + 0.5 * len(half)
+        absent_n = max(wd - len(days | lv) - 0.5 * len(half - days), 0)
+        out.append(dict(id=eid, name=e["Name"], band=e["Band"], designation=e.get("Designation", ""), present=len(days),
+                        leave=int(leave_n) if leave_n == int(leave_n) else leave_n,
+                        absent=int(absent_n) if absent_n == int(absent_n) else absent_n, wd=wd,
                         att=min(round(len(days) / wd * 100), 100) if wd else 0,
                         pct=min(round(prod_hrs / base * 100), 100) if base else 0,
                         prod=prod_hrs, non=sum(s["non"] for s in mine), perm=perm_hrs))
@@ -2994,31 +3041,34 @@ def leave_days_used(eid, month):
     """Working (non weekly-off, non-holiday) leave days already applied for (Pending + Approved;
     Rejected doesn't count) by this employee in the given month ('YYYY-MM')."""
     eid = str(eid)
-    return sum(1 for r in rows("Leave")
+    return sum(0.5 if leave_is_half(r) else 1 for r in rows("Leave")
                if str(r["Employee ID"]) == eid and str(r["Date"]).startswith(month)
                and leave_status(r) != "Rejected" and not is_off(r["Date"]))
 
-def add_leave(emp, d1, d2, reason, status="Pending", enforce_limit=None):
+def add_leave(emp, d1, d2, reason, status="Pending", enforce_limit=None, day_type="Full day"):
     """Employees' leave starts as Pending (admin approves/rejects); leave added by admin is Approved.
     Self-service (Pending) requests are capped at LEAVE_MONTHLY_LIMIT working days per calendar month
     (Pending + Approved count against the limit); admin-added leave is not capped unless requested."""
     a, b = dt.date.fromisoformat(d1), dt.date.fromisoformat(d2)
     if b < a or (b - a).days > 31:
         raise ValueError("Choose a valid date range (max 31 days).")
+    day_type = "Half day" if str(day_type).strip().lower().startswith("half") else "Full day"
+    if day_type == "Half day" and a != b:
+        raise ValueError("A half-day leave is for ONE date - choose the same From and To date.")
     if enforce_limit is None:
         enforce_limit = (status == "Pending")
     eid = str(emp["Employee ID"])
     have = {l["Date"] for l in live_leaves(rows("Leave")) if str(l["Employee ID"]) == eid}
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
     new = [[str(a + dt.timedelta(days=i)), eid, emp["Name"], emp["Band"], reason or "Leave", now, status,
-           now if status != "Pending" else "", "Admin" if status != "Pending" else ""]
+           now if status != "Pending" else "", "Admin" if status != "Pending" else "", day_type]
            for i in range((b - a).days + 1)]
     new = [r for r in new if r[0] not in have and not is_holiday(r[0])]   # nothing is recorded against a holiday
     if enforce_limit and new:
         added_by_month = {}
         for r in new:
             if not is_off(r[0]):
-                added_by_month[r[0][:7]] = added_by_month.get(r[0][:7], 0) + 1
+                added_by_month[r[0][:7]] = added_by_month.get(r[0][:7], 0) + (0.5 if day_type == "Half day" else 1)
         for month, add_days in added_by_month.items():
             used = leave_days_used(eid, month)
             if used + add_days > LEAVE_MONTHLY_LIMIT:
@@ -3087,7 +3137,7 @@ def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
     eid = str(eid)
     leaves = live_leaves(leaves)
     done = {s["date"] for s in subs if str(s["emp_id"]) == eid} | \
-           {l["Date"] for l in leaves if str(l["Employee ID"]) == eid}
+           {l["Date"] for l in leaves if str(l["Employee ID"]) == eid and not leave_is_half(l)}      # a half-day leave still needs an entry (4 hrs)
     out, d = [], start
     while d <= end:
         if not is_off(d) and str(d) not in done:
@@ -3197,16 +3247,17 @@ LEAVE_EMP = """<style>
 .lpsum li{margin:0;line-height:1.4}.lpsum b{color:var(--ink);font-size:12px;font-weight:600}
 </style><div class="lp"><div class="head"><h1>Leave &amp; Permission</h1><a href="/employee">Back to daily entry</a></div>
 
-<div class="card"><h2>Apply leave</h2><p class="mut">Up to {{leave_limit|g}} working day(s) of leave per calendar month (weekly-offs and holidays don't count against the limit).</p>
+<div class="card"><h2>Apply leave</h2><p class="mut">Up to {{leave_limit|g}} working day(s) of leave per calendar month (weekly-offs and holidays don't count against the limit). A <b>half-day leave</b> counts as 0.5 day, is for one date only, and leaves you 4 working hours that day.</p>
 <ul class="lpsum"><li>Monthly Limit: <b>{{leave_limit|g}} day(s)</b></li><li>Used This Month: <b>{{leave_used|g}} day(s)</b></li><li>Remaining: <b>{{leave_remaining|g}} day(s)</b></li></ul>
 <form method="post" action="/employee/leave" class="grid">
 <label>From date<input type="date" name="d1" value="{{today}}" required></label>
 <label>To date<input type="date" name="d2" value="{{today}}" required></label>
+<label>Day type<select name="daytype"><option value="Full day">Full day</option><option value="Half day">Half day (4 hrs)</option></select></label>
 <label>Reason<input name="reason" size="30" placeholder="Reason"></label>
 <button class="primary">Submit leave</button></form></div>
 {% if hols %}<p class="mut">&#127774; <b>Upcoming holidays</b> (no leave, permission or productivity entry needed): {% for d,n in hols %}{{d}}{% if n %} - {{n}}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
 <h2>My leave days</h2><table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
-{% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']|t12}}</td>
+{% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}{% if r|lhalf %} <span class="pill act">Half day</span>{% endif %}</td><td>{{r['Applied at']|t12}}</td>
 <td><span class="pill {{st|ppill}}">{{st}}</span></td>
 <td>{% if st=='Pending' %}<form method="post" action="/employee/leave/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this leave?')"><button class="danger">Cancel</button></form>{% else %}-{% endif %}</td></tr>
 {% else %}<tr><td colspan="5">No leave yet.</td></tr>{% endfor %}</table>
@@ -3221,13 +3272,20 @@ LEAVE_EMP = """<style>
 <h2>My permission requests</h2><table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
 {% for r in perm_data %}<tr><td>{{r['Date']}}</td><td>{{r['Hours']|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']|t12}}</td>
 <td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td>
-<td>{% if r['Status']=='Pending' %}<form method="post" action="/employee/permission/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this request?')"><button class="danger">Cancel</button></form>{% else %}-{% endif %}</td></tr>
+<td>{% if r['Date'][:7]==today[:7] %}<details><summary class="mut" style="cursor:pointer">Edit</summary>
+<form method="post" action="/employee/permission/{{r['_row']}}/edit" class="grid" style="margin-top:6px"><input type="hidden" name="pid" value="{{r['Permission ID']}}">
+<label>Hours<input type="number" name="hours" step="0.25" min="0.25" max="{{perm_limit}}" value="{{r['Hours']|g}}" required></label>
+<label>Reason<input name="reason" size="24" value="{{r['Reason']}}" required></label>
+<button class="primary">Save</button></form>
+{% if r['Status']!='Pending' %}<p class="mut">Saving a change sends this request back to Pending for admin approval.</p>{% endif %}</details>{% endif %}
+{% if r['Status']=='Pending' %}<form method="post" action="/employee/permission/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this request?')"><button class="danger">Cancel</button></form>{% elif r['Date'][:7]!=today[:7] %}-{% endif %}</td></tr>
 {% else %}<tr><td colspan="6">No permission requests yet.</td></tr>{% endfor %}</table></div>"""
 
 LEAVE_ADMIN = """<div class="head"><h1>Leave log</h1></div>
 <div class="card"><form method="post" class="grid">
 <label>Employee<select name="emp">{% for e in emps %}<option value="{{e['Employee ID']}}">{{e['Employee ID']}} - {{e['Name']}}</option>{% endfor %}</select></label>
 <label>From date<input type="date" name="d1" required></label><label>To date<input type="date" name="d2" required></label>
+<label>Day type<select name="daytype"><option value="Full day">Full day</option><option value="Half day">Half day (4 hrs)</option></select></label>
 <label>Reason<input name="reason" placeholder="Reason"></label><button class="primary">Add leave</button></form></div>
 <table><tr><th>Date</th><th>Employee</th><th>Designation</th><th>Band</th><th>Reason</th><th>Applied at</th><th></th></tr>
 {% for r in data %}<tr><td>{{r['Date']}}</td><td>{{r['Employee ID']}} &middot; {{r['Employee name']}}</td><td>{{r['Designation']}}</td><td>{{r['Band']}}</td>
@@ -3383,7 +3441,7 @@ def admin_leave():
         emp = next((e for e in emps if str(e["Employee ID"]) == request.form["emp"]), None)
         try:
             leave_range_check(request.form['d1'], request.form['d2'])
-            flash(f"{add_leave(emp, request.form['d1'], request.form['d2'], request.form['reason'].strip(), status="Approved")} leave day(s) added (holiday dates are skipped).")
+            flash(f"{add_leave(emp, request.form['d1'], request.form['d2'], request.form['reason'].strip(), status="Approved", day_type=request.form.get('daytype', 'Full day'))} leave day(s) added (holiday dates are skipped).")
         except (ValueError, TypeError) as e:
             flash(str(e))
         return redirect("/admin/leave")
@@ -3468,11 +3526,11 @@ def employee_leave():
     if request.method == "POST":
         try:
             skipped = leave_range_check(request.form['d1'], request.form['d2'])
-            n = add_leave(my_emp(), request.form['d1'], request.form['d2'], request.form['reason'].strip())
+            n = add_leave(my_emp(), request.form['d1'], request.form['d2'], request.form['reason'].strip(), day_type=request.form.get('daytype', 'Full day'))
             if n:
                 d1, d2, why = request.form['d1'], request.form['d2'], request.form['reason'].strip() or "Leave"
-                log_change(SEC_LEAVE, "Added", f"Leave {d1 if d1 == d2 else d1 + ' to ' + d2} ({n} day(s)) \u2013 {_short(why, 80)}")
-            flash(f"{n} leave day(s) submitted - waiting for admin approval." +
+                log_change(SEC_LEAVE, "Added", f"{'Half-day leave' if request.form.get('daytype', '').lower().startswith('half') else 'Leave'} {d1 if d1 == d2 else d1 + ' to ' + d2} ({n} day(s)) \u2013 {_short(why, 80)}")
+            flash(("Half-day leave submitted" if request.form.get('daytype', '').lower().startswith('half') and n else f"{n} leave day(s) submitted") + " - waiting for admin approval." +
                   (f" Holiday date(s) {', '.join(skipped)} were skipped (leave is not needed on a holiday)." if skipped else ""))
         except ValueError as e:
             flash(str(e))
@@ -3513,6 +3571,50 @@ def employee_permission():
         flash("Permission request submitted for today.")
     except ValueError as e:
         flash(str(e))
+    return redirect("/employee/leave")
+
+def update_permission(r, hours, reason):
+    """Employee edits ONE of their own permission requests (hours + reason). Same rules as applying: > 0 hrs, monthly limit
+    (this request's own hours are not counted twice). A change to an Approved / Rejected request returns it to Pending."""
+    eid, row = str(r["Employee ID"]), r["_row"]
+    if str(r.get("Date", ""))[:7] != str(today_local())[:7]:
+        raise ValueError("Only this month's permission requests can be edited.")
+    try: hours = round(float(hours), 2)
+    except (TypeError, ValueError): raise ValueError("Enter a valid number of permission hours.")
+    if hours <= 0: raise ValueError("Permission hours must be greater than 0.")
+    reason = " ".join(str(reason or "").split())
+    if not reason: raise ValueError("Please enter a reason for the permission.")
+    status = str(r.get("Status", "")).strip() or "Pending"
+    mine_now = num(r.get("Hours")) if status != "Rejected" else 0.0
+    used = permission_hours_used(eid, str(r["Date"])[:7]) - mine_now
+    if used + hours > PERMISSION_MONTHLY_LIMIT + 1e-9:
+        raise ValueError(f"Monthly permission limit is {PERMISSION_MONTHLY_LIMIT:g} hrs. "
+                         f"You have {round(max(PERMISSION_MONTHLY_LIMIT - used, 0), 2):g} hr(s) available for this request.")
+    if abs(hours - num(r.get("Hours"))) < 1e-9 and reason == str(r.get("Reason", "")).strip():
+        return None                                              # nothing changed
+    upd = [{"range": f"F{row}:G{row}", "values": [[hours, reason]]}]
+    if status != "Pending": upd.append({"range": f"I{row}:K{row}", "values": [["Pending", "", ""]]})      # needs approval again
+    _with_retry(ws_of("Permissions").batch_update, upd, value_input_option="RAW")
+    invalidate_cache("Permissions")
+    return dict(old_h=num(r.get("Hours")), new_h=hours, back=status != "Pending")
+
+@app.route("/employee/permission/<int:row>/edit", methods=["POST"])
+@need("employee")
+def employee_permission_edit(row):
+    eid = session["emp_id"]
+    r = next((r for r in _fetch_rows("Permissions") if r["_row"] == row), None)          # fresh read: row numbers move when others delete
+    if not r or _key(r["Employee ID"]) != _key(eid): abort(403)                         # only YOUR OWN records
+    if request.form.get("pid", "") != str(r.get("Permission ID", "")):
+        flash("That list was out of date - please try again."); return redirect("/employee/leave")
+    try:
+        res = update_permission(r, request.form.get("hours", ""), request.form.get("reason", ""))
+    except ValueError as e:
+        flash(str(e)); return redirect("/employee/leave")
+    if res is None:
+        flash("No changes to save."); return redirect("/employee/leave")
+    log_change(SEC_LEAVE, "Updated", f"Permission request for {r['Date']}: {_fmt_num(res['old_h'])} hr \u2192 {_fmt_num(res['new_h'])} hr \u2013 "
+                                      f"{_short(' '.join(request.form.get('reason', '').split()), 80)}" + (" (sent back for approval)" if res["back"] else ""))
+    flash("Permission request updated." + (" It is Pending again and waits for admin approval." if res["back"] else ""))
     return redirect("/employee/leave")
 
 @app.route("/employee/permission/<int:row>/delete", methods=["POST"])
@@ -3696,7 +3798,9 @@ tick none and the Audit Log disappears. No process is ever included automaticall
 def _aud_att_days(eid, subs, sess, start, end):
     """One row per calendar day in the period: Present / Leave / Holiday / Weekly off / Absent + first login, last logout."""
     present = {s["date"] for s in subs if not s["off"] and str(start) <= str(s["date"]) <= str(end)}
-    leave = {str(l["Date"]): leave_status(l) for l in live_leaves(rows("Leave")) if _key(l["Employee ID"]) == _key(eid)}
+    _lv = [l for l in live_leaves(rows("Leave")) if _key(l["Employee ID"]) == _key(eid)]
+    leave = {str(l["Date"]): leave_status(l) for l in _lv if not leave_is_half(l)}
+    half_days = {str(l["Date"]) for l in _lv if leave_is_half(l)}
     by = {}
     for r in sess: by.setdefault(str(r["Date"]), []).append(r)
     out, d = [], start
@@ -3709,6 +3813,7 @@ def _aud_att_days(eid, subs, sess, start, end):
         elif is_off(d): st = "Weekly off"
         elif d < today_local(): st = "Absent"
         else: st = "-"
+        if ds in half_days: note = (note + " · " if note else "") + "Half-day leave (4 hrs)"
         if ss:
             note = (note + " · " if note else "") + f"{len(ss)} login{'s' if len(ss) > 1 else ''}"
         out.append(dict(date=ds, status=st, note=note,

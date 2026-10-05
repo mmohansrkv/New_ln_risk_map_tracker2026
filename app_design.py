@@ -702,8 +702,6 @@ def parse_form(emp_id):
     tot = sum(p[1] for p in procs) + sum(n[1] for n in notes)
     half = any(num(h) <= 0 and t.strip() for t, h in zip(g("nd"), g("nh")))
     if d is None: err = "Please choose a valid date."
-    elif session.get("role") == "employee" and d > today_local():
-        err = "Future dates are not allowed. You can only add or update entries for today or earlier dates."
     elif session.get("role") == "employee" and is_holiday(date):
         err = f"{date} is a holiday{(' (' + holiday_name(date) + ')') if holiday_name(date) else ''}. Productivity entries cannot be submitted or updated for a holiday."
     elif not procs: err = "Add at least one process entry."
@@ -2552,7 +2550,7 @@ def form_page(sub, action, heading):
     names = [r["Process name"] for r in procs]
     tph = process_rates()
     perm = {d: h for (_k, d), h in deduction_map(sub.get("emp_id")).items()}      # approved permission + half-day leave hours, by date
-    maxdate = str(today_local()) if session.get("role") == "employee" else ""
+    maxdate = ""          # no upper limit on the entry date - employees may pick any date they need
     return FORM, dict(sub=sub, action=action, heading=heading, names=names, tph=tph, day=day_limit(), target=target_hours(),
                       workday=float(DAY_HOURS), perm=perm, maxdate=maxdate)
 
@@ -2874,7 +2872,6 @@ def employee_home():
     lv = rows("Leave"); t0 = today_local()
     k = report([my_emp()], all_mine, lv, first, t0)[0]
     missed = missing_dates(session["emp_id"], all_mine, lv, first, t0 - dt.timedelta(days=1))
-    pend = bool(missing_dates(session["emp_id"], all_mine, lv, t0, t0))
     emp_row = my_emp_row()
     missing_fields = missing_personal(emp_row)
     profile_incomplete = bool(missing_fields)
@@ -2885,7 +2882,7 @@ def employee_home():
     cut = str(t0 - dt.timedelta(days=6))
     tgt_miss = [m for s_ in all_mine if s_["date"] >= cut for m in sub_misses(s_)][:12]     # newest entries first
     return page(EMP_MARQUEE + EMP_TOP + EMP_ALERT + EMP_TARGET + body + '<h2>Submitted today</h2>' + LIST,
-                title="Daily productivity", missed=missed, pend=pend, subs=mine, tgt_miss=tgt_miss,
+                title="Daily productivity", missed=missed, subs=mine, tgt_miss=tgt_miss,
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
                 a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete, missing_fields=missing_fields,
                 today_perm=today_perm, perm_limit=PERMISSION_MONTHLY_LIMIT, perm_used=perm_used,
@@ -3149,9 +3146,8 @@ def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
         d += dt.timedelta(days=1)
     return out
 
-EMP_MARQUEE = """{% if missed or pend %}{% set msg %}&#9888; Productivity entry pending &mdash;
-{% if missed %} You missed the entry for {{missed|length}} day(s) this month: {{missed|join(', ')}}. Pick that date in the form below and submit, or apply leave.{% endif %}
-{% if pend %} Today's entry is not submitted yet.{% endif %}{% endset %}
+EMP_MARQUEE = """{% if missed %}{% set msg %}&#9888; Productivity entry pending &mdash;
+ You missed the entry for {{missed|length}} day(s) this month: {{missed|join(', ')}}. Pick that date in the form below and submit, or apply leave.{% endset %}
 {% set dur = [44, ((msg|striptags|length) * 0.3)|int]|max %}
 <div class="mq" role="status"><div class="mq-track" style="animation-duration:{{dur}}s">
 <div class="mq-group"><span class="mq-item">{{msg}}</span></div>

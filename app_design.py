@@ -696,7 +696,9 @@ def is_training(name): return str(name or "").strip().lower() == TRAINING_PROCES
 
 OTHER_PROCESS = "Other"
 OTHER_HOURS = 8.0          # Update90: the "Other" process always counts as a full 8-hour day, whatever hours were typed
-def is_other(name): return str(name or "").strip().lower() == OTHER_PROCESS.lower()
+def is_other(name): return str(name or "").strip().lower() in (OTHER_PROCESS.lower(), OTHER_PROCESS.lower() + "s")      # Update94: "Other" / "Others"
+POC_SAMPLE_PROCESS = "POC_Sample"   # Update94: like "Other", POC_Sample needs Hour + Count + Description (all required); it keeps the hours entered
+def is_poc(name): return str(name or "").strip().lower().replace(" ", "_") == POC_SAMPLE_PROCESS.lower()
 def eff_hours(name, hours):
     """Hours that count for a process line: 8 for "Other" (as long as some hours were entered), the entered hours for every other process."""
     return OTHER_HOURS if (is_other(name) and hours > 0) else hours
@@ -757,7 +759,10 @@ def parse_form(emp_id):
     elif not procs: err = "Add at least one process entry."
     elif any(not str(n).strip() or not str(h).strip() or (not str(c).strip() and not is_training(n)) or not desc.strip() or num(h) <= 0
              for n, h, c, desc in rows_p):
-        err = "All Process Entry fields (Process, Hour, Count and Description) are mandatory - please fill every field before saving. (Training needs only Hour and Description.)"
+        if any((is_other(n) or is_poc(n)) and (not str(h).strip() or num(h) <= 0 or not str(c).strip() or not desc.strip()) for n, h, c, desc in rows_p):
+            err = "For \u201cOthers\u201d and \u201cPOC_Sample\u201d, Hour, Count and Description are all required - please fill them before saving."
+        else:
+            err = "All Process Entry fields (Process, Hour, Count and Description) are mandatory - please fill every field before saving. (Training needs only Hour and Description.)"
     elif half: err = "Please enter the Hour for every note you filled in - a note without hours is not saved."
     elif sum(1 for p_ in procs if is_other(p_[0])) > 1: err = "\u201cOther\u201d can be added only once per day (it already counts as 8 hours)."
     elif tot > day_limit():
@@ -1905,15 +1910,15 @@ Productivity: <b id="tpct">0</b>% &middot; <b id="tstat"></b> <span class="mut">
 <script>
 const WORK={{workday|g}}, PERM={{perm|tojson}}, MAXD={{maxdate|tojson}};
 const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}}, OTHER_H={{other_hours|g}};
-const isOther=v=>String(v==null?'':v).trim().toLowerCase()==='other', isTrain=v=>String(v==null?'':v).trim().toLowerCase()==='training';
+const isOther=v=>['other','others'].includes(String(v==null?'':v).trim().toLowerCase()), isPoc=v=>String(v==null?'':v).trim().toLowerCase().replace(/ /g,'_')==='poc_sample', isTrain=v=>String(v==null?'':v).trim().toLowerCase()==='training';
 const effH=(nm,h)=>(isOther(nm)&&h>0)?OTHER_H:h;      // "Other" always counts as 8 hrs
 function rowH(r){return effH((r.querySelector('[name=pn]')||{}).value,+((r.querySelector('[name=ph]')||{}).value)||0)}
-function otherUI(r){const pv=(r.querySelector('[name=pn]')||{}).value,o=isOther(pv),tr=isTrain(pv),d=r.querySelector('[name=pd]'),c=r.querySelector('[name=pc]');if(!d)return;
+function otherUI(r){const pv=(r.querySelector('[name=pn]')||{}).value,o=isOther(pv),pc_=isPoc(pv),tr=isTrain(pv),d=r.querySelector('[name=pd]'),c=r.querySelector('[name=pc]');if(!d)return;
  let n=r.querySelector('.oth-note');
  if(c){if(tr){c.type='hidden';c.required=false;c.value='0'}else{if(c.type==='hidden'){c.type='number';c.value=''}c.required=true}}      // Training: Count is not shown / not required
- if(o||tr){d.placeholder=tr?'Training details *':'Description of the work done *';d.size=48;d.style.minWidth='320px';
+ if(o||pc_||tr){d.placeholder=tr?'Training details *':'Description of the work done *';d.size=48;d.style.minWidth='320px';
   if(!n){n=document.createElement('div');n.className='oth-note mut';n.style.cssText='flex-basis:100%;font-size:.85em;color:#b45309';r.insertBefore(n,r.querySelector('button.danger'))}
-  n.textContent=tr?'"Training": enter the Hours and a Description only - no Count is needed. Productivity is calculated from the hours entered.':'"Other": enter the work details in Description, plus Hours and Count. It is always counted as '+OTHER_H+' working hours, whatever hours you enter.'}
+  n.textContent=pc_?'"POC_Sample": Hour, Count and Description are all required.':tr?'"Training": enter the Hours and a Description only - no Count is needed. Productivity is calculated from the hours entered.':'"Other": enter the work details in Description, plus Hours and Count. It is always counted as '+OTHER_H+' working hours, whatever hours you enter.'}
  else{d.placeholder='Description *';d.size=28;d.style.minWidth='';if(n)n.remove()}}
 const E=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function row(h){const d=document.createElement('div');d.className='r';
@@ -2620,6 +2625,7 @@ def form_page(sub, action, heading):
     procs = rows("Processes")
     names = [r["Process name"] for r in procs]
     if not any(is_other(n) for n in names): names.append(OTHER_PROCESS)       # Update90: "Other" is always available
+    if not any(is_poc(n) for n in names): names.insert(max(len(names) - 1, 0), POC_SAMPLE_PROCESS)       # Update94: "POC_Sample" is always available (Hour, Count, Description required)
     if not any(is_training(n) for n in names): names.insert(max(len(names) - 1, 0), TRAINING_PROCESS)       # Update93: "Training" is always available (just before "Other")
     tph = process_rates()
     perm = {d: h for (_k, d), h in deduction_map(sub.get("emp_id")).items()}      # approved permission + half-day leave hours, by date

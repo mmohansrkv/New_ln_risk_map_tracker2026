@@ -1895,6 +1895,18 @@ EDIT = """<div class="card"><h2>Edit {{title}}</h2>{% if kind=='processes' %}<p 
 <button class="primary">Save</button> <a href="/admin/{{kind}}">Cancel</a></form>
 {% if locked %}<p class="mut">Personal details (grayed out) are entered by the employee on their own Personal details page.</p>{% endif %}</div>"""
 
+# Update94: 3-second flower animation on the Employee page when the day just saved reached 100% (target + working hours)
+BLOOM = """{% if bloom %}<style>
+#bloom{position:fixed;inset:0;z-index:99999;pointer-events:none;overflow:hidden}
+#bloom span{position:absolute;top:-12%;animation:bloomfall 3s ease-in forwards;opacity:0;will-change:transform}
+@keyframes bloomfall{0%{transform:translateY(0) rotate(0);opacity:0}10%{opacity:1}85%{opacity:1}100%{transform:translateY(125vh) rotate(360deg);opacity:0}}
+#bloom b{position:absolute;left:0;right:0;top:38%;text-align:center;font-size:2.2em;color:#be185d;text-shadow:0 2px 8px #fff;animation:bloomfade 3s ease forwards}
+@keyframes bloomfade{0%{opacity:0;transform:scale(.6)}20%{opacity:1;transform:scale(1)}80%{opacity:1}100%{opacity:0}}
+</style><div id="bloom" aria-hidden="true"><b>&#127800; 100% Target Achieved! &#127802;</b></div>
+<script>(function(){var e=['\uD83C\uDF38','\uD83C\uDF3C','\uD83C\uDF3A','\uD83C\uDF37','\uD83C\uDF3B'],b=document.getElementById('bloom');if(!b)return;
+for(var i=0;i<46;i++){var p=document.createElement('span');p.textContent=e[i%e.length];p.style.left=(Math.random()*96)+'%';p.style.fontSize=(22+Math.random()*26)+'px';p.style.animationDelay=(Math.random()*0.9)+'s';p.style.animationDuration=(1.9+Math.random()*1.0)+'s';b.appendChild(p)}
+setTimeout(function(){if(b.parentNode)b.parentNode.removeChild(b)},3000)})();</script>{% endif %}"""
+
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th><th>Designation</th>{% endif %}
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Target count</th><th>Completed</th><th>Target status</th><th>Productivity</th><th></th></tr>
 {% for s in subs %}<tr><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; {{s.emp_name}}</td><td>{{s.designation}}</td>{% endif %}
@@ -2977,8 +2989,8 @@ def employee_home():
     perm_used = permission_hours_used(session["emp_id"], today[:7])
     cut = str(t0 - dt.timedelta(days=6))
     tgt_miss = [m for s_ in all_mine if s_["date"] >= cut for m in sub_misses(s_)][:12]     # newest entries first
-    return page(EMP_MARQUEE + EMP_TOP + EMP_ALERT + EMP_TARGET + body + '<h2>Submitted today</h2>' + LIST,
-                title="Daily productivity", missed=missed, subs=mine, tgt_miss=tgt_miss,
+    return page(EMP_MARQUEE + EMP_TOP + EMP_ALERT + EMP_TARGET + body + '<h2>Submitted today</h2>' + LIST + BLOOM,
+                title="Daily productivity", missed=missed, subs=mine, tgt_miss=tgt_miss, bloom=bool(session.pop("bloom", False)),
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
                 a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete, missing_fields=missing_fields,
                 today_perm=today_perm, perm_limit=PERMISSION_MONTHLY_LIMIT, perm_used=perm_used,
@@ -3056,6 +3068,9 @@ def employee_save():
     flash("Saved." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else ""))
     miss = [] if is_off(date) else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
     if miss: flash(target_alert_text(miss), "error")           # employee is told straight away that the target was missed
+    # Update94: 100% = not a weekly off, every Admin target met, and all required working hours logged -> flower animation (3 s)
+    if not is_off(date) and not miss and sum(p_[1] for p_ in procs) + sum(n_[1] for n_ in notes) + 1e-9 >= required_hours(session["emp_id"], date):
+        session["bloom"] = True
     return redirect("/employee")
 
 @app.route("/entry/<sid>", methods=["GET", "POST"])

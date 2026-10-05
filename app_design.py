@@ -1080,7 +1080,15 @@ aside a:hover{background:#2b3560;transform:translateX(2px)}aside a.on{background
 .me{margin-bottom:14px;padding:0 10px 14px;border-bottom:1px solid #2b3560;font-size:13px;color:#9aa3c7;display:flex;justify-content:space-between;align-items:center;gap:8px}
 .me a{padding:5px 12px;color:#fff;background:#2b3560;border-radius:7px;font-size:13px;transition:background .2s ease,transform .15s ease}
 .me a:hover{background:#e5484d;transform:translateY(-1px)}
-main{flex:1;padding:24px 28px;min-width:0;animation:fadeInUp .45s cubic-bezier(.22,1,.36,1)}
+main{flex:1;display:flex;flex-direction:column;padding:24px 28px;min-width:0;animation:fadeInUp .45s cubic-bezier(.22,1,.36,1)}
+.mbody{flex:1 0 auto;min-width:0}
+/* Update95: colourful copyright footer (same on Admin and Employee pages) */
+.site-ftr{flex:none;margin:26px auto 0;padding:10px 22px;text-align:center;font-weight:800;font-size:14px;letter-spacing:.4px;border-radius:999px;background:#fff;border:2px solid transparent;background-image:linear-gradient(#fff,#fff),linear-gradient(90deg,#4f46e5,#c026d3,#f97316,#0ea5e9,#22c55e,#4f46e5);background-origin:border-box;background-clip:padding-box,border-box;background-size:100% 100%,300% 100%;box-shadow:0 6px 18px -8px #4f46e566;animation:ftrBorder 6s linear infinite}
+.site-ftr span{background:linear-gradient(90deg,#4f46e5,#c026d3,#f97316,#0ea5e9,#22c55e,#4f46e5);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:ftrText 6s linear infinite}
+@keyframes ftrText{to{background-position:300% 0}}
+@keyframes ftrBorder{to{background-position:0 0,300% 0}}
+@media(max-width:800px){.site-ftr{font-size:12.5px;padding:9px 16px}}
+@media(prefers-reduced-motion:reduce){.site-ftr,.site-ftr span{animation:none}}
 .center{max-width:420px;margin:12vh auto;padding:0 16px}
 h1{font-size:22px;margin:0}h2{font-size:17px;margin:22px 0 10px}h3{font-size:15px;margin:14px 0 6px}
 .head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
@@ -1446,7 +1454,7 @@ aside a.mzn ~ .prof{margin-top:0}
 <div class="prof"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
-<main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}{{body|safe}}</main></div>
+<main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><footer class="site-ftr" role="contentinfo"><span>&copy; 2026 LN_MAP_AI. All Rights Reserved.</span></footer></main></div>
 {% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}</div>{% endif %}
 {% if session.role=='admin' %}<div id="toasts"></div><script>
 (function(){var since="0",first=1;

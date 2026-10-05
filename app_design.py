@@ -1339,6 +1339,11 @@ table td small,table th small{font-size:10.5px!important}
 .kpis .kpi b{font-size:17px}
 .tabs a{font-size:12.5px;padding:6px 12px}
 .totals{font-size:12px}
+/* Update94: compact Save + Back buttons (all Save forms, Admin and Employee) */
+.primary.sm,.back.sm{padding:5px 14px;font-size:13px;line-height:1.3;border-radius:6px;margin:4px 6px 4px 0;display:inline-block;width:auto}
+.primary.sm{box-shadow:0 2px 0 #3730a3,0 4px 8px -4px #4f46e566}
+.back.sm{background:#fff;color:#4338ca;border:1px solid #c7c4fb;box-shadow:none;text-decoration:none}
+.back.sm:hover{background:#eef0ff;border-color:#4f46e5;color:#3730a3}
 /* ---- Daily Productivity Entry: red/green box vs the Admin-set Target Count/Hour ---- */
 #entryCard{transition:background .35s ease,border-color .35s ease,box-shadow .35s ease;border:2px solid var(--line)}
 #entryCard.tgt-met{background:#f2fbf5;border-color:#22c55e;box-shadow:0 0 0 3px #22c55e26}
@@ -1892,7 +1897,7 @@ TABLE = """<div class="card"><h2>{{title}}</h2>
 
 EDIT = """<div class="card"><h2>Edit {{title}}</h2>{% if kind=='processes' %}<p class="mut">Set the <b>Target count / hour</b> &mdash; the count to complete in 1 hour (e.g. <b>1000 / 1</b> hr). The target for an entry is worked out automatically from the hours the employee logs: 8 hrs &rarr; 8 &times; the hourly count, 4 hrs &rarr; 4 &times;, 2 hrs &rarr; 2 &times;. If the employee's count is below that target, they get an alert.</p>{% endif %}<form method="post" class="grid">
 {% for h in heads %}<label>{{h}}<input name="f{{loop.index0}}" value="{{vals[loop.index0]}}"{% if h not in optional %} required{% endif %}{% if h in locked %} readonly{% endif %}></label>{% endfor %}
-<button class="primary">Save</button> <a href="/admin/{{kind}}">Cancel</a></form>
+<button class="primary sm">Save</button> <button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='/admin/{{kind}}'">Back</button></form>
 {% if locked %}<p class="mut">Personal details (grayed out) are entered by the employee on their own Personal details page.</p>{% endif %}</div>"""
 
 # Update94: 3-second flower animation on the Employee page when the day just saved reached 100% (target + working hours)
@@ -1935,7 +1940,7 @@ Non-productive: <b id="tn">0</b> hrs &middot; Balance: <b id="tb">{{day|g}}</b> 
 Productivity: <b id="tpct">0</b>% &middot; <b id="tstat"></b> <span class="mut">({{target|g}} productive hrs = 100%, target set by Admin)</span></div>
 <div id="tgtMsg" class="flash err" style="display:none" role="alert"></div>
 <div id="formerr" class="flash err" style="display:none" role="alert"></div>
-<button class="primary">Save</button></form></div>
+<button class="primary sm">Save</button> <button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='{{ '/admin/summary' if session.role=='admin' else '/employee' }}'">Back</button></form></div>
 <script>
 const WORK={{workday|g}}, PERM={{perm|tojson}}, MAXD={{maxdate|tojson}};
 const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}}, OTHER_H={{other_hours|g}};
@@ -3415,7 +3420,7 @@ LEAVE_EMP = """<style>
 <form method="post" action="/employee/permission/{{r['_row']}}/edit" class="grid" style="margin-top:6px"><input type="hidden" name="pid" value="{{r['Permission ID']}}">
 <label>Hours<input type="number" name="hours" step="0.25" min="0.25" max="{{perm_limit}}" value="{{r['Hours']|g}}" required></label>
 <label>Reason<input name="reason" size="24" value="{{r['Reason']}}" required></label>
-<button class="primary">Save</button></form>
+<button class="primary sm">Save</button> <button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='/employee'">Back</button></form>
 {% if r['Status']!='Pending' %}<p class="mut">Saving a change sends this request back to Pending for admin approval.</p>{% endif %}</details>{% endif %}
 {% if r['Status']=='Pending' %}<form method="post" action="/employee/permission/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this request?')"><button class="danger">Cancel</button></form>{% elif r['Date'][:7]<today[:7] %}-{% endif %}</td></tr>
 {% else %}<tr><td colspan="6">No permission requests yet.</td></tr>{% endfor %}</table></div>"""
@@ -3454,7 +3459,7 @@ PERSONAL_EDIT = """<div class="card"><h2>Edit personal details</h2>
 <label>Name<input value="{{emp['Name']}}" readonly></label>
 {% for f in fields %}{% if f=='Gender' %}<label>Gender<select name="Gender"><option value="">Select</option>{% for g in ['Male','Female'] %}<option {{'selected' if (emp.get('Gender') or '')|lower==g|lower else ''}}>{{g}}</option>{% endfor %}</select></label>{% else %}<label>{{f}}<input {% if f.endswith('Email ID') %}type="email" {% endif %}name="{{f}}" value="{{emp[f]}}"></label>{% endif %}{% endfor %}
 <label>Office Email ID<input value="{{emp['Email']}}" readonly></label>
-<button class="primary">Save</button> <a href="/admin/personal">Cancel</a></form>
+<button class="primary sm">Save</button> <button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='/admin/personal'">Back</button></form>
 <p class="mut">Office Email ID is linked to the employee's login email. To change it, edit the Email on the Employees page.</p></div>"""
 
 @app.route("/admin/personal/<int:row>", methods=["GET", "POST"])
@@ -3534,7 +3539,7 @@ PROFILE = """<div class="card"><h2>Personal details</h2>
 <label>Emergency no<input name="Emergency no" value="{{emp['Emergency no']}}"></label>
 <label>Personal Email ID<input type="email" name="Personal Email ID" value="{{emp['Personal Email ID']}}"></label>
 <label>Office Email ID<input value="{{emp['Email']}}" readonly></label>
-<button class="primary">Save</button></form>
+<button class="primary sm">Save</button> <button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='/employee'">Back</button></form>
 <p class="mut" style="margin-top:10px">Last updated: {{(emp['Profile updated at'] or '-')|t12}}</p></div>
 <div class="card"><h2>Change password</h2>
 <p class="mut">Enter your current password, then choose a new one (at least 6 characters). Use the new password next time you log in.</p>
@@ -3932,7 +3937,7 @@ tick none and the Audit Log disappears. No process is ever included automaticall
 {% for p in procs %}<tr><td><input type="checkbox" name="procs" value="{{p}}" {{'checked' if p in acc.procs}}></td><td>{{p}}</td>
 <td>{% if p in worked %}Yes &middot; {{worked[p][0]}} entr{{'y' if worked[p][0]==1 else 'ies'}}, last {{worked[p][1]}}{% else %}<span class="mut">No entries yet</span>{% endif %}</td></tr>
 {% else %}<tr><td colspan="3">No processes exist yet. Add them under Processes.</td></tr>{% endfor %}</table><br>
-<button class="primary">Save permission</button> <a href="{{base}}">Cancel</a>
+<button class="primary sm">Save permission</button> <button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='{{base}}'">Back</button>
 {% if acc.updated %}<p class="mut">Last saved: {{acc.updated|t12}}</p>{% endif %}</form></div>"""
 
 
@@ -5408,7 +5413,7 @@ MLOG = '''<div class="head"><div><h1>Missed Entries Log</h1>
 <form method="post" action="/admin/missed/auto" class="grid" style="align-items:end">
 <label>Automatic e-mail<select name="enabled"><option value="Yes"{{' selected' if auto_on else ''}}>Enabled</option><option value="No"{{'' if auto_on else ' selected'}}>Disabled</option></select></label>
 <label>Send every day at<input type="time" name="time" value="{{auto_time}}" required></label>
-<button class="primary">Save</button></form>
+<button class="primary sm">Save</button> <button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='/admin/summary'">Back</button></form>
 <p class="mut">{% if auto_on %}Automatic e-mail is <b>ON</b>: every day at {{auto_time}} each employee with missed dates this month gets one e-mail listing only the dates not e-mailed before.{% else %}Automatic e-mail is <b>OFF</b>.{% endif %}</p>
 <table><tr><th>Employee</th><th>E-mail</th><th>Missed dates</th><th>Not yet e-mailed</th><th>Last e-mailed</th><th></th></tr>
 {% for x in summary %}<tr><td><a href="/admin/missed-log/{{x.id|urlencode}}?month={{month}}">{{x.id}} &middot; {{x.name}}</a></td><td>{{x.email or '-'}}</td><td>{{x.dates|length}}: {{x.dates|join(', ')}}</td><td>{{x.new}}</td><td>{{(x.last|t12) if x.last else 'Never'}}</td>

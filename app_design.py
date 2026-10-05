@@ -332,6 +332,7 @@ app.secret_key = _load_secret_key()
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_SECURE=os.getenv("COOKIE_SECURE", "0") == "1")   # set COOKIE_SECURE=1 when served over HTTPS
 app.jinja_env.filters["t12"] = t12
+app.jinja_env.filters["cnt"] = lambda x: "{:,.2f}".format(float(x or 0)).rstrip("0").rstrip(".")      # 8000 -> 8,000
 app.jinja_env.filters["g"] = lambda x: "%g" % (float(x) if str(x).strip() else 0)
 app.jinja_env.globals["PERMISSION_MONTHLY_LIMIT"] = PERMISSION_MONTHLY_LIMIT
 app.jinja_env.globals["LEAVE_MONTHLY_LIMIT"] = LEAVE_MONTHLY_LIMIT
@@ -546,6 +547,16 @@ def num(x):
     try: return float(x)
     except (TypeError, ValueError): return 0.0
 
+def parse_rate(x):
+    """Update94: Target count / hour may be typed as 1000, 1,000 or '1000 / 1' (count / hours) - returns the count PER HOUR."""
+    t = str(x if x is not None else "").replace(",", "").strip()
+    m = re.match(r"^([0-9]*\.?[0-9]+)\s*/\s*([0-9]*\.?[0-9]+)", t)
+    if m:
+        a, b = float(m.group(1)), float(m.group(2))
+        return a / b if b > 0 else 0.0
+    m = re.match(r"^[0-9]*\.?[0-9]+", t)
+    return float(m.group(0)) if m else 0.0
+
 # ---------------------------------------------------------------- per-process 8-hour targets
 TARGET_BASIS_HOURS = float(DAY_HOURS)          # Admin's per-process target is for a full 8-hour day
 def _g4(x): return "%g" % round(float(x), 4)
@@ -555,10 +566,10 @@ def process_targets():
     so processes set up before the 8-hour column existed keep working unchanged."""
     out = {}
     for r in rows("Processes"):
-        hourly, daily = num(r.get("Target count / hour")), num(r.get("Target count / 8 hrs"))
+        hourly, daily = parse_rate(r.get("Target count / hour")), parse_rate(r.get("Target count / 8 hrs"))
         if hourly <= 0 < daily: hourly = daily / TARGET_BASIS_HOURS
         elif daily <= 0 < hourly: daily = hourly * TARGET_BASIS_HOURS
-        if is_training(r["Process name"]): continue          # Update93: Training never has a count target
+        if no_count(r["Process name"]): continue          # Update93/94: Training, Other(s) and POC_Sample never have a count target
         out[r["Process name"]] = dict(rate=hourly, daily=daily)
     return out
 
@@ -569,7 +580,7 @@ def proc_targets_sync(h, d, old_h="", old_d=""):
     """Keep 'per hour' and 'per 8 hrs' consistent when Admin saves a process. Returns (hourly, daily, error).
     If both are given and they disagree, whichever one Admin just CHANGED wins (the 8-hour figure if both changed)."""
     B = TARGET_BASIS_HOURS
-    hn, dn, ohn, odn = num(h), num(d), num(old_h), num(old_d)
+    hn, dn, ohn, odn = parse_rate(h), parse_rate(d), parse_rate(old_h), parse_rate(old_d)
     if hn <= 0 and dn <= 0:
         return "", "", "Enter the Target count / hour - it must be more than 0."
     if hn > 0: dn = hn * B                  # Update94: Target count / hour is what Admin sets; the 8-hr figure follows it
@@ -658,7 +669,7 @@ def load_subs(emp_id=None):
             h = eff_hours(r["Process / Description"], h)          # Update90: "Other" always shows / counts as 8 hrs
             rate = tph.get(r["Process / Description"], 0)
             c = num(r["Count"]); t = h * rate
-            s["procs"].append(dict(name=r["Process / Description"], hour=h, count=c, training=is_training(r["Process / Description"]),
+            s["procs"].append(dict(name=r["Process / Description"], hour=h, count=c, training=no_count(r["Process / Description"]),
                                    desc=str(r.get("Description", "")),
                                    target=round(t, 1), pct=round(c / t * 100) if t else None,
                                    earned=(c / rate) if rate else 0.0))
@@ -672,6 +683,12 @@ def load_subs(emp_id=None):
         s["ded"] = ded.get((_key(s["emp_id"]), str(s["date"])), 0.0)          # approved permission / half-day leave hours that day
         s["avail"] = max(T - s["ded"], 0.0)                                   # working hours left = target hrs less those hours
         s["pct"] = (min(round(s["prod"] / s["avail"] * 100), 100) if s["avail"] > 0 else (100 if s["prod"] > 0 else 0))   # available hrs logged = 100%
+        # Update94: when the entry has processes with an Admin target, productivity = completed count vs target count
+        # (hours of processes without a target - Training, Other(s), POC_Sample - count as achieved). No target at all -> hours-based above.
+        _tg_h = sum(p["hour"] for p in s["procs"] if tph.get(p["name"], 0) > 0)
+        if _tg_h > 0 and s["prod"] > 0:
+            _done = sum(p["count"] / tph[p["name"]] for p in s["procs"] if tph.get(p["name"], 0) > 0) + (s["prod"] - _tg_h)
+            s["pct"] = round(min(_done / s["prod"] * 100, 100), 2)
         s["off"] = is_off(s["date"])                            # weekly-off entry: saved, not counted
         # Update66: Admin-set Target Count vs. what the employee completed (target pro-rated to the hours booked)
         s["tgt_total"] = round(sum(p["hour"] * tph.get(p["name"], 0) for p in s["procs"]), 2)
@@ -690,6 +707,9 @@ def get_sub(sid):
 
 TRAINING_PROCESS = "Training"      # Update93: Hours + Description only - no Count, no count target; its hours simply add to productivity
 def is_training(name): return str(name or "").strip().lower() == TRAINING_PROCESS.lower()
+def no_count(name):
+    """Update94: Training, Other(s) and POC_Sample take Hour + Description only - no Count, no count target."""
+    return is_training(name) or is_other(name) or is_poc(name)
 
 OTHER_PROCESS = "Other"
 OTHER_HOURS = 8.0          # Update90: the "Other" process always counts as a full 8-hour day, whatever hours were typed
@@ -746,7 +766,7 @@ def parse_form(emp_id):
     try: d = dt.date.fromisoformat(date)
     except ValueError: d = None
     rows_p = list(zip(g("pn"), g("ph"), g("pc"), g("pd")))
-    procs = [(n, eff_hours(n, num(h)), (0.0 if is_training(n) else num(c)), desc.strip()) for n, h, c, desc in rows_p]     # Update90: "Other" = 8 hrs, others = hours entered
+    procs = [(n, eff_hours(n, num(h)), (0.0 if no_count(n) else num(c)), desc.strip()) for n, h, c, desc in rows_p]     # Update90: "Other" = 8 hrs, others = hours entered
     notes = [(t.strip(), num(h)) for t, h in zip(g("nd"), g("nh")) if num(h) > 0]
     tot = sum(p[1] for p in procs) + sum(n[1] for n in notes)
     half = any(num(h) <= 0 and t.strip() for t, h in zip(g("nd"), g("nh")))
@@ -754,12 +774,12 @@ def parse_form(emp_id):
     elif session.get("role") == "employee" and is_holiday(date):
         err = f"{date} is a holiday{(' (' + holiday_name(date) + ')') if holiday_name(date) else ''}. Productivity entries cannot be submitted or updated for a holiday."
     elif not procs: err = "Add at least one process entry."
-    elif any(not str(n).strip() or not str(h).strip() or (not str(c).strip() and not is_training(n)) or not desc.strip() or num(h) <= 0
+    elif any(not str(n).strip() or not str(h).strip() or (not str(c).strip() and not no_count(n)) or not desc.strip() or num(h) <= 0
              for n, h, c, desc in rows_p):
-        if any((is_other(n) or is_poc(n)) and (not str(h).strip() or num(h) <= 0 or not str(c).strip() or not desc.strip()) for n, h, c, desc in rows_p):
-            err = "For \u201cOthers\u201d and \u201cPOC_Sample\u201d, Hour, Count and Description are all required - please fill them before saving."
+        if any((is_other(n) or is_poc(n)) and (not str(h).strip() or num(h) <= 0 or not desc.strip()) for n, h, c, desc in rows_p):
+            err = "For \u201cOthers\u201d and \u201cPOC_Sample\u201d, Hour and Description are required (no Count) - please fill them before saving."
         else:
-            err = "All Process Entry fields (Process, Hour, Count and Description) are mandatory - please fill every field before saving. (Training needs only Hour and Description.)"
+            err = "All Process Entry fields (Process, Hour, Count and Description) are mandatory - please fill every field before saving. (Training, Others and POC_Sample need only Hour and Description.)"
     elif half: err = "Please enter the Hour for every note you filled in - a note without hours is not saved."
     elif sum(1 for p_ in procs if is_other(p_[0])) > 1: err = "\u201cOther\u201d can be added only once per day (it already counts as 8 hours)."
     elif tot > day_limit():
@@ -1879,8 +1899,8 @@ LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Target count</th><th>Completed</th><th>Target status</th><th>Productivity</th><th></th></tr>
 {% for s in subs %}<tr><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; {{s.emp_name}}</td><td>{{s.designation}}</td>{% endif %}
 <td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
-<td>{{ (s.tgt_total|g) if s.tgt_state in ('met','miss') else '-' }}</td><td>{{ (s.cnt_total|g) if s.tgt_state in ('met','miss') else '-' }}</td>
-<td>{% if s.tgt_state=='met' %}<span class="tg-badge met">&#10003; Target met</span>{% elif s.tgt_state=='miss' %}<span class="tg-badge miss" title="Below target: {{s.tgt_miss|join(', ')}}">&#9888; Not met</span>{% else %}-{% endif %}</td>
+<td>{{ (s.tgt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td><td>{{ (s.cnt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td>
+<td>{% if s.tgt_state=='met' %}<span class="tg-badge met">&#9989; Achieved</span>{% elif s.tgt_state=='miss' %}<span class="tg-badge miss" title="Below target: {{s.tgt_miss|join(', ')}}">&#10060; Not Achieved</span>{% else %}-{% endif %}</td>
 <td>{{ 'Weekend - not counted' if s.off else (s.pct ~ '%') }}</td>
 <td class="act"><a href="/entry/{{s.id}}/view{{ ('?next=' ~ (nxt|urlencode)) if nxt else '' }}">View</a><a href="/entry/{{s.id}}{{ ('?next=' ~ (nxt|urlencode)) if nxt else '' }}">Edit</a>
 <form method="post" action="/entry/{{s.id}}/delete{{ ('?next=' ~ (nxt|urlencode)) if nxt else '' }}" onsubmit="return confirm('Delete this entry?')"><button class="danger">Delete</button></form></td></tr>
@@ -1910,12 +1930,12 @@ const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}}, OTH
 const isOther=v=>['other','others'].includes(String(v==null?'':v).trim().toLowerCase()), isPoc=v=>String(v==null?'':v).trim().toLowerCase().replace(/ /g,'_')==='poc_sample', isTrain=v=>String(v==null?'':v).trim().toLowerCase()==='training';
 const effH=(nm,h)=>(isOther(nm)&&h>0)?OTHER_H:h;      // "Other" always counts as 8 hrs
 function rowH(r){return effH((r.querySelector('[name=pn]')||{}).value,+((r.querySelector('[name=ph]')||{}).value)||0)}
-function otherUI(r){const pv=(r.querySelector('[name=pn]')||{}).value,o=isOther(pv),pc_=isPoc(pv),tr=isTrain(pv),d=r.querySelector('[name=pd]'),c=r.querySelector('[name=pc]');if(!d)return;
+function otherUI(r){const pv=(r.querySelector('[name=pn]')||{}).value,o=isOther(pv),pc_=isPoc(pv),tr=isTrain(pv)||o||pc_,d=r.querySelector('[name=pd]'),c=r.querySelector('[name=pc]');if(!d)return;
  let n=r.querySelector('.oth-note');
  if(c){if(tr){c.type='hidden';c.required=false;c.value='0'}else{if(c.type==='hidden'){c.type='number';c.value=''}c.required=true}}      // Training: Count is not shown / not required
- if(o||pc_||tr){d.placeholder=tr?'Training details *':'Description of the work done *';d.size=48;d.style.minWidth='320px';
+ if(o||pc_||tr){d.placeholder=isTrain(pv)?'Training details *':'Description of the work done *';d.size=48;d.style.minWidth='320px';
   if(!n){n=document.createElement('div');n.className='oth-note mut';n.style.cssText='flex-basis:100%;font-size:.85em;color:#b45309';r.insertBefore(n,r.querySelector('button.danger'))}
-  n.textContent=pc_?'"POC_Sample": Hour, Count and Description are all required.':tr?'"Training": enter the Hours and a Description only - no Count is needed. Productivity is calculated from the hours entered.':'"Other": enter the work details in Description, plus Hours and Count. It is always counted as '+OTHER_H+' working hours, whatever hours you enter.'}
+  n.textContent=pc_?'"POC_Sample": enter the Hours and a Description only - no Count is needed.':o?'"Other": enter the Hours and the work details in Description - no Count is needed. It is always counted as '+OTHER_H+' working hours, whatever hours you enter.':'"Training": enter the Hours and a Description only - no Count is needed. Productivity is calculated from the hours entered.'}
  else{d.placeholder='Description *';d.size=28;d.style.minWidth='';if(n)n.remove()}}
 const E=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function row(h){const d=document.createElement('div');d.className='r';

@@ -113,6 +113,20 @@ from google.oauth2.service_account import Credentials
 from flask import Flask, request, redirect, session, render_template_string, flash, abort, jsonify, has_request_context, Response, send_file
 
 from zoneinfo import ZoneInfo
+
+# Load settings from a ".env" file placed next to this script (KEY=VALUE per line). Real environment variables always win.
+def _load_dotenv():
+    try:
+        f = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+        if not os.path.isfile(f): return
+        for line in open(f, encoding="utf-8"):
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line: continue
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    except Exception as e:
+        print("Could not read .env:", e)
+_load_dotenv()
 # The server clock is often UTC. All app times use this timezone instead (set APP_TZ to change it).
 TZ = ZoneInfo(os.getenv("APP_TZ", "Asia/Kolkata"))
 def now_local(): return dt.datetime.now(TZ).replace(tzinfo=None)

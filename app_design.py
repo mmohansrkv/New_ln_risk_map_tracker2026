@@ -51,7 +51,7 @@ Access rules (Update59):
   * Update78: Welcome Page opens first for Admin and Employee, no 'Continue' button, opens the Admin/Employee page by itself when it ends.
     Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
     melody, different from the earlier Mohanam tune), Welcome Page only.
-  * Update93: (1) New Admin menu item "Missed Entries Log" (/admin/missed-log): every employee with missed dates, a View page per employee (dates, which
+  * Update93: (1) New Admin menu item "Missed Entries Log" (/admin/missed-log, reachable by the links on the Missed entries page; no longer in the menu): every employee with missed dates, a View page per employee (dates, which
     were already e-mailed, e-mail history) and the Send e-mail button + Automatic e-mail switch (moved here from the Missed entries page).
     (2) New process "Training": the employee enters Hours + Description only (no Count, none required); it adds its hours to productivity and never
     has a count target, even if a target is typed for it in Admin > Processes.
@@ -1649,7 +1649,7 @@ setInterval(function(){location.reload()},120000);
 </body></html>"""
 
 NAVS = {
-    "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"), ("/admin/missed-log", "Missed Entries Log"),
+    "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"), 
               ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
@@ -5119,6 +5119,9 @@ SMTP_HOST, SMTP_PORT = os.getenv("SMTP_HOST", "").strip(), int(os.getenv("SMTP_P
 SMTP_USER, SMTP_PASS = os.getenv("SMTP_USER", "").strip(), os.getenv("SMTP_PASS", "")
 MAIL_FROM = os.getenv("MAIL_FROM", "").strip() or SMTP_USER
 APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "").strip()      # Update94: send e-mail over HTTPS (port 443) via Brevo - works on hosts that block SMTP ports (e.g. Render free)
+MAIL_READY = bool(MAIL_FROM and (BREVO_API_KEY or SMTP_HOST))
+print("E-mail mode:", "Brevo HTTPS API" if BREVO_API_KEY else ("SMTP " + SMTP_HOST if SMTP_HOST else "NOT CONFIGURED"))
 _WORKER_ID = uuid.uuid4().hex[:8]
 _reminder_done = set()          # dates this process has already handled
 
@@ -5161,11 +5164,44 @@ def reminder_message(emp, date):
     msg.add_alternative(h + "<p>Thank you,<br>Productivity Tracker</p>", subtype="html")
     return msg
 
+def _brevo_send(messages):
+    """Send via Brevo's HTTPS API (no SMTP port needed). Returns {email: 'Sent' | 'Failed: reason'}."""
+    import json, urllib.request, urllib.error
+    res = {}
+    for m in messages:
+        to = m["To"]
+        try:
+            html = m.get_body(preferencelist=("html",)); plain = m.get_body(preferencelist=("plain",))
+            payload = {"sender": {"name": "Productivity Tracker", "email": MAIL_FROM}, "to": [{"email": to}], "subject": str(m["Subject"]),
+                       "htmlContent": html.get_content() if html else "<p>" + (plain.get_content() if plain else "") + "</p>"}
+            if plain: payload["textContent"] = plain.get_content()
+            req = urllib.request.Request("https://api.brevo.com/v3/smtp/email", data=json.dumps(payload).encode("utf-8"), method="POST",
+                                         headers={"api-key": BREVO_API_KEY, "content-type": "application/json", "accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=30) as r: r.read()
+            res[to] = "Sent"
+        except urllib.error.HTTPError as ex:
+            try: body = ex.read().decode("utf-8", "ignore")
+            except Exception: body = ""
+            res[to] = (f"Failed (Brevo) {ex.code}: {body}")[:230]
+        except Exception as ex:
+            res[to] = ("Failed (Brevo): " + str(ex))[:230]
+    return res
+
 def _smtp_send(messages):
-    """Send all messages over ONE SMTP connection. Returns {email: 'Sent' | 'Failed: reason'}."""
+    """Send all messages. Uses Brevo (HTTPS) when BREVO_API_KEY is set, otherwise ONE SMTP connection (IPv4 forced). Returns {email: 'Sent' | 'Failed: reason'}."""
+    if BREVO_API_KEY: return _brevo_send(messages)
+    import socket
     res = {}
     ctx = ssl.create_default_context()
-    srv = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ctx, timeout=30) if SMTP_PORT == 465 else smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30)
+    try: ip = socket.getaddrinfo(SMTP_HOST, SMTP_PORT, socket.AF_INET, socket.SOCK_STREAM)[0][4][0]      # force IPv4 (many hosts have no IPv6 route -> Errno 101)
+    except Exception: ip = SMTP_HOST
+    try:
+        if SMTP_PORT == 465: srv = smtplib.SMTP_SSL(context=ctx, timeout=30)
+        else: srv = smtplib.SMTP(timeout=30)
+        srv._host = SMTP_HOST                                  # keep the real host name for TLS certificate checking
+        srv.connect(ip, SMTP_PORT)
+    except Exception as ex:
+        return {m["To"]: (f"Failed (SMTP, no BREVO_API_KEY set on server): {ex}. Render free blocks SMTP - add BREVO_API_KEY in Environment and redeploy.")[:230] for m in messages}
     try:
         if SMTP_PORT != 465:
             srv.ehlo(); srv.starttls(context=ctx); srv.ehlo()
@@ -5173,6 +5209,8 @@ def _smtp_send(messages):
         for m in messages:
             try: srv.send_message(m); res[m["To"]] = "Sent"
             except Exception as ex: res[m["To"]] = ("Failed: " + str(ex))[:200]
+    except Exception as ex:
+        for m in messages: res.setdefault(m["To"], ("Failed: " + str(ex))[:200])
     finally:
         try: srv.quit()
         except Exception: pass
@@ -5181,7 +5219,7 @@ def _smtp_send(messages):
 def run_daily_reminder(date=None):
     """Send today's reminders once. Safe with several workers/servers: the first worker to log the '__RUN__' row for the date sends the batch."""
     date = date or str(today_local())
-    if not SMTP_HOST or not MAIL_FROM:
+    if not MAIL_READY:
         print("Reminder mail: SMTP_HOST / MAIL_FROM not set - no reminder e-mails sent."); return 0
     ws = ws_of("Email Log")
     ws.append_row([date, "__RUN__", _WORKER_ID, "", now_local().strftime("%Y-%m-%d %H:%M:%S"), "Claimed"], value_input_option="RAW")
@@ -5285,8 +5323,8 @@ def send_missed_mails(items, mode, by):
 def admin_missed_send():
     nxt = (request.form.get("next") or "").strip()
     back = nxt if (nxt.startswith("/admin/") and "//" not in nxt and "\\" not in nxt and "\n" not in nxt) else "/admin/missed-log"
-    if not (SMTP_HOST and MAIL_FROM):
-        flash("E-mail is not set up on the server (SMTP_HOST / MAIL_FROM).", "error"); return redirect(back)
+    if not MAIL_READY:
+        flash("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST, and MAIL_FROM).", "error"); return redirect(back)
     eid = (request.form.get("eid") or "").strip()
     e = next((x for x in rows("Employees") if _key(x["Employee ID"]) == _key(eid)), None)
     if not e: flash("Employee not found.", "error"); return redirect(back)
@@ -5328,7 +5366,7 @@ MLOG = '''<div class="head"><div><h1>Missed Entries Log</h1>
 <div class="kpi"><span>Employees affected</span><b>{{summary|length}}</b></div></div>
 <div class="card no-print"><h2>Missed entries e-mail</h2>
 <p class="mut">Sends the employee's missed productivity entry dates to their registered Office Email ID. Dates shown follow the filter above ({{label}}).</p>
-{% if not smtp_ok %}<div class="warn">E-mail is not set up on the server yet (SMTP_HOST / MAIL_FROM) - nothing can be sent until it is.</div>{% endif %}
+{% if not smtp_ok %}<div class="warn">E-mail is not set up on the server yet (BREVO_API_KEY or SMTP_HOST, and MAIL_FROM) - nothing can be sent until it is.</div>{% endif %}
 <form method="post" action="/admin/missed/auto" class="grid" style="align-items:end">
 <label>Automatic e-mail<select name="enabled"><option value="Yes"{{' selected' if auto_on else ''}}>Enabled</option><option value="No"{{'' if auto_on else ' selected'}}>Disabled</option></select></label>
 <label>Send every day at<input type="time" name="time" value="{{auto_time}}" required></label>
@@ -5395,7 +5433,7 @@ def admin_missed_log():
     summary.sort(key=lambda x: str(x["name"]))
     on, t = missed_auto_settings()
     return page(MLOG, title="Missed Entries Log", month=month, label=label, emp=request.args.get("emp", ""), summary=summary, total=total,
-                auto_on=on, auto_time=t, smtp_ok=bool(SMTP_HOST and MAIL_FROM), history=mail_history())
+                auto_on=on, auto_time=t, smtp_ok=MAIL_READY, history=mail_history())
 
 @app.route("/admin/missed-log/<eid>")
 @need("admin")
@@ -5411,13 +5449,13 @@ def admin_missed_log_emp(eid):
     ds = sorted(missing_dates(eid, subs, leaves, start, end, fmt="%Y-%m-%d"), reverse=True)
     dates = [dict(date=d, day=dt.date.fromisoformat(d).strftime("%a"), sent=d in sent) for d in ds]
     return page(MLOG_EMP, title="Missed entries - " + str(e["Name"]), emp=e, email=employee_office_email(e), month=month, label=label, dates=dates,
-                new_count=sum(1 for d in dates if not d["sent"]), smtp_ok=bool(SMTP_HOST and MAIL_FROM), history=mail_history(eid))
+                new_count=sum(1 for d in dates if not d["sent"]), smtp_ok=MAIL_READY, history=mail_history(eid))
 
 def run_auto_missed(date=None):
     """One automatic run: each employee with missed dates this month NOT e-mailed before gets one e-mail with only the new dates.
     Duplicate protection: (a) a __RUN__ row claims the day so only one worker/server sends, (b) dates already in a 'Sent' log row are never repeated."""
     date = date or str(today_local())
-    if not (SMTP_HOST and MAIL_FROM): print("Missed mail: SMTP not configured - skipped."); return 0
+    if not MAIL_READY: print("Missed mail: SMTP not configured - skipped."); return 0
     ws = ws_of(MISSED_LOG)
     ws.append_row([date, "__RUN__", _WORKER_ID, "", "", 0, now_local().strftime("%Y-%m-%d %H:%M:%S"), "Auto", "Claimed", "system"], value_input_option="RAW")
     invalidate_cache(MISSED_LOG)

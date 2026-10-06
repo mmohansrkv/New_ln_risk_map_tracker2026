@@ -1509,6 +1509,10 @@ aside .ng .kids{display:none;flex-direction:column;gap:2px;padding:4px 0 4px 14p
 aside .ng.open .kids{display:flex}
 aside .ng .kids a{font-size:13px;padding:7px 12px}
 aside .ng .kids a.on{background:transparent;color:#fff;font-weight:700;box-shadow:none;transform:none;border-left:3px solid #8ea8ff;border-radius:0 8px 8px 0}
+/* Update103: Log group (reuses the Employee Info expandable-group style) */
+aside .ng .kids a.on::before{content:"";}
+aside .ng .kids a{transition:background .15s,padding-left .15s}
+aside .ng .kids a:hover{padding-left:16px}
 #bgm{position:fixed;right:14px;bottom:14px;z-index:60;width:38px;height:38px;border-radius:50%;border:1px solid var(--line,#d8dbe6);background:#fff;color:#1c2340;font-size:17px;line-height:1;cursor:pointer;box-shadow:0 2px 10px #0002;opacity:.85;padding:0}
 #bgm:hover{opacity:1}
 @media print{ #bgm{display:none}}
@@ -1799,6 +1803,16 @@ def page(body, title="Productivity Tracker", **ctx):
                 ("/admin/mahizhchi", "Mahizhchi", p.startswith("/admin/mahizhchi"))]
         nav = [(h, l, on or any(k[2] for k in kids), kids) if h == "/admin/employee-info" else (h, l, on, [])
                for h, l, on, _k in nav]
+        # Update103: Productivity Log / Leave & Permission Log / Audit Log / Email Controls are grouped under one expandable "Log" menu.
+        # Every URL is unchanged - only the sidebar grouping changed. Overview, Processes and Employee Info stay as main menu items.
+        LOG_KIDS = [("/admin/log", "Productivity Log"), ("/admin/leave-permission", "Leave & Permission Log"),
+                    ("/admin/audit", "Audit Log"), ("/admin/email-controls", "Email Controls")]
+        def _on(h): return p == h or p.startswith(h + "/")
+        log_kids = [(h, l, _on(h)) for h, l in LOG_KIDS]
+        by_h = {n[0]: n for n in nav}
+        nav = [by_h["/admin/summary"], by_h["/admin/processes"],
+               ("/admin/log", "Log", any(k[2] for k in log_kids), log_kids),
+               by_h["/admin/employee-info"]]
     side_avatar = ""
     if session.get("role") == "admin":
         side_avatar = '<div class="av-flat" role="img" aria-label="Admin profile picture"><span>A</span></div>'

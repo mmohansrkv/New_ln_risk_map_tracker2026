@@ -51,6 +51,11 @@ Access rules (Update59):
   * Update78: Welcome Page opens first for Admin and Employee, no 'Continue' button, opens the Admin/Employee page by itself when it ends.
     Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
     melody, different from the earlier Mohanam tune), Welcome Page only.
+  * Update98: NEW Admin menu item "Email Controls" (/admin/email-controls): (1) Enable/Disable the automatic missed-productivity e-mail and
+    set its daily time; (2) pick an employee + one or more of their missed dates and send the reminder manually to the Office Email ID;
+    (3) configure the sender name / sender e-mail (stored in the Settings sheet; the Brevo API key / SMTP password stay in Render environment
+    variables); (4) status board of every e-mail - Pending / Sent / Failed (with the failure reason). Mails contain the missed date(s) and the
+    Employee Login link (APP_URL, else Render's RENDER_EXTERNAL_URL). Mails are sent from this Render-hosted app.
   * Update93: (1) New Admin menu item "Missed Entries Log" (/admin/missed-log, reachable by the links on the Missed entries page; no longer in the menu): every employee with missed dates, a View page per employee (dates, which
     were already e-mailed, e-mail history) and the Send e-mail button + Automatic e-mail switch (moved here from the Missed entries page).
     (2) New process "Training": the employee enters Hours + Description only (no Count, none required); it adds its hours to productivity and never
@@ -64,7 +69,7 @@ Access rules (Update59):
     an edit / delete the employee comes back to the same month. Employees can only ever open, edit or delete their OWN entries (get_sub -> 403).
   * Update90: (1) Process Entries: choosing the "Other" process shows a work-details Description box; Hours and Count are still entered, but "Other"
     is ALWAYS counted as 8 working hours (5, 6 or 7 entered = 8). Every other process keeps the hours actually entered. (2) Automatic reminder e-mail:
-    every day at 5:55 PM (REMINDER_TIME, app timezone) each employee who may submit the Daily Productivity Entry and has NOT yet submitted it for
+    every day at 1:35 PM (REMINDER_TIME, app timezone) each employee who may submit the Daily Productivity Entry and has NOT yet submitted it for
     today gets an e-mail on their Office Email ID. Needs SMTP_* environment variables (see REMINDER MAIL section). Sheets "Productivity Access"
     (optional switch-off list) and "Email Log" are created automatically.
   * Update89: Leave & Permission - (1) employees can EDIT their own Permission requests (hours + reason, this month's and later records; an edit of an
@@ -1755,7 +1760,8 @@ setInterval(function(){location.reload()},120000);
 NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"), 
               ("/admin/leave-permission", "Leave & Permission Log"),
-              ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log")],
+              ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log"),
+              ("/admin/email-controls", "Email Controls")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
@@ -5363,7 +5369,7 @@ SMTP_USER, SMTP_PASS = os.getenv("SMTP_USER", "").strip(), os.getenv("SMTP_PASS"
 MAIL_FROM = os.getenv("MAIL_FROM", "").strip() or SMTP_USER
 APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 BREVO_API_KEY = os.getenv("BREVO_API_KEY", "").strip()      # Update94: send e-mail over HTTPS (port 443) via Brevo - works on hosts that block SMTP ports (e.g. Render free)
-MAIL_READY = bool(MAIL_FROM and (BREVO_API_KEY or SMTP_HOST))
+MAIL_READY = bool(BREVO_API_KEY or SMTP_HOST)      # Update98: the transport; the sender address comes from Admin > Email Controls (or MAIL_FROM)
 print("E-mail mode:", "Brevo HTTPS API" if BREVO_API_KEY else ("SMTP " + SMTP_HOST if SMTP_HOST else "NOT CONFIGURED"))
 _WORKER_ID = uuid.uuid4().hex[:8]
 _reminder_done = set()          # dates this process has already handled
@@ -5398,7 +5404,7 @@ def reminder_message(emp, date):
     d = dt.date.fromisoformat(date).strftime("%d %b %Y")
     msg = EmailMessage()
     msg["Subject"] = f"Reminder: Daily Productivity Entry for {d} not yet submitted"
-    msg["From"] = formataddr(("Productivity Tracker", MAIL_FROM)); msg["To"] = emp["email"]
+    msg["From"] = formataddr(mail_sender()); msg["To"] = emp["email"]
     link = f"\n\nSubmit it here: {APP_URL}/employee" if APP_URL else ""
     msg.set_content(f"Hello {emp['name']},\n\nYour Daily Productivity Entry for today ({d}) has not yet been submitted.\n"
                     f"Please log in and submit it as soon as possible.{link}\n\nThank you,\nProductivity Tracker")
@@ -5415,7 +5421,9 @@ def _brevo_send(messages):
         to = m["To"]
         try:
             html = m.get_body(preferencelist=("html",)); plain = m.get_body(preferencelist=("plain",))
-            payload = {"sender": {"name": "Productivity Tracker", "email": MAIL_FROM}, "to": [{"email": to}], "subject": str(m["Subject"]),
+            from email.utils import parseaddr
+            _sn, _se = parseaddr(str(m["From"]))
+            payload = {"sender": {"name": _sn or "Productivity Tracker", "email": _se or MAIL_FROM}, "to": [{"email": to}], "subject": str(m["Subject"]),
                        "htmlContent": html.get_content() if html else "<p>" + (plain.get_content() if plain else "") + "</p>"}
             if plain: payload["textContent"] = plain.get_content()
             req = urllib.request.Request("https://api.brevo.com/v3/smtp/email", data=json.dumps(payload).encode("utf-8"), method="POST",
@@ -5533,31 +5541,76 @@ def missed_dates_for(eid, start, end):
     leaves = [l for l in rows("Leave") if _key(l["Employee ID"]) == _key(eid)]
     return missing_dates(eid, subs, leaves, start, end, fmt="%Y-%m-%d")
 
+# ---- Update98: sender settings + login link helpers
+MAIL_SENDER_EMAIL_KEY, MAIL_SENDER_NAME_KEY = "Mail Sender Email", "Mail Sender Name"
+EMAIL_RE = re.compile(r"^[^@\s,;<>\"]+@[^@\s,;<>\"]+\.[^@\s,;<>\"]+$")
+
+def mail_sender(fresh=False):
+    """-> (display name, e-mail). Admin's setting (Settings sheet) wins; falls back to the MAIL_FROM environment variable."""
+    try:
+        src = _fetch_rows("Settings") if fresh else rows("Settings")
+        get = lambda k: next((str(r.get("Value", "")).strip() for r in src if str(r.get("Key", "")).strip() == k), "")
+        em, nm = get(MAIL_SENDER_EMAIL_KEY), get(MAIL_SENDER_NAME_KEY)
+    except Exception as ex:
+        print("Could not read sender settings:", ex); em, nm = "", ""
+    if not EMAIL_RE.match(em or ""): em = MAIL_FROM
+    return ((nm or "Productivity Tracker").replace("\r", " ").replace("\n", " ")[:60], em)
+
+def app_url():
+    u = APP_URL or os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")      # Render sets RENDER_EXTERNAL_URL automatically
+    if not u and has_request_context(): u = request.host_url.rstrip("/")
+    return u
+
+def employee_login_link():
+    u = app_url()
+    return (u + "/employee/login") if u else ""
+
 def missed_message(emp, dates):
-    """Same layout as the Daily Productivity reminder (greeting, bold statement, instruction, link, sign-off) with the missed dates listed."""
+    """Greeting, the missed date(s), instruction, the Employee Login link and sign-off."""
+    import html as _h
     pretty = [dt.date.fromisoformat(d).strftime("%d %b %Y (%a)") for d in dates]
-    n = len(pretty)
+    n = len(pretty); link = employee_login_link(); nm = _h.escape(str(emp["name"]))
+    s_, ies = ("s" if n != 1 else ""), ("ies" if n != 1 else "y")
     msg = EmailMessage()
-    msg["Subject"] = f"Reminder: Daily Productivity Entry missed for {n} date{'s' if n != 1 else ''}"
-    msg["From"] = formataddr(("Productivity Tracker", MAIL_FROM)); msg["To"] = emp["email"]
-    link = f"\n\nSubmit it here: {APP_URL}/employee" if APP_URL else ""
-    msg.set_content(f"Hello {emp['name']},\n\nYour Daily Productivity Entry has not been submitted for the following date{'s' if n != 1 else ''}:\n\n"
-                    + "\n".join("  - " + x for x in pretty)
-                    + f"\n\nPlease log in and submit the missing entr{'ies' if n != 1 else 'y'} (or apply for leave if you were away).{link}\n\nThank you,\nProductivity Tracker")
-    h = (f'<p>Hello {emp["name"]},</p><p><b>Your Daily Productivity Entry has not been submitted for the following date{"s" if n != 1 else ""}:</b></p><ul>'
-         + "".join(f"<li>{x}</li>" for x in pretty) + "</ul>"
-         f'<p>Please log in and submit the missing entr{"ies" if n != 1 else "y"} (or apply for leave if you were away).</p>')
-    if APP_URL: h += f'<p><a href="{APP_URL}/employee">Open the Daily Productivity Entry</a></p>'
+    msg["Subject"] = f"Reminder: Daily Productivity Entry missed for {n} date{s_}"
+    msg["From"] = formataddr(mail_sender()); msg["To"] = emp["email"]
+    plain = (f"Hello {emp['name']},\n\nYour Daily Productivity Entry has not been submitted for the following date{s_}:\n\n"
+             + "\n".join("  - " + x for x in pretty)
+             + f"\n\nPlease log in and submit the missing entr{ies} (or apply for leave if you were away).")
+    if link: plain += f"\n\nEmployee Login: {link}"
+    msg.set_content(plain + "\n\nThank you,\nProductivity Tracker")
+    h = (f"<p>Hello {nm},</p><p><b>Your Daily Productivity Entry has not been submitted for the following date{s_}:</b></p><ul>"
+         + "".join(f"<li>{_h.escape(x)}</li>" for x in pretty) + "</ul>"
+         f"<p>Please log in and submit the missing entr{ies} (or apply for leave if you were away).</p>")
+    if link: h += f'<p><a href="{_h.escape(link)}">Employee Login</a><br><span style="color:#555">{_h.escape(link)}</span></p>'
     msg.add_alternative(h + "<p>Thank you,<br>Productivity Tracker</p>", subtype="html")
     return msg
 
 def send_missed_mails(items, mode, by):
-    """items = [(emp dict(eid,name,email), [dates])]. One SMTP connection; every outcome is written to the Missed Email Log. Returns {eid: status}."""
-    res = _smtp_send([missed_message(e, d) for e, d in items])
+    """items = [(emp dict(eid,name,email), [dates])]. Update98: each row is first written as Pending, then updated to Sent / Failed-<reason>.
+    Returns {eid: status}. The Missed Email Log is also the record that prevents duplicate automatic mails."""
+    ws = ws_of(MISSED_LOG)
     now = now_local().strftime("%Y-%m-%d %H:%M:%S"); today = now[:10]
+    sender = mail_sender(fresh=True)[1]
+    if not sender or not MAIL_READY:
+        why = "Failed: no sender e-mail configured (Admin > Email Controls)" if not sender else "Failed: mail service not configured on the server"
+        out = {e["eid"]: why for e, _d in items}
+        ws.append_rows([[today, e["eid"], e["name"], e["email"], ", ".join(d), len(d), now, mode, why, by] for e, d in items], value_input_option="RAW")
+        invalidate_cache(MISSED_LOG); return out
+    resp = ws.append_rows([[today, e["eid"], e["name"], e["email"], ", ".join(d), len(d), now, mode, "Pending", by] for e, d in items], value_input_option="RAW")
+    invalidate_cache(MISSED_LOG)
+    m_ = re.search(r"!A(\d+):", str((resp or {}).get("updates", {}).get("updatedRange", "")))
+    try: first = int(m_.group(1)) if m_ else len(ws.col_values(1)) - len(items) + 1
+    except Exception: first = None
+    try: res = _smtp_send([missed_message(e, d) for e, d in items])
+    except Exception as ex:
+        print("Missed mail send error:", ex); res = {e["email"]: ("Failed: " + str(ex))[:200] for e, _d in items}
     out = {e["eid"]: res.get(e["email"], "Failed") for e, _d in items}
-    ws_of(MISSED_LOG).append_rows([[today, e["eid"], e["name"], e["email"], ", ".join(d), len(d), now, mode, out[e["eid"]], by] for e, d in items],
-                                  value_input_option="RAW")
+    done = now_local().strftime("%Y-%m-%d %H:%M:%S")
+    if first:
+        try:
+            ws.update(range_name=f"G{first}:I{first + len(items) - 1}", values=[[done, mode, out[e["eid"]]] for e, _d in items], value_input_option="RAW")
+        except Exception as ex: print("Could not update mail status:", ex)
     invalidate_cache(MISSED_LOG)
     return out
 
@@ -5737,6 +5790,159 @@ def _missed_auto_loop():
             print("Missed mail error:", ex)
 if REMINDER_ENABLED and os.getenv("WERKZEUG_RUN_MAIN", "true") == "true":
     threading.Thread(target=_missed_auto_loop, daemon=True).start()
+
+# ---------------------------------------------------------------- Update98: ADMIN EMAIL CONTROLS
+MAIL_LOOKBACK_DAYS = 92          # missed dates offered for manual sending: the last ~3 months (today is never "missed")
+
+def mail_status(v):
+    v = str(v or "").strip()
+    return "Sent" if v == "Sent" else ("Pending" if v == "Pending" else "Failed")
+
+EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
+<p class="mut">Automatic and manual reminders for missed Productivity entries. Mails go to each employee's Office Email ID and contain the missed date(s) and the Employee Login link. They are sent by this application running on Render.</p></div></div>
+{% if not mail_ok %}<div class="warn"><b>&#9888; E-mail service is not set up on the server.</b> Add <code>BREVO_API_KEY</code> (recommended on Render - it sends over HTTPS) or <code>SMTP_HOST</code> in the Render Environment settings and redeploy. Nothing can be sent until then.</div>{% endif %}
+{% if not login_link %}<div class="warn">No Employee Login link is available: set <code>APP_URL</code> (e.g. https://your-app.onrender.com) in the Render Environment settings.</div>{% endif %}
+<div class="kpis"><div class="kpi"><span>Sent</span><b>{{counts.Sent}}</b></div><div class="kpi"><span>Failed</span><b>{{counts.Failed}}</b></div><div class="kpi"><span>Pending</span><b>{{counts.Pending}}</b></div>
+<div class="kpi"><span>Automatic e-mail</span><b>{{'ON' if auto_on else 'OFF'}}</b></div></div>
+
+<div class="card"><h2>1. Automatic notifications</h2>
+<form method="post" action="/admin/email-controls/auto" class="grid" style="align-items:end">
+<label>Automatic missed-productivity e-mail<select name="enabled"><option value="Yes"{{' selected' if auto_on else ''}}>Enabled</option><option value="No"{{'' if auto_on else ' selected'}}>Disabled</option></select></label>
+<label>Send every day at<input type="time" name="time" value="{{auto_time}}" required></label>
+<button class="primary sm">Save</button></form>
+<p class="mut">{% if auto_on %}ON: every day at {{auto_time}} each employee with missed dates this month gets one e-mail listing only the dates that were not e-mailed before.{% else %}OFF: no automatic e-mail is sent. You can still send reminders manually below.{% endif %}</p></div>
+
+<div class="card"><h2>2. Send a reminder manually</h2>
+<form method="post" action="/admin/email-controls/send" id="ec-form" onsubmit="return ecCheck()">
+<label>Employee<select name="eid" id="ec-emp"><option value="">- choose an employee -</option>
+{% for e in emps %}<option value="{{e.id}}"{{' disabled' if not e.email else ''}}>{{e.id}} &middot; {{e.name}} &middot; {{e.email or 'no Office Email ID'}} ({{e.n}} missed)</option>{% endfor %}</select></label>
+<p class="mut" style="margin:10px 0 4px">Missed date(s) to include (last {{days}} days):</p>
+<div id="ec-dates" style="max-height:220px;overflow:auto;border:1px solid #d0d5dd;border-radius:8px;padding:8px 12px">Choose an employee first.</div>
+<p style="margin:10px 0"><label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="ec-all"> Select all dates</label></p>
+<button class="primary" id="ec-send" disabled>&#9993; Send reminder e-mail</button></form></div>
+
+<div class="card"><h2>3. Sender e-mail / account</h2>
+<form method="post" action="/admin/email-controls/sender" class="grid" style="align-items:end">
+<label>Sender name<input name="sender_name" value="{{sender_name}}" maxlength="60" placeholder="Productivity Tracker"></label>
+<label>Sender e-mail<input type="email" name="sender_email" value="{{sender_email}}" placeholder="noreply@yourcompany.com"></label>
+<button class="primary sm">Save sender</button></form>
+<p class="mut">Mail service in use: <b>{{transport}}</b>. The address you save here is used as the From address. With Brevo it must be a verified sender in your Brevo account, otherwise mails will show as Failed. The Brevo API key / SMTP password are kept in the Render Environment settings (never in the sheet) - change them there. Leave the e-mail empty to fall back to <code>MAIL_FROM</code>{% if env_from %} (now: {{env_from}}){% endif %}.</p>
+<p class="mut">Current sender: <b>{{cur_sender}}</b></p></div>
+
+<div class="card"><h2>4. E-mail status</h2>
+<form method="get" class="grid no-print" style="align-items:end">
+<label>Status<select name="status"><option value="">All</option>{% for x in ['Sent','Failed','Pending'] %}<option{{' selected' if status==x else ''}}>{{x}}</option>{% endfor %}</select></label>
+<input name="q" placeholder="Employee ID / name" value="{{q}}"><button class="primary sm">Show</button><a href="/admin/email-controls">Reset</a></form>
+<table><tr><th>Time</th><th>Employee</th><th>Office e-mail</th><th>Missed date(s)</th><th>Mode</th><th>Status</th><th>Sent by</th></tr>
+{% for h in history %}<tr><td>{{h.at|t12}}</td><td>{{h.emp}}</td><td>{{h.email}}</td><td>{{h.dates}}</td><td>{{h.mode}}</td>
+<td><span style="padding:2px 9px;border-radius:99px;font-weight:600;{{ {'Sent':'background:#dcfce7;color:#166534','Failed':'background:#fee2e2;color:#991b1b','Pending':'background:#fef3c7;color:#92400e'}[h.status] }}">{{h.status}}</span>
+{% if h.status=='Failed' and h.detail %}<br><small class="mut">{{h.detail}}</small>{% endif %}</td><td>{{h.by}}</td></tr>
+{% else %}<tr><td colspan="7">No e-mails recorded{{' for this filter' if status or q else ' yet'}}.</td></tr>{% endfor %}</table>
+<p class="mut">Latest {{history|length}} of {{total}} shown. Pending = being sent right now (a row that stays Pending means the server stopped before it finished).</p></div>
+<script>
+(function(){
+ var M={{ missed_map|tojson }};
+ var sel=document.getElementById('ec-emp'),box=document.getElementById('ec-dates'),btn=document.getElementById('ec-send'),all=document.getElementById('ec-all');
+ function boxes(){return box.querySelectorAll('input[type=checkbox]');}
+ function upd(){var n=0;boxes().forEach(function(c){if(c.checked)n++;});btn.disabled=!n;}
+ function render(){
+  var list=M[sel.value]||[];box.innerHTML='';all.checked=false;
+  if(!sel.value){box.textContent='Choose an employee first.';}
+  else if(!list.length){box.textContent='No missed dates in the last {{days}} days.';}
+  list.forEach(function(x){
+   var l=document.createElement('label');l.style.cssText='display:flex;gap:8px;align-items:center;margin:3px 0';
+   var c=document.createElement('input');c.type='checkbox';c.name='dates';c.value=x.d;c.addEventListener('change',upd);
+   var t=document.createElement('span');t.textContent=x.label+(x.sent?'  (already e-mailed)':'');
+   l.appendChild(c);l.appendChild(t);box.appendChild(l);});
+  upd();}
+ sel.addEventListener('change',render);
+ all.addEventListener('change',function(){boxes().forEach(function(c){c.checked=all.checked;});upd();});
+ window.ecCheck=function(){var n=0;boxes().forEach(function(c){if(c.checked)n++;});
+  if(!n){alert('Select at least one missed date.');return false;}
+  return confirm('Send the reminder for '+n+' date(s) to the selected employee?');};
+ render();
+})();
+</script>"""
+
+@app.route("/admin/email-controls")
+@need("admin")
+def admin_email_controls():
+    prefetch("Employees", "Productivity log", "Leave", "Holidays", "Settings", MISSED_LOG)
+    today = today_local(); end = today - dt.timedelta(days=1); start = today - dt.timedelta(days=MAIL_LOOKBACK_DAYS)
+    subs, leaves = load_subs(), rows("Leave")
+    _last, notified = missed_mail_history()
+    emps, missed_map = [], {}
+    for e in rows("Employees"):
+        k = _key(e["Employee ID"]); eid = str(e["Employee ID"])
+        ds = sorted(missing_dates(eid, [x for x in subs if _key(x["emp_id"]) == k], [l for l in leaves if _key(l["Employee ID"]) == k], start, end, fmt="%Y-%m-%d"), reverse=True)
+        missed_map[eid] = [dict(d=d, label=dt.date.fromisoformat(d).strftime("%d %b %Y (%a)"), sent=d in notified.get(k, set())) for d in ds]
+        emps.append(dict(id=eid, name=str(e.get("Name", "")), email=(employee_office_email(e) if "@" in employee_office_email(e) else ""), n=len(ds)))
+    emps.sort(key=lambda x: x["name"].lower())
+    allrows = [r for r in rows(MISSED_LOG) if str(r.get("Employee ID", "")) != "__RUN__"]
+    allrows.sort(key=lambda r: str(r.get("Sent at", "")), reverse=True)
+    counts = {"Sent": 0, "Failed": 0, "Pending": 0}
+    for r in allrows: counts[mail_status(r.get("Status"))] += 1
+    status = request.args.get("status", "").strip(); q = request.args.get("q", "").strip().lower()
+    hist = []
+    for r in allrows:
+        st = mail_status(r.get("Status"))
+        if status in counts and st != status: continue
+        if q and q not in str(r.get("Employee ID", "")).lower() and q not in str(r.get("Employee name", "")).lower(): continue
+        hist.append(dict(at=str(r.get("Sent at", "")), emp=f"{r.get('Employee ID', '')} · {r.get('Employee name', '')}", email=str(r.get("Email", "")),
+                         dates=str(r.get("Missed dates", "")), mode=str(r.get("Mode", "")), status=st,
+                         detail=str(r.get("Status", ""))[:200] if st == "Failed" else "", by=str(r.get("Sent by", ""))))
+    on, t = missed_auto_settings()
+    nm, em = mail_sender()
+    cur = f"{nm} <{em}>" if em else "not set"
+    transport = "Brevo HTTPS API" if BREVO_API_KEY else (f"SMTP ({SMTP_HOST})" if SMTP_HOST else "NOT CONFIGURED")
+    return page(EMAIL_CONTROLS, title="Email Controls", mail_ok=MAIL_READY, login_link=employee_login_link(), counts=counts, auto_on=on, auto_time=t,
+                emps=emps, missed_map=missed_map, days=MAIL_LOOKBACK_DAYS, sender_name=_setting(MAIL_SENDER_NAME_KEY),
+                sender_email=_setting(MAIL_SENDER_EMAIL_KEY), env_from=MAIL_FROM, cur_sender=cur, transport=transport,
+                history=hist[:100], total=len(hist), status=status, q=request.args.get("q", ""))
+
+@app.route("/admin/email-controls/auto", methods=["POST"])
+@need("admin")
+def admin_email_controls_auto():
+    on = request.form.get("enabled") == "Yes"
+    t = (request.form.get("time") or "").strip()
+    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t): flash("Choose a valid time.", "error"); return redirect("/admin/email-controls")
+    _set_setting(MISSED_TIME_KEY, t); _set_setting(MISSED_AUTO_KEY, "Yes" if on else "No")
+    flash(f"Automatic missed-productivity e-mail {'enabled - sends every day at ' + t if on else 'disabled'}.")
+    return redirect("/admin/email-controls")
+
+@app.route("/admin/email-controls/sender", methods=["POST"])
+@need("admin")
+def admin_email_controls_sender():
+    nm = re.sub(r"[\r\n]+", " ", (request.form.get("sender_name") or "")).strip()[:60]
+    em = (request.form.get("sender_email") or "").strip()
+    if em and not EMAIL_RE.match(em): flash("Enter a valid sender e-mail address.", "error"); return redirect("/admin/email-controls")
+    _set_setting(MAIL_SENDER_NAME_KEY, nm); _set_setting(MAIL_SENDER_EMAIL_KEY, em)
+    flash(f"Sender saved: {mail_sender(fresh=True)[1] or 'none - set an address or MAIL_FROM'}.")
+    return redirect("/admin/email-controls")
+
+@app.route("/admin/email-controls/send", methods=["POST"])
+@need("admin")
+def admin_email_controls_send():
+    back = "/admin/email-controls"
+    if not MAIL_READY:
+        flash("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST).", "error"); return redirect(back)
+    eid = (request.form.get("eid") or "").strip()
+    e = next((x for x in rows("Employees") if _key(x["Employee ID"]) == _key(eid)), None)
+    if not e: flash("Choose an employee.", "error"); return redirect(back)
+    mail = employee_office_email(e)
+    if not EMAIL_RE.match(mail): flash(f"{e['Name']} has no valid Office Email ID.", "error"); return redirect(back)
+    asked = {d for d in request.form.getlist("dates") if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d)}
+    today = today_local()
+    missed = set(missed_dates_for(eid, today - dt.timedelta(days=MAIL_LOOKBACK_DAYS), today - dt.timedelta(days=1)))
+    chosen = sorted(asked & missed)
+    if not chosen: flash("Select at least one missed date (only dates the employee really missed can be sent).", "error"); return redirect(back)
+    emp = dict(eid=str(e["Employee ID"]), name=str(e["Name"]), email=mail)
+    try: st = send_missed_mails([(emp, chosen)], "Manual", session.get("name", "admin"))[emp["eid"]]
+    except Exception as ex_: st = "Failed: " + str(ex_)[:150]; print("Manual missed mail error:", ex_)
+    if st == "Sent": flash(f"Reminder sent to {e['Name']} ({mail}) for {len(chosen)} date(s).")
+    else: flash(f"E-mail to {e['Name']} could not be sent: {st}", "error")
+    return redirect(back)
+
 
 if __name__ == "__main__":
     # NOTE: Flask's built-in dev server (even with threaded=True) is still not

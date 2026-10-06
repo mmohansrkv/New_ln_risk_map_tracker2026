@@ -743,13 +743,15 @@ TRAINING_PROCESS = "Training"      # Update93: Hours + Description only - no Cou
 def is_training(name): return str(name or "").strip().lower() == TRAINING_PROCESS.lower()
 def no_count(name):
     """Update94: Training, Other(s) and POC_Sample take Hour + Description only - no Count, no count target."""
-    return is_training(name) or is_other(name) or is_poc(name)
+    return is_training(name) or is_other(name) or is_poc(name) or is_genai(name)
 
 OTHER_PROCESS = "Other"
 OTHER_HOURS = 8.0          # Update90: the "Other" process always counts as a full 8-hour day, whatever hours were typed
 def is_other(name): return str(name or "").strip().lower() in (OTHER_PROCESS.lower(), OTHER_PROCESS.lower() + "s")      # Update94: "Other" / "Others"
 POC_SAMPLE_PROCESS = "POC_Sample"   # Update94: like "Other", POC_Sample needs Hour + Count + Description (all required); it keeps the hours entered
 def is_poc(name): return str(name or "").strip().lower().replace(" ", "_") == POC_SAMPLE_PROCESS.lower()
+GENAI_PROCESS = "GenAI"      # Update103: GenAI follows EXACTLY the same solution as POC_Sample / Others (Hour + Description, no Count, same productivity logic)
+def is_genai(name): return str(name or "").strip().lower().replace(" ", "").replace("_", "").replace("-", "") == "genai"
 def eff_hours(name, hours):
     """Hours that count for a process line: 8 for "Other" (as long as some hours were entered), the entered hours for every other process."""
     return hours      # Update96: "Other" uses the hours the employee typed - never overridden with 8
@@ -812,10 +814,10 @@ def parse_form(emp_id):
     elif not procs: err = "Add at least one process entry."
     elif any(not str(n).strip() or (not str(h).strip() or num(h) <= 0) or (not str(c).strip() and not no_count(n)) or not desc.strip()
              for n, h, c, desc in rows_p):
-        if any((is_other(n) or is_poc(n)) and (not str(h).strip() or num(h) <= 0 or not desc.strip()) for n, h, c, desc in rows_p):
-            err = "For \u201cOthers\u201d and \u201cPOC_Sample\u201d, Hour and Description are required (no Count) - please fill them before saving."
+        if any((is_other(n) or is_poc(n) or is_genai(n)) and (not str(h).strip() or num(h) <= 0 or not desc.strip()) for n, h, c, desc in rows_p):
+            err = "For \u201cOthers\u201d, \u201cPOC_Sample\u201d and \u201cGenAI\u201d, Hour and Description are required (no Count) - please fill them before saving."
         else:
-            err = "All Process Entry fields (Process, Hour, Count and Description) are mandatory - please fill every field before saving. (Training, Others and POC_Sample need only Hour and Description.)"
+            err = "All Process Entry fields (Process, Hour, Count and Description) are mandatory - please fill every field before saving. (Training, Others, POC_Sample and GenAI need only Hour and Description.)"
     elif half: err = "Please enter the Hour for every note you filled in - a note without hours is not saved."
     elif sum(1 for p_ in procs if is_other(p_[0])) > 1: err = "\u201cOther\u201d can be added only once per day (enter all its hours in one line)."
     elif tot > day_limit():
@@ -828,6 +830,10 @@ def parse_form(emp_id):
             err = (f"Entry incomplete: {tot:g} of the required {need_h:g} working hours logged{why} "
                    f"({need_h - tot:g} hrs remaining). Complete all {need_h:g} hours before saving.")
     return date, procs, notes, err
+
+def live_rows_of(sid):
+    """Update103: current sheet row numbers of one submission, read live (cached row numbers can be stale after another Add/Delete)."""
+    return [r["_row"] for r in _fetch_rows("Productivity log") if str(r["Submission ID"]) == str(sid)]
 
 def duplicate_entry(emp_id, date, skip_sid=None, fresh=False):
     """Update96: reads just the Productivity log (live from the sheet when fresh=True) instead of building every employee's submissions."""
@@ -1116,7 +1122,8 @@ def home():
 def next_url():
     """Update91: where View / Edit / Delete return to. Only an employee's own Productivity Info month page is accepted (no open redirect)."""
     n = (request.values.get("next") or "").strip()
-    ok = (session.get("role") == "employee" and n.startswith("/employee/productivity")
+    ok = (((session.get("role") == "employee" and n.startswith("/employee/productivity"))
+           or (session.get("role") == "admin" and (n == "/admin/log" or n.startswith("/admin/log?"))))      # Update103: Admin returns to the Productivity Log
           and "//" not in n and "\\" not in n and "\n" not in n and "\r" not in n)
     return n if ok else ""
 
@@ -2072,15 +2079,15 @@ Productivity: <b id="tpct">0</b>% &middot; <b id="tstat"></b> <span class="mut">
 <script>
 const WORK={{workday|g}}, PERM={{perm|tojson}}, MAXD={{maxdate|tojson}};
 const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}}, OTHER_H={{other_hours|g}};
-const isOther=v=>['other','others'].includes(String(v==null?'':v).trim().toLowerCase()), isPoc=v=>String(v==null?'':v).trim().toLowerCase().replace(/ /g,'_')==='poc_sample', isTrain=v=>String(v==null?'':v).trim().toLowerCase()==='training';
+const isOther=v=>['other','others'].includes(String(v==null?'':v).trim().toLowerCase()), isPoc=v=>String(v==null?'':v).trim().toLowerCase().replace(/ /g,'_')==='poc_sample', isGenai=v=>String(v==null?'':v).trim().toLowerCase().replace(/[ _-]/g,'')==='genai', isTrain=v=>String(v==null?'':v).trim().toLowerCase()==='training';
 const effH=(nm,h)=>h;      // Update96: hours are exactly what the employee typed
 function rowH(r){return effH((r.querySelector('[name=pn]')||{}).value,+((r.querySelector('[name=ph]')||{}).value)||0)}
-function otherUI(r){const pv=(r.querySelector('[name=pn]')||{}).value,o=isOther(pv),pc_=isPoc(pv),tr=isTrain(pv)||o||pc_,d=r.querySelector('[name=pd]'),c=r.querySelector('[name=pc]');if(!d)return;
+function otherUI(r){const pv=(r.querySelector('[name=pn]')||{}).value,o=isOther(pv),pc_=isPoc(pv),ga_=isGenai(pv),tr=isTrain(pv)||o||pc_||ga_,d=r.querySelector('[name=pd]'),c=r.querySelector('[name=pc]');if(!d)return;
  let n=r.querySelector('.oth-note');
  if(c){if(tr){c.type='hidden';c.required=false;c.value='0'}else{if(c.type==='hidden'){c.type='number';c.value=''}c.required=true}}      // Training: Count is not shown / not required
- if(o||pc_||tr){d.placeholder=isTrain(pv)?'Training details *':'Description of the work done *';d.size=48;d.style.minWidth='320px';
+ if(o||pc_||ga_||tr){d.placeholder=isTrain(pv)?'Training details *':'Description of the work done *';d.size=48;d.style.minWidth='320px';
   if(!n){n=document.createElement('div');n.className='oth-note mut';n.style.cssText='flex-basis:100%;font-size:.85em;color:#b45309';r.insertBefore(n,r.querySelector('button.danger'))}
-  n.textContent=pc_?'"POC_Sample": enter the Hours and a Description only - no Count is needed.':o?'"Other": enter the Hours and the work details in Description - no Count is needed. The hours you enter are counted as productive hours.':'"Training": enter the Hours and a Description only - no Count is needed. Productivity is calculated from the hours entered.'}
+  n.textContent=ga_?'"GenAI": enter the Hours and a Description only - no Count is needed.':pc_?'"POC_Sample": enter the Hours and a Description only - no Count is needed.':o?'"Other": enter the Hours and the work details in Description - no Count is needed. The hours you enter are counted as productive hours.':'"Training": enter the Hours and a Description only - no Count is needed. Productivity is calculated from the hours entered.'}
  else{d.placeholder='Description *';d.size=28;d.style.minWidth='';if(n)n.remove()}}
 const E=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function row(h){const d=document.createElement('div');d.className='r';
@@ -2304,6 +2311,14 @@ def admin_delete(kind, row):
     ws_of(KINDS.get(kind) or abort(404)).delete_rows(row); invalidate_cache(KINDS.get(kind))
     flash("Deleted."); return redirect(f"/admin/{kind}")
 
+LOG_MANAGE = """<div class="card no-print"><h2>Manage employee entries</h2>
+<p class="mut">Pick an employee to see their entries (then <b>View / Edit / Delete</b> in the list below), or add a new entry for any date.</p>
+<form method="get" class="grid"><label>Employee<select name="emp" required><option value="">- select employee -</option>
+{% for e in emp_list %}<option value="{{e['Employee ID']}}" {{'selected' if sel_emp and (sel_emp|upper) == (e['Employee ID']|string|trim|upper) else ''}}>{{e['Employee ID']}} &middot; {{e['Name']}}</option>{% endfor %}</select></label>
+<label>Date for new entry<input type="date" name="adate" value="{{request.args.get('adate') or today_str}}"></label>
+<div><button class="primary pbtn" type="submit" formaction="/admin/log">Show entries</button>
+<button class="primary pbtn" type="submit" formaction="/admin/log/add" style="background:#22a06b">+ Add entry</button></div></form></div>"""
+
 LOG_TOP = """<div class="card"><div class="loghead"><h2>Productivity log</h2>
 <details class="exp no-print"><summary class="btnl pbtn">&#128438; Print / Export &#9662;</summary>
 <div class="menu">
@@ -2377,9 +2392,43 @@ def admin_log():
     d, e = request.args.get("date", ""), request.args.get("emp", "").strip().lower()
     subs = [s for s in load_subs() if (not d or s["date"] == d) and
             (not e or e in (str(s["emp_id"]).lower(), str(s["emp_name"]).lower()))]
-    return page(LOG_TOP + LIST + LOG_MISSED, title="Productivity log", subs=subs, emp=request.args.get("emp", "").strip(), **log_missed_section(),
+    emp_list = sorted(rows("Employees"), key=lambda x: str(x.get("Name", "")).lower())
+    return page(LOG_MANAGE + LOG_TOP + LIST + LOG_MISSED, title="Productivity log", subs=subs, emp=request.args.get("emp", "").strip(), **log_missed_section(),
+                emp_list=emp_list, sel_emp=request.args.get("emp", "").strip(), today_str=str(today_local()),
+                nxt=request.full_path.rstrip("?"),
                 tg_met=sum(1 for s in subs if s["tgt_state"] == "met"), tg_miss=sum(1 for s in subs if s["tgt_state"] == "miss"),
                 month_label=period_range("month")[2], week_label=period_range("week")[2])
+
+@app.route("/admin/log/add", methods=["GET", "POST"])
+@need("admin")
+def admin_log_add():
+    """Update103: Admin adds a Daily Productivity Entry for any employee on any date (same form + same validation as the employee's)."""
+    eid = (request.values.get("emp") or "").strip()
+    e = next((e for e in rows("Employees") if _key(e.get("Employee ID", "")) == _key(eid)), None) if eid else None
+    if not e:
+        flash("Please select an employee first.", "error"); return redirect("/admin/log")
+    emp_id, name, band = str(e["Employee ID"]).strip(), str(e.get("Name", "")), str(e.get("Band", ""))
+    action = "/admin/log/add?emp=" + urllib.parse.quote(emp_id, safe="")
+    if request.method == "POST":
+        try:
+            date, procs, notes, err = parse_form(emp_id)
+            if err:
+                flash(err, "error"); return redirect(action + "&date=" + urllib.parse.quote(date, safe=""))
+            with _save_lock((emp_id, date)):                  # a double click / second tab cannot save the same day twice
+                if duplicate_entry(emp_id, date, fresh=True):
+                    flash(f"{name} already has an entry for {date}. Use Edit on that entry instead of adding the same date again.", "error")
+                    return redirect("/admin/log?emp=" + urllib.parse.quote(emp_id, safe="") + "&date=" + urllib.parse.quote(date, safe=""))
+                write_sub(uuid.uuid4().hex[:10], date, (band, emp_id, name), procs, notes)
+        except Exception:
+            import traceback; traceback.print_exc()
+            flash("The entry could not be saved right now (the data service is busy). Nothing was saved - please press Save again.", "error")
+            return redirect(action)
+        flash(f"Entry for {date} added for {name}." + (f" Note: {date} is a weekly off, so it is not counted in calculations." if is_off(date) else ""))
+        return redirect("/admin/log?emp=" + urllib.parse.quote(emp_id, safe=""))
+    sub = dict(date=(request.args.get("date") or request.args.get("adate") or str(today_local())), band=band, designation=find_designation(emp_id, name, band),
+               emp_id=emp_id, emp_name=name, procs=[{}], notes=[{}])
+    body, ctx = form_page(sub, action, f"Add entry for {name}")
+    return page(body, title="Add entry", **ctx)
 
 @app.route("/admin/log/report")
 @need("admin")
@@ -2878,6 +2927,7 @@ def form_page(sub, action, heading):
     procs = rows("Processes")
     names = [r["Process name"] for r in procs]
     if not any(is_other(n) for n in names): names.append(OTHER_PROCESS)       # Update90: "Other" is always available
+    if not any(is_genai(n) for n in names): names.insert(max(len(names) - 1, 0), GENAI_PROCESS)       # Update103: "GenAI" is always available, same as POC_Sample
     if not any(is_poc(n) for n in names): names.insert(max(len(names) - 1, 0), POC_SAMPLE_PROCESS)       # Update94: "POC_Sample" is always available (Hour, Count, Description required)
     if not any(is_training(n) for n in names): names.insert(max(len(names) - 1, 0), TRAINING_PROCESS)       # Update93: "Training" is always available (just before "Other")
     tph = process_rates()
@@ -3326,13 +3376,17 @@ def entry_edit(sid):
     s = get_sub(sid)
     if request.method == "POST":
         date, procs, notes, err = parse_form(s["emp_id"])
-        if not err and duplicate_entry(s["emp_id"], date, skip_sid=sid):
-            err = f"An entry for {date} already exists. Choose a different date or edit that entry."
         if err:
             flash(err, "error"); return redirect(request.full_path.rstrip("?"))
         changed = entry_diff(s, date, procs, notes)          # compare with the saved entry before it is replaced
-        delete_rows(s["rows"])
-        write_sub(sid, date, (s["band"], s["emp_id"], s["emp_name"]), procs, notes)
+        with _save_lock((s["emp_id"], "edit")):               # Update103: one edit at a time per employee; duplicate check + replace are atomic
+            if duplicate_entry(s["emp_id"], date, skip_sid=sid, fresh=True):
+                flash(f"An entry for {date} already exists. Choose a different date or edit that entry.", "error"); return redirect(request.full_path.rstrip("?"))
+            old = live_rows_of(sid)
+            if not old:
+                flash("This entry no longer exists (it was deleted). Nothing was changed.", "error"); return redirect(next_url() or home())
+            delete_rows(old)
+            write_sub(sid, date, (s["band"], s["emp_id"], s["emp_name"]), procs, notes)
         if changed: log_change(SEC_PROD, "Updated", changed)
         flash("Updated." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else ""))
         miss = [] if is_off(date) or session.get("role") != "employee" else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
@@ -3351,7 +3405,9 @@ def entry_view(sid):
 @need()
 def entry_delete(sid):
     s = get_sub(sid)
-    delete_rows(s["rows"])
+    with _save_lock((s["emp_id"], "edit")):
+        old = live_rows_of(sid)                              # Update103: live row numbers - a double click / second admin cannot delete the wrong rows
+        if old: delete_rows(old); invalidate_cache("Productivity log")
     log_change(SEC_PROD, "Deleted",
                f"Entry {s['date']} ({_fmt_num(s['prod'])} productive hr, {_fmt_num(s['non'])} non-productive hr)")
     flash("Deleted."); return redirect(next_url() or home())

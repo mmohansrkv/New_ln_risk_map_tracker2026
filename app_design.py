@@ -51,6 +51,9 @@ Access rules (Update59):
   * Update78: Welcome Page opens first for Admin and Employee, no 'Continue' button, opens the Admin/Employee page by itself when it ends.
     Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
     melody, different from the earlier Mohanam tune), Welcome Page only.
+  * Update102: Admin -> Audit Log (By Process): after choosing a Process and a Month, the new "Productivity" button opens the
+    Productivity report for exactly that Process + Month, with "Download Excel" and "Print" buttons. The Excel file (and the printout)
+    contain ONLY that Process + Month. The per-employee Productivity page (opened from a process) gets the same two buttons.
   * Update101: the Leave / Permission approval e-mail no longer has the login sentence, button or link (missed-entry e-mails keep them).
   * Update100: (1) Email Controls > "Send a reminder manually" lists ONLY the current month's missed dates. (2) Leave / Permission: when Admin APPROVES
     a request an e-mail is sent automatically to the employee's Office Email ID (name, request type, date, duration/hours, status) in the same 3D
@@ -4148,6 +4151,8 @@ AUD_ATT = """<div class="totals">Working days: <b>{{k.wd}}</b> &middot; Present:
 
 AUD_PROC = """{% if not allowed %}<div class="card"><p>Admin has not granted you access to any process yet.</p></div>{% else %}
 <p class="mut">{% if admin %}Productivity for process: {% else %}Productivity for the process(es) Admin selected for you: {% endif %}<b>{{allowed|join(', ')}}</b></p>
+{% if admin and process %}<div class="rep-tools no-print"><button type="button" class="btnl pbtn" onclick="window.print()">&#128438; Print</button>
+<a class="btnl pbtn" style="background:#22a06b;box-shadow:0 4px 0 #17734d" href="{{base}}/productivity/export?process={{process|urlencode}}&month={{month}}&emp={{emp.id|urlencode}}">&#128196; Download Excel</a></div>{% endif %}
 <h2>Productivity by process</h2>
 <table><tr><th>Process</th><th>Hours</th><th>Count</th><th>Target count</th><th>Achievement</th></tr>
 {% for b in bd %}<tr><td>{{b.name}}</td><td>{{b.hour|g}}</td><td>{{b.count|g}}</td><td>{{b.target|g}}</td><td>{{ (b.pct ~ '%') if b.pct is not none else '-' }}</td></tr>{% endfor %}</table>
@@ -4206,7 +4211,8 @@ AUD_PROCESS = """<div class="head"><div><h1>Audit Log</h1>
 <option value="">- Select process -</option>{% for p in procs %}<option value="{{p}}" {{'selected' if p==sel}}>{{p}}</option>{% endfor %}</select>
 <input type="month" name="month" value="{{month}}">
 {% if sel %}<input name="q" value="{{q}}" placeholder="Search employee ID or name">{% endif %}
-<button class="primary">Show</button><a href="{{base}}">Reset</a></form>
+<button class="primary">Show</button>
+<button type="submit" class="primary" formaction="{{base}}/productivity" onclick="if(!this.form.process.value){alert('Please select a Process first.');return false}">Productivity</button><a href="{{base}}">Reset</a></form>
 <p class="mut">Period: <b>{{label}}</b> &middot; Daily target: <b>{{T|g}} hrs</b></p>
 {% if not sel %}
 <h2>Available processes</h2>
@@ -4330,6 +4336,161 @@ def _audit_detail(base, eid, admin, acc=None):
             body = AUD_PROC
             ctx.update(allowed=allowed, lines=lines, bd=_aud_breakdown(lines, allowed))
     return page(AUD_HEAD + body, title=f"Audit Log - {emp['Name']}", **ctx)
+
+# ---- Update102: Process + Month Productivity report (page, Print, Excel)
+def _aud_prod_report(process, start, end, emp_id=""):
+    """All productivity lines for ONE process in ONE month (optionally one employee). Weekly-off days are not counted."""
+    T = target_hours()
+    emap = {_key(e["Employee ID"]): e for e in rows("Employees")}
+    lines, per = [], {}
+    for sub in load_subs():
+        if sub["off"] or not (str(start) <= str(sub["date"]) <= str(end)): continue
+        if emp_id and _key(sub["emp_id"]) != _key(emp_id): continue
+        for pr in sub["procs"]:
+            if pr["name"] != process: continue
+            lines.append(dict(date=str(sub["date"]), id=str(sub["emp_id"]), name=sub["emp_name"], desc=pr["desc"],
+                              hour=pr["hour"], count=pr["count"], target=pr["target"] or 0))
+            e = per.setdefault(_key(sub["emp_id"]), dict(id=str(sub["emp_id"]), name=sub["emp_name"], hour=0.0, count=0.0,
+                                                          target=0.0, days=set(), entries=0))
+            e["hour"] += pr["hour"]; e["count"] += pr["count"]; e["target"] += pr["target"] or 0
+            e["days"].add(sub["date"]); e["entries"] += 1
+    lines.sort(key=lambda r: (r["date"], str(r["name"]).lower()))
+    for l in lines: l["ach"] = round(l["count"] / l["target"] * 100) if l["target"] else None
+    summary = []
+    for e in per.values():
+        info = emap.get(_key(e["id"]), {}); d = len(e["days"]); avg = e["hour"] / d if d else 0
+        summary.append(dict(id=e["id"], name=e["name"], desig=info.get("Designation", ""), band=info.get("Band", ""),
+                            days=d, entries=e["entries"], hour=round(e["hour"], 2), avg=round(avg, 2),
+                            pct=min(round(avg / T * 100), 100) if T else 0,
+                            count=round(e["count"], 2), target=round(e["target"], 1),
+                            ach=round(e["count"] / e["target"] * 100) if e["target"] else None))
+    summary.sort(key=lambda r: str(r["name"]).lower())
+    th, tc, tt = sum(r["hour"] for r in summary), sum(r["count"] for r in summary), sum(r["target"] for r in summary)
+    tot = dict(emps=len(summary), entries=len(lines), hour=round(th, 2), count=round(tc, 2), target=round(tt, 1),
+               ach=round(tc / tt * 100) if tt else None)
+    emp_name = ""
+    if emp_id: emp_name = str((emap.get(_key(emp_id)) or {}).get("Name", emp_id))
+    return dict(lines=lines, summary=summary, tot=tot, emp_name=emp_name)
+
+AUD_PROD_REPORT = """<style>.print-only{display:none}@media print{.print-only{display:block}.rep-meta{color:#000}}</style>
+<div class="rep-tools no-print"><button type="button" class="btnl pbtn" onclick="window.print()">&#128438; Print</button>
+<a class="btnl pbtn" style="background:#22a06b;box-shadow:0 4px 0 #17734d" href="{{base}}/productivity/export?process={{sel|urlencode}}&month={{month}}{% if emp_id %}&emp={{emp_id|urlencode}}{% endif %}">&#128196; Download Excel</a>
+<a href="{{base}}?process={{sel|urlencode}}&month={{month}}">&larr; Back to Audit Log</a></div>
+<form class="grid no-print" method="get" action="{{base}}/productivity"><select name="process">{% for p in procs %}<option value="{{p}}" {{'selected' if p==sel}}>{{p}}</option>{% endfor %}</select>
+<input type="month" name="month" value="{{month}}"><button class="primary">Show</button></form>
+<h1 class="rep-title">Productivity Audit Report</h1>
+<p class="rep-meta">Process: <b>{{sel}}</b> &middot; Period: <b>{{label}}</b>{% if emp_name %} &middot; Employee: <b>{{emp_name}}</b> <a class="no-print" href="{{base}}/productivity?process={{sel|urlencode}}&month={{month}}">(show all employees)</a>{% endif %} &middot; Generated {{now}}</p>
+<div class="totals">Employees: <b>{{tot.emps}}</b> &middot; Entries: <b>{{tot.entries}}</b> &middot; Total hours: <b>{{tot.hour|g}}</b> &middot; Total count: <b>{{tot.count|g}}</b>
+&middot; Target count: <b>{{tot.target|g}}</b> &middot; Achievement: <b>{{ (tot.ach ~ '%') if tot.ach is not none else '-' }}</b></div>
+<h2>Productivity by employee</h2>
+<table><tr><th>Employee ID</th><th>Employee</th><th>Designation</th><th>Days worked</th><th>Hours</th><th>Avg hrs / day</th><th>Productivity %</th><th>Count</th><th>Target count</th><th>Achievement</th></tr>
+{% for r in summary %}<tr><td>{{r.id}}</td><td>{{r.name}}</td><td>{{r.desig or '-'}}</td><td>{{r.days}}</td><td>{{r.hour|g}}</td><td>{{r.avg|g}}</td><td>{{r.pct}}%</td><td>{{r.count|g}}</td><td>{{r.target|g}}</td><td>{{ (r.ach ~ '%') if r.ach is not none else '-' }}</td></tr>
+{% else %}<tr><td colspan="10">No entries for {{sel}} in {{label}}.</td></tr>{% endfor %}
+{% if summary %}<tr style="font-weight:700"><td colspan="4">Total</td><td>{{tot.hour|g}}</td><td></td><td></td><td>{{tot.count|g}}</td><td>{{tot.target|g}}</td><td>{{ (tot.ach ~ '%') if tot.ach is not none else '-' }}</td></tr>{% endif %}</table>
+<h2>Entries</h2>
+<table><tr><th>Date</th><th>Employee ID</th><th>Employee</th><th>Process</th><th>Description</th><th>Hours</th><th>Count</th><th>Target count</th><th>Achievement</th></tr>
+{% for l in lines %}<tr><td>{{l.date}}</td><td>{{l.id}}</td><td>{{l.name}}</td><td>{{sel}}</td><td>{{l.desc or '-'}}</td><td>{{l.hour|g}}</td><td>{{l.count|g}}</td><td>{{l.target|g}}</td><td>{{ (l.ach ~ '%') if l.ach is not none else '-' }}</td></tr>
+{% else %}<tr><td colspan="9">No entries for {{sel}} in {{label}}.</td></tr>{% endfor %}</table>
+<p class="mut">Productivity % = average hours per worked day on this process &divide; the daily target hours. Achievement = count &divide; target count. Weekly-off days are not counted.</p>
+<p class="print-only mut">Audit report &mdash; {{sel}} &middot; {{label}} &middot; generated {{now}}</p>
+{% if autoprint %}<script>window.addEventListener('load',function(){setTimeout(function(){window.print()},350)})</script>{% endif %}"""
+
+def _aud_prod_args():
+    """Validate Process + Month from the query string. Returns (process, month, start, end, emp_id) or None."""
+    process = request.args.get("process", "").strip()
+    if process not in audit_process_names(): return None
+    month, start, end = _aud_month()
+    return process, month, start, end, request.args.get("emp", "").strip()
+
+@app.route("/admin/audit/productivity")
+@need("admin")
+def admin_audit_productivity():
+    prefetch("Employees", "Productivity log", "Processes", "Settings", "Holidays")
+    a = _aud_prod_args()
+    if not a:
+        flash("Please select a Process first.", "err")
+        return redirect("/admin/audit")
+    process, month, start, end, emp_id = a
+    r = _aud_prod_report(process, start, end, emp_id)
+    return page(AUD_PROD_REPORT, title=f"Productivity - {process}", base="/admin/audit", sel=process, month=month,
+                label=start.strftime("%B %Y"), procs=audit_process_names(), emp_id=emp_id,
+                now=now_local().strftime("%Y-%m-%d %I:%M %p"), autoprint=request.args.get("print") == "1", **r)
+
+AUD_SUM_HEADS = ["Employee ID", "Employee name", "Designation", "Band", "Days worked", "Entries", "Hours",
+                 "Avg hrs / day", "Productivity %", "Count", "Target count", "Achievement %"]
+AUD_LINE_HEADS = ["Date", "Employee ID", "Employee name", "Process", "Description", "Hours", "Count",
+                  "Target count", "Achievement %"]
+
+@app.route("/admin/audit/productivity/export")
+@need("admin")
+def admin_audit_productivity_export():
+    prefetch("Employees", "Productivity log", "Processes", "Settings", "Holidays")
+    a = _aud_prod_args()
+    if not a:
+        flash("Please select a Process first.", "err")
+        return redirect("/admin/audit")
+    process, month, start, end, emp_id = a
+    r = _aud_prod_report(process, start, end, emp_id)
+    label = start.strftime("%B %Y")
+    fname = "Audit_Productivity_" + re.sub(r"[^A-Za-z0-9]+", "_", process).strip("_") + "_" + month
+    srows = [[x["id"], x["name"], x["desig"], x["band"], x["days"], x["entries"], x["hour"], x["avg"], x["pct"] / 100,
+              x["count"], x["target"], (x["ach"] / 100 if x["ach"] is not None else "")] for x in r["summary"]]
+    lrows = [[x["date"], x["id"], x["name"], process, x["desc"], x["hour"], x["count"], x["target"],
+              (x["ach"] / 100 if x["ach"] is not None else "")] for x in r["lines"]]
+    t = r["tot"]
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+    except ImportError:      # openpyxl not installed: still give a file Excel opens
+        buf = io.StringIO(); w = csv.writer(buf)
+        w.writerow([f"Productivity Audit Report - {process} - {label}"]); w.writerow(AUD_SUM_HEADS)
+        w.writerows([[("" if v is None else v) for v in row] for row in srows])
+        w.writerow([]); w.writerow(AUD_LINE_HEADS); w.writerows(lrows)
+        return Response("\ufeff" + buf.getvalue(), mimetype="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="{fname}.csv"'})
+    wb = Workbook()
+    hfill = PatternFill("solid", fgColor="4F46E5"); tfill = PatternFill("solid", fgColor="E8EAFB")
+    thin = Side(style="thin", color="D9DCEB")
+    meta = [("Process", process), ("Period", label)]
+    if r["emp_name"]: meta.append(("Employee", r["emp_name"]))
+    meta.append(("Generated", now_local().strftime("%Y-%m-%d %I:%M %p")))
+    def sheet(ws, title, heads, data, widths, pct_cols, total_row):
+        ws.title = title
+        ws.append(["Productivity Audit Report"]); ws["A1"].font = Font(bold=True, size=14)
+        for k, v in meta:
+            ws.append([k, v]); ws.cell(ws.max_row, 1).font = Font(bold=True)
+        ws.append([])
+        hr = ws.max_row + 1
+        ws.append(heads)
+        for c in ws[hr]:
+            c.font = Font(bold=True, color="FFFFFF"); c.fill = hfill
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws.row_dimensions[hr].height = 30
+        for row in data: ws.append(["" if v is None else v for v in row])
+        last = ws.max_row
+        if total_row:
+            ws.append(total_row); last = ws.max_row
+            for c in ws[last]: c.font = Font(bold=True); c.fill = tfill
+        for row in ws.iter_rows(min_row=hr + 1, max_row=last):
+            for c in row:
+                c.border = Border(top=thin, bottom=thin, left=thin, right=thin)
+                if c.column in pct_cols: c.number_format = "0%"
+                if isinstance(c.value, (int, float)): c.alignment = Alignment(horizontal="right")
+        for i, wd in enumerate(widths, start=1): ws.column_dimensions[get_column_letter(i)].width = wd
+        ws.freeze_panes = ws.cell(hr + 1, 1)
+        if data: ws.auto_filter.ref = f"A{hr}:{get_column_letter(len(heads))}{hr + len(data)}"
+        ws.page_setup.orientation = "landscape"; ws.page_setup.fitToWidth = 1; ws.page_setup.fitToHeight = 0
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.print_title_rows = f"{hr}:{hr}"
+    ach = (t["ach"] / 100) if t["ach"] is not None else ""
+    sheet(wb.active, "Summary", AUD_SUM_HEADS, srows, [13, 24, 22, 8, 12, 9, 10, 13, 15, 10, 13, 15], {9, 12},
+          ["Total", "", "", "", "", t["entries"], t["hour"], "", "", t["count"], t["target"], ach] if srows else None)
+    sheet(wb.create_sheet(), "Entries", AUD_LINE_HEADS, lrows, [12, 13, 24, 22, 34, 9, 9, 13, 15], {9},
+          ["Total", "", "", "", "", t["hour"], t["count"], t["target"], ach] if lrows else None)
+    out = io.BytesIO(); wb.save(out)
+    return Response(out.getvalue(), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}.xlsx"'})
 
 # ---- Admin side
 @app.route("/admin/audit")

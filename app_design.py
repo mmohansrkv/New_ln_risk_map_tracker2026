@@ -294,6 +294,17 @@ def _method_not_allowed(e):
     if session.get("role") == "admin": return redirect("/admin/summary")
     return redirect("/")
 
+@app.errorhandler(500)
+def _server_error(e):
+    import traceback; traceback.print_exc()
+    try:
+        if request.method == "POST" and session.get("role") in ("employee", "admin"):
+            flash("Something went wrong and the request could not be completed. Please try again in a few seconds.", "error")
+            return redirect(request.referrer or ("/employee" if session.get("role") == "employee" else "/admin/summary"))
+    except Exception:
+        pass
+    return ("<h2>Something went wrong</h2><p>Please wait a few seconds and <a href='/'>try again</a>.</p>"), 500
+
 @app.errorhandler(APIError)
 def _handle_sheets_api_error(e):
     # Reached only if retries in _with_retry were exhausted (Sheets still
@@ -467,7 +478,12 @@ def invalidate_cache(name=None):
     # land on another worker still holding the old rows (looked like "not saved"). Mark this user's
     # session so their next reads go straight to the sheet.
     try:
-        if has_request_context(): session["fresh_until"] = time.time() + 10
+        if has_request_context():      # Update96: only the sheet that was written is read live; every other sheet stays cached (much faster page after Save)
+            now_ = time.time()
+            fs = {k: v for k, v in (session.get("fresh") or {}).items() if v > now_}
+            if name is None: session["fresh_all"] = now_ + 10
+            else: fs[name] = now_ + 10
+            session["fresh"] = fs
     except Exception:
         pass
     global _holidays_cache
@@ -507,7 +523,7 @@ def rows(name):
     refresh runs (so a page never waits on Google for data it already has). Own writes and 'fresh_until'
     sessions always read straight from the sheet, so nobody misses their own changes."""
     now = time.monotonic()
-    try: bypass = has_request_context() and session.get("fresh_until", 0) > time.time()
+    try: bypass = has_request_context() and (session.get("fresh_all", 0) > time.time() or (session.get("fresh") or {}).get(name, 0) > time.time())
     except Exception: bypass = False
     with _rows_cache_lock:
         cached = _rows_cache.get(name)
@@ -793,15 +809,28 @@ def parse_form(emp_id):
                    f"({need_h - tot:g} hrs remaining). Complete all {need_h:g} hours before saving.")
     return date, procs, notes, err
 
-def duplicate_entry(emp_id, date, skip_sid=None):
-    return any(s_["emp_id"] == str(emp_id) and s_["date"] == date and s_["id"] != skip_sid for s_ in load_subs())
+def duplicate_entry(emp_id, date, skip_sid=None, fresh=False):
+    """Update96: reads just the Productivity log (live from the sheet when fresh=True) instead of building every employee's submissions."""
+    recs = _fetch_rows("Productivity log") if fresh else rows("Productivity log")
+    k = _key(emp_id)
+    return any(_key(r["Employee ID"]) == k and str(r["Date"]) == str(date) and str(r["Submission ID"]) != str(skip_sid) for r in recs)
 
 def write_sub(sid, date, emp, procs, notes):
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
     base = [sid, date, *emp]      # emp = (band, id, name)
     out = [base + ["Process", n, h, c, now, d] for n, h, c, d in procs] + \
           [base + ["Note", t, h, "", now, ""] for t, h in notes]
-    ws_of("Productivity log").append_rows(out, value_input_option="RAW"); invalidate_cache("Productivity log")
+    last = None
+    for attempt in range(3):          # Update96: retry a failed write, but first check the rows did not already land (no duplicates, no loss)
+        try:
+            if attempt:
+                time.sleep(0.8 * attempt)
+                if any(str(r["Submission ID"]) == str(sid) for r in _fetch_rows("Productivity log")):
+                    invalidate_cache("Productivity log"); return
+            ws_of("Productivity log").append_rows(out, value_input_option="RAW"); invalidate_cache("Productivity log"); return
+        except Exception as ex:
+            last = ex; print("save attempt", attempt + 1, "failed:", repr(ex))
+    raise last
 
 # ---------------------------------------------------------------- login / logout tracking
 # Runs silently in a background thread: the employee never sees it and is never slowed down.
@@ -2019,7 +2048,9 @@ document.querySelector('form[action="{{action}}"]').addEventListener('submit',fu
  if(bad){e.preventDefault();return showErr('All Process Entry fields are mandatory - fill every field before saving.')}
  const t=[...document.querySelectorAll('#procs .r')].reduce((a,r2)=>a+rowH(r2),0)+[...document.querySelectorAll('[name=nh]')].reduce((a,x)=>a+(+x.value||0),0),r=reqHrs();
  if(t+1e-9<r){e.preventDefault();showErr('Entry incomplete: '+t+' of the required '+r+' working hours logged. Complete all '+r+' hours before saving.')}
+ if(!e.defaultPrevented){const b=e.target.querySelector('button.primary');if(b){setTimeout(function(){b.disabled=true;b.textContent='Saving...'},0)}}      /* Update96: one click = one save (no double submit) */
 });
+window.addEventListener('pageshow',function(){const b=document.querySelector('form button.primary[disabled]');if(b){b.disabled=false;b.textContent='Save'}});
 {{sub.procs|tojson}}.forEach(addProc);{{sub.notes|tojson}}.forEach(addNote);
 </script>"""
 
@@ -2773,12 +2804,14 @@ WELCOME = """<style>
 .wl-bar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#6d70f5,#f58a8a);transform-origin:left;transform:scaleX(0);animation:wlFill 4s linear forwards}
 @keyframes wlFill{to{transform:scaleX(1)}}
 .wl-st{margin-top:10px;font:600 10px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;color:#8a90ad}
+.wl-ftr{position:absolute;left:0;right:0;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:6;text-align:center;font-size:11px;font-weight:600;letter-spacing:.3px;color:#ffffffa6;pointer-events:none}
 </style>
 <div class="wl {{session.role}}" id="wl">
 """ + WL_SCENE.replace('{{role}}', "{{session.role}}").replace("role=='admin'", "session.role=='admin'") + """
  <div class="wl-card"><h1>Welcome, {{session.name}}</h1>
  <p>{{ 'Syncing live data from the server' if session.role=='admin' else 'Securely connecting to the server' }}&hellip;</p>
  <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div><div class="wl-st" style="margin-top:6px;font-weight:500"><span id="wl_msg">&nbsp;</span></div></div>
+ <div class="wl-ftr" role="contentinfo">&copy; 2026 LN_MAP_AI. All Rights Reserved.</div>
 </div>
 <script>
 (function(){
@@ -3080,23 +3113,40 @@ def employee_productivity():
                 months=months, sel=sel, is_cur=is_cur, mlabel=mlabel, nxt=nxt,
                 empty_msg="No productivity entries for " + mlabel + ".")
 
+_save_locks = {}
+_save_locks_guard = threading.Lock()
+def _save_lock(key):
+    with _save_locks_guard: return _save_locks.setdefault(key, threading.Lock())
+
 @app.route("/employee/save", methods=["POST"])
 @need("employee")
 def employee_save():
-    date, procs, notes, err = parse_form(session["emp_id"])
-    if not err and duplicate_entry(session["emp_id"], date):
-        err = f"You have already submitted an entry for {date}. Edit the existing entry instead of submitting the same date again."
-    if err:
-        flash(err, "error"); return redirect("/employee")
-    write_sub(uuid.uuid4().hex[:10], date, (session["band"], session["emp_id"], session["name"]), procs, notes)
-    log_change(SEC_PROD, "Added", entry_added_details(date, procs, notes))
+    try:
+        date, procs, notes, err = parse_form(session["emp_id"])
+        if err:
+            flash(err, "error"); return redirect("/employee")
+        with _save_lock((session["emp_id"], date)):          # Update96: a double click / second tab cannot save the same day twice
+            if duplicate_entry(session["emp_id"], date, fresh=True):
+                flash(f"You have already submitted an entry for {date}. Edit the existing entry instead of submitting the same date again.", "error")
+                return redirect("/employee")
+            write_sub(uuid.uuid4().hex[:10], date, (session["band"], session["emp_id"], session["name"]), procs, notes)
+    except Exception as ex:
+        import traceback; traceback.print_exc()
+        flash("Your entry could not be saved right now (the data service is busy). Nothing was lost - please wait a few seconds and press Save again.", "error")
+        return redirect("/employee")
+    # ---- the data is saved from here on: nothing below may turn a successful save into an error page ----
     session["saved_anim"] = True       # Update95: 3-second 3D "Saved successfully" animation, shown on the same page after the data is saved
     flash("Saved." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else ""))
-    miss = [] if is_off(date) else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
-    if miss: flash(target_alert_text(miss), "error")           # employee is told straight away that the target was missed
-    # Update94: 100% = not a weekly off, every Admin target met, and all required working hours logged -> flower animation (3 s)
-    if not is_off(date) and not miss and sum(p_[1] for p_ in procs) + sum(n_[1] for n_ in notes) + 1e-9 >= required_hours(session["emp_id"], date):
-        session["bloom"] = True
+    try: log_change(SEC_PROD, "Added", entry_added_details(date, procs, notes))
+    except Exception as ex: print("log_change failed:", ex)
+    try:
+        miss = [] if is_off(date) else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
+        if miss: flash(target_alert_text(miss), "error")           # employee is told straight away that the target was missed
+        # Update94: 100% = not a weekly off, every Admin target met, and all required working hours logged -> flower animation (3 s)
+        if not is_off(date) and not miss and sum(p_[1] for p_ in procs) + sum(n_[1] for n_ in notes) + 1e-9 >= required_hours(session["emp_id"], date):
+            session["bloom"] = True
+    except Exception as ex:
+        print("post-save checks failed:", ex)
     return redirect("/employee")
 
 @app.route("/entry/<sid>", methods=["GET", "POST"])

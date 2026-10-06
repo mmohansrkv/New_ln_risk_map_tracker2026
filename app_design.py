@@ -51,6 +51,11 @@ Access rules (Update59):
   * Update78: Welcome Page opens first for Admin and Employee, no 'Continue' button, opens the Admin/Employee page by itself when it ends.
     Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
     melody, different from the earlier Mohanam tune), Welcome Page only.
+  * Update101: the Leave / Permission approval e-mail no longer has the login sentence, button or link (missed-entry e-mails keep them).
+  * Update100: (1) Email Controls > "Send a reminder manually" lists ONLY the current month's missed dates. (2) Leave / Permission: when Admin APPROVES
+    a request an e-mail is sent automatically to the employee's Office Email ID (name, request type, date, duration/hours, status) in the same 3D
+    template, via the Brevo API; nothing is sent on Reject, and re-approving an already approved request does not send again. Every mail appears
+    in the Email Controls status board (Mode = Leave approval / Permission approval).
   * Update99: (1) Missed-entry e-mail uses ONE professional 3D-style HTML template (calendar tiles for the missed date(s), 3D login button) for
     Manual AND Automatic sending. (2) Admin > Email Controls: the automatic e-mail has a schedule - Enable/Disable, DATE, TIME and Repeat
     (only on that date / every day from that date); Admin can change it any time. (3) Admin > Productivity log: a "Missed Entries" section below
@@ -2466,12 +2471,22 @@ def admin_leave_review():
     if not mine:
         flash("Leave request not found - the employee may have cancelled it.")
     else:
+        newly = status == "Approved" and any(leave_status(r) != "Approved" for r in mine)      # Update100: e-mail only on a real approval, never again
         now = now_local().strftime("%Y-%m-%d %H:%M:%S")
         _with_retry(ws_of("Leave").batch_update,
                     [{"range": f"G{r['_row']}:I{r['_row']}", "values": [[status, now, "Admin"]]} for r in mine],
                     value_input_option="RAW")
         invalidate_cache("Leave")
         flash(f"Leave request {status.lower()} ({len(mine)} day{'s' if len(mine) != 1 else ''}).")
+        if newly:
+            emp_row = next((x for x in rows("Employees") if _key(x["Employee ID"]) == _key(eid)), None)
+            if emp_row:
+                ds_ = sorted(str(r["Date"]) for r in mine)
+                days_ = sum(0.5 if leave_is_half(r) else 1 for r in mine)
+                dtxt = _pretty_date(ds_[0]) if len(ds_) == 1 else f"{_pretty_date(ds_[0])} to {_pretty_date(ds_[-1])}"
+                dur = ("Half day (4 hrs)" if all(leave_is_half(r) for r in mine) and len(mine) == 1 else f"{days_:g} day{'s' if days_ != 1 else ''}")
+                msg_, cat_ = notify_approved(emp_row, "Leave", dtxt, dur, len(mine))
+                flash(msg_, "error") if cat_ == "error" else flash(msg_)
     nxt = request.form.get("next", "")
     return redirect(nxt if nxt.startswith("/admin/") else "/admin/leave-permission")
 
@@ -2797,11 +2812,16 @@ def _review_permission(eid, row, status):
     emp = emp_or_404(eid)
     r = next((r for r in rows("Permissions") if r["_row"] == row), None)
     if not r or _key(r["Employee ID"]) != _key(emp["Employee ID"]): abort(404)
+    prev = str(r.get("Status", "")).strip()
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
     ws_of("Permissions").update(range_name=f"I{row}:K{row}",
                                            values=[[status, now, "Admin"]], value_input_option="RAW")
     invalidate_cache("Permissions")
     flash(f"Permission request {status.lower()}.")
+    if status == "Approved" and prev != "Approved":      # Update100: approval e-mail (never on Reject, never twice)
+        hrs = num(r.get("Hours"))
+        msg_, cat_ = notify_approved(emp, "Permission", _pretty_date(r.get("Date", "")), f"{hrs:g} hr{'s' if hrs != 1 else ''}", 1)
+        flash(msg_, "error") if cat_ == "error" else flash(msg_)
     nxt = request.form.get("next", "")
     return redirect(nxt if nxt.startswith("/admin/") else f"/admin/employee-info/{eid}?tab=leave")
 
@@ -5568,7 +5588,7 @@ def missed_mail_history(fresh=False):
     """-> ({EMP: last sent-at}, {EMP: set of dates already e-mailed successfully})."""
     last, done = {}, {}
     for r in (_fetch_rows(MISSED_LOG) if fresh else rows(MISSED_LOG)):
-        if str(r.get("Employee ID", "")) == "__RUN__" or str(r.get("Status", "")) != "Sent": continue
+        if str(r.get("Employee ID", "")) == "__RUN__" or str(r.get("Status", "")) != "Sent" or str(r.get("Mode", "")) not in ("Manual", "Auto"): continue
         k = _key(r.get("Employee ID", ""))
         last[k] = max(last.get(k, ""), str(r.get("Sent at", "")))
         done.setdefault(k, set()).update(x.strip() for x in str(r.get("Missed dates", "")).split(",") if x.strip())
@@ -5603,8 +5623,42 @@ def employee_login_link():
     u = app_url()
     return (u + "/employee/login") if u else ""
 
+def _html3d(nm, preheader, lead_html, middle_html, link, cta_text):
+    """Update100: the ONE 3D-style e-mail design (table layout + inline CSS = works in Gmail/Outlook). Missed-entry AND approval mails use it."""
+    import html as _h
+    F = "font-family:'Segoe UI',Arial,Helvetica,sans-serif;"
+    if link:
+        lk = _h.escape(link)
+        button = ('<table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:6px auto 4px auto"><tr>'
+                  '<td align="center" bgcolor="#4f46e5" style="background:linear-gradient(180deg,#6366f1,#4338ca);border-radius:14px;border-bottom:6px solid #2e2a8f;box-shadow:0 12px 22px rgba(67,56,202,.50)">'
+                  f'<a href="{lk}" target="_blank" style="display:inline-block;padding:16px 40px;{F}font-size:17px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:14px">Login to Productivity Tracker &rarr;</a>'
+                  '</td></tr></table>'
+                  f'<p style="{F}margin:12px 0 0 0;font-size:12px;color:#64748b;text-align:center;word-break:break-all">Or copy this link: <a href="{lk}" style="color:#4338ca">{lk}</a></p>')
+    else:
+        button = f'<p style="{F}text-align:center;color:#b91c1c;font-size:14px">Please open the Productivity Tracker and log in.</p>'
+    if not cta_text and not link:      # Update101: approval mails carry no login text / button / link
+        cta_row = ""
+    else:
+        cta_row = f'<tr><td style="padding:8px 34px 8px 34px;{F}color:#1e293b"><p style="margin:0 0 18px 0;font-size:16px;line-height:1.55">{_h.escape(cta_text)}</p>{button}</td></tr>'
+    return (
+        '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+        '<body style="margin:0;padding:0;background:#e0e7ff">'
+        f'<div style="display:none;max-height:0;overflow:hidden;opacity:0">{_h.escape(preheader)}</div>'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#e0e7ff" style="background:linear-gradient(160deg,#e0e7ff,#f1f5f9)"><tr><td align="center" style="padding:32px 12px">'
+        '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:20px;border-bottom:7px solid #c7d2fe;box-shadow:0 26px 50px rgba(15,23,42,.28)">'
+        '<tr><td bgcolor="#312e81" style="background:linear-gradient(135deg,#1e1b4b,#4338ca 60%,#6366f1);border-radius:20px 20px 0 0;padding:26px 30px"><table role="presentation" cellpadding="0" cellspacing="0"><tr>'
+        f'<td style="padding-right:16px"><table role="presentation" cellpadding="0" cellspacing="0"><tr><td align="center" width="58" height="58" bgcolor="#818cf8" style="width:58px;height:58px;background:linear-gradient(145deg,#c7d2fe,#6366f1);border-radius:16px;border-bottom:5px solid #3730a3;box-shadow:0 8px 14px rgba(0,0,0,.35);{F}font-size:22px;font-weight:bold;color:#1e1b4b">PT</td></tr></table></td>'
+        f'<td style="{F}color:#ffffff"><div style="font-size:22px;font-weight:bold;letter-spacing:.3px">Productivity Tracker</div><div style="font-size:13px;color:#c7d2fe;letter-spacing:2px;margin-top:3px">LN_MAP</div></td></tr></table></td></tr>'
+        f'<tr><td style="padding:32px 34px 10px 34px;{F}color:#1e293b">'
+        f'<p style="margin:0 0 14px 0;font-size:18px;font-weight:bold">Hello {nm},</p>'
+        f'<p style="margin:0 0 18px 0;font-size:16px;line-height:1.55">{lead_html}</p></td></tr>'
+        f'<tr><td align="center" style="padding:6px 24px 0 24px">{middle_html}</td></tr>'
+        + cta_row +
+        f'<tr><td style="padding:22px 34px 8px 34px;{F}color:#475569;font-size:13px;line-height:1.5"><p style="margin:0;border-top:1px solid #e2e8f0;padding-top:16px">This is an automated email. Please do not reply to this email.</p></td></tr>'
+        f'<tr><td style="padding:6px 34px 30px 34px;{F}color:#1e293b;font-size:15px;line-height:1.5"><p style="margin:0">Thanks,<br><b>Productivity Tracker (LN_Map)</b></p></td></tr>'
+        '</table></td></tr></table></body></html>')
+
 def _missed_html(nm, ds, pretty, link):
-    """Update99: the one 3D-style e-mail design used for manual AND automatic missed-entry e-mails (table layout + inline CSS = works in Gmail/Outlook)."""
     import html as _h
     F = "font-family:'Segoe UI',Arial,Helvetica,sans-serif;"
     tiles = ""
@@ -5615,34 +5669,34 @@ def _missed_html(nm, ds, pretty, link):
                   f'<tr><td align="center" style="{F}font-size:34px;font-weight:bold;color:#1e293b;padding:8px 0 0 0">{d.strftime("%d")}</td></tr>'
                   f'<tr><td align="center" style="{F}font-size:12px;color:#64748b;padding:0 0 11px 0">{d.strftime("%A")}</td></tr></table></td>')
     more = (f'<p style="{F}margin:0 0 6px 0;font-size:13px;color:#64748b;text-align:center">+ {len(ds) - 4} more date(s)</p>' if len(ds) > 4 else "")
-    if link:
-        lk = _h.escape(link)
-        button = ('<table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:6px auto 4px auto"><tr>'
-                  '<td align="center" bgcolor="#4f46e5" style="background:linear-gradient(180deg,#6366f1,#4338ca);border-radius:14px;border-bottom:6px solid #2e2a8f;box-shadow:0 12px 22px rgba(67,56,202,.50)">'
-                  f'<a href="{lk}" target="_blank" style="display:inline-block;padding:16px 40px;{F}font-size:17px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:14px">Login to Productivity Tracker &rarr;</a>'
-                  '</td></tr></table>'
-                  f'<p style="{F}margin:12px 0 0 0;font-size:12px;color:#64748b;text-align:center;word-break:break-all">Or copy this link: <a href="{lk}" style="color:#4338ca">{lk}</a></p>')
-    else:
-        button = f'<p style="{F}text-align:center;color:#b91c1c;font-size:14px">Please open the Productivity Tracker and log in.</p>'
-    return (
-        '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
-        '<body style="margin:0;padding:0;background:#e0e7ff">'
-        f'<div style="display:none;max-height:0;overflow:hidden;opacity:0">Your Productivity Entry is missing for {_h.escape(", ".join(pretty))}.</div>'
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#e0e7ff" style="background:linear-gradient(160deg,#e0e7ff,#f1f5f9)"><tr><td align="center" style="padding:32px 12px">'
-        '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:20px;border-bottom:7px solid #c7d2fe;box-shadow:0 26px 50px rgba(15,23,42,.28)">'
-        # header band with a 3D badge
-        '<tr><td bgcolor="#312e81" style="background:linear-gradient(135deg,#1e1b4b,#4338ca 60%,#6366f1);border-radius:20px 20px 0 0;padding:26px 30px"><table role="presentation" cellpadding="0" cellspacing="0"><tr>'
-        f'<td style="padding-right:16px"><table role="presentation" cellpadding="0" cellspacing="0"><tr><td align="center" width="58" height="58" bgcolor="#818cf8" style="width:58px;height:58px;background:linear-gradient(145deg,#c7d2fe,#6366f1);border-radius:16px;border-bottom:5px solid #3730a3;box-shadow:0 8px 14px rgba(0,0,0,.35);{F}font-size:22px;font-weight:bold;color:#1e1b4b">PT</td></tr></table></td>'
-        f'<td style="{F}color:#ffffff"><div style="font-size:22px;font-weight:bold;letter-spacing:.3px">Productivity Tracker</div><div style="font-size:13px;color:#c7d2fe;letter-spacing:2px;margin-top:3px">LN_MAP</div></td></tr></table></td></tr>'
-        # body
-        f'<tr><td style="padding:32px 34px 10px 34px;{F}color:#1e293b">'
-        f'<p style="margin:0 0 14px 0;font-size:18px;font-weight:bold">Hello {nm},</p>'
-        f'<p style="margin:0 0 18px 0;font-size:16px;line-height:1.55">Your Productivity Entry is missing for <b style="color:#b91c1c">{_h.escape(", ".join(pretty))}</b>.</p></td></tr>'
-        f'<tr><td align="center" style="padding:6px 24px 0 24px"><table role="presentation" cellpadding="0" cellspacing="0"><tr>{tiles}</tr></table>{more}</td></tr>'
-        f'<tr><td style="padding:8px 34px 8px 34px;{F}color:#1e293b"><p style="margin:0 0 18px 0;font-size:16px;line-height:1.55">Please log in to the Productivity Tracker and complete the required entry:</p>{button}</td></tr>'
-        f'<tr><td style="padding:22px 34px 8px 34px;{F}color:#475569;font-size:13px;line-height:1.5"><p style="margin:0;border-top:1px solid #e2e8f0;padding-top:16px">This is an automated email. Please do not reply to this email.</p></td></tr>'
-        f'<tr><td style="padding:6px 34px 30px 34px;{F}color:#1e293b;font-size:15px;line-height:1.5"><p style="margin:0">Thanks,<br><b>Productivity Tracker (LN_Map)</b></p></td></tr>'
-        '</table></td></tr></table></body></html>')
+    dl = _h.escape(", ".join(pretty))
+    return _html3d(nm, f"Your Productivity Entry is missing for {', '.join(pretty)}.",
+                   f'Your Productivity Entry is missing for <b style="color:#b91c1c">{dl}</b>.',
+                   f'<table role="presentation" cellpadding="0" cellspacing="0"><tr>{tiles}</tr></table>{more}', link,
+                   "Please log in to the Productivity Tracker and complete the required entry:")
+
+def approval_message(emp, kind, date_txt, duration_txt):
+    """Update100: 'Leave' / 'Permission' APPROVED e-mail - same 3D template. Fields: employee name, request type, date, duration / hours, approval status."""
+    import html as _h
+    F = "font-family:'Segoe UI',Arial,Helvetica,sans-serif;"
+    name = str(emp["name"])
+    badge = ('<span style="display:inline-block;padding:5px 15px;border-radius:99px;background:#16a34a;border-bottom:3px solid #166534;'
+             f'color:#ffffff;{F}font-size:13px;font-weight:bold;letter-spacing:.5px">&#10003; Approved</span>')
+    fields = [("Employee Name", _h.escape(name)), ("Request Type", _h.escape(kind)), ("Date", _h.escape(date_txt)),
+              ("Duration / Hours", _h.escape(duration_txt)), ("Approval Status", badge)]
+    body = "".join(f'<tr><td style="padding:12px 18px;{F}font-size:13px;color:#64748b;border-bottom:1px solid #e2e8f0;width:40%;text-align:left">{k}</td>'
+                   f'<td style="padding:12px 18px;{F}font-size:15px;font-weight:bold;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:left">{v}</td></tr>' for k, v in fields)
+    card = ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#f8fafc;border-radius:14px;'
+            f'border-bottom:5px solid #cbd5e1;box-shadow:0 10px 18px rgba(30,41,59,.25)">{body}</table>')
+    msg = EmailMessage()
+    msg["Subject"] = f"{kind} request approved - {date_txt}"
+    msg["From"] = formataddr(mail_sender()); msg["To"] = emp["email"]
+    msg.set_content(f"Hello {name},\n\nYour {kind} request has been approved.\n\n"
+                    f"Employee Name: {name}\nRequest Type: {kind}\nDate: {date_txt}\nDuration / Hours: {duration_txt}\nApproval Status: Approved\n\n"
+                    "This is an automated email. Please do not reply to this email.\n\nThanks,\nProductivity Tracker (LN_Map)")
+    msg.add_alternative(_html3d(_h.escape(name), f"Your {kind} request has been approved ({date_txt}).",
+                                f'Your <b>{_h.escape(kind)}</b> request has been <b style="color:#15803d">approved</b>.', card, "", ""), subtype="html")
+    return msg
 
 def missed_message(emp, dates):
     """Update99: the single missed-entry e-mail (3D template) - used by Manual AND Automatic sending."""
@@ -5660,33 +5714,50 @@ def missed_message(emp, dates):
     msg.add_alternative(_missed_html(_h.escape(name), ds, pretty, link), subtype="html")
     return msg
 
-def send_missed_mails(items, mode, by):
-    """items = [(emp dict(eid,name,email), [dates])]. Update98: each row is first written as Pending, then updated to Sent / Failed-<reason>.
-    Returns {eid: status}. The Missed Email Log is also the record that prevents duplicate automatic mails."""
+def send_logged(items, mode, by):
+    """items = [(emp dict(eid,name,email), EmailMessage, dates_text, count)]. Each is logged as Pending, sent through Brevo (or SMTP), then updated to
+    Sent / Failed-<reason> in the Missed Email Log (= the Email Controls status board). Returns {eid: status}."""
     ws = ws_of(MISSED_LOG)
     now = now_local().strftime("%Y-%m-%d %H:%M:%S"); today = now[:10]
     sender = mail_sender(fresh=True)[1]
     if not sender or not MAIL_READY:
-        why = "Failed: no sender e-mail configured (Admin > Email Controls)" if not sender else "Failed: mail service not configured on the server"
-        out = {e["eid"]: why for e, _d in items}
-        ws.append_rows([[today, e["eid"], e["name"], e["email"], ", ".join(d), len(d), now, mode, why, by] for e, d in items], value_input_option="RAW")
+        why = "Failed: no sender e-mail configured (Admin > Email Controls)" if not sender else "Failed: mail service not configured on the server (BREVO_API_KEY)"
+        out = {e["eid"]: why for e, *_r in items}
+        ws.append_rows([[today, e["eid"], e["name"], e["email"], dtxt, cnt, now, mode, why, by] for e, _m, dtxt, cnt in items], value_input_option="RAW")
         invalidate_cache(MISSED_LOG); return out
-    resp = ws.append_rows([[today, e["eid"], e["name"], e["email"], ", ".join(d), len(d), now, mode, "Pending", by] for e, d in items], value_input_option="RAW")
+    resp = ws.append_rows([[today, e["eid"], e["name"], e["email"], dtxt, cnt, now, mode, "Pending", by] for e, _m, dtxt, cnt in items], value_input_option="RAW")
     invalidate_cache(MISSED_LOG)
     m_ = re.search(r"!A(\d+):", str((resp or {}).get("updates", {}).get("updatedRange", "")))
     try: first = int(m_.group(1)) if m_ else len(ws.col_values(1)) - len(items) + 1
     except Exception: first = None
-    try: res = _smtp_send([missed_message(e, d) for e, d in items])
+    try: res = _smtp_send([m for _e, m, _d, _c in items])
     except Exception as ex:
-        print("Missed mail send error:", ex); res = {e["email"]: ("Failed: " + str(ex))[:200] for e, _d in items}
-    out = {e["eid"]: res.get(e["email"], "Failed") for e, _d in items}
+        print("Mail send error:", ex); res = {e["email"]: ("Failed: " + str(ex))[:200] for e, *_r in items}
+    out = {e["eid"]: res.get(e["email"], "Failed") for e, *_r in items}
     done = now_local().strftime("%Y-%m-%d %H:%M:%S")
     if first:
-        try:
-            ws.update(range_name=f"G{first}:I{first + len(items) - 1}", values=[[done, mode, out[e["eid"]]] for e, _d in items], value_input_option="RAW")
+        try: ws.update(range_name=f"G{first}:I{first + len(items) - 1}", values=[[done, mode, out[e["eid"]]] for e, *_r in items], value_input_option="RAW")
         except Exception as ex: print("Could not update mail status:", ex)
     invalidate_cache(MISSED_LOG)
     return out
+
+def send_missed_mails(items, mode, by):
+    """items = [(emp, [dates])] -> one 3D missed-entry e-mail each (manual and automatic). Returns {eid: status}."""
+    return send_logged([(e, missed_message(e, d), ", ".join(d), len(d)) for e, d in items], mode, by)
+
+def _pretty_date(d):
+    try: return dt.date.fromisoformat(str(d)).strftime("%d %b %Y (%a)")
+    except ValueError: return str(d)
+
+def notify_approved(emp_row, kind, date_txt, duration_txt, count):
+    """Send the 'approved' e-mail for a Leave / Permission request. Never raises. Returns a flash-ready (text, category)."""
+    mail = employee_office_email(emp_row); name = str(emp_row.get("Name", ""))
+    if not EMAIL_RE.match(mail): return (f"No approval e-mail sent: {name} has no valid Office Email ID.", "error")
+    e = dict(eid=str(emp_row["Employee ID"]), name=name, email=mail)
+    try: st = send_logged([(e, approval_message(e, kind, date_txt, duration_txt), date_txt, count)], f"{kind} approval", session.get("name", "Admin"))[e["eid"]]
+    except Exception as ex_: st = "Failed: " + str(ex_)[:150]; print("Approval mail error:", ex_)
+    if st == "Sent": return (f"Approval e-mail sent to {name} ({mail}).", "ok")
+    return (f"The request was approved, but the approval e-mail to {name} could not be sent: {st}", "error")
 
 @app.route("/admin/missed/send", methods=["POST"])
 @need("admin")
@@ -5771,7 +5842,7 @@ def missed_scope(month, subs, leaves):
     return st, min(en, end), st.strftime("%B %Y")
 
 def mail_history(eid=None, limit=40):
-    out = [r for r in rows(MISSED_LOG) if str(r.get("Employee ID", "")) != "__RUN__" and (eid is None or _key(r.get("Employee ID", "")) == _key(eid))]
+    out = [r for r in rows(MISSED_LOG) if str(r.get("Employee ID", "")) != "__RUN__" and str(r.get("Mode", "")) in ("Manual", "Auto") and (eid is None or _key(r.get("Employee ID", "")) == _key(eid))]
     return sorted(out, key=lambda r: str(r.get("Sent at", "")), reverse=True)[:limit]
 
 @app.route("/admin/missed-log")
@@ -5856,7 +5927,7 @@ if REMINDER_ENABLED and os.getenv("WERKZEUG_RUN_MAIN", "true") == "true":
     threading.Thread(target=_missed_auto_loop, daemon=True).start()
 
 # ---------------------------------------------------------------- Update98: ADMIN EMAIL CONTROLS
-MAIL_LOOKBACK_DAYS = 92          # missed dates offered for manual sending: the last ~3 months (today is never "missed")
+def mail_month_start(): return today_local().replace(day=1)      # Update100: manual sending covers the CURRENT month only (today is never "missed")
 
 def mail_status(v):
     v = str(v or "").strip()
@@ -5882,7 +5953,7 @@ EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
 <form method="post" action="/admin/email-controls/send" id="ec-form" onsubmit="return ecCheck()">
 <label>Employee<select name="eid" id="ec-emp"><option value="">- choose an employee -</option>
 {% for e in emps %}<option value="{{e.id}}"{{' disabled' if not e.email else ''}}>{{e.id}} &middot; {{e.name}} &middot; {{e.email or 'no Office Email ID'}} ({{e.n}} missed)</option>{% endfor %}</select></label>
-<p class="mut" style="margin:10px 0 4px">Missed date(s) to include (last {{days}} days):</p>
+<p class="mut" style="margin:10px 0 4px">Missed date(s) to include (current month - {{month_label}}):</p>
 <div id="ec-dates" style="max-height:220px;overflow:auto;border:1px solid #d0d5dd;border-radius:8px;padding:8px 12px">Choose an employee first.</div>
 <p style="margin:10px 0"><label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="ec-all"> Select all dates</label></p>
 <button class="primary" id="ec-send" disabled>&#9993; Send reminder e-mail</button></form></div>
@@ -5914,7 +5985,7 @@ EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
  function render(){
   var list=M[sel.value]||[];box.innerHTML='';all.checked=false;
   if(!sel.value){box.textContent='Choose an employee first.';}
-  else if(!list.length){box.textContent='No missed dates in the last {{days}} days.';}
+  else if(!list.length){box.textContent='No missed dates in {{month_label}}.';}
   list.forEach(function(x){
    var l=document.createElement('label');l.style.cssText='display:flex;gap:8px;align-items:center;margin:3px 0';
    var c=document.createElement('input');c.type='checkbox';c.name='dates';c.value=x.d;c.addEventListener('change',upd);
@@ -5934,7 +6005,7 @@ EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
 @need("admin")
 def admin_email_controls():
     prefetch("Employees", "Productivity log", "Leave", "Holidays", "Settings", MISSED_LOG)
-    today = today_local(); end = today - dt.timedelta(days=1); start = today - dt.timedelta(days=MAIL_LOOKBACK_DAYS)
+    today = today_local(); end = today - dt.timedelta(days=1); start = mail_month_start()
     subs, leaves = load_subs(), rows("Leave")
     _last, notified = missed_mail_history()
     emps, missed_map = [], {}
@@ -5963,7 +6034,7 @@ def admin_email_controls():
     cur = f"{nm} <{em}>" if em else "not set"
     transport = "Brevo HTTPS API" if BREVO_API_KEY else (f"SMTP ({SMTP_HOST})" if SMTP_HOST else "NOT CONFIGURED")
     return page(EMAIL_CONTROLS, title="Email Controls", mail_ok=MAIL_READY, login_link=employee_login_link(), counts=counts, auto_on=on, auto_time=t, sch=sch, next_run=(nr.strftime("%d %b %Y, %I:%M %p") if nr else ""),
-                emps=emps, missed_map=missed_map, days=MAIL_LOOKBACK_DAYS, sender_name=_setting(MAIL_SENDER_NAME_KEY),
+                emps=emps, missed_map=missed_map, month_label=today.strftime("%B %Y"), sender_name=_setting(MAIL_SENDER_NAME_KEY),
                 sender_email=_setting(MAIL_SENDER_EMAIL_KEY), env_from=MAIL_FROM, cur_sender=cur, transport=transport,
                 history=hist[:100], total=len(hist), status=status, q=request.args.get("q", ""))
 
@@ -6011,9 +6082,9 @@ def admin_email_controls_send():
     if not EMAIL_RE.match(mail): flash(f"{e['Name']} has no valid Office Email ID.", "error"); return redirect(back)
     asked = {d for d in request.form.getlist("dates") if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d)}
     today = today_local()
-    missed = set(missed_dates_for(eid, today - dt.timedelta(days=MAIL_LOOKBACK_DAYS), today - dt.timedelta(days=1)))
+    missed = set(missed_dates_for(eid, mail_month_start(), today - dt.timedelta(days=1)))
     chosen = sorted(asked & missed)
-    if not chosen: flash("Select at least one missed date (only dates the employee really missed can be sent).", "error"); return redirect(back)
+    if not chosen: flash("Select at least one missed date (only this month's missed dates can be sent).", "error"); return redirect(back)
     emp = dict(eid=str(e["Employee ID"]), name=str(e["Name"]), email=mail)
     try: st = send_missed_mails([(emp, chosen)], "Manual", session.get("name", "admin"))[emp["eid"]]
     except Exception as ex_: st = "Failed: " + str(ex_)[:150]; print("Manual missed mail error:", ex_)

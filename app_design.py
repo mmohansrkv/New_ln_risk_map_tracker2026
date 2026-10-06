@@ -718,7 +718,7 @@ POC_SAMPLE_PROCESS = "POC_Sample"   # Update94: like "Other", POC_Sample needs H
 def is_poc(name): return str(name or "").strip().lower().replace(" ", "_") == POC_SAMPLE_PROCESS.lower()
 def eff_hours(name, hours):
     """Hours that count for a process line: 8 for "Other" (as long as some hours were entered), the entered hours for every other process."""
-    return OTHER_HOURS if is_other(name) else hours      # Update95: Other is ALWAYS 8 hrs - added automatically, even if the Hour box was left empty
+    return hours      # Update96: "Other" uses the hours the employee typed - never overridden with 8
 
 def approved_perm_hours(emp_id, date):
     """Approved permission hours for one employee on one date (they reduce the hours that must be logged)."""
@@ -774,16 +774,16 @@ def parse_form(emp_id):
     elif session.get("role") == "employee" and is_holiday(date):
         err = f"{date} is a holiday{(' (' + holiday_name(date) + ')') if holiday_name(date) else ''}. Productivity entries cannot be submitted or updated for a holiday."
     elif not procs: err = "Add at least one process entry."
-    elif any(not str(n).strip() or (not is_other(n) and (not str(h).strip() or num(h) <= 0)) or (not str(c).strip() and not no_count(n)) or not desc.strip()
-             for n, h, c, desc in rows_p):      # Update95: Other needs only a Description - its 8 hours are added automatically
-        if any((is_other(n) or is_poc(n)) and ((is_poc(n) and (not str(h).strip() or num(h) <= 0)) or not desc.strip()) for n, h, c, desc in rows_p):
+    elif any(not str(n).strip() or (not str(h).strip() or num(h) <= 0) or (not str(c).strip() and not no_count(n)) or not desc.strip()
+             for n, h, c, desc in rows_p):
+        if any((is_other(n) or is_poc(n)) and (not str(h).strip() or num(h) <= 0 or not desc.strip()) for n, h, c, desc in rows_p):
             err = "For \u201cOthers\u201d and \u201cPOC_Sample\u201d, Hour and Description are required (no Count) - please fill them before saving."
         else:
             err = "All Process Entry fields (Process, Hour, Count and Description) are mandatory - please fill every field before saving. (Training, Others and POC_Sample need only Hour and Description.)"
     elif half: err = "Please enter the Hour for every note you filled in - a note without hours is not saved."
-    elif sum(1 for p_ in procs if is_other(p_[0])) > 1: err = "\u201cOther\u201d can be added only once per day (it already counts as 8 hours)."
+    elif sum(1 for p_ in procs if is_other(p_[0])) > 1: err = "\u201cOther\u201d can be added only once per day (enter all its hours in one line)."
     elif tot > day_limit():
-        err = f"Total {tot:g} hrs is more than {day_limit():g} hrs." + (" (\u201cOther\u201d always counts as 8 hours.)" if any(is_other(p_[0]) for p_ in procs) else "")
+        err = f"Total {tot:g} hrs is more than {day_limit():g} hrs."
     else:
         need_h = required_hours(emp_id, date)
         if tot + 1e-9 < need_h:
@@ -1083,12 +1083,8 @@ aside a:hover{background:#2b3560;transform:translateX(2px)}aside a.on{background
 main{flex:1;display:flex;flex-direction:column;padding:24px 28px;min-width:0;animation:fadeInUp .45s cubic-bezier(.22,1,.36,1)}
 .mbody{flex:1 0 auto;min-width:0}
 /* Update95: colourful copyright footer (same on Admin and Employee pages) */
-.site-ftr{flex:none;margin:20px auto 0;padding:5px 14px;text-align:center;font-weight:800;font-size:11px;letter-spacing:.3px;border-radius:999px;background:#fff;border:2px solid transparent;background-image:linear-gradient(#fff,#fff),linear-gradient(90deg,#4f46e5,#c026d3,#f97316,#0ea5e9,#22c55e,#4f46e5);background-origin:border-box;background-clip:padding-box,border-box;background-size:100% 100%,300% 100%;box-shadow:0 6px 18px -8px #4f46e566;animation:ftrBorder 6s linear infinite}
-.site-ftr span{background:linear-gradient(90deg,#4f46e5,#c026d3,#f97316,#0ea5e9,#22c55e,#4f46e5);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:ftrText 6s linear infinite}
-@keyframes ftrText{to{background-position:300% 0}}
-@keyframes ftrBorder{to{background-position:0 0,300% 0}}
-@media(max-width:800px){.site-ftr{font-size:10px;padding:4px 12px}}
-@media(prefers-reduced-motion:reduce){.site-ftr,.site-ftr span{animation:none}}
+.site-ftr{flex:none;margin:22px auto 0;padding:6px 12px;text-align:center;font-weight:700;font-size:11.5px;color:var(--mut);background:none;border:0}
+.site-ftr span{color:var(--mut)}
 .center{max-width:420px;margin:12vh auto;padding:0 16px}
 h1{font-size:22px;margin:0}h2{font-size:17px;margin:22px 0 10px}h3{font-size:15px;margin:14px 0 6px}
 .head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
@@ -1968,15 +1964,14 @@ Productivity: <b id="tpct">0</b>% &middot; <b id="tstat"></b> <span class="mut">
 const WORK={{workday|g}}, PERM={{perm|tojson}}, MAXD={{maxdate|tojson}};
 const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}}, OTHER_H={{other_hours|g}};
 const isOther=v=>['other','others'].includes(String(v==null?'':v).trim().toLowerCase()), isPoc=v=>String(v==null?'':v).trim().toLowerCase().replace(/ /g,'_')==='poc_sample', isTrain=v=>String(v==null?'':v).trim().toLowerCase()==='training';
-const effH=(nm,h)=>isOther(nm)?OTHER_H:h;      // "Other" always counts as 8 hrs
+const effH=(nm,h)=>h;      // Update96: hours are exactly what the employee typed
 function rowH(r){return effH((r.querySelector('[name=pn]')||{}).value,+((r.querySelector('[name=ph]')||{}).value)||0)}
 function otherUI(r){const pv=(r.querySelector('[name=pn]')||{}).value,o=isOther(pv),pc_=isPoc(pv),tr=isTrain(pv)||o||pc_,d=r.querySelector('[name=pd]'),c=r.querySelector('[name=pc]');if(!d)return;
  let n=r.querySelector('.oth-note');
- const hh=r.querySelector('[name=ph]');if(hh){if(o){hh.value=OTHER_H;hh.readOnly=true;hh.dataset.auto='1';hh.title='Other is automatically '+OTHER_H+' hours'}else if(hh.dataset.auto){hh.readOnly=false;hh.value='';delete hh.dataset.auto;hh.title=''}}      // Update95: choosing Other fills 8 hrs automatically
  if(c){if(tr){c.type='hidden';c.required=false;c.value='0'}else{if(c.type==='hidden'){c.type='number';c.value=''}c.required=true}}      // Training: Count is not shown / not required
  if(o||pc_||tr){d.placeholder=isTrain(pv)?'Training details *':'Description of the work done *';d.size=48;d.style.minWidth='320px';
   if(!n){n=document.createElement('div');n.className='oth-note mut';n.style.cssText='flex-basis:100%;font-size:.85em;color:#b45309';r.insertBefore(n,r.querySelector('button.danger'))}
-  n.textContent=pc_?'"POC_Sample": enter the Hours and a Description only - no Count is needed.':o?'"Other": enter the work details in Description only - no Hours or Count needed. '+OTHER_H+' working hours are added automatically.':'"Training": enter the Hours and a Description only - no Count is needed. Productivity is calculated from the hours entered.'}
+  n.textContent=pc_?'"POC_Sample": enter the Hours and a Description only - no Count is needed.':o?'"Other": enter the Hours and the work details in Description - no Count is needed. The hours you enter are counted as productive hours.':'"Training": enter the Hours and a Description only - no Count is needed. Productivity is calculated from the hours entered.'}
  else{d.placeholder='Description *';d.size=28;d.style.minWidth='';if(n)n.remove()}}
 const E=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function row(h){const d=document.createElement('div');d.className='r';

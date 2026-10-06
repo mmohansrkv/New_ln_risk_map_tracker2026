@@ -197,7 +197,8 @@ PHOTOS = {
 HEADERS = {
     "Employees": ["Employee ID", "Name", "Band", "Email", "Password",
                   "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
-                  "Emergency no", "Personal Email ID", "Office Email ID", "Designation", "Profile updated at", "Gender"],
+                  "Emergency no", "Personal Email ID", "Office Email ID", "Designation", "Profile updated at", "Gender",
+                  "Account locked", "Photo"],      # Update96: "Account locked" = Yes/blank; "Photo" = only a file reference (the picture itself is NOT in the sheet)
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour", "Target count / 8 hrs"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
@@ -1079,6 +1080,13 @@ def need(role=None):
                 return redirect(LOGIN_URL.get(role, "/employee/login"))
             if role and r != role:                      # signed in, but with the wrong role
                 return _wrong_area(role)
+            if r == "employee":                         # Update96: a locked or deleted account is signed out straight away
+                try: st = emp_status(session.get("emp_id"))
+                except Exception: st = "ok"
+                if st != "ok":
+                    session.clear()
+                    flash("Your account is locked. Please contact the Admin." if st == "locked" else "Your account is no longer available. Please contact the Admin.", "error")
+                    return redirect("/employee/login")
             return f(*a, **k)
         return w
     return deco
@@ -1092,6 +1100,74 @@ def next_url():
     ok = (session.get("role") == "employee" and n.startswith("/employee/productivity")
           and "//" not in n and "\\" not in n and "\n" not in n and "\r" not in n)
     return n if ok else ""
+
+
+# ---------------------------------------------------------------- Update96: account lock / password reset / profile photo
+PHOTO_DIR = os.getenv("PROFILE_PHOTO_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "profile_photos"))
+PHOTO_MAX_BYTES = 4 * 1024 * 1024
+_PHOTO_NAME = re.compile(r"^[a-f0-9]{24}\.jpg$")
+
+def emp_locked(e): return str(e.get("Account locked", "")).strip().lower() in ("yes", "y", "true", "locked", "1")
+
+def emp_status(emp_id):
+    """'ok' | 'locked' | 'deleted' for a signed-in employee (uses the short-lived sheet cache, so it costs no extra Google call)."""
+    k = _key(emp_id)
+    for e in rows("Employees"):
+        if _key(e["Employee ID"]) == k: return "locked" if emp_locked(e) else "ok"
+    return "deleted"
+
+def photo_path(fname): return os.path.join(PHOTO_DIR, fname)
+
+def photo_ok(fname):
+    return bool(fname) and bool(_PHOTO_NAME.match(str(fname))) and os.path.isfile(photo_path(str(fname)))
+
+def store_photo(file_storage):
+    """Validate + shrink the uploaded picture and keep it as a file in PHOTO_DIR (never in the Google Sheet).
+    Returns (file name, "") or ("", error text)."""
+    if not file_storage or not getattr(file_storage, "filename", ""): return "", ""
+    data = file_storage.stream.read(PHOTO_MAX_BYTES + 1)
+    if not data: return "", ""
+    if len(data) > PHOTO_MAX_BYTES: return "", "The photo is too large (maximum 4 MB)."
+    try:
+        from PIL import Image, ImageOps
+        im = Image.open(io.BytesIO(data)); im.verify()
+        im = Image.open(io.BytesIO(data)); im = ImageOps.exif_transpose(im).convert("RGB")
+        im.thumbnail((400, 400))
+        out = io.BytesIO(); im.save(out, "JPEG", quality=85, optimize=True); data = out.getvalue()
+    except Exception:
+        return "", "Please choose a valid picture (JPG, PNG or WebP)."
+    os.makedirs(PHOTO_DIR, exist_ok=True)
+    fname = uuid.uuid4().hex[:24] + ".jpg"
+    with open(photo_path(fname), "wb") as fh: fh.write(data)
+    return fname, ""
+
+def drop_photo(fname):
+    try:
+        if _PHOTO_NAME.match(str(fname or "")) and os.path.isfile(photo_path(str(fname))): os.remove(photo_path(str(fname)))
+    except Exception as ex: print("photo cleanup failed:", ex)
+
+def set_employee_cell(row, emp_id, col, value):
+    """Write ONE cell of an Employees row (after re-checking the row still belongs to emp_id). Returns the previous value or None."""
+    heads = HEADERS["Employees"]; ws = ws_of("Employees")
+    cur = ws.row_values(row); cur += [""] * (len(heads) - len(cur))
+    if _key(cur[heads.index("Employee ID")]) != _key(emp_id):
+        invalidate_cache("Employees"); return None
+    old = cur[heads.index(col)]
+    _with_retry(ws.update, range_name=gspread.utils.rowcol_to_a1(row, heads.index(col) + 1), values=[[value]], value_input_option="RAW")
+    invalidate_cache("Employees")
+    return old or ""
+
+def save_employee_photo(emp, file_storage):
+    """Store the picture as a file and keep only its name in the Employees sheet. Returns an error text ('' = ok / nothing to do)."""
+    fname, err = store_photo(file_storage)
+    if err or not fname: return err
+    old = set_employee_cell(emp["_row"], emp["Employee ID"], "Photo", fname)
+    if old is None: drop_photo(fname); return "Could not save the photo. Please try again."
+    drop_photo(old)
+    return ""
+
+def temp_password():
+    return "".join(random.choice("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789") for _ in range(8))
 
 # ---------------------------------------------------------------- templates
 BASE = """<!doctype html><html><head><meta charset="utf-8">
@@ -1276,6 +1352,11 @@ aside.emp{position:sticky;top:0;height:100vh;overflow-y:auto;align-self:flex-sta
 .prof-sub{font-size:12px;color:#9aa3c7;line-height:1.4;margin-top:2px;word-break:break-word}
 .prof-out{display:block;text-align:center;padding:6px 18px;color:#fff;background:#2b3560;border-radius:7px;font-size:13px;transition:background .2s ease,transform .15s ease}
 .prof-out:hover{background:#e5484d;transform:translateY(-1px)}
+.lph{display:block;margin:2px 0 10px;font-size:12px;color:var(--mut);text-align:left}.lph input{display:block;margin-top:4px;width:100%;font-size:12px}
+.av-photo{position:relative;flex:none;width:96px;height:96px;margin-bottom:6px}.av-photo img{width:100%;height:100%;border-radius:50%;object-fit:cover;box-shadow:0 12px 22px -8px #4f46e577,0 0 0 3px #fff;background:#e9ecf6}
+.prof .av-photo{width:84px;height:84px;margin:0 0 6px}
+.prof-ph{display:inline-block;margin-top:4px;font-size:11px;color:#9aa3c7;cursor:pointer;text-decoration:underline}.prof-ph:hover{color:#fff}.prof-ph input{display:none}
+@media(max-width:800px){.prof .av-photo{width:44px;height:44px}.prof-ph{display:none}}
 @media print{.prof{display:none!important}}
 @media(max-width:800px){.av3d{width:72px;height:72px}.wflex{gap:12px}
 aside.emp{position:static;height:auto;overflow:visible;align-self:auto}.prof-sub{display:none}.prof-row{gap:8px}.prof{order:99;margin:0 0 0 auto;border:0;padding:0;flex-direction:row;gap:10px}.prof .av3d{width:44px;height:44px;margin:0}.prof-name{font-size:13px}}
@@ -1476,7 +1557,7 @@ aside a.mzn ~ .prof{margin-top:0}
 <div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
-<div class="prof"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
+<div class="prof"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div>{% if session.role=='employee' %}<form method="post" action="/employee/photo" enctype="multipart/form-data"><label class="prof-ph">Change photo<input type="file" name="photo" accept="image/png,image/jpeg,image/webp" onchange="this.form.submit()"></label></form>{% endif %}</div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
 <main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><footer class="site-ftr" role="contentinfo"><span>&copy; 2026 LN_MAP_AI. All Rights Reserved.</span></footer></main></div>
@@ -1742,10 +1823,13 @@ def page(body, title="Productivity Tracker", **ctx):
         side_avatar = '<div class="av-flat" role="img" aria-label="Admin profile picture"><span>A</span></div>'
     elif session.get("role") == "employee":
         try:
-            g = gender_of(my_emp_row())
+            me_ = my_emp_row(); g = gender_of(me_); ph_ = str(me_.get("Photo", "")).strip()
         except Exception:                      # never break a page just because the avatar could not load
-            g = ""
-        side_avatar = render_template_string(AVATAR3D, gender=g, initials=initials_of(session.get("name", "")))
+            g = ""; ph_ = ""
+        if photo_ok(ph_):                      # Update96: the employee's own uploaded photo (file reference from the Employees sheet)
+            side_avatar = render_template_string('<div class="av-photo"><img src="/profile-photo/{{f}}" alt="{{n}} profile photo"></div>', f=ph_, n=session.get("name", ""))
+        else:
+            side_avatar = render_template_string(AVATAR3D, gender=g, initials=initials_of(session.get("name", "")))
     return render_template_string(BASE, body=render_template_string(body, **ctx), title=title, nav=nav,
                                   side_avatar=side_avatar, music_engine=BGM_ENGINE)
 
@@ -1762,13 +1846,14 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
 <div class="fl hm" style="right:5%;top:46%;--bt:7s;--d:-1.5s"><div class="sph" style="--s:34px"></div></div>
 <div class="fl hm" style="left:4%;top:48%;--bt:8s;--d:-5s"><div class="sph" style="--s:20px"></div></div>{% if role=='admin' %}<div class="dp adm"><div class="dp-lab"><b>&#9664;&#9664;&#9664;</b>&nbsp; LIVE DATA FEED &middot; INCOMING FROM SERVER</div><div class="dp-node l"><div class="dp-dash"><i></i><i></i><i></i><i></i></div><div class="dp-stand"></div><small>ADMIN DASHBOARD</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% else %}<div class="dp emp"><div class="dp-lab">UPLOADING ENCRYPTED DATA TO SERVER &nbsp;<b>&#9654;&#9654;&#9654;</b></div><div class="dp-node l"><div class="dp-scr"><i></i><i></i><i></i></div><div class="dp-stand"></div><small>EMPLOYEE</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% endif %}</div>
 <div class="lcard">{% if role=='admin' %}<div class="lav">{{admin_avatar|safe}}</div>{% endif %}<h2>Welcome back</h2><p>{{title}}</p>
-<form method="post">
+<form method="post"{% if role=='employee' %} enctype="multipart/form-data"{% endif %}>
 <div class="field"><input id="login_u" name="u" placeholder="{{ph}}" required autofocus autocomplete="off"></div>
 <div class="field pw"><input id="login_p" name="p" type="password" placeholder="Password" required autocomplete="off">
 <button type="button" class="pw-toggle" id="pw_toggle" aria-pressed="false" aria-label="Show password" title="Show password">
 <svg class="eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
 <svg class="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.9 10.9 0 0 1 12 19c-7 0-11-7-11-7a19.8 19.8 0 0 1 5.1-5.9M9.9 4.2A10.6 10.6 0 0 1 12 5c7 0 11 7 11 7a19.7 19.7 0 0 1-3.2 4.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>
 <span class="pw-t">Show</span></button></div>
+{% if role=='employee' %}<label class="lph">Add your profile photo (optional)<input type="file" name="photo" accept="image/png,image/jpeg,image/webp"></label>{% endif %}
 <button>Log in</button></form></div></div>{% if role!='admin' %}<img class="orb" src="/photo/{{role}}" alt="">{% endif %}</div>
 <script>
 (function(){
@@ -1922,10 +2007,14 @@ TABLE = """<div class="card"><h2>{{title}}</h2>
 {% if kind=='processes' %}<p class="mut">Set the <b>Target count / hour</b> &mdash; the count to complete in 1 hour (e.g. <b>1000 / 1</b> hr). The target for an entry is worked out automatically from the hours the employee logs: 8 hrs &rarr; 8 &times; the hourly count, 4 hrs &rarr; 4 &times;, 2 hrs &rarr; 2 &times;. If the employee's count is below that target, they get an alert.</p>{% endif %}
 {% if missing %}<p class="mut">&#9888; {{missing}} employee(s) have no Designation yet. Use Edit to set it; it then fills in automatically on their daily entry page.</p>{% endif %}
 {% if locked %}<p class="mut">Personal details are managed on the Personal details page. Office Email ID follows the login Email.</p>{% endif %}</div>
-<table><tr>{% for h in heads %}<th>{{h}}</th>{% endfor %}<th></th></tr>
+<table><tr>{% for h in heads %}<th>{{h}}</th>{% endfor %}{% if kind=='employees' %}<th>Status</th>{% endif %}<th></th></tr>
 {% for r in data %}<tr>{% for h in heads %}<td>{{r[h]}}{% if h=='Target count / hour' and r[h] %} / 1{% endif %}</td>{% endfor %}
+{% if kind=='employees' %}{% set lk = (r['Account locked']|string|lower) in ['yes','y','true','locked','1'] %}<td>{% if lk %}<span class="pill" style="background:#fde8e8;color:#b42318">Locked</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td>{% endif %}
 <td class="act"><a href="/admin/{{kind}}/{{r['_row']}}">Edit</a>
-<form method="post" action="/admin/{{kind}}/{{r['_row']}}/delete" onsubmit="return confirm('Delete?')"><button class="danger">Delete</button></form></td></tr>
+{% if kind=='employees' %}<form method="post" action="/admin/employees/{{r['_row']}}/lock"><input type="hidden" name="eid" value="{{r['Employee ID']}}"><input type="hidden" name="do" value="{{'unlock' if lk else 'lock'}}"><button class="back sm" type="submit">{{'Unlock' if lk else 'Lock'}}</button></form>
+<form method="post" action="/admin/employees/{{r['_row']}}/reset-password" onsubmit="var p=prompt('New password for {{r['Employee ID']}} (leave empty to generate one):','');if(p===null)return false;this.newpw.value=p;return true"><input type="hidden" name="eid" value="{{r['Employee ID']}}"><input type="hidden" name="newpw" value=""><button class="back sm" type="submit">Reset password</button></form>
+<form method="post" action="/admin/employees/{{r['_row']}}/delete" onsubmit="return confirm('Permanently delete the account of {{r['Employee ID']}}? Their login and profile photo are removed. Their past productivity entries stay in the log.')"><input type="hidden" name="eid" value="{{r['Employee ID']}}"><button class="danger">Delete</button></form>
+{% else %}<form method="post" action="/admin/{{kind}}/{{r['_row']}}/delete" onsubmit="return confirm('Delete?')"><button class="danger">Delete</button></form>{% endif %}</td></tr>
 {% else %}<tr><td colspan="9">No records yet.</td></tr>{% endfor %}</table>"""
 
 EDIT = """<div class="card"><h2>Edit {{title}}</h2>{% if kind=='processes' %}<p class="mut">Set the <b>Target count / hour</b> &mdash; the count to complete in 1 hour (e.g. <b>1000 / 1</b> hr). The target for an entry is worked out automatically from the hours the employee logs: 8 hrs &rarr; 8 &times; the hourly count, 4 hrs &rarr; 4 &times;, 2 hrs &rarr; 2 &times;. If the employee's count is below that target, they get an alert.</p>{% endif %}<form method="post" class="grid">
@@ -2111,6 +2200,70 @@ def admin_login():
 @app.route("/admin")
 @need("admin")
 def admin_home(): return redirect("/admin/summary")
+
+
+@app.route("/profile-photo/<fname>")
+def profile_photo(fname):
+    if not session.get("role"): abort(404)
+    if not _PHOTO_NAME.match(fname) or not os.path.isfile(photo_path(fname)): abort(404)
+    resp = send_file(photo_path(fname), mimetype="image/jpeg")
+    resp.headers["Cache-Control"] = "private, max-age=86400"
+    return resp
+
+@app.route("/employee/photo", methods=["POST"])
+@need("employee")
+def employee_photo():
+    try:
+        err = save_employee_photo(my_emp_row_uncached(), request.files.get("photo"))
+    except Exception as ex:
+        print("photo upload failed:", ex); err = "The photo could not be saved. Please try again."
+    flash(err or "Profile photo updated.", "error" if err else "ok")
+    return redirect("/employee")
+
+def _admin_emp(row, eid):
+    """Re-read the row and make sure it still belongs to the employee the Admin clicked on."""
+    heads = HEADERS["Employees"]; cur = ws_of("Employees").row_values(row); cur += [""] * (len(heads) - len(cur))
+    return cur if _key(cur[heads.index("Employee ID")]) == _key(eid) else None
+
+@app.route("/admin/employees/<int:row>/lock", methods=["POST"])
+@need("admin")
+def admin_emp_lock(row):
+    eid = request.form.get("eid", ""); lock = request.form.get("do") == "lock"
+    if _admin_emp(row, eid) is None:
+        flash("That employee changed - please refresh and try again.", "error"); return redirect("/admin/employees")
+    set_employee_cell(row, eid, "Account locked", "Yes" if lock else "")
+    try: log_change("Employees", "Locked" if lock else "Unlocked", f"Employee ID {eid}")
+    except Exception as ex: print("log_change failed:", ex)
+    flash(f"Account {eid} {'locked - this employee can no longer log in.' if lock else 'unlocked - this employee can log in again.'}")
+    return redirect("/admin/employees")
+
+@app.route("/admin/employees/<int:row>/reset-password", methods=["POST"])
+@need("admin")
+def admin_emp_reset(row):
+    eid = request.form.get("eid", ""); new = request.form.get("newpw", "").strip() or temp_password()
+    if len(new) < 4:
+        flash("The password must be at least 4 characters.", "error"); return redirect("/admin/employees")
+    if _admin_emp(row, eid) is None:
+        flash("That employee changed - please refresh and try again.", "error"); return redirect("/admin/employees")
+    set_employee_cell(row, eid, "Password", new)
+    try: log_change("Employees", "Password reset", f"Employee ID {eid}")
+    except Exception as ex: print("log_change failed:", ex)
+    flash(f"New password for {eid}: {new}   (share it with the employee).")
+    return redirect("/admin/employees")
+
+@app.route("/admin/employees/<int:row>/delete", methods=["POST"])
+@need("admin")
+def admin_emp_delete(row):
+    eid = request.form.get("eid", ""); cur = _admin_emp(row, eid)
+    if cur is None:
+        flash("That employee changed - please refresh and try again.", "error"); return redirect("/admin/employees")
+    ph = cur[HEADERS["Employees"].index("Photo")]
+    ws_of("Employees").delete_rows(row); invalidate_cache("Employees")
+    drop_photo(ph)
+    try: log_change("Employees", "Deleted", f"Employee ID {eid}")
+    except Exception as ex: print("log_change failed:", ex)
+    flash(f"Employee account {eid} deleted.")
+    return redirect("/admin/employees")
 
 @app.route("/admin/<kind>", methods=["GET", "POST"])
 @need("admin")
@@ -2695,6 +2848,13 @@ def employee_login():
         u = request.form["u"].strip().lower()
         for e in rows("Employees"):
             if u in (str(e["Employee ID"]).lower(), str(e["Email"]).lower()) and eq(request.form["p"], e["Password"]):
+                if emp_locked(e):                                   # Update96: locked accounts cannot log in
+                    flash("Your account is locked. Please contact the Admin to unlock it.", "error")
+                    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee")
+                perr = ""
+                try: perr = save_employee_photo(e, request.files.get("photo"))      # optional profile photo chosen on the login page (only after the password is correct)
+                except Exception as ex: print("login photo failed:", ex); perr = "The photo could not be saved."
+                if perr: flash(perr, "error")
                 track_logout(auto=True, reason="New login")      # closes a previous session in this browser, if any
                 session.clear()
                 session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"],

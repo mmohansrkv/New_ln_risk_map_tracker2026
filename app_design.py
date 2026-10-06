@@ -64,7 +64,7 @@ Access rules (Update59):
     an edit / delete the employee comes back to the same month. Employees can only ever open, edit or delete their OWN entries (get_sub -> 403).
   * Update90: (1) Process Entries: choosing the "Other" process shows a work-details Description box; Hours and Count are still entered, but "Other"
     is ALWAYS counted as 8 working hours (5, 6 or 7 entered = 8). Every other process keeps the hours actually entered. (2) Automatic reminder e-mail:
-    every day at 1:35 PM (REMINDER_TIME, app timezone) each employee who may submit the Daily Productivity Entry and has NOT yet submitted it for
+    every day at 5:55 PM (REMINDER_TIME, app timezone) each employee who may submit the Daily Productivity Entry and has NOT yet submitted it for
     today gets an e-mail on their Office Email ID. Needs SMTP_* environment variables (see REMINDER MAIL section). Sheets "Productivity Access"
     (optional switch-off list) and "Email Log" are created automatically.
   * Update89: Leave & Permission - (1) employees can EDIT their own Permission requests (hours + reason, this month's and later records; an edit of an
@@ -198,7 +198,7 @@ HEADERS = {
     "Employees": ["Employee ID", "Name", "Band", "Email", "Password",
                   "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                   "Emergency no", "Personal Email ID", "Office Email ID", "Designation", "Profile updated at", "Gender",
-                  "Account locked"],      # Update96: "Account locked" = Yes / blank (Admin -> Employee Info)
+                  "Account locked", "Joining date"],      # Update96: "Account locked" = Yes / blank; Update97: "Joining date" (YYYY-MM-DD, set by Admin in Employee Info)
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour", "Target count / 8 hrs"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
@@ -790,6 +790,8 @@ def parse_form(emp_id):
     if d is None: err = "Please choose a valid date."
     elif session.get("role") == "employee" and is_holiday(date):
         err = f"{date} is a holiday{(' (' + holiday_name(date) + ')') if holiday_name(date) else ''}. Productivity entries cannot be submitted or updated for a holiday."
+    elif session.get("role") == "employee" and join_date(emp_id) and d < join_date(emp_id):
+        err = f"Productivity entry is available only from your joining date ({join_date(emp_id).strftime('%d %b %Y')}). You cannot submit an entry for {date}."
     elif not procs: err = "Add at least one process entry."
     elif any(not str(n).strip() or (not str(h).strip() or num(h) <= 0) or (not str(c).strip() and not no_count(n)) or not desc.strip()
              for n, h, c, desc in rows_p):
@@ -1122,6 +1124,15 @@ def set_employee_cell(row, emp_id, col, value):
     _with_retry(ws.update, range_name=gspread.utils.rowcol_to_a1(row, heads.index(col) + 1), values=[[value]], value_input_option="RAW")
     invalidate_cache("Employees")
     return old or ""
+
+def join_date(emp_id):
+    """Update97: the employee's joining date set by Admin (a date), or None when none is set (no restriction)."""
+    k = _key(emp_id)
+    for e in rows("Employees"):
+        if _key(e["Employee ID"]) == k:
+            try: return dt.date.fromisoformat(str(e.get("Joining date", "")).strip())
+            except ValueError: return None
+    return None
 
 def temp_password():
     return "".join(random.choice("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789") for _ in range(8))
@@ -2011,7 +2022,7 @@ LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th
 FORM = """<div class="card" id="entryCard"><h2>{{heading}} <span id="tgtBadge"></span></h2>
 <form method="post" action="{{action}}">
 <div class="grid">
-<label>Date<input type="date" name="date" value="{{sub.date}}" {% if maxdate %}max="{{maxdate}}"{% endif %} required></label>
+<label>Date<input type="date" name="date" value="{{sub.date}}" {% if maxdate %}max="{{maxdate}}"{% endif %}{% if mindate %} min="{{mindate}}"{% endif %} required></label>
 <label>Designation<input value="{{sub.designation}}" placeholder="Not set - ask admin" readonly></label>
 <label>Band<input value="{{sub.band}}" readonly></label>
 <label>Employee ID<input value="{{sub.emp_id}}" readonly></label>
@@ -2603,7 +2614,11 @@ class="{{'on' if k==tab else ''}}">{{l}}</a>{% endfor %}</div>"""
 
 T_PERSONAL = """<div class="card"><h2>Personal details</h2>
 <table>{% for l,v in fields %}<tr><th style="width:220px">{{l}}</th><td>{{v or '-'}}</td></tr>{% endfor %}</table><br>
-<a class="btnl no-print" href="/admin/personal/{{emp['_row']}}">Edit details</a></div>"""
+<a class="btnl no-print" href="/admin/personal/{{emp['_row']}}">Edit details</a></div>
+<div class="card no-print"><h2>Job / Joining date</h2>
+<p class="mut">Productivity entry is available only from this date. Earlier dates cannot be submitted and are never shown as missed or pending. Leave empty for no restriction.</p>
+<form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/joining" class="grid"><input type="date" name="joining" value="{{emp.get('Joining date','')}}">
+<button class="primary sm" type="submit">Save joining date</button></form></div>"""
 
 T_MISSED = """<form class="grid no-print" method="get"><input type="hidden" name="tab" value="missed">
 <input type="month" name="month" value="{{month if month!='all' else ''}}"><button class="primary">Show</button>
@@ -2675,6 +2690,20 @@ def emp_or_404(eid):
     e = next((e for e in rows("Employees") if _key(e["Employee ID"]) == _key(eid)), None)
     return e or abort(404)
 
+@app.route("/admin/employee-info/<eid>/joining", methods=["POST"])
+@need("admin")
+def admin_set_joining(eid):
+    emp = emp_or_404(eid); v = (request.form.get("joining") or "").strip()
+    if v:
+        try: dt.date.fromisoformat(v)
+        except ValueError:
+            flash("Please choose a valid joining date.", "error"); return redirect(f"/admin/employee-info/{urllib.parse.quote(str(emp['Employee ID']))}")
+    if set_employee_cell(emp["_row"], emp["Employee ID"], "Joining date", v) is None:
+        flash("That employee changed - please refresh and try again.", "error")
+    else:
+        flash(f"Joining date {'set to ' + v if v else 'cleared'} for {emp['Employee ID']}.")
+    return redirect(f"/admin/employee-info/{urllib.parse.quote(str(emp['Employee ID']))}")
+
 @app.route("/admin/employee-info/<eid>")
 @need("admin")
 def admin_employee_detail(eid):
@@ -2687,7 +2716,7 @@ def admin_employee_detail(eid):
     if tab == "personal":
         fields = [("Employee ID", emp["Employee ID"]), ("Name", emp["Name"]), ("Designation", emp.get("Designation", "")),
                   ("Band", emp["Band"])] + [(f, emp.get(f, "")) for f in EDITABLE_PERSONAL] + \
-                 [("Office Email ID", emp.get("Email", "")), ("Last updated", t12(emp.get("Profile updated at", "")))]
+                 [("Joining date", emp.get("Joining date", "")), ("Office Email ID", emp.get("Email", "")), ("Last updated", t12(emp.get("Profile updated at", "")))]
         body = T_PERSONAL; ctx["fields"] = fields
     elif tab == "missed":
         subs = [s for s in load_subs() if _key(s["emp_id"]) == _key(eid)]
@@ -2807,8 +2836,10 @@ def form_page(sub, action, heading):
     tph = process_rates()
     perm = {d: h for (_k, d), h in deduction_map(sub.get("emp_id")).items()}      # approved permission + half-day leave hours, by date
     maxdate = ""          # no upper limit on the entry date - employees may pick any date they need
+    jd_ = join_date(sub.get("emp_id")) if session.get("role") == "employee" else None
+    mindate = str(jd_) if jd_ else ""      # Update97: no entry before the joining date
     return FORM, dict(sub=sub, action=action, heading=heading, names=names, tph=tph, day=day_limit(), target=target_hours(),
-                      workday=float(DAY_HOURS), perm=perm, maxdate=maxdate, other_hours=OTHER_HOURS)
+                      workday=float(DAY_HOURS), perm=perm, maxdate=maxdate, mindate=mindate, other_hours=OTHER_HOURS)
 
 def gender_of(emp):
     g = str(emp.get("Gender", "")).strip().lower()
@@ -3304,9 +3335,12 @@ def report(employees, subs, leaves, start, end):
     leaves = live_leaves(leaves)    # rejected leave does not count
     for e in employees:
         eid = str(e["Employee ID"])
-        mine = [s for s in subs if str(s["emp_id"]) == eid and a <= s["date"] <= b and not s["off"]]
+        jd_ = join_date(eid)                                            # Update97: working days count only from the joining date
+        ea = str(jd_) if (jd_ and str(jd_) > a) else a
+        wd_i = 0 if ea > b else (workdays(dt.date.fromisoformat(ea), end) if ea != a else wd)
+        mine = [s for s in subs if str(s["emp_id"]) == eid and ea <= s["date"] <= b and not s["off"]]
         days = {s["date"] for s in mine}
-        mylv = [l for l in leaves if str(l["Employee ID"]) == eid and a <= l["Date"] <= b and not is_off(l["Date"])]
+        mylv = [l for l in leaves if str(l["Employee ID"]) == eid and ea <= l["Date"] <= b and not is_off(l["Date"])]
         lv = {l["Date"] for l in mylv if not leave_is_half(l)}          # full-day leave: the whole day is excused
         half = {l["Date"] for l in mylv if leave_is_half(l)}            # half-day leave: 4 hrs still have to be worked
         perm_hrs = sum(num(r.get("Hours")) for r in perms
@@ -3319,15 +3353,15 @@ def report(employees, subs, leaves, start, end):
         full = days - half                                              # worked days that are not half-day-leave days
         today_s = str(today_local())
         # today is still running: with no entry / leave yet it is "not marked" - it is NOT counted as Absent until the day is over
-        pending_today = 1 if (a <= today_s <= b and not is_off(today_s) and today_s not in (days | lv | half)) else 0
-        wd_e = wd - pending_today                                       # working days that have a status so far
+        pending_today = 1 if (ea <= today_s <= b and not is_off(today_s) and today_s not in (days | lv | half)) else 0
+        wd_e = wd_i - pending_today                                       # working days that have a status so far
         credit = len(full) + 0.5 * len(half)                            # Present 1 + Half day 0.5 + Absent 0
         present_n = credit
         leave_n = len(lv) + 0.5 * len(half)
         absent_n = max(wd_e - len(full | lv | half), 0)
         _n = lambda v: int(v) if v == int(v) else v
         out.append(dict(id=eid, name=e["Name"], band=e["Band"], designation=e.get("Designation", ""), present=_n(present_n),
-                        leave=_n(leave_n), absent=_n(absent_n), wd=wd, counted=wd_e,
+                        leave=_n(leave_n), absent=_n(absent_n), wd=wd_i, counted=wd_e,
                         att=min(round(credit / wd_e * 100), 100) if wd_e else 0,
                         pct=min(round(prod_hrs / base * 100), 100) if base else 0,
                         prod=prod_hrs, non=sum(s["non"] for s in mine), perm=perm_hrs))
@@ -3444,6 +3478,8 @@ app.jinja_env.filters["ppill"] = permission_pill
 def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
     """Working days (weekly offs and holidays excluded) in start..end with no entry and no leave."""
     eid = str(eid)
+    jd = join_date(eid)
+    if jd and start < jd: start = jd                  # Update97: dates before the joining date are never "missed" / "pending"
     leaves = live_leaves(leaves)
     done = {s["date"] for s in subs if str(s["emp_id"]) == eid} | \
            {l["Date"] for l in leaves if str(l["Employee ID"]) == eid and not leave_is_half(l)}      # a half-day leave still needs an entry (4 hrs)

@@ -51,7 +51,7 @@ Access rules (Update59):
   * Update78: Welcome Page opens first for Admin and Employee, no 'Continue' button, opens the Admin/Employee page by itself when it ends.
     Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
     melody, different from the earlier Mohanam tune), Welcome Page only.
-  * Update104: Admin Overview has a centred AI strip below the menu with a 3D AI button that opens the new read-only \"AI Insights\" page (/admin/ai).
+  * Update104: compact Admin UI (smaller text, labels and buttons; Admin pages only).
   * Update102: Admin -> Audit Log (By Process): after choosing a Process and a Month, the new "Productivity" button opens the
     Productivity report for exactly that Process + Month, with "Download Excel" and "Print" buttons. The Excel file (and the printout)
     contain ONLY that Process + Month. The per-employee Productivity page (opened from a process) gets the same two buttons.
@@ -1542,7 +1542,27 @@ aside a.mzn ~ .prof{margin-top:0}
 @keyframes mznBorder{to{background-position:0 0,300% 0}}
 @keyframes mznFloat{0%{opacity:0;transform:translateY(6px) scale(.5) rotate(0)}25%{opacity:1}70%{opacity:1;transform:translateY(-8px) scale(1.1) rotate(14deg)}100%{opacity:0;transform:translateY(-16px) scale(.6) rotate(-10deg)}}
 @media(prefers-reduced-motion:reduce){aside a.mzn,.mzn-c{animation:none!important;opacity:1}.mzn-em{display:none}}
-</style></head><body>
+/* Update104: compact Admin UI - smaller text, labels and buttons (Admin pages only; Employee pages unchanged) */
+body.adm .app{font-size:12.5px}
+body.adm .app aside{width:196px;padding:14px 9px;gap:2px}
+body.adm .app .brand{font-size:15px;padding:0 8px 10px}body.adm .app .brand small{font-size:11px}
+body.adm .app aside a{padding:6px 10px;font-size:12.5px;border-radius:7px}
+body.adm .app .me{font-size:11.5px;margin-bottom:10px;padding:0 8px 10px}body.adm .app .me a{padding:3px 9px;font-size:11.5px}
+body.adm .app main{padding:16px 20px}
+body.adm .app h1{font-size:18px}body.adm .app h2{font-size:14px;margin:14px 0 8px}body.adm .app h3{font-size:13px;margin:10px 0 5px}
+body.adm .app .mut,body.adm .app p{font-size:11.5px}
+body.adm .app .head{margin-bottom:10px;gap:8px}
+body.adm .app .card{padding:12px 14px;margin-bottom:12px;border-radius:12px}
+body.adm .app input,body.adm .app select,body.adm .app button,body.adm .app textarea{padding:4px 8px;font-size:12px;margin:2px;border-radius:6px}
+body.adm .app .primary,body.adm .app .btnl{padding:5px 12px;font-size:12px;border-radius:6px}
+body.adm .app .grid label,body.adm .app label{font-size:11px}
+body.adm .app th,body.adm .app td{padding:5px 8px;font-size:11.5px}
+body.adm .app th{font-size:11.5px}
+body.adm .app .kpis{gap:8px;margin-bottom:12px;grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+body.adm .app .kpi{padding:9px 12px;border-radius:10px}body.adm .app .kpi span{font-size:11.5px}body.adm .app .kpi b{font-size:20px;margin:2px 0 5px}
+body.adm .app .pill{font-size:11px}
+body.adm .app .site-ftr{font-size:10.5px;margin-top:14px}
+</style></head><body{% if session.get("role")=="admin" %} class="adm"{% endif %}>
 {% if session.role %}<div class="app"><aside class="emp">
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
 {% for h,l,on,kids in nav %}{% if kids %}<div class="ng{{' open' if on else ''}}"><a class="ng-h" href="{{h}}" role="button" aria-expanded="{{'true' if on else 'false'}}" onclick="var g=this.parentNode;var o=g.classList.toggle('open');this.setAttribute('aria-expanded',o);return false">{{l}}<span class="chev">&#9650;</span></a>
@@ -3657,62 +3677,7 @@ EMP_TOP = """<div class="head hero"><div class="welcome wflex"><div class="wtxt"
 <p class="mut wsub"><span class="seg">{{today}}</span>{% if session.designation %}<span class="dot">&middot;</span><span class="seg">{{session.designation}}</span>{% endif %}<span class="dot">&middot;</span><span class="seg">Band {{session.band}}</span><span class="dot">&middot;</span><span class="seg">{{month_label}} summary</span>
 {% if today_perm %}<span class="dot">&middot;</span>Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div></div></div>""" + KPI
 
-AI_STRIP = """<style>
-.ai-strip{position:relative;display:flex;justify-content:center;align-items:center;padding:22px 16px;margin:0 0 18px;border-radius:16px;
- background:linear-gradient(135deg,#141a36 0%,#1c2340 55%,#2a2470 100%);border:1px solid #2b3560;overflow:hidden;box-shadow:0 10px 28px #1c234030}
-.ai-strip:before,.ai-strip:after{content:"";position:absolute;top:50%;height:1px;width:calc(50% - 150px);background:linear-gradient(90deg,transparent,#7c83ff,transparent);opacity:.7}
-.ai-strip:before{left:0}.ai-strip:after{right:0}
-.ai-strip .ai-cap{position:absolute;left:0;right:0;bottom:6px;text-align:center;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#9aa3c7}
-.ai-btn{--g:#7c83ff;position:relative;display:inline-flex;align-items:center;gap:14px;padding:12px 26px 12px 14px;margin:0 0 12px;border:0;border-radius:18px;
- text-decoration:none;color:#fff;font-weight:600;font-size:15px;letter-spacing:.02em;
- background:linear-gradient(160deg,#6d6bff 0%,#4f46e5 45%,#3a2fc0 100%);
- box-shadow:0 1px 0 #ffffff55 inset,0 -3px 0 #2a1f9a inset,0 8px 0 #2a1f9a,0 16px 26px #0008,0 0 28px #7c83ff66;
- transition:transform .15s ease,box-shadow .15s ease;z-index:1}
-.ai-btn:hover{transform:translateY(-2px);box-shadow:0 1px 0 #ffffff66 inset,0 -3px 0 #2a1f9a inset,0 10px 0 #2a1f9a,0 20px 30px #0009,0 0 38px #7c83ffaa;background:linear-gradient(160deg,#7c7aff,#5a52f0 45%,#4136cf)}
-.ai-btn:active{transform:translateY(6px);box-shadow:0 1px 0 #ffffff55 inset,0 -2px 0 #2a1f9a inset,0 2px 0 #2a1f9a,0 6px 12px #0008}
-.ai-btn:focus-visible{outline:3px solid #c7c4fb;outline-offset:4px}
-.ai-ico{width:54px;height:54px;flex:none;border-radius:14px;display:grid;place-items:center;background:radial-gradient(circle at 30% 25%,#1e2757,#0d1230);
- box-shadow:0 0 0 2px #ffffff30 inset,0 0 18px #7c83ff88}
-.ai-ico svg{width:36px;height:36px;animation:aiPulse 2.8s ease-in-out infinite}
-@keyframes aiPulse{0%,100%{filter:drop-shadow(0 0 2px #7c83ff)}50%{filter:drop-shadow(0 0 8px #a5f3fc)}}
-.ai-txt small{display:block;font-weight:400;font-size:11.5px;color:#d6d9ff;letter-spacing:.04em}
-@media (max-width:640px){.ai-strip:before,.ai-strip:after{display:none}}
-@media (prefers-reduced-motion:reduce){.ai-ico svg{animation:none}.ai-btn{transition:none}}
-</style>
-<div class="ai-strip no-print" role="region" aria-label="AI assistant">
-<a class="ai-btn" href="/admin/ai" title="Open AI Insights">
-<span class="ai-ico" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none" stroke="#a5f3fc" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-<rect x="13" y="13" width="22" height="22" rx="5" fill="#2a2470"/><text x="24" y="29" text-anchor="middle" font-size="11" font-weight="700" fill="#fff" stroke="none" font-family="system-ui,sans-serif">AI</text>
-<path d="M19 13V7M24 13V6M29 13V7M19 35v6M24 35v7M29 35v6M13 19H7M13 24H6M13 29H7M35 19h6M35 24h7M35 29h6"/>
-<circle cx="19" cy="7" r="1.3" fill="#a5f3fc"/><circle cx="29" cy="41" r="1.3" fill="#a5f3fc"/><circle cx="6" cy="24" r="1.3" fill="#a5f3fc"/><circle cx="42" cy="24" r="1.3" fill="#a5f3fc"/></svg></span>
-<span class="ai-txt">AI Insights<small>Open the AI assistant</small></span></a></div>
-"""
-
-AI_PAGE = """<style>
-.aip-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px}
-.aip-k{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px}
-.aip-k span{display:block;color:var(--mut);font-size:12px}.aip-k b{font-size:24px}
-.aip-ins li{margin:6px 0;line-height:1.5}
-</style>
-<div class="head"><div><h1>&#10024; AI Insights</h1>
-<p class="mut">{{label}} &middot; Automatic observations generated from your productivity, attendance and leave data.</p></div>
-<form class="grid" method="get" style="margin:0"><input type="month" name="month" value="{{month if month!='all' else ''}}"><button class="primary">Show</button>
-<a href="/admin/summary">Back to Overview</a></form></div>
-<div class="aip-grid"><div class="aip-k"><span>Employees analysed</span><b>{{n}}</b></div>
-<div class="aip-k"><span>Average attendance</span><b>{{a1}}%</b></div>
-<div class="aip-k"><span>Average productivity</span><b>{{a2}}%</b></div></div>
-<div class="card"><h2 style="margin-top:0">Key insights</h2><ul class="aip-ins">{% for i in insights %}<li>{{i}}</li>{% else %}<li>No data for this period.</li>{% endfor %}</ul></div>
-<div class="card"><h2 style="margin-top:0">Needs attention <small class="mut">(productivity below 70% or attendance below 80%)</small></h2>
-<table><tr><th>Employee</th><th>Attendance</th><th>Productivity</th><th>Absent days</th></tr>
-{% for r in low %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.att}}%</td><td>{{r.pct}}%</td><td>{{r.absent}}</td></tr>
-{% else %}<tr><td colspan="4">Everyone is on track for this period.</td></tr>{% endfor %}</table></div>
-<div class="card"><h2 style="margin-top:0">Top performers</h2>
-<table><tr><th>Employee</th><th>Productivity</th><th>Attendance</th></tr>
-{% for r in top %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.pct}}%</td><td>{{r.att}}%</td></tr>
-{% else %}<tr><td colspan="3">No data.</td></tr>{% endfor %}</table></div>
-"""
-
-SUMMARY = AI_STRIP + """<div class="head ov-head"><div><h1>Overview</h1>
+SUMMARY = """<div class="head ov-head"><div><h1>Overview</h1>
 <p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; the daily target of {{target|g}} hrs per present day (capped at 100%).</p></div>
 <div class="ov-tools no-print">
 <button type="button" class="btnl pbtn" onclick="window.print()" title="Print this overview"><span aria-hidden="true">&#128438;</span> Print</button>
@@ -3854,34 +3819,6 @@ def admin_summary():
     return page(SUMMARY, title="Overview", rep=rep, month=month, label=label, wd=workdays(start, end),
                 lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra, target=target_hours(),
                 online=online_list())
-
-@app.route("/admin/ai")
-@need("admin")
-def admin_ai():
-    # Update104: AI Insights page opened by the AI button on the Admin Overview. Read-only; uses the same report() data as the Overview.
-    today = today_local()
-    month = request.args.get("month") or today.strftime("%Y-%m")
-    subs, leaves = load_subs(), rows("Leave")
-    if month == "all":
-        ds = [x["date"] for x in subs] + [l["Date"] for l in leaves]
-        start, end, label = (dt.date.fromisoformat(min(ds)) if ds else today), today, "All time"
-    else:
-        start, end = month_range(month); label = start.strftime("%B %Y")
-    rep = report(rows("Employees"), subs, leaves, start, end)
-    n = len(rep)
-    a1 = round(sum(r["att"] for r in rep) / n) if n else 0
-    a2 = round(sum(r["pct"] for r in rep) / n) if n else 0
-    by = sorted(rep, key=lambda r: (-r["pct"], str(r["name"])))
-    low = [r for r in by if r["pct"] < 70 or r["att"] < 80][::-1]
-    ins = []
-    if n:
-        ins.append(f"{n} employee(s) analysed; average attendance is {a1}% and average productivity is {a2}%.")
-        ins.append(f"Highest productivity: {by[0]['name']} ({by[0]['pct']}%). Lowest: {by[-1]['name']} ({by[-1]['pct']}%).")
-        ins.append(f"{len(low)} employee(s) need attention." if low else "All employees are meeting the attendance and productivity thresholds.")
-        tl = sum(r["leave"] for r in rep)
-        if tl: ins.append(f"Total leave taken in this period: {tl:g} day(s).")
-    return page(AI_PAGE, title="AI Insights", rep=rep, month=month, label=label, n=n, a1=a1, a2=a2,
-                insights=ins, low=low, top=by[:5])
 
 @app.route("/admin/settings/target", methods=["POST"])
 @need("admin")

@@ -57,6 +57,7 @@ Access rules (Update59):
   * Update107: Mobius365 / LN_Map branding and logo removed from the Admin & Employee panels (sidebar, footer, login title bar, emblem, welcome page).
   * Update108: Admin login text removed, welcome page is a separate page (no panel behind it), 3D admin avatar, sidebar calendar for both panels.
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
+  * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update102: Admin -> Audit Log (By Process): after choosing a Process and a Month, the new "Productivity" button opens the
     Productivity report for exactly that Process + Month, with "Download Excel" and "Print" buttons. The Excel file (and the printout)
     contain ONLY that Process + Month. The per-employee Productivity page (opened from a process) gets the same two buttons.
@@ -3165,7 +3166,7 @@ function go(){
 function stopAll(){if(timer){clearInterval(timer);timer=null}if(ctx&&master)fade(0,0.25)}
 """
 
-WL_SCENE = LOGIN[LOGIN.index('<div class="scene '):LOGIN.index('<div class="lcard">')]   # same 3D scene + data-packet flow as the login pages
+WL_SCENE = re.sub(r"\{% if role=='admin' %\}<div class=\"adp\".*?\{% endif %\}", "", LOGIN[LOGIN.index('<div class="scene '):LOGIN.index('<div class="lcard">')], flags=re.S)   # Update110: the Admin Panel / Productivity Dashboard text belongs to the login page only   # same 3D scene + data-packet flow as the login pages
 WL_ENGINE = LOGIN[LOGIN.index("var SA=ADMIN"):LOGIN.index("function arm()")]      # same Tamil-style engine as the login page
 WELCOME = """<style>
 .wl{position:fixed;inset:0;z-index:9999;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
@@ -3181,13 +3182,14 @@ WELCOME = """<style>
 .wl-bar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#6d70f5,#f58a8a);transform-origin:left;transform:scaleX(0);animation:wlFill 4s linear forwards}
 @keyframes wlFill{to{transform:scaleX(1)}}
 .wl-st{margin-top:10px;font:600 10px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;color:#8a90ad}
-.wl-ftr{position:absolute;left:0;right:0;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:6;text-align:center;font-size:11px;font-weight:600;letter-spacing:.3px;color:#ffffffa6;pointer-events:none}
+.wl-ftr{position:absolute;left:0;right:0;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:6;text-align:center;font-size:10.5px;font-weight:400;letter-spacing:.2px;color:#ffffff80;pointer-events:none}
 </style>
 <div class="wl {{session.role}}" id="wl">
 """ + WL_SCENE.replace('{{role}}', "{{session.role}}").replace("role=='admin'", "session.role=='admin'") + """
  <div class="wl-card"><h1>Welcome, {{session.name}}</h1>
  <p>{{ 'Syncing live data from the server' if session.role=='admin' else 'Securely connecting to the server' }}&hellip;</p>
  <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div><div class="wl-st" style="margin-top:6px;font-weight:500"><span id="wl_msg">&nbsp;</span></div></div>
+{% if session.role=='admin' %}<div class="wl-ftr" role="contentinfo">&copy; 2026 LN_MAP_AI</div>{% endif %}
 </div>
 <script>
 (function(){

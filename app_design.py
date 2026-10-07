@@ -51,7 +51,7 @@ Access rules (Update59):
   * Update78: Welcome Page opens first for Admin and Employee, no 'Continue' button, opens the Admin/Employee page by itself when it ends.
     Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
     melody, different from the earlier Mohanam tune), Welcome Page only.
-  * Update104: compact Admin UI (smaller text, labels and buttons; Admin pages only).
+  * Update104: compact Employee + Admin UI (smaller text/buttons) and a dashboard-style 3D Admin login (UI only; login logic unchanged).
   * Update102: Admin -> Audit Log (By Process): after choosing a Process and a Month, the new "Productivity" button opens the
     Productivity report for exactly that Process + Month, with "Download Excel" and "Print" buttons. The Excel file (and the printout)
     contain ONLY that Process + Month. The per-employee Productivity page (opened from a process) gets the same two buttons.
@@ -1542,27 +1542,68 @@ aside a.mzn ~ .prof{margin-top:0}
 @keyframes mznBorder{to{background-position:0 0,300% 0}}
 @keyframes mznFloat{0%{opacity:0;transform:translateY(6px) scale(.5) rotate(0)}25%{opacity:1}70%{opacity:1;transform:translateY(-8px) scale(1.1) rotate(14deg)}100%{opacity:0;transform:translateY(-16px) scale(.6) rotate(-10deg)}}
 @media(prefers-reduced-motion:reduce){aside a.mzn,.mzn-c{animation:none!important;opacity:1}.mzn-em{display:none}}
-/* Update104: compact Admin UI - smaller text, labels and buttons (Admin pages only; Employee pages unchanged) */
-body.adm .app{font-size:12.5px}
-body.adm .app aside{width:196px;padding:14px 9px;gap:2px}
-body.adm .app .brand{font-size:15px;padding:0 8px 10px}body.adm .app .brand small{font-size:11px}
-body.adm .app aside a{padding:6px 10px;font-size:12.5px;border-radius:7px}
-body.adm .app .me{font-size:11.5px;margin-bottom:10px;padding:0 8px 10px}body.adm .app .me a{padding:3px 9px;font-size:11.5px}
-body.adm .app main{padding:16px 20px}
-body.adm .app h1{font-size:18px}body.adm .app h2{font-size:14px;margin:14px 0 8px}body.adm .app h3{font-size:13px;margin:10px 0 5px}
-body.adm .app .mut,body.adm .app p{font-size:11.5px}
-body.adm .app .head{margin-bottom:10px;gap:8px}
-body.adm .app .card{padding:12px 14px;margin-bottom:12px;border-radius:12px}
-body.adm .app input,body.adm .app select,body.adm .app button,body.adm .app textarea{padding:4px 8px;font-size:12px;margin:2px;border-radius:6px}
-body.adm .app .primary,body.adm .app .btnl{padding:5px 12px;font-size:12px;border-radius:6px}
-body.adm .app .grid label,body.adm .app label{font-size:11px}
-body.adm .app th,body.adm .app td{padding:5px 8px;font-size:11.5px}
-body.adm .app th{font-size:11.5px}
-body.adm .app .kpis{gap:8px;margin-bottom:12px;grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
-body.adm .app .kpi{padding:9px 12px;border-radius:10px}body.adm .app .kpi span{font-size:11.5px}body.adm .app .kpi b{font-size:20px;margin:2px 0 5px}
-body.adm .app .pill{font-size:11px}
-body.adm .app .site-ftr{font-size:10.5px;margin-top:14px}
-</style></head><body{% if session.get("role")=="admin" %} class="adm"{% endif %}>
+/* Update104: compact UI for Employee + Admin pages (login pages unaffected) */
+body .app{font-size:12px}
+body .app aside{width:176px;padding:12px 8px;gap:2px}
+body .app .brand{font-size:14px;padding:0 8px 8px}body .app .brand small{font-size:10.5px}
+body .app aside a{padding:5px 9px;font-size:12px;border-radius:6px}
+body .app .me{font-size:11px;margin-bottom:8px;padding:0 8px 8px}body .app .me a{padding:3px 8px;font-size:11px}
+body .app .prof{padding:10px 4px 4px;gap:7px}body .app .prof .av3d{width:56px;height:56px;margin:0 0 4px}
+body .app .prof-name{font-size:12.5px}body .app .prof-sub{font-size:10.5px}
+body .app .prof-out{padding:4px 12px;font-size:11.5px;border-radius:6px}
+body .app main{padding:14px 18px}
+body .app h1{font-size:17px}body .app h2{font-size:13.5px;margin:12px 0 7px}body .app h3{font-size:12.5px;margin:9px 0 5px}
+body .app .mut,body .app p,body .app small{font-size:11px}
+body .app .head{margin-bottom:9px;gap:7px}
+body .app .card{padding:11px 13px;margin-bottom:11px;border-radius:11px}
+body .app input,body .app select,body .app textarea,body .app button{padding:4px 8px;font-size:11.5px;margin:2px;border-radius:6px}
+body .app .primary,body .app .btnl{padding:4px 11px;font-size:11.5px;border-radius:6px;box-shadow:0 2px 0 #3730a3,0 6px 10px -5px #4f46e566,inset 0 1px 0 #ffffff45}
+body .app .primary:hover,body .app .btnl:hover{box-shadow:0 3px 0 #3730a3,0 8px 12px -6px #4f46e577,inset 0 1px 0 #ffffff45}
+body .app label,body .app .grid label{font-size:10.5px}
+body .app table th,body .app table td{font-size:11px!important;padding:4px 7px!important;line-height:1.3!important}
+body .app table .pill,body .app .pill{font-size:10px!important;padding:1px 7px!important}
+body .app .kpis{gap:8px;margin-bottom:11px;grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
+body .app .kpi{padding:8px 11px;border-radius:10px}body .app .kpi span{font-size:11px}body .app .kpi b{font-size:19px;margin:2px 0 4px}
+body .app .flash{padding:6px 10px;font-size:11.5px}
+body .app .site-ftr{font-size:10px;margin-top:12px}
+/* Update104: Admin login - dashboard-style 3D panel */
+.win.admin{width:min(940px,100%);border-radius:16px;box-shadow:0 40px 70px -20px #05081c99,0 20px 36px -18px #000a}
+.win.admin .wbar{height:34px;border-radius:16px 16px 0 0;background:linear-gradient(180deg,#232c5c,#161d42);border-bottom:1px solid #2f3a74;position:relative}
+.win.admin .wbar i{width:8px;height:8px;background:#5b67b5}.win.admin .wbar i:first-child{background:#ef6a6a}.win.admin .wbar i:nth-child(2){background:#f2c25b}.win.admin .wbar i:nth-child(3){background:#5fd39a}
+.win.admin .wbar:after{content:"Mobius365  \00b7  Admin Panel";position:absolute;left:0;right:0;text-align:center;font-size:11.5px;letter-spacing:.08em;color:#aab3e6;pointer-events:none}
+.win.admin .wbody{min-height:420px;border-radius:0 0 16px 16px;gap:40px;padding:28px 36px;justify-content:space-between;
+ background:radial-gradient(700px 380px at 15% 10%,#3b5bdb44,transparent 60%),radial-gradient(500px 300px at 90% 100%,#7c3aed33,transparent 60%),linear-gradient(135deg,#0a1030 0%,#111a4a 55%,#1d2470 100%)}
+.win.admin .scene .fl,.win.admin .scene .dp{display:none}
+.win.admin .scene .gfw{opacity:.55}
+.adp{position:relative;z-index:2;flex:1;min-width:0;color:#fff;transform:translateZ(30px)}
+.adp-t{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#8ea8ff;margin:0 0 6px}
+.adp h3{font-size:24px;line-height:1.2;margin:0 0 6px;color:#fff}
+.adp-s{font-size:12.5px;color:#aab3e6;margin:0 0 20px;max-width:330px;line-height:1.5}
+.adp-3d{perspective:900px;height:200px;position:relative}
+.adp-st{position:absolute;inset:0;transform-style:preserve-3d;transform:rotateX(14deg) rotateY(-18deg);animation:adpFloat 7s ease-in-out infinite}
+@keyframes adpFloat{0%,100%{transform:rotateX(14deg) rotateY(-18deg) translateY(0)}50%{transform:rotateX(11deg) rotateY(-14deg) translateY(-8px)}}
+.adp-c{position:absolute;border-radius:12px;background:linear-gradient(160deg,#ffffff1f,#ffffff0a);border:1px solid #ffffff2e;backdrop-filter:blur(4px);box-shadow:0 18px 30px -12px #000a,inset 0 1px 0 #ffffff33}
+.adp-c.c1{left:0;top:0;width:210px;height:120px;transform:translateZ(10px);padding:12px 14px}
+.adp-c.c2{left:190px;top:34px;width:128px;height:76px;transform:translateZ(46px);padding:10px 12px}
+.adp-c.c3{left:70px;top:112px;width:200px;height:70px;transform:translateZ(80px);padding:10px 14px;background:linear-gradient(160deg,#6d70f5cc,#4f46e5cc)}
+.adp-c small{display:block;font-size:10px;color:#c9d0ee;letter-spacing:.06em;text-transform:uppercase}
+.adp-bars{display:flex;align-items:flex-end;gap:7px;height:70px;margin-top:10px}
+.adp-bars i{flex:1;border-radius:4px 4px 0 0;background:linear-gradient(180deg,#a5b4fc,#4f46e5);box-shadow:0 4px 8px #0006}
+.adp-ring{width:34px;height:34px;border-radius:50%;margin-top:8px;border:5px solid #ffffff2a;border-top-color:#8ea8ff;border-right-color:#8ea8ff}
+.adp-ln{height:6px;border-radius:3px;background:#ffffff59;margin-top:9px}.adp-ln.s{width:60%}
+.win.admin .lcard{width:310px;flex:none;padding:24px 26px;border-radius:14px;text-align:left;background:linear-gradient(180deg,#fff,#f4f6ff);
+ box-shadow:0 1px 0 #fff inset,0 36px 54px -16px #000a,0 10px 18px -8px #0005}
+.win.admin .lav{justify-content:flex-start;margin:0 0 4px}.win.admin .lav .av3d{width:64px;height:64px;margin:0 0 4px}
+.win.admin .lcard h2{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:20px;color:#1c2340;margin:4px 0 2px}
+.win.admin .lcard p{font-size:12px;margin:0 0 12px}
+.win.admin .lcard input{border:1px solid #cfd5e6;border-radius:8px;padding:9px 11px;font-size:13px;background:#fff}
+.win.admin .lcard input:focus{outline:2px solid #c7c4fb;border-color:#4f46e5}
+.win.admin .lcard input.key-pulse{border-color:#4f46e5;box-shadow:0 0 0 4px #4f46e533}
+.win.admin .lcard>form>button:not(.pw-toggle){border-radius:9px;padding:10px;font-size:13.5px;background:linear-gradient(180deg,#6d70f5,#4f46e5);box-shadow:0 4px 0 #3730a3,0 12px 18px -8px #4f46e5aa,inset 0 1px 0 #ffffff55}
+.win.admin .lcard>form>button:not(.pw-toggle):active{transform:translateY(3px);box-shadow:0 1px 0 #3730a3}
+@media(max-width:800px){.adp{display:none}.win.admin .wbody{justify-content:center;padding:20px 12px}.win.admin .lcard{width:100%}}
+@media(prefers-reduced-motion:reduce){.adp-st{animation:none}}
+</style></head><body>
 {% if session.role %}<div class="app"><aside class="emp">
 <div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
 {% for h,l,on,kids in nav %}{% if kids %}<div class="ng{{' open' if on else ''}}"><a class="ng-h" href="{{h}}" role="button" aria-expanded="{{'true' if on else 'false'}}" onclick="var g=this.parentNode;var o=g.classList.toggle('open');this.setAttribute('aria-expanded',o);return false">{{l}}<span class="chev">&#9650;</span></a>
@@ -1865,7 +1906,7 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
 <div class="fl" style="left:22%;top:6%;--bt:6s;--d:-2.5s"><div class="sph" style="--s:26px"></div></div>
 <div class="fl hm" style="right:5%;top:46%;--bt:7s;--d:-1.5s"><div class="sph" style="--s:34px"></div></div>
 <div class="fl hm" style="left:4%;top:48%;--bt:8s;--d:-5s"><div class="sph" style="--s:20px"></div></div>{% if role=='admin' %}<div class="dp adm"><div class="dp-lab"><b>&#9664;&#9664;&#9664;</b>&nbsp; LIVE DATA FEED &middot; INCOMING FROM SERVER</div><div class="dp-node l"><div class="dp-dash"><i></i><i></i><i></i><i></i></div><div class="dp-stand"></div><small>ADMIN DASHBOARD</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% else %}<div class="dp emp"><div class="dp-lab">UPLOADING ENCRYPTED DATA TO SERVER &nbsp;<b>&#9654;&#9654;&#9654;</b></div><div class="dp-node l"><div class="dp-scr"><i></i><i></i><i></i></div><div class="dp-stand"></div><small>EMPLOYEE</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% endif %}</div>
-<div class="lcard">{% if role=='admin' %}<div class="lav">{{admin_avatar|safe}}</div>{% endif %}<h2>Welcome back</h2><p>{{title}}</p>
+{% if role=='admin' %}<div class="adp" aria-hidden="true"><p class="adp-t">Admin Panel</p><h3>Productivity<br>Dashboard</h3><p class="adp-s">Monitor attendance, tasks and team performance in one place.</p><div class="adp-3d"><div class="adp-st"><div class="adp-c c1"><small>Performance</small><div class="adp-bars"><i style="height:38%"></i><i style="height:62%"></i><i style="height:48%"></i><i style="height:80%"></i><i style="height:58%"></i><i style="height:92%"></i><i style="height:70%"></i></div></div><div class="adp-c c2"><small>Attendance</small><div class="adp-ring"></div></div><div class="adp-c c3"><small>Reports</small><div class="adp-ln"></div><div class="adp-ln s"></div></div></div></div></div>{% endif %}<div class="lcard">{% if role=='admin' %}<div class="lav">{{admin_avatar|safe}}</div>{% endif %}<h2>Welcome back</h2><p>{{title}}</p>
 <form method="post">
 <div class="field"><input id="login_u" name="u" placeholder="{{ph}}" required autofocus autocomplete="off"></div>
 <div class="field pw"><input id="login_p" name="p" type="password" placeholder="Password" required autocomplete="off">

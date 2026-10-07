@@ -59,6 +59,11 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update122: Missed Entries - AUTOMATIC e-mail (Admin only). Admin > Email Controls > "Automatic Email" switch (Enable / Disable, saved in the Settings sheet,
+    default OFF). When ON, a background job runs once a day (AUTO_MAIL_TIME, default 09:30, app timezone) and e-mails every employee who has missed
+    Productivity Entries this month (only dates not e-mailed before): employee name, missed date(s) and the Productivity Tracker login link.
+    Employees cannot see or call the switch (/admin/* is Admin-only + the route re-checks the Admin session). Missed Entries calculation is unchanged;
+    manual sending is unchanged. Every send is logged in the "Missed Email Log" sheet (Mode = Auto, Sent by = System).
   * Update121: Admin > Employee Info > Employee Login Access: 'Add employee login' form (username/Employee ID, initial password, enable) + per-row Set Password.
   * Update120: large 3D profile avatar (male / female from the employee's Gender) on the Employee page.
   * Update119: Admin + Employee login pages redesigned to the fire-theme reference (dark crimson window, orange grid floor, logo in card, orange 3D button). UI only; login logic unchanged.
@@ -6107,7 +6112,7 @@ MLOG = '''<div class="head"><div><h1>Missed Entries Log</h1>
 <div class="card no-print"><h2>Missed entries e-mail</h2>
 <p class="mut">Sends the employee's missed productivity entry dates to their registered Office Email ID. Dates shown follow the filter above ({{label}}).</p>
 {% if not smtp_ok %}<div class="warn">E-mail is not set up on the server yet (BREVO_API_KEY or SMTP_HOST, and MAIL_FROM) - nothing can be sent until it is.</div>{% endif %}
-<p class="mut">Reminder e-mails are sent manually by the Admin only. There is no automatic e-mail.</p>
+<p class="mut">Reminder e-mails are sent by the Admin, or automatically when the Admin has switched on Automatic Email (Admin &rarr; Email Controls).</p>
 <table><tr><th>Employee</th><th>E-mail</th><th>Missed dates</th><th>Not yet e-mailed</th><th>Last e-mailed</th><th></th></tr>
 {% for x in summary %}<tr><td><a href="/admin/missed-log/{{x.id|urlencode}}?month={{month}}">{{x.id}} &middot; {{x.name}}</a></td><td>{{x.email or '-'}}</td><td>{{x.dates|length}}: {{x.dates|join(', ')}}</td><td>{{x.new}}</td><td>{{(x.last|t12) if x.last else 'Never'}}</td>
 <td class="act"><a href="/admin/missed-log/{{x.id|urlencode}}?month={{month}}">View</a>
@@ -6193,11 +6198,93 @@ def mail_status(v):
     v = str(v or "").strip()
     return "Sent" if v == "Sent" else ("Pending" if v == "Pending" else "Failed")
 
+# ---------------------------------------------------------------- Update122: AUTOMATIC missed-entry e-mail (Admin-only switch)
+AUTO_MAIL_KEY = "Auto Missed Email"
+AUTO_MAIL_TIME = os.getenv("AUTO_MAIL_TIME", "09:30").strip()      # HH:MM, app timezone
+
+def auto_mail_on(fresh=False):
+    return _setting(AUTO_MAIL_KEY, fresh).lower() in ("yes", "on", "true", "1", "enabled")
+
+def _auto_time():
+    try:
+        h, m = AUTO_MAIL_TIME.split(":"); return dt.time(int(h), int(m))
+    except Exception:
+        return dt.time(9, 30)
+
+def _auto_claim_run(today):
+    """One automatic run per day across all workers: the first '__RUN__' row of the day wins."""
+    ws = ws_of(MISSED_LOG); t = str(today)
+    def mine():
+        runs = [r for r in _fetch_rows(MISSED_LOG) if str(r.get("Employee ID", "")) == "__RUN__" and str(r.get("Mode", "")) == "Auto" and str(r.get("Date sent", "")) == t]
+        return runs
+    if mine(): return False
+    ws.append_row([t, "__RUN__", _WORKER_ID, "", "", 0, now_local().strftime("%Y-%m-%d %H:%M:%S"), "Auto", "Run", "System"], value_input_option="RAW")
+    invalidate_cache(MISSED_LOG)
+    runs = mine()
+    return bool(runs) and str(runs[0].get("Employee name", "")) == _WORKER_ID
+
+def run_auto_missed_mail():
+    """Background job (no request / session). E-mails each employee their NEW missed dates of this month. Never raises. Returns the number of e-mails tried."""
+    try:
+        if not (MAIL_READY and auto_mail_on(fresh=True)): return 0
+        today = today_local()
+        if not _auto_claim_run(today): return 0
+        end = today - dt.timedelta(days=1); start = mail_month_start()
+        try: access = _fetch_rows("Productivity Access")
+        except Exception: access = []
+        subs, leaves = load_subs(), _fetch_rows("Leave")
+        _l, notified = missed_mail_history(fresh=True)
+        items = []
+        for e in _fetch_rows("Employees"):
+            eid = str(e.get("Employee ID", "")); k = _key(eid)
+            mail = employee_office_email(e)
+            if not eid or not EMAIL_RE.match(mail) or not productivity_access(eid, access): continue
+            ds = missing_dates(eid, [x for x in subs if _key(x["emp_id"]) == k], [l for l in leaves if _key(l["Employee ID"]) == k], start, end, fmt="%Y-%m-%d")
+            new = sorted(d for d in ds if d not in notified.get(k, set()))
+            if not new: continue
+            emp = dict(eid=eid, name=str(e.get("Name", "")), email=mail)
+            items.append((emp, missed_message(emp, new), ", ".join(new), len(new)))
+        for i in range(0, len(items), 25):
+            send_logged(items[i:i + 25], "Auto", "System")      # logged in the Missed Email Log; failed ones are retried next day
+        print(f"Automatic missed-entry e-mail: {len(items)} employee(s).")
+        return len(items)
+    except Exception as ex:
+        print("Automatic missed-entry e-mail error:", ex); return 0
+
+_auto_done_day = [None]
+def _auto_mail_loop():
+    time.sleep(60)
+    while True:
+        try:
+            now = now_local()
+            if _auto_done_day[0] != now.date() and now.time() >= _auto_time() and auto_mail_on():
+                run_auto_missed_mail(); _auto_done_day[0] = now.date()
+        except Exception as ex:
+            print("auto mail loop error:", ex)
+        time.sleep(60)
+
+threading.Thread(target=_auto_mail_loop, daemon=True).start()
+
+@app.route("/admin/email-controls/auto", methods=["POST"])
+@need("admin")
+def admin_email_controls_auto():
+    _admin_only_mail()                                   # Admin session only - employees get 403
+    on = request.form.get("auto") == "on"
+    _set_setting(AUTO_MAIL_KEY, "Yes" if on else "No")
+    flash("Automatic Email ENABLED - employees with missed entries will be e-mailed every day." if on else "Automatic Email DISABLED.")
+    return redirect("/admin/email-controls")
+
 EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
-<p class="mut">Manual reminders for missed Productivity entries (Admin only - there is no automatic sending). Mails go to each employee's Office Email ID using one 3D-style template (missed date(s) + Login button). They are sent by this application running on Render. Only Admin can open this page.</p></div></div>
+<p class="mut">Reminders for missed Productivity entries - manual or automatic (Admin only). Mails go to each employee's Office Email ID using one 3D-style template (missed date(s) + Login button). They are sent by this application running on Render. Only Admin can open this page.</p></div></div>
 {% if not mail_ok %}<div class="warn"><b>&#9888; E-mail service is not set up on the server.</b> Add <code>BREVO_API_KEY</code> (recommended on Render - it sends over HTTPS) or <code>SMTP_HOST</code> in the Render Environment settings and redeploy. Nothing can be sent until then.</div>{% endif %}
 {% if not login_link %}<div class="warn">No Employee Login link is available: set <code>APP_URL</code> (e.g. https://your-app.onrender.com) in the Render Environment settings.</div>{% endif %}
 <div class="kpis"><div class="kpi"><span>Sent</span><b>{{counts.Sent}}</b></div><div class="kpi"><span>Failed</span><b>{{counts.Failed}}</b></div><div class="kpi"><span>Pending</span><b>{{counts.Pending}}</b></div></div>
+
+<div class="card"><h2>Automatic Email</h2>
+<form method="post" action="/admin/email-controls/auto" class="grid" style="align-items:end">
+<label style="display:inline-flex;gap:8px;align-items:center"><input type="checkbox" name="auto" value="on" {{'checked' if auto_on else ''}}> Send missed-entry e-mails automatically</label>
+<button class="primary sm">Save</button></form>
+<p class="mut">Status: <b style="color:{{'#15803d' if auto_on else '#991b1b'}}">{{'ENABLED' if auto_on else 'DISABLED'}}</b>. When enabled, every day at <b>{{auto_time}}</b> each employee who has missed a Productivity Entry this month receives an e-mail with their name, the missed date(s) and the Productivity Tracker login link. A date is never e-mailed twice. Last automatic run: <b>{{auto_last or 'never'}}</b>. Only Admin can change this.</p></div>
 
 <div class="card"><h2>1. Send a reminder manually</h2>
 <form method="post" action="/admin/email-controls/send" id="ec-form" onsubmit="return ecCheck()">
@@ -6283,7 +6370,9 @@ def admin_email_controls():
     transport = "Brevo HTTPS API" if BREVO_API_KEY else (f"SMTP ({SMTP_HOST})" if SMTP_HOST else "NOT CONFIGURED")
     return page(EMAIL_CONTROLS, title="Email Controls", mail_ok=MAIL_READY, login_link=employee_login_link(), counts=counts, emps=emps, missed_map=missed_map, month_label=today.strftime("%B %Y"), sender_name=_setting(MAIL_SENDER_NAME_KEY),
                 sender_email=_setting(MAIL_SENDER_EMAIL_KEY), env_from=MAIL_FROM, cur_sender=cur, transport=transport,
-                history=hist[:100], total=len(hist), status=status, q=request.args.get("q", ""))
+                history=hist[:100], total=len(hist), status=status, q=request.args.get("q", ""),
+                auto_on=auto_mail_on(fresh=True), auto_time=_auto_time().strftime("%I:%M %p"),
+                auto_last=max([str(r.get("Date sent", "")) for r in rows(MISSED_LOG) if str(r.get("Employee ID", "")) == "__RUN__" and str(r.get("Mode", "")) == "Auto"] or [""]))
 
 @app.route("/admin/email-controls/sender", methods=["POST"])
 @need("admin")

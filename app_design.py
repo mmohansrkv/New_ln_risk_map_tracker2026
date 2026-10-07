@@ -59,6 +59,8 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update124: 3D profile avatar (male / female from Gender) is back at the top of the Employee page, with a Logout button at the top of every Employee page (sidebar Logout unchanged).
+    Automatic Email Enable/Disable + Admin-set send time (Update123) confirmed: Admin-only; Disabled = no automatic mail; time = the Admin's saved time.
   * Update123: (1) Admin > Email Controls > Automatic Email: Admin-selectable SEND TIME (saved in the Settings sheet, used by the daily background job; AUTO_MAIL_TIME env is only the default).
     (2) 3D profile image REMOVED from the Employee page (hero picture and sidebar picture); nothing else on the Employee page changed.
     (3) Footer "@2026_Mobius365 | LN_Map_AI" on ALL pages (Admin, Employee, login, welcome) - small, subtle, centred at the bottom, responsive.
@@ -1243,6 +1245,11 @@ main{flex:1;display:flex;flex-direction:column;padding:24px 28px;min-width:0;ani
 /* Update113: subtle page-bottom credit (Admin -> Employees page) */
 .pg-ftr{flex:none;margin:26px auto 0;padding:8px 12px;text-align:center;font-size:11px;font-weight:400;letter-spacing:.2px;color:var(--mut);opacity:.75;background:none;border:0}
 .center{max-width:420px;margin:12vh auto;padding:0 16px}
+/* Update124: Logout at the top of every Employee page */
+.top-out{display:flex;justify-content:flex-end;margin:-6px 0 12px}
+.top-out a{display:inline-block;padding:6px 16px;border-radius:999px;font-size:13px;font-weight:600;text-decoration:none;color:#fff;background:linear-gradient(135deg,#4f46e5,#7c5cf5);box-shadow:0 4px 12px -4px #4f46e599;transition:transform .15s ease,background .2s ease}
+.top-out a:hover{background:#e5484d;transform:translateY(-1px)}
+@media print{.top-out{display:none}}
 /* Update123: global footer - same text and bottom-centre position on every page */
 .site-foot{flex:none;margin:auto auto 0;padding:14px 12px calc(10px + env(safe-area-inset-bottom,0px));width:100%;text-align:center;font:400 11px/1.4 Poppins,system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:.3px;color:var(--mut);opacity:.8;overflow-wrap:anywhere;pointer-events:none;user-select:none}
 .lg{padding-bottom:44px}
@@ -1809,7 +1816,7 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 <div class="prof"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
-<main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></main></div>
+<main>{% if session.role=='employee' %}<div class="top-out"><a href="/logout">Logout</a></div>{% endif %}{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></main></div>
 {% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}<div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></div>{% endif %}
 {% if session.role and not bare %}<script>
 (function(){var g=document.getElementById('cal_g');if(!g)return;var d=document.getElementById('cal');
@@ -2108,8 +2115,15 @@ def page(body, title="Productivity Tracker", **ctx):
     if session.get("role") == "admin":
         side_avatar = ADMIN_AVATAR
     elif session.get("role") == "employee":
-        side_avatar = ""                       # Update123: the 3D profile image is no longer shown anywhere on the Employee page
-    ctx["hero_avatar"] = ""
+        side_avatar = ""                       # sidebar stays picture-free (matches the reference); the 3D avatar is at the top of the page
+    hero_avatar = ""
+    if session.get("role") == "employee":      # Update124: 3D avatar (male / female from the employee's Gender) at the top of the Employee page
+        try:
+            g = gender_of(my_emp_row())
+        except Exception:                      # never break a page just because the avatar could not load
+            g = ""
+        hero_avatar = '<div class="av-hero">' + render_fast(AVATAR3D, gender=g, initials=initials_of(session.get("name", ""))).split("<script>")[0] + '</div>'
+    ctx["hero_avatar"] = hero_avatar
     return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
                                   side_avatar=side_avatar, bare=bool(ctx.get("bare")))
 

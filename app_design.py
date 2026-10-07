@@ -59,13 +59,14 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
-  * Update125: Employee page - the shared picture (employee_corner.png, embedded) is shown at the BOTTOM-LEFT of every Employee page (above the footer);
+  * Update126: the shared picture (employee_corner.png, embedded) now sits ABOVE the employee name in the sidebar profile block (same layout for every employee); the bottom-left copy is removed.
+  * Update125: Employee page - the shared picture was shown at the bottom-left (moved in Update126);
     the 3D profile avatar at the top of the page and the Logout button at the top-right are REMOVED. Sidebar Logout and everything else unchanged.
   * Update124: 3D profile avatar (male / female from Gender) is back at the top of the Employee page, with a Logout button at the top of every Employee page (sidebar Logout unchanged).
     Automatic Email Enable/Disable + Admin-set send time (Update123) confirmed: Admin-only; Disabled = no automatic mail; time = the Admin's saved time.
   * Update123: (1) Admin > Email Controls > Automatic Email: Admin-selectable SEND TIME (saved in the Settings sheet, used by the daily background job; AUTO_MAIL_TIME env is only the default).
     (2) 3D profile image REMOVED from the Employee page (hero picture and sidebar picture); nothing else on the Employee page changed.
-    (3) Footer "@2026_Mobius365_LN_Map_AI" on ALL pages (Admin, Employee, login, welcome) - small, subtle, centred at the bottom, responsive.
+    (3) Footer "@2026_Mobius365 | LN_Map_AI" on ALL pages (Admin, Employee, login, welcome) - small, subtle, centred at the bottom, responsive.
   * Update122: Missed Entries - AUTOMATIC e-mail (Admin only). Admin > Email Controls > "Automatic Email" switch (Enable / Disable, saved in the Settings sheet,
     default OFF). When ON, a background job runs once a day (AUTO_MAIL_TIME, default 09:30, app timezone) and e-mails every employee who has missed
     Productivity Entries this month (only dates not e-mailed before): employee name, missed date(s) and the Productivity Tracker login link.
@@ -1249,11 +1250,11 @@ main{flex:1;display:flex;flex-direction:column;padding:24px 28px;min-width:0;ani
 /* Update113: subtle page-bottom credit (Admin -> Employees page) */
 .pg-ftr{flex:none;margin:26px auto 0;padding:8px 12px;text-align:center;font-size:11px;font-weight:400;letter-spacing:.2px;color:var(--mut);opacity:.75;background:none;border:0}
 .center{max-width:420px;margin:12vh auto;padding:0 16px}
-/* Update125: picture at the bottom-left of every Employee page */
-.emp-corner{flex:none;align-self:flex-start;margin:22px 0 0;line-height:0}
-.emp-corner img{display:block;width:110px;height:auto;max-width:30vw;user-select:none;-webkit-user-drag:none}
-@media(max-width:800px){.emp-corner img{width:84px}}
-@media print{.emp-corner{display:none}}
+/* Update126: profile picture above the employee name (sidebar), same for every employee */
+.prof-pic{display:block;width:96px;height:auto;margin:0 auto;user-select:none;-webkit-user-drag:none;filter:drop-shadow(0 8px 12px #0006)}
+.prof-emp .prof-row{flex-direction:column;align-items:center;text-align:center;gap:10px}
+.prof-emp .prof-info{text-align:center}
+@media(max-width:800px){.prof-emp .prof-row{flex-direction:row;text-align:left}.prof-pic{width:44px;margin:0}}
 /* Update123: global footer - same text and bottom-centre position on every page */
 .site-foot{flex:none;margin:auto auto 0;padding:14px 12px calc(10px + env(safe-area-inset-bottom,0px));width:100%;text-align:center;font:400 11px/1.4 Poppins,system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:.3px;color:var(--mut);opacity:.8;overflow-wrap:anywhere;pointer-events:none;user-select:none}
 .lg{padding-bottom:44px}
@@ -1809,10 +1810,10 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
 <details class="cal" id="cal"><summary>Calendar</summary><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
-<div class="prof"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
+<div class="prof{{' prof-emp' if session.role=='employee' else ''}}"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
-<main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div>{% if session.role=='employee' %}<div class="emp-corner"><img src="/employee_corner.png" alt="Employee" width="110" height="141" decoding="async"></div>{% endif %}<div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></main></div>
+<main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></main></div>
 {% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}<div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></div>{% endif %}
 {% if session.role and not bare %}<script>
 (function(){var g=document.getElementById('cal_g');if(!g)return;var d=document.getElementById('cal');
@@ -2111,7 +2112,7 @@ def page(body, title="Productivity Tracker", **ctx):
     if session.get("role") == "admin":
         side_avatar = ADMIN_AVATAR
     elif session.get("role") == "employee":
-        side_avatar = ""                       # sidebar stays picture-free (matches the reference); the 3D avatar is at the top of the page
+        side_avatar = '<img class="prof-pic" src="/employee_corner.png" alt="Profile picture" width="96" height="123" decoding="async">'   # Update126: picture above the name
     return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
                                   side_avatar=side_avatar, bare=bool(ctx.get("bare")))
 

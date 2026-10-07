@@ -59,6 +59,7 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update112: "© 2026 LN_MAP_AI" on the Admin welcome page made reliably visible (fixed at the bottom-centre, slightly clearer).
   * Update102: Admin -> Audit Log (By Process): after choosing a Process and a Month, the new "Productivity" button opens the
     Productivity report for exactly that Process + Month, with "Download Excel" and "Print" buttons. The Excel file (and the printout)
     contain ONLY that Process + Month. The per-employee Productivity page (opened from a process) gets the same two buttons.
@@ -3183,7 +3184,7 @@ WELCOME = """<style>
 .wl-bar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#6d70f5,#f58a8a);transform-origin:left;transform:scaleX(0);animation:wlFill 4s linear forwards}
 @keyframes wlFill{to{transform:scaleX(1)}}
 .wl-st{margin-top:10px;font:600 10px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;color:#8a90ad}
-.wl-ftr{position:absolute;left:0;right:0;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:6;text-align:center;font-size:10.5px;font-weight:400;letter-spacing:.2px;color:#ffffff80;pointer-events:none}
+.wl-ftr{position:fixed;left:0;right:0;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:10000;text-align:center;font-size:11.5px;font-weight:400;letter-spacing:.3px;color:#ffffffc7;text-shadow:0 1px 2px #0008;pointer-events:none}
 </style>
 <div class="wl {{session.role}}" id="wl">
 """ + WL_SCENE.replace('{{role}}', "{{session.role}}").replace("role=='admin'", "session.role=='admin'") + """

@@ -59,6 +59,12 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update115: Automatic reminder e-mails REMOVED (daily 1:35 PM REMINDER_TIME scheduler + scheduled missed-entries e-mail + their Email Controls schedule). Reminder e-mails are manual and Admin-only
+    (menu, buttons and every send route; employees get 403 / are redirected). All other e-mails (leave / permission approval etc.) are unchanged.
+  * Update114: Welcome Page (Admin + Employee) has NO AI voice and NO audio/music of any kind - animation only, then the dashboard opens after 2.2 s.
+    Faster Admin / Employee login: no dead audio code on the login pages, no per-keystroke animation, animations pause while signing in, double-click
+    protection on Log in, Employee list pre-loaded while the login page is open, Admin dashboard data pre-loaded after login, and page templates are
+    compiled once and reused (instead of on every request). Login / password / lock / session logic is unchanged.
   * Update113: Admin -> Employee Info -> Employees (all employees page): subtle centred footer text "@2026_Mobius365_LN_MAP_Ai" at the bottom of the page.
   * Update112: "© 2026 LN_MAP_AI" on the Admin welcome page made reliably visible (fixed at the bottom-centre, slightly clearer).
   * Update102: Admin -> Audit Log (By Process): after choosing a Process and a Month, the new "Productivity" button opens the
@@ -565,6 +571,15 @@ def rows(name):
     return [dict(r) for r in _fetch_rows(name)]
 
 EMP_PAGE_SHEETS = ("Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays", "Mahizhchi Access")
+
+def _prewarm_employees():
+    """Update114: while the Employee login page is open, refresh the Employees list in the background (only if it is not fresh already),
+    so the password check after 'Log in' is served from memory instead of waiting for Google Sheets."""
+    try:
+        with _rows_cache_lock: c = _rows_cache.get("Employees")
+        if c is None or time.monotonic() - c[0] > _ROWS_CACHE_TTL: _refresh_bg("Employees")
+    except Exception:
+        pass
 
 def warm_employee_cache():
     """Read every sheet the Employee dashboard needs, all at once."""
@@ -1949,6 +1964,16 @@ NAVS = {
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
 
+from functools import lru_cache
+@lru_cache(maxsize=128)
+def _compiled(src):
+    return app.jinja_env.from_string(src)          # Update114: compile each page template once, not on every request
+
+def render_fast(src, **context):
+    """Same output as render_template_string(), but the compiled template is reused (big layouts were being re-compiled on every page view)."""
+    app.update_template_context(context)
+    return _compiled(src).render(context)
+
 def page(body, title="Productivity Tracker", **ctx):
     ctx["title"] = title
     p = request.path
@@ -1988,9 +2013,9 @@ def page(body, title="Productivity Tracker", **ctx):
             g = gender_of(my_emp_row())
         except Exception:                      # never break a page just because the avatar could not load
             g = ""
-        side_avatar = render_template_string(AVATAR3D, gender=g, initials=initials_of(session.get("name", "")))
-    return render_template_string(BASE, body=render_template_string(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar, music_engine=BGM_ENGINE, bare=bool(ctx.get("bare")),
+        side_avatar = render_fast(AVATAR3D, gender=g, initials=initials_of(session.get("name", "")))
+    return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
+                                  side_avatar=side_avatar, bare=bool(ctx.get("bare")),
                                   ftr=ctx.get("ftr", ""))
 
 
@@ -2016,20 +2041,6 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
 <button>Log in</button></form></div></div>{% if role!='admin' %}<img class="orb" src="/photo/{{role}}" alt="">{% endif %}</div>
 <script>
 (function(){
-  function animate(input, masked){
-    var field = input.closest('.field');
-    input.classList.remove('key-pulse');
-    void input.offsetWidth;          // restart the pulse animation on every keystroke
-    input.classList.add('key-pulse');
-    var ch = (input.value || '').slice(-1);
-    if (!ch) return;
-    var span = document.createElement('span');
-    span.className = 'fly-letter';
-    span.textContent = masked ? '\\u2022' : ch;
-    field.appendChild(span);
-    span.addEventListener('animationend', function(){ span.remove(); });
-    setTimeout(function(){ span.remove(); }, 900);
-  }
   var u = document.getElementById('login_u'), p = document.getElementById('login_p');
   var w = document.querySelector('.win'), lg = document.querySelector('.lg');
   if (w && lg && window.matchMedia('(hover:hover) and (pointer:fine)').matches &&
@@ -2045,8 +2056,18 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
     }, {passive: true});
     lg.addEventListener('mouseleave', function(){ w.style.setProperty('--rx', '0deg'); w.style.setProperty('--ry', '0deg'); });
   }
-  if (u) u.addEventListener('input', function(){ animate(u, false); });
-  if (p) p.addEventListener('input', function(){ animate(p, p.type === 'password'); });
+  var fm = document.querySelector('form'), sc = document.querySelector('.scene');
+  if (fm) fm.addEventListener('submit', function(){
+    if (sc) sc.classList.add('dp-paused');                       /* stop the decorative animation while the browser signs in */
+    var b = fm.querySelector('button:not([type=button])');
+    if (b) setTimeout(function(){ b.disabled = true }, 0);       /* one click = one sign-in */
+  });
+  window.addEventListener('pageshow', function(e){               /* back button: make the form usable again */
+    if (!e.persisted || !fm) return;
+    var b = fm.querySelector('button:not([type=button])'); if (b) b.disabled = false;
+    if (sc) sc.classList.remove('dp-paused');
+  });
+  document.addEventListener('visibilitychange', function(){ if (sc) sc.classList.toggle('dp-paused', document.hidden) });
   var tg = document.getElementById('pw_toggle');
   if (tg && p) {
     tg.addEventListener('mousedown', function(e){ e.preventDefault(); });   // keep focus/caret in the password box
@@ -2062,103 +2083,7 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
   }
 })();
 </script>
-
-<script>
-(function(){
-/* Update67: Tamil-style background music, synthesised live with Web Audio (no audio file, nothing to download).
-   Employee = raga Mohanam, Admin = raga Hamsadhwani; tanpura drone + veena/flute-like lead with gamaka + thavil-style rhythm (Adi tala).
-   Starts on the first click/key/touch (browser rule), can be muted, never touches the login form, pauses when the tab is hidden. */
-try{
-var ADMIN={{ 'true' if role=='admin' else 'false' }};
-var AC=window.AudioContext||window.webkitAudioContext;
-var btn=document.getElementById('lgm'),bi=document.getElementById('lgm_i'),bt=document.getElementById('lgm_t');
-if(!AC||!btn)return;
-var ctx=null,master=null,verb=null,timer=null,muted=false,armed=false,next=0,step=0,noiseBuf=null,lastF=0;
-function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
-function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
-var SA=ADMIN?174.61:196,BPM=ADMIN?88:104,SPB=60/BPM/2;
-var RAT=ADMIN?[1,9/8,5/4,3/2,15/8]:[1,9/8,5/4,3/2,5/3];
-function fr(i){var o=Math.floor(i/5),d=((i%5)+5)%5;return SA*2*RAT[d]*Math.pow(2,o)}
-var PH=[[[2,2],[3,2],[4,2],[3,1],[2,1],[1,2],[0,2],[1,2],[2,2]],
-        [[5,3],[4,1],[3,2],[4,2],[3,2],[2,2],[1,2],[0,2]],
-        [[0,2],[1,1],[2,1],[3,2],[2,2],[3,1],[4,1],[5,2],[4,2],[3,2]],
-        [[3,2],[2,1],[1,1],[0,2],[-1,2],[0,2],[1,2],[2,2],[0,2]]];
-var ORDER=[0,1,0,2,3,1,2,0];
-var SEQ=[];  /* flat step list: [stepIndex, noteIdx, lengthSteps] */
-(function(){var pos=0;ORDER.forEach(function(p){PH[p].forEach(function(n){SEQ.push([pos,n[0],n[1]]);pos+=n[1]})});SEQ.total=pos})();
-var byStep={};SEQ.forEach(function(n){byStep[n[0]]=n});
-function icon(){bi.innerHTML=muted?'&#128263;':'&#128266;';bt.textContent=muted?'Music off':'Music on';
- btn.setAttribute('aria-label',muted?'Turn music on':'Turn music off')}
-function env(g,t,peak,att,dec,sus,dur,rel){g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(peak,t+att);
- g.gain.exponentialRampToValueAtTime(Math.max(peak*sus,0.0002),t+att+dec);g.gain.setValueAtTime(Math.max(peak*sus,0.0002),t+dur);
- g.gain.exponentialRampToValueAtTime(0.0001,t+dur+rel)}
-function lead(t,f,dur){
- var g=ctx.createGain(),lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=2600;
- var o1=ctx.createOscillator(),o2=ctx.createOscillator(),g2=ctx.createGain();
- o1.type='triangle';o2.type='sine';g2.gain.value=0.3;
- var from=lastF>0?lastF:f;   /* gamaka: glide in from the previous swara */
- o1.frequency.setValueAtTime(from,t);o1.frequency.linearRampToValueAtTime(f,t+0.07);
- o2.frequency.setValueAtTime(from*2,t);o2.frequency.linearRampToValueAtTime(f*2,t+0.07);
- lastF=f;
- o1.connect(lp);o2.connect(g2);g2.connect(lp);lp.connect(g);g.connect(master);g.connect(verb);
- env(g,t,0.16,0.02,0.35,0.55,dur,0.16);
- var stop=t+dur+0.3;
- if(dur>SPB*1.8){var l=ctx.createOscillator(),lg=ctx.createGain();l.frequency.value=5.6;lg.gain.value=9;
-  l.connect(lg);lg.connect(o1.detune);lg.connect(o2.detune);l.start(t+dur*0.3);l.stop(stop)}
- o1.start(t);o2.start(t);o1.stop(stop);o2.stop(stop)}
-function tanpura(t,f){
- [0,3].forEach(function(c){var o=ctx.createOscillator(),lp=ctx.createBiquadFilter(),g=ctx.createGain();
-  o.type='sawtooth';o.frequency.value=f;o.detune.value=c;lp.type='lowpass';lp.frequency.value=950;
-  o.connect(lp);lp.connect(g);g.connect(master);env(g,t,0.05,0.006,1.6,0.05,0.2,0.4);o.start(t);o.stop(t+2.4)})}
-function thump(t,acc){var o=ctx.createOscillator(),g=ctx.createGain();o.type='sine';
- o.frequency.setValueAtTime(150,t);o.frequency.exponentialRampToValueAtTime(70,t+0.2);
- o.connect(g);g.connect(master);env(g,t,acc?0.42:0.3,0.004,0.24,0.02,0.02,0.05);o.start(t);o.stop(t+0.4)}
-function tick(t,acc){var s=ctx.createBufferSource(),bp=ctx.createBiquadFilter(),g=ctx.createGain();
- s.buffer=noiseBuf;bp.type='bandpass';bp.frequency.value=acc?3400:2400;bp.Q.value=1.3;
- s.connect(bp);bp.connect(g);g.connect(master);env(g,t,acc?0.2:0.11,0.002,0.07,0.02,0.01,0.03);s.start(t);s.stop(t+0.15)}
-var LOW=[0,8,12],HI=[2,4,6,10,14,15],ACC=[4,12];
-function play(n,t){
- var k=n%16;
- if(n%8===0)tanpura(t,SA*0.75);if(n%8===2)tanpura(t,SA);if(n%8===4)tanpura(t,SA);if(n%8===6)tanpura(t,SA*0.5);
- if(LOW.indexOf(k)>=0)thump(t,k===0);
- if(HI.indexOf(k)>=0)tick(t,ACC.indexOf(k)>=0);
- var m=byStep[n%SEQ.total];if(m&&m[1]!==null)lead(t,fr(m[1]),Math.max(m[2]*SPB*0.95,0.15))}
-function sched(){if(!ctx||ctx.state!=='running'||muted)return;
- while(next<ctx.currentTime+0.6){play(step,next);next+=SPB;step++}}
-function build(){
- ctx=new AC();master=ctx.createGain();master.gain.value=0;
- var comp=ctx.createDynamicsCompressor();master.connect(comp);comp.connect(ctx.destination);
- var d=ctx.createDelay(1);d.delayTime.value=0.27;var fb=ctx.createGain();fb.gain.value=0.28;d.connect(fb);fb.connect(d);
- var vg=ctx.createGain();vg.gain.value=0.35;verb=ctx.createGain();verb.connect(d);d.connect(vg);vg.connect(master);
- noiseBuf=ctx.createBuffer(1,Math.floor(ctx.sampleRate*0.2),ctx.sampleRate);
- var ch=noiseBuf.getChannelData(0);for(var i=0;i<ch.length;i++)ch[i]=Math.random()*2-1}
-function fade(to,sec){if(!master)return;var t=ctx.currentTime;master.gain.cancelScheduledValues(t);master.gain.setValueAtTime(master.gain.value,t);master.gain.linearRampToValueAtTime(to,t+sec)}
-function go(){
- if(muted)return;
- if(!ctx)build();
- var r=ctx.resume?ctx.resume():null;
- var run=function(){if(ctx.state!=='running')return;if(!timer){next=ctx.currentTime+0.15;timer=setInterval(sched,150)}fade(0.8,2.5)};
- if(r&&r.then)r.then(run,function(){});else run()}
-function stopAll(){if(timer){clearInterval(timer);timer=null}if(ctx&&master)fade(0,0.25)}
-function arm(){if(armed)return;armed=true;   /* autoplay is blocked until the first click / key / touch */
- var h=function(){['pointerdown','keydown','touchstart'].forEach(function(t){document.removeEventListener(t,h,true)});armed=false;go()};
- ['pointerdown','keydown','touchstart'].forEach(function(t){document.addEventListener(t,h,true)})}
-function init(){
- muted=get('loginMusicMuted')==='1';btn.hidden=false;icon();
- btn.addEventListener('click',function(){muted=!muted;put('loginMusicMuted',muted?'1':'0');icon();
-  if(muted)stopAll();else{armed=false;go()}});
- if(!muted){try{build();ctx.resume().then(function(){go()},function(){arm()});arm()}catch(e){arm()}}}
-document.addEventListener('visibilitychange',function(){   /* hidden tab: no audio work, no animation work */
- var sc=document.querySelector('.scene');if(sc)sc.classList.toggle('dp-paused',document.hidden);
- if(!ctx)return;if(document.hidden){if(timer){clearInterval(timer);timer=null}ctx.suspend&&ctx.suspend()}
- else if(!muted){ctx.resume&&ctx.resume().then(function(){if(!timer){next=ctx.currentTime+0.15;timer=setInterval(sched,150)}})}});
-window.addEventListener('pagehide',function(){stopAll();if(ctx&&ctx.close)ctx.close()});
-var f=document.querySelector('form');if(f)f.addEventListener('submit',function(){stopAll()});   /* quiet the moment they log in */
-function start(){}   /* Update79: no automatic music on the login pages */   /* after the page has loaded - never competes with the login itself */
-if(document.readyState==='complete')start();else window.addEventListener('load',start);
-}catch(e){/* audio unavailable: login and animation carry on normally */}
-})();
-</script>"""
+"""
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}{% if h=='Target count / hour' %} (count in 1 hr, e.g. 1000){% endif %}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
@@ -2351,10 +2276,11 @@ def admin_login():
             track_logout(auto=True, reason="New login")      # closes a previous session in this browser, if any
             session.clear(); session.update(role="admin", name="Admin")
             track_login("ADMIN", "Admin", "-")
+            _bg(prefetch, "Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays")   # Update114: dashboard data loads while the welcome animation plays
             return redirect("/admin/welcome")
         flash("Wrong username or password.")
     return page(LOGIN, title="Admin login", ph="Admin username", role="admin",
-                admin_avatar=render_template_string(AVATAR3D, gender="male", initials="A"))
+                admin_avatar=render_fast(AVATAR3D, gender="male", initials="A"))
 
 @app.route("/admin")
 @need("admin")
@@ -3069,6 +2995,7 @@ def admin_permission_reject(eid, row):
 def employee_login():
     if session.get("role") == "admin":                  # the admin uses the Admin login only
         return _wrong_area("employee")
+    if request.method != "POST": _prewarm_employees()
     if request.method == "POST":
         u = request.form["u"].strip().lower()
         for e in rows("Employees"):
@@ -3109,71 +3036,8 @@ def initials_of(name):
     parts = str(name).replace(".", " ").split()
     return "".join(p[0] for p in parts[:2]).upper() or "?"
 
-BGM_ENGINE = r"""
-/* Update81: NEW original Tamil-style instrumental BGM (replaces the earlier bamboo-flute tune). Raga Hamsadhwani (S R2 G3 P N3), 84 BPM, Adi tala (8 beats).
-   Soft veena-style plucked melody + gentle tanpura drone + light mridangam-style thump. Synthesised live with Web Audio: no audio file, no vocals, nothing to download. */
-var SA=220,BPM=84,SPB=60/BPM/2;
-var RAT=[1,9/8,5/4,3/2,15/8];   /* Hamsadhwani: S R2 G3 P N3 */
-function fr(i){var o=Math.floor(i/5),d=((i%5)+5)%5;return SA*RAT[d]*Math.pow(2,o)}
-/* melody: [swara index (5 per octave, 5 = upper Sa), length in steps, ornament]; null = rest */
-var PH=[[[5,2],[4,1],[3,1],[2,2],[3,2],[4,2],[3,2],[2,2],[1,2],[0,4],[null,2]],
-        [[0,2],[2,2],[3,2],[4,2],[5,3],[4,1],[3,2],[4,2],[3,2],[2,2],[1,2],[2,4],[null,2]],
-        [[7,2],[6,2],[5,2],[4,2],[3,3,1],[4,1],[5,2],[6,2],[5,2],[4,2],[3,2],[2,2],[3,4],[null,2]],
-        [[5,2],[4,2],[3,2],[2,2],[1,2],[2,2],[1,2],[0,6],[null,4]]];
-var ORDER=[0,1,0,2,1,3];
-var SEQ=[],byStep={};
-(function(){var pos=0;ORDER.forEach(function(p){PH[p].forEach(function(n){SEQ.push([pos,n[0],n[1],n[2]||0]);pos+=n[1]})});SEQ.total=pos})();
-SEQ.forEach(function(n){byStep[n[0]]=n});
-function icon(){bi.innerHTML=muted?'&#128263;':'&#128266;';bt.textContent=muted?'Music off':'Music on';btn.setAttribute('aria-label',muted?'Turn music on':'Turn music off')}
-function pluck(t,f,dur,gain){                 /* veena-style string: bright attack, quick natural decay */
- var g=ctx.createGain(),lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.setValueAtTime(4200,t);lp.frequency.exponentialRampToValueAtTime(1200,t+0.5);
- var len=Math.min(Math.max(dur*1.4,0.6),1.8),stop=t+len+0.1;
- [[1,'triangle',1,0],[1,'triangle',0.5,6],[2,'sine',0.28,0],[3,'sine',0.09,0]].forEach(function(p){
-  var o=ctx.createOscillator(),pg=ctx.createGain();o.type=p[1];pg.gain.value=p[2];o.detune.value=p[3];
-  o.frequency.setValueAtTime(f*p[0]*1.012,t);o.frequency.exponentialRampToValueAtTime(f*p[0],t+0.04);   /* tiny gamaka glide into the note */
-  o.connect(pg);pg.connect(lp);o.start(t);o.stop(stop)});
- g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(gain,t+0.006);g.gain.exponentialRampToValueAtTime(0.0001,t+len);
- lp.connect(g);g.connect(master);g.connect(verb)}
-function drone(t,f){                          /* tanpura: soft, long, sitting far behind the melody */
- var g=ctx.createGain(),lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=1600;
- [[1,'sine',1],[2,'triangle',0.35],[3,'sine',0.12]].forEach(function(p){var o=ctx.createOscillator(),pg=ctx.createGain();o.type=p[1];o.frequency.value=f*p[0];pg.gain.value=p[2];o.connect(pg);pg.connect(lp);o.start(t);o.stop(t+3)});
- g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(0.07,t+0.03);g.gain.exponentialRampToValueAtTime(0.0001,t+2.6);lp.connect(g);g.connect(master)}
-function thump(t,f,gain){                     /* mridangam-style bass stroke */
- var o=ctx.createOscillator(),g=ctx.createGain();o.type='sine';o.frequency.setValueAtTime(f*1.6,t);o.frequency.exponentialRampToValueAtTime(f,t+0.09);
- g.gain.setValueAtTime(gain,t);g.gain.exponentialRampToValueAtTime(0.0001,t+0.32);o.connect(g);g.connect(master);o.start(t);o.stop(t+0.35)}
-function tick(t,gain){                        /* light finger tap */
- var n=ctx.createBufferSource(),hp=ctx.createBiquadFilter(),g=ctx.createGain();n.buffer=noiseBuf;hp.type='highpass';hp.frequency.value=3200;
- g.gain.setValueAtTime(gain,t);g.gain.exponentialRampToValueAtTime(0.0001,t+0.05);n.connect(hp);hp.connect(g);g.connect(master);n.start(t);n.stop(t+0.06)}
-var DRONE=[0.75,1,1,0.5];
-function play(n,t){
- var pos=n%SEQ.total;
- if(n%4===0)drone(t,SA*DRONE[(n/4)%4]);   /* Pa - Sa - Sa - low Sa */
- var c=n%8;                                /* Adi tala: 8 counts */
- if(c===0)thump(t,78,0.2);else if(c===4)thump(t,96,0.12);else if(c%2===0)tick(t,0.05);
- var m=byStep[pos];if(!m||m[1]===null)return;
- var f=fr(m[1]),d=m[2]*SPB;
- if(m[3]===1){pluck(t,fr(m[1]+1),0.12,0.16);pluck(t+0.11,f,d,0.22)}else pluck(t,f,d,0.22)}
-function sched(){if(!ctx||ctx.state!=='running'||muted)return;
- while(next<ctx.currentTime+0.6){play(step,next);next+=SPB;step++}}
-function build(){
- ctx=new AC();master=ctx.createGain();master.gain.value=0;
- var comp=ctx.createDynamicsCompressor();master.connect(comp);comp.connect(ctx.destination);
- var d=ctx.createDelay(1);d.delayTime.value=0.27;var fb=ctx.createGain();fb.gain.value=0.28;d.connect(fb);fb.connect(d);
- var vg=ctx.createGain();vg.gain.value=0.35;verb=ctx.createGain();verb.connect(d);d.connect(vg);vg.connect(master);
- noiseBuf=ctx.createBuffer(1,Math.floor(ctx.sampleRate*0.3),ctx.sampleRate);
- var ch=noiseBuf.getChannelData(0);for(var i=0;i<ch.length;i++)ch[i]=Math.random()*2-1}
-function fade(to,sec){if(!master)return;var t=ctx.currentTime;master.gain.cancelScheduledValues(t);master.gain.setValueAtTime(master.gain.value,t);master.gain.linearRampToValueAtTime(to,t+sec)}
-function go(){
- if(muted)return;
- if(!ctx)build();
- var r=ctx.resume?ctx.resume():null;
- var run=function(){if(ctx.state!=='running')return;if(!timer){next=ctx.currentTime+0.15;timer=setInterval(sched,150)}fade(0.85,2)};
- if(r&&r.then)r.then(run,function(){});else run()}
-function stopAll(){if(timer){clearInterval(timer);timer=null}if(ctx&&master)fade(0,0.25)}
-"""
 
 WL_SCENE = re.sub(r"\{% if role=='admin' %\}<div class=\"adp\".*?\{% endif %\}", "", LOGIN[LOGIN.index('<div class="scene '):LOGIN.index('<div class="lcard">')], flags=re.S)   # Update110: the Admin Panel / Productivity Dashboard text belongs to the login page only   # same 3D scene + data-packet flow as the login pages
-WL_ENGINE = LOGIN[LOGIN.index("var SA=ADMIN"):LOGIN.index("function arm()")]      # same Tamil-style engine as the login page
 WELCOME = """<style>
 .wl{position:fixed;inset:0;z-index:9999;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
 .wl.admin{background:radial-gradient(900px 420px at 20% 0%,#3b5bdb55,transparent 60%),linear-gradient(120deg,#0b1230 0%,#182a6b 48%,#4f46e5 100%)}
@@ -3185,7 +3049,7 @@ WELCOME = """<style>
 .wl-card h1{font-family:Georgia,serif;font-size:27px;margin:0 0 4px;color:#5b4fb0;word-break:break-word}
 .wl-card p{margin:0 0 14px;color:#6b7390;font-size:13px}
 .wl-bar{height:6px;border-radius:4px;background:#e9e6fb;overflow:hidden}
-.wl-bar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#6d70f5,#f58a8a);transform-origin:left;transform:scaleX(0);animation:wlFill 4s linear forwards}
+.wl-bar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#6d70f5,#f58a8a);transform-origin:left;transform:scaleX(0);animation:wlFill 2.2s linear forwards}
 @keyframes wlFill{to{transform:scaleX(1)}}
 .wl-st{margin-top:10px;font:600 10px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;color:#8a90ad}
 .wl-ftr{position:fixed;left:0;right:0;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:10000;text-align:center;font-size:11.5px;font-weight:400;letter-spacing:.3px;color:#ffffffc7;text-shadow:0 1px 2px #0008;pointer-events:none}
@@ -3199,71 +3063,12 @@ WELCOME = """<style>
 </div>
 <script>
 (function(){
- var ROLE={{session.role|tojson}}, NAME={{session.name|tojson}};
- var ANIM_MS=4000, PLAY_MS=12000;
+ /* Update114: Welcome Page = animation only. No AI voice, no music, no audio. The dashboard data loads in the background meanwhile. */
  var DEST={{ ('/admin/summary' if session.role=='admin' else '/employee') | tojson }};
- var IS_EMP=(ROLE==='employee');
-
- /* Update79: ADMIN welcome = no voice, no music (animation only). EMPLOYEE welcome = AI voice first; ONLY AFTER the voice
-    has finished does the Tamil BGM start. The BGM never starts before the voice ends. */
- var AC=window.AudioContext||window.webkitAudioContext;
- var ctx=null,master=null,verb=null,timer=null,muted=false,next=0,step=0,noiseBuf=null,lastF=0;
- var btn={setAttribute:function(){}},bi={},bt={};
- function get(k){return null}function put(k,v){}
- """ + BGM_ENGINE + """
- function msg(t){var m=document.getElementById('wl_msg');if(m)m.textContent=t}
- function leave(){
-  try{ if(timer)clearInterval(timer); if(ctx){ master.gain.cancelScheduledValues(ctx.currentTime); master.gain.value=0; ctx.close(); } }catch(e){}
-  try{ if(window.speechSynthesis)window.speechSynthesis.cancel() }catch(e){}
-  window.location.replace(DEST);
- }
-
- if(!IS_EMP){ setTimeout(leave,ANIM_MS); return; }      /* Admin: no automatic audio at all */
-
- var SS=window.speechSynthesis, hadStart=false, bgmBegun=false, guard=null, giveUp=null, ready=false;
- var TEXT='Welcome, '+NAME+'. Wishing you a productive day.';
-
- function unlock(){ try{ if(AC){ if(!ctx)build(); if(ctx.resume)ctx.resume() } }catch(e){} }   /* silent; just lets the BGM start later */
- var uEv=['mousemove','pointermove','pointerdown','keydown','touchstart'];
- function onUser(){ if(!AC||!ready)return; try{go()}catch(e){} if(ctx&&ctx.state==='running'){uEv.forEach(function(t){document.removeEventListener(t,onUser,true)})} }
- uEv.forEach(function(t){document.addEventListener(t,onUser,true)});
-
- function startBgm(){                                   /* called ONLY when the voice has finished */
-  if(bgmBegun)return; bgmBegun=true; ready=true; clearTimeout(guard); clearTimeout(giveUp);
-  if(!AC){ setTimeout(leave,1500); return; }
-  msg('\\u266A Tamil music'); try{go()}catch(e){}
-  setTimeout(function(){ if(!ctx||ctx.state!=='running')msg('\\u266A Move the mouse to play the music') },800);
-  setTimeout(function(){ try{stopAll()}catch(e){} },PLAY_MS-500);
-  setTimeout(leave,PLAY_MS);
- }
- function pickVoice(){ var v=(SS.getVoices&&SS.getVoices())||[],i;
-  for(i=0;i<v.length;i++) if(/^en[-_]IN/i.test(v[i].lang)) return v[i];
-  for(i=0;i<v.length;i++) if(/^en/i.test(v[i].lang)) return v[i];
-  return null }
- function speak(){
-  if(hadStart||bgmBegun)return;
-  try{
-   SS.cancel();
-   var u=new SpeechSynthesisUtterance(TEXT); u.lang='en-IN'; u.rate=0.95; u.pitch=1; u.volume=1;
-   var v=pickVoice(); if(v)u.voice=v;
-   u.onstart=function(){ hadStart=true; clearTimeout(giveUp); msg('AI voice welcome\\u2026'); guard=setTimeout(startBgm,20000) };   /* safety: a voice that never reports its end */
-   u.onend=function(){ if(hadStart)startBgm() };
-   u.onerror=function(){ if(hadStart)startBgm(); else msg('Click anywhere to hear the welcome') };
-   SS.speak(u);
-  }catch(e){ msg('Click anywhere to hear the welcome') }
- }
- if(!SS||typeof SpeechSynthesisUtterance==='undefined'){        /* no voice support in this browser: go straight to the BGM */
-  setTimeout(startBgm,ANIM_MS);
- }else{
-  setTimeout(speak,700);
-  /* browsers may block speech until the page is touched: the first click/key/touch retries it (and unlocks the audio engine) */
-  var retry=function(){ unlock(); if(!hadStart)speak(); if(hadStart)['click','keydown','touchstart'].forEach(function(t){document.removeEventListener(t,retry,true)}) };
-  ['click','keydown','touchstart'].forEach(function(t){document.addEventListener(t,retry,true)});
-  giveUp=setTimeout(function(){ if(!hadStart)leave() },9000);   /* voice never started (blocked): open the dashboard, silently */
- }
+ setTimeout(function(){ window.location.replace(DEST) },2200);
 })();
 </script>
-<noscript><meta http-equiv="refresh" content="16;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
+<noscript><meta http-equiv="refresh" content="3;url={{ '/admin/summary' if session.role=='admin' else '/employee' }}"></noscript>"""
 
 @app.route("/admin/welcome")
 @need("admin")
@@ -5806,17 +5611,13 @@ def employee_mahizhchi_connect_guess():
 
 
 # ---------------------------------------------------------------- Update90: REMINDER MAIL (Daily Productivity Entry not submitted)
-# Every day at REMINDER_TIME (default 13:35, app timezone) each employee who may submit the Daily Productivity Entry and has not
-# submitted it for today receives an e-mail on their registered Office Email ID.
-# Environment variables:  SMTP_HOST (required), SMTP_PORT (587; 465 = SSL), SMTP_USER, SMTP_PASS, MAIL_FROM (default SMTP_USER),
-#                         REMINDER_TIME ("13:35"), REMINDER_GRACE_MIN (30 = still sends if the server starts up to 30 min late),
-#                         REMINDER_ENABLED ("1"), APP_URL (optional link placed in the mail).
+# Update115: the AUTOMATIC reminder e-mails (daily 1:35 PM scheduler and the scheduled missed-entries e-mail) are REMOVED.
+# Reminder e-mails are sent ONLY manually, and ONLY by an Admin (Admin > Email Controls / Missed Entries Log).
+# Environment variables:  SMTP_HOST (required unless BREVO_API_KEY), SMTP_PORT (587; 465 = SSL), SMTP_USER, SMTP_PASS, MAIL_FROM (default SMTP_USER),
+#                         BREVO_API_KEY (optional, HTTPS), APP_URL (optional link placed in the mail).
 import smtplib, ssl
 from email.message import EmailMessage
 from email.utils import formataddr
-REMINDER_ENABLED = os.getenv("REMINDER_ENABLED", "1") == "1"
-REMINDER_TIME = os.getenv("REMINDER_TIME", "13:35")
-REMINDER_GRACE_MIN = int(os.getenv("REMINDER_GRACE_MIN", "30"))
 SMTP_HOST, SMTP_PORT = os.getenv("SMTP_HOST", "").strip(), int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER, SMTP_PASS = os.getenv("SMTP_USER", "").strip(), os.getenv("SMTP_PASS", "")
 MAIL_FROM = os.getenv("MAIL_FROM", "").strip() or SMTP_USER
@@ -5825,7 +5626,6 @@ BREVO_API_KEY = os.getenv("BREVO_API_KEY", "").strip()      # Update94: send e-m
 MAIL_READY = bool(BREVO_API_KEY or SMTP_HOST)      # Update98: the transport; the sender address comes from Admin > Email Controls (or MAIL_FROM)
 print("E-mail mode:", "Brevo HTTPS API" if BREVO_API_KEY else ("SMTP " + SMTP_HOST if SMTP_HOST else "NOT CONFIGURED"))
 _WORKER_ID = uuid.uuid4().hex[:8]
-_reminder_done = set()          # dates this process has already handled
 
 def productivity_access(eid, access_rows):
     """Everyone may submit the Daily Productivity Entry unless the 'Productivity Access' sheet has a row for them with Enabled = No."""
@@ -5837,35 +5637,6 @@ def productivity_access(eid, access_rows):
 
 def employee_office_email(e):
     return str(e.get("Office Email ID") or e.get("Email") or "").strip()      # Office Email ID mirrors the login Email
-
-def reminder_recipients(date):
-    """Employees who have access to the entry, have not submitted it for `date`, and are not off that day (weekly off / holiday / full-day leave)."""
-    if is_off(date): return []
-    emps = _fetch_rows("Employees"); access = _fetch_rows("Productivity Access")
-    done = {_key(r.get("Employee ID", "")) for r in _fetch_rows("Productivity log") if str(r.get("Date", "")).strip() == date}
-    on_leave = {_key(l.get("Employee ID", "")) for l in _fetch_rows("Leave")
-                if str(l.get("Date", "")).strip() == date and leave_status(l) == "Approved" and not leave_is_half(l)}
-    out = []
-    for e in emps:
-        k = _key(e.get("Employee ID", ""))
-        mail = employee_office_email(e)
-        if not k or not mail or "@" not in mail: continue
-        if k in done or k in on_leave or not productivity_access(k, access): continue
-        out.append(dict(eid=str(e["Employee ID"]), name=str(e.get("Name", "")), email=mail))
-    return out
-
-def reminder_message(emp, date):
-    d = dt.date.fromisoformat(date).strftime("%d %b %Y")
-    msg = EmailMessage()
-    msg["Subject"] = f"Reminder: Daily Productivity Entry for {d} not yet submitted"
-    msg["From"] = formataddr(mail_sender()); msg["To"] = emp["email"]
-    link = f"\n\nSubmit it here: {APP_URL}/employee" if APP_URL else ""
-    msg.set_content(f"Hello {emp['name']},\n\nYour Daily Productivity Entry for today ({d}) has not yet been submitted.\n"
-                    f"Please log in and submit it as soon as possible.{link}\n\nThank you,\nProductivity Tracker")
-    h = f'<p>Hello {emp["name"]},</p><p><b>Your Daily Productivity Entry for today ({d}) has not yet been submitted.</b><br>Please log in and submit it as soon as possible.</p>'
-    if APP_URL: h += f'<p><a href="{APP_URL}/employee">Open the Daily Productivity Entry</a></p>'
-    msg.add_alternative(h + "<p>Thank you,<br>Productivity Tracker</p>", subtype="html")
-    return msg
 
 def _brevo_send(messages):
     """Send via Brevo's HTTPS API (no SMTP port needed). Returns {email: 'Sent' | 'Failed: reason'}."""
@@ -5921,48 +5692,8 @@ def _smtp_send(messages):
         except Exception: pass
     return res
 
-def run_daily_reminder(date=None):
-    """Send today's reminders once. Safe with several workers/servers: the first worker to log the '__RUN__' row for the date sends the batch."""
-    date = date or str(today_local())
-    if not MAIL_READY:
-        print("Reminder mail: SMTP_HOST / MAIL_FROM not set - no reminder e-mails sent."); return 0
-    ws = ws_of("Email Log")
-    ws.append_row([date, "__RUN__", _WORKER_ID, "", now_local().strftime("%Y-%m-%d %H:%M:%S"), "Claimed"], value_input_option="RAW")
-    invalidate_cache("Email Log")
-    runs = [r for r in _fetch_rows("Email Log") if str(r.get("Date", "")).strip() == date and str(r.get("Employee ID", "")) == "__RUN__"]
-    if not runs or str(runs[0].get("Employee name", "")) != _WORKER_ID: return 0          # another worker already owns today's batch
-    already = {_key(r.get("Employee ID", "")) for r in _fetch_rows("Email Log")
-               if str(r.get("Date", "")).strip() == date and str(r.get("Status", "")) == "Sent"}
-    todo = [e for e in reminder_recipients(date) if _key(e["eid"]) not in already]
-    if not todo: return 0
-    res = _smtp_send([reminder_message(e, date) for e in todo])
-    now = now_local().strftime("%Y-%m-%d %H:%M:%S")
-    ws.append_rows([[date, e["eid"], e["name"], e["email"], now, res.get(e["email"], "Failed")] for e in todo], value_input_option="RAW")
-    invalidate_cache("Email Log")
-    return sum(1 for v in res.values() if v == "Sent")
-
-def _reminder_loop():
-    try: hh, mm = (int(x) for x in REMINDER_TIME.split(":")[:2])
-    except Exception: hh, mm = 13, 35
-    while True:
-        time.sleep(20)
-        try:
-            now = now_local(); today = str(now.date())
-            due = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-            if today in _reminder_done or not (due <= now <= due + dt.timedelta(minutes=REMINDER_GRACE_MIN)): continue
-            _reminder_done.add(today)
-            n = run_daily_reminder(today)
-            print(f"Reminder mail {today}: {n} sent")
-        except Exception as ex:
-            print("Reminder mail error:", ex)
-if REMINDER_ENABLED and os.getenv("WERKZEUG_RUN_MAIN", "true") == "true":       # not in the debug reloader's parent process
-    threading.Thread(target=_reminder_loop, daemon=True).start()
-
-
 # ---------------------------------------------------------------- Update92: MISSED ENTRIES E-MAIL (manual + automatic)
-MISSED_AUTO_KEY, MISSED_TIME_KEY = "Missed Email Auto", "Missed Email Time"
 MISSED_LOG = "Missed Email Log"
-_missed_auto_done = set()
 
 def _setting(key, fresh=False):
     r = next((r for r in (_fetch_rows("Settings") if fresh else rows("Settings")) if str(r.get("Key", "")).strip() == key), None)
@@ -5973,46 +5704,6 @@ def _set_setting(key, val):
     if key in keys: ws.update(range_name=f"B{keys.index(key) + 1}", values=[[val]], value_input_option="RAW")
     else: ws.append_row([key, val], value_input_option="RAW")
     invalidate_cache("Settings")
-
-def missed_auto_settings(fresh=False):
-    on = _setting(MISSED_AUTO_KEY, fresh).lower() == "yes"
-    t = _setting(MISSED_TIME_KEY, fresh)
-    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t or ""): t = "10:00"          # default 10:00 AM until Admin chooses a time
-    return on, t
-
-MISSED_DATE_KEY, MISSED_REPEAT_KEY = "Missed Email Date", "Missed Email Repeat"
-
-def missed_schedule(fresh=False):
-    """Update99: Admin's schedule -> dict(on, time 'HH:MM', date 'YYYY-MM-DD' or '', repeat 'Once' | 'Daily'). No date saved (older setups) = every day."""
-    src = _fetch_rows("Settings") if fresh else rows("Settings")
-    g = lambda k: next((str(r.get("Value", "")).strip() for r in src if str(r.get("Key", "")).strip() == k), "")
-    t = g(MISSED_TIME_KEY)
-    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t or ""): t = "10:00"
-    d = g(MISSED_DATE_KEY)
-    try: dt.date.fromisoformat(d)
-    except ValueError: d = ""
-    return dict(on=g(MISSED_AUTO_KEY).lower() == "yes", time=t, date=d, repeat="Once" if g(MISSED_REPEAT_KEY).lower() == "once" else "Daily")
-
-def missed_run_due(sch, now):
-    """True while `now` is inside the send window (REMINDER_GRACE_MIN after the scheduled time) on a day the schedule allows."""
-    if not sch["on"]: return False
-    if sch["date"]:
-        sd = dt.date.fromisoformat(sch["date"])
-        if now.date() < sd or (sch["repeat"] == "Once" and now.date() != sd): return False
-    due = now.replace(hour=int(sch["time"][:2]), minute=int(sch["time"][3:]), second=0, microsecond=0)
-    return due <= now <= due + dt.timedelta(minutes=REMINDER_GRACE_MIN)
-
-def missed_next_run(sch, now):
-    """-> datetime of the next automatic run, or None (disabled / the one-time run has passed)."""
-    if not sch["on"]: return None
-    hh, mm = int(sch["time"][:2]), int(sch["time"][3:])
-    grace = dt.timedelta(minutes=REMINDER_GRACE_MIN)
-    if sch["date"] and sch["repeat"] == "Once":
-        due = dt.datetime.combine(dt.date.fromisoformat(sch["date"]), dt.time(hh, mm))
-        return due if due + grace >= now else None
-    d = max(dt.date.fromisoformat(sch["date"]), now.date()) if sch["date"] else now.date()
-    due = dt.datetime.combine(d, dt.time(hh, mm))
-    return due if due + grace >= now else due + dt.timedelta(days=1)
 
 def missed_mail_history(fresh=False):
     """-> ({EMP: last sent-at}, {EMP: set of dates already e-mailed successfully})."""
@@ -6171,8 +5862,13 @@ def send_logged(items, mode, by):
     invalidate_cache(MISSED_LOG)
     return out
 
+def _admin_only_mail():
+    """Update115: reminder e-mails may be triggered ONLY from a signed-in Admin session (UI, API or a hand-made request)."""
+    if session.get("role") != "admin": abort(403)
+
 def send_missed_mails(items, mode, by):
-    """items = [(emp, [dates])] -> one 3D missed-entry e-mail each (manual and automatic). Returns {eid: status}."""
+    """items = [(emp, [dates])] -> one 3D missed-entry e-mail each (manual, Admin only). Returns {eid: status}."""
+    _admin_only_mail()
     return send_logged([(e, missed_message(e, d), ", ".join(d), len(d)) for e, d in items], mode, by)
 
 def _pretty_date(d):
@@ -6192,6 +5888,7 @@ def notify_approved(emp_row, kind, date_txt, duration_txt, count):
 @app.route("/admin/missed/send", methods=["POST"])
 @need("admin")
 def admin_missed_send():
+    _admin_only_mail()
     nxt = (request.form.get("next") or "").strip()
     back = nxt if (nxt.startswith("/admin/") and "//" not in nxt and "\\" not in nxt and "\n" not in nxt) else "/admin/missed-log"
     if not MAIL_READY:
@@ -6217,12 +5914,6 @@ def admin_missed_send():
     else: flash(f"E-mail to {e['Name']} could not be sent: {st}", "error")
     return redirect(back)
 
-@app.route("/admin/missed/auto", methods=["POST"])
-@need("admin")
-def admin_missed_auto():
-    flash("The automatic e-mail schedule is now set in Email Controls.")
-    return redirect("/admin/email-controls")
-
 # ---------------------------------------------------------------- Update93: MISSED ENTRIES LOG (separate Admin page)
 MLOG = '''<div class="head"><div><h1>Missed Entries Log</h1>
 <p class="mut">{{label}} &middot; Every employee with working days (weekly off / holidays excluded) that have no productivity entry and no leave. Today is not included.</p></div>
@@ -6234,7 +5925,7 @@ MLOG = '''<div class="head"><div><h1>Missed Entries Log</h1>
 <div class="card no-print"><h2>Missed entries e-mail</h2>
 <p class="mut">Sends the employee's missed productivity entry dates to their registered Office Email ID. Dates shown follow the filter above ({{label}}).</p>
 {% if not smtp_ok %}<div class="warn">E-mail is not set up on the server yet (BREVO_API_KEY or SMTP_HOST, and MAIL_FROM) - nothing can be sent until it is.</div>{% endif %}
-<p class="mut">Automatic e-mail is <b>{{'ON' if auto_on else 'OFF'}}</b>{% if auto_on %} (daily at {{auto_time}} - see the schedule){% endif %}. <a href="/admin/email-controls">Change it in Email Controls</a> (enable / disable, date, time).</p>
+<p class="mut">Reminder e-mails are sent manually by the Admin only. There is no automatic e-mail.</p>
 <table><tr><th>Employee</th><th>E-mail</th><th>Missed dates</th><th>Not yet e-mailed</th><th>Last e-mailed</th><th></th></tr>
 {% for x in summary %}<tr><td><a href="/admin/missed-log/{{x.id|urlencode}}?month={{month}}">{{x.id}} &middot; {{x.name}}</a></td><td>{{x.email or '-'}}</td><td>{{x.dates|length}}: {{x.dates|join(', ')}}</td><td>{{x.new}}</td><td>{{(x.last|t12) if x.last else 'Never'}}</td>
 <td class="act"><a href="/admin/missed-log/{{x.id|urlencode}}?month={{month}}">View</a>
@@ -6294,9 +5985,8 @@ def admin_missed_log():
         summary.append(dict(id=e["Employee ID"], name=e["Name"], email=employee_office_email(e), dates=sorted(dates), last=last.get(k, ""),
                             new=len([d for d in dates if d not in notified.get(k, set())])))
     summary.sort(key=lambda x: str(x["name"]))
-    on, t = missed_auto_settings()
     return page(MLOG, title="Missed Entries Log", month=month, label=label, emp=request.args.get("emp", ""), summary=summary, total=total,
-                auto_on=on, auto_time=t, smtp_ok=MAIL_READY, history=mail_history())
+                smtp_ok=MAIL_READY, history=mail_history())
 
 @app.route("/admin/missed-log/<eid>")
 @need("admin")
@@ -6314,48 +6004,6 @@ def admin_missed_log_emp(eid):
     return page(MLOG_EMP, title="Missed entries - " + str(e["Name"]), emp=e, email=employee_office_email(e), month=month, label=label, dates=dates,
                 new_count=sum(1 for d in dates if not d["sent"]), smtp_ok=MAIL_READY, history=mail_history(eid))
 
-def run_auto_missed(date=None):
-    """One automatic run: each employee with missed dates this month NOT e-mailed before gets one e-mail with only the new dates.
-    Duplicate protection: (a) a __RUN__ row claims the day so only one worker/server sends, (b) dates already in a 'Sent' log row are never repeated."""
-    date = date or str(today_local())
-    if not MAIL_READY: print("Missed mail: SMTP not configured - skipped."); return 0
-    ws = ws_of(MISSED_LOG)
-    ws.append_row([date, "__RUN__", _WORKER_ID, "", "", 0, now_local().strftime("%Y-%m-%d %H:%M:%S"), "Auto", "Claimed", "system"], value_input_option="RAW")
-    invalidate_cache(MISSED_LOG)
-    runs = [r for r in _fetch_rows(MISSED_LOG) if str(r.get("Date sent", "")).strip() == date and str(r.get("Employee ID", "")) == "__RUN__" and str(r.get("Mode", "")) == "Auto"]
-    if not runs or str(runs[0].get("Employee name", "")) != _WORKER_ID: return 0         # another worker owns today's run
-    t = dt.date.fromisoformat(date); start = t.replace(day=1); end = t - dt.timedelta(days=1)
-    if end < start: return 0
-    _last, notified = missed_mail_history(fresh=True)
-    access = _fetch_rows("Productivity Access"); subs_all = load_subs(); leaves = _fetch_rows("Leave")
-    items = []
-    for e in _fetch_rows("Employees"):
-        k = _key(e.get("Employee ID", "")); mail = employee_office_email(e)
-        if not k or "@" not in mail or not productivity_access(k, access): continue
-        dates = missing_dates(k, [s_ for s_ in subs_all if _key(s_["emp_id"]) == k], [l for l in leaves if _key(l["Employee ID"]) == k], start, end, fmt="%Y-%m-%d")
-        new = [d for d in dates if d not in notified.get(k, set())]
-        if new: items.append((dict(eid=str(e["Employee ID"]), name=str(e.get("Name", "")), email=mail), new))
-    if not items: return 0
-    res = send_missed_mails(items, "Auto", "system")
-    return sum(1 for v in res.values() if v == "Sent")
-
-def _missed_auto_loop():
-    while True:
-        time.sleep(30)
-        try:
-            now = now_local()
-            sch = missed_schedule()                                            # cached read (a few seconds old at most)
-            key = f"{now.date()} {sch['time']}"
-            if key in _missed_auto_done or not missed_run_due(sch, now): continue
-            sch = missed_schedule(fresh=True)                                  # confirm with the sheet right before sending
-            if not missed_run_due(sch, now): continue
-            _missed_auto_done.add(key)
-            print(f"Missed mail {now.date()}: {run_auto_missed(str(now.date()))} sent")
-        except Exception as ex:
-            print("Missed mail error:", ex)
-if REMINDER_ENABLED and os.getenv("WERKZEUG_RUN_MAIN", "true") == "true":
-    threading.Thread(target=_missed_auto_loop, daemon=True).start()
-
 # ---------------------------------------------------------------- Update98: ADMIN EMAIL CONTROLS
 def mail_month_start(): return today_local().replace(day=1)      # Update100: manual sending covers the CURRENT month only (today is never "missed")
 
@@ -6364,22 +6012,12 @@ def mail_status(v):
     return "Sent" if v == "Sent" else ("Pending" if v == "Pending" else "Failed")
 
 EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
-<p class="mut">Automatic and manual reminders for missed Productivity entries. Mails go to each employee's Office Email ID using one 3D-style template (missed date(s) + Login button) for both manual and automatic sending. They are sent by this application running on Render. Only Admin can open this page.</p></div></div>
+<p class="mut">Manual reminders for missed Productivity entries (Admin only - there is no automatic sending). Mails go to each employee's Office Email ID using one 3D-style template (missed date(s) + Login button). They are sent by this application running on Render. Only Admin can open this page.</p></div></div>
 {% if not mail_ok %}<div class="warn"><b>&#9888; E-mail service is not set up on the server.</b> Add <code>BREVO_API_KEY</code> (recommended on Render - it sends over HTTPS) or <code>SMTP_HOST</code> in the Render Environment settings and redeploy. Nothing can be sent until then.</div>{% endif %}
 {% if not login_link %}<div class="warn">No Employee Login link is available: set <code>APP_URL</code> (e.g. https://your-app.onrender.com) in the Render Environment settings.</div>{% endif %}
-<div class="kpis"><div class="kpi"><span>Sent</span><b>{{counts.Sent}}</b></div><div class="kpi"><span>Failed</span><b>{{counts.Failed}}</b></div><div class="kpi"><span>Pending</span><b>{{counts.Pending}}</b></div>
-<div class="kpi"><span>Automatic e-mail</span><b>{{'ON' if auto_on else 'OFF'}}</b></div></div>
+<div class="kpis"><div class="kpi"><span>Sent</span><b>{{counts.Sent}}</b></div><div class="kpi"><span>Failed</span><b>{{counts.Failed}}</b></div><div class="kpi"><span>Pending</span><b>{{counts.Pending}}</b></div></div>
 
-<div class="card"><h2>1. Automatic notifications &amp; schedule</h2>
-<form method="post" action="/admin/email-controls/auto" class="grid" style="align-items:end">
-<label>Automatic missed-productivity e-mail<select name="enabled"><option value="Yes"{{' selected' if sch.on else ''}}>Enabled</option><option value="No"{{'' if sch.on else ' selected'}}>Disabled</option></select></label>
-<label>Send on (date)<input type="date" name="date" value="{{sch.date}}"></label>
-<label>At (time)<input type="time" name="time" value="{{sch.time}}" required></label>
-<label>Repeat<select name="repeat"><option value="Once"{{' selected' if sch.repeat=='Once' else ''}}>Only on that date</option><option value="Daily"{{' selected' if sch.repeat=='Daily' else ''}}>Every day from that date</option></select></label>
-<button class="primary sm">Save schedule</button></form>
-<p class="mut">{% if sch.on %}<b>ON.</b> {% if next_run %}Next automatic run: <b>{{next_run}}</b>.{% else %}The one-time run for the saved date has already passed - choose a new date to schedule another.{% endif %} At that time the system finds every employee with missed Productivity entries this month and e-mails only the dates not e-mailed before. You can change the schedule whenever you need.{% else %}<b>OFF.</b> No automatic e-mail is sent. Manual sending below still works.{% endif %}</p></div>
-
-<div class="card"><h2>2. Send a reminder manually</h2>
+<div class="card"><h2>1. Send a reminder manually</h2>
 <form method="post" action="/admin/email-controls/send" id="ec-form" onsubmit="return ecCheck()">
 <label>Employee<select name="eid" id="ec-emp"><option value="">- choose an employee -</option>
 {% for e in emps %}<option value="{{e.id}}"{{' disabled' if not e.email else ''}}>{{e.id}} &middot; {{e.name}} &middot; {{e.email or 'no Office Email ID'}} ({{e.n}} missed)</option>{% endfor %}</select></label>
@@ -6388,7 +6026,7 @@ EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
 <p style="margin:10px 0"><label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="ec-all"> Select all dates</label></p>
 <button class="primary" id="ec-send" disabled>&#9993; Send reminder e-mail</button></form></div>
 
-<div class="card"><h2>3. Sender e-mail / account</h2>
+<div class="card"><h2>2. Sender e-mail / account</h2>
 <form method="post" action="/admin/email-controls/sender" class="grid" style="align-items:end">
 <label>Sender name<input name="sender_name" value="{{sender_name}}" maxlength="60" placeholder="Productivity Tracker"></label>
 <label>Sender e-mail<input type="email" name="sender_email" value="{{sender_email}}" placeholder="noreply@yourcompany.com"></label>
@@ -6396,7 +6034,7 @@ EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
 <p class="mut">Mail service in use: <b>{{transport}}</b>. The address you save here is used as the From address. With Brevo it must be a verified sender in your Brevo account, otherwise mails will show as Failed. The Brevo API key / SMTP password are kept in the Render Environment settings (never in the sheet) - change them there. Leave the e-mail empty to fall back to <code>MAIL_FROM</code>{% if env_from %} (now: {{env_from}}){% endif %}.</p>
 <p class="mut">Current sender: <b>{{cur_sender}}</b></p></div>
 
-<div class="card"><h2>4. E-mail status</h2>
+<div class="card"><h2>3. E-mail status</h2>
 <form method="get" class="grid no-print" style="align-items:end">
 <label>Status<select name="status"><option value="">All</option>{% for x in ['Sent','Failed','Pending'] %}<option{{' selected' if status==x else ''}}>{{x}}</option>{% endfor %}</select></label>
 <input name="q" placeholder="Employee ID / name" value="{{q}}"><button class="primary sm">Show</button><a href="/admin/email-controls">Reset</a></form>
@@ -6458,36 +6096,12 @@ def admin_email_controls():
         hist.append(dict(at=str(r.get("Sent at", "")), emp=f"{r.get('Employee ID', '')} · {r.get('Employee name', '')}", email=str(r.get("Email", "")),
                          dates=str(r.get("Missed dates", "")), mode=str(r.get("Mode", "")), status=st,
                          detail=str(r.get("Status", ""))[:200] if st == "Failed" else "", by=str(r.get("Sent by", ""))))
-    sch = missed_schedule(); nr = missed_next_run(sch, now_local())
-    on, t = sch["on"], sch["time"]
     nm, em = mail_sender()
     cur = f"{nm} <{em}>" if em else "not set"
     transport = "Brevo HTTPS API" if BREVO_API_KEY else (f"SMTP ({SMTP_HOST})" if SMTP_HOST else "NOT CONFIGURED")
-    return page(EMAIL_CONTROLS, title="Email Controls", mail_ok=MAIL_READY, login_link=employee_login_link(), counts=counts, auto_on=on, auto_time=t, sch=sch, next_run=(nr.strftime("%d %b %Y, %I:%M %p") if nr else ""),
-                emps=emps, missed_map=missed_map, month_label=today.strftime("%B %Y"), sender_name=_setting(MAIL_SENDER_NAME_KEY),
+    return page(EMAIL_CONTROLS, title="Email Controls", mail_ok=MAIL_READY, login_link=employee_login_link(), counts=counts, emps=emps, missed_map=missed_map, month_label=today.strftime("%B %Y"), sender_name=_setting(MAIL_SENDER_NAME_KEY),
                 sender_email=_setting(MAIL_SENDER_EMAIL_KEY), env_from=MAIL_FROM, cur_sender=cur, transport=transport,
                 history=hist[:100], total=len(hist), status=status, q=request.args.get("q", ""))
-
-@app.route("/admin/email-controls/auto", methods=["POST"])
-@need("admin")
-def admin_email_controls_auto():
-    back = "/admin/email-controls"
-    on = request.form.get("enabled") == "Yes"
-    t = (request.form.get("time") or "").strip(); d = (request.form.get("date") or "").strip()
-    rep = "Once" if request.form.get("repeat") == "Once" else "Daily"
-    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t): flash("Choose a valid time.", "error"); return redirect(back)
-    if d:
-        try: dt.date.fromisoformat(d)
-        except ValueError: flash("Choose a valid date.", "error"); return redirect(back)
-    if on:
-        if not d: flash("Choose the date the automatic e-mail should start / be sent on.", "error"); return redirect(back)
-        due = dt.datetime.combine(dt.date.fromisoformat(d), dt.time(int(t[:2]), int(t[3:])))
-        if rep == "Once" and due + dt.timedelta(minutes=REMINDER_GRACE_MIN) < now_local():
-            flash("That date and time has already passed - choose a future date and time.", "error"); return redirect(back)
-    _set_setting(MISSED_TIME_KEY, t); _set_setting(MISSED_DATE_KEY, d); _set_setting(MISSED_REPEAT_KEY, rep); _set_setting(MISSED_AUTO_KEY, "Yes" if on else "No")
-    if on: flash(f"Automatic e-mail enabled: {'on ' + d if rep == 'Once' else 'every day from ' + d} at {t}.")
-    else: flash("Automatic missed-productivity e-mail disabled.")
-    return redirect(back)
 
 @app.route("/admin/email-controls/sender", methods=["POST"])
 @need("admin")
@@ -6502,6 +6116,7 @@ def admin_email_controls_sender():
 @app.route("/admin/email-controls/send", methods=["POST"])
 @need("admin")
 def admin_email_controls_send():
+    _admin_only_mail()
     back = "/admin/email-controls"
     if not MAIL_READY:
         flash("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST).", "error"); return redirect(back)

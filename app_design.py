@@ -59,6 +59,7 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update121: Admin > Employee Info > Employee Login Access: 'Add employee login' form (username/Employee ID, initial password, enable) + per-row Set Password.
   * Update120: large 3D profile avatar (male / female from the employee's Gender) on the Employee page.
   * Update119: Admin + Employee login pages redesigned to the fire-theme reference (dark crimson window, orange grid floor, logo in card, orange 3D button). UI only; login logic unchanged.
   * Update117: Admin > Employee Info > new "Employee Login Access" tab (ID, name, Office Email, status, Enable / Disable Login with confirmation). Admin only; uses the existing Account-locked flag, login logic unchanged.
@@ -2863,13 +2864,26 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <a href="/admin/employee-info?view=access" class="{{'on' if view=='access' else ''}}">Employee Login Access</a>
 <a href="/admin/employee-info?view=notifications" class="{{'on' if view=='notifications' else ''}}">Notifications{% if new_count %} ({{new_count}} new){% endif %}</a></div>
 {% if view=='access' %}
+<div class="card no-print" id="addlogin"><h2 style="margin-top:0">Add employee login</h2>
+<p class="mut">For a new joiner: enter the username (Employee ID) and an initial password, then save. The employee can sign in at <b>/employee/login</b> with the Employee ID or the Email, plus this password. If the Employee ID already exists without a password, only the password is set.</p>
+<form method="post" action="/admin/employee-info/login-access/add" autocomplete="off" class="grid" onsubmit="var b=this.querySelector('button.primary');setTimeout(function(){b.disabled=true},0)">
+<input name="eid" placeholder="Username / Employee ID *" required maxlength="40" value="{{ad.get('eid','')}}">
+<input name="name" placeholder="Employee name *" required maxlength="80" value="{{ad.get('name','')}}">
+<input name="email" type="email" placeholder="Office email (also works as username)" maxlength="120" value="{{ad.get('email','')}}">
+<input name="band" placeholder="Band" maxlength="20" value="{{ad.get('band','')}}">
+<input name="designation" placeholder="Designation" maxlength="80" value="{{ad.get('designation','')}}">
+<select name="gender"><option value="">Gender (for 3D avatar)</option><option {{'selected' if ad.get('gender')=='Male'}}>Male</option><option {{'selected' if ad.get('gender')=='Female'}}>Female</option></select>
+<span style="position:relative;display:inline-block"><input id="al_pw" name="pw" type="text" placeholder="Initial password * (min 4)" required minlength="4" maxlength="60" style="padding-right:84px"><button type="button" class="back sm" style="position:absolute;right:4px;top:50%;transform:translateY(-50%)" onclick="var c='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789',o='';for(var i=0;i<8;i++)o+=c[Math.floor(Math.random()*c.length)];document.getElementById('al_pw').value=o">Generate</button></span>
+<label style="display:flex;align-items:center;gap:6px"><input type="checkbox" name="enable" value="1" checked style="width:auto"> Enable login now</label>
+<button class="primary" type="submit">Save login credentials</button></form></div>
 <p class="mut">Login enabled: <b>{{n_on}}</b> &middot; Login disabled: <b>{{n_off}}</b></p>
 <table><tr><th>Employee ID</th><th>Employee Name</th><th>Office Email ID</th><th>Login Access Status</th><th class="no-print">Action (Admin only)</th></tr>
 {% for e in emps %}{% set off = e.login_off %}<tr><td>{{e['Employee ID']}}</td><td><b>{{e['Name']}}</b></td><td>{{e['Email'] or '-'}}</td>
 <td>{% if off %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% endif %}</td>
 <td class="act no-print">
 <form method="post" action="/admin/employee-info/login-access/{{e['_row']}}"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="do" value="enable"><button class="primary sm" type="submit" {{'' if off else 'disabled'}}>Enable Login</button></form>
-<form method="post" action="/admin/employee-info/login-access/{{e['_row']}}" onsubmit="return confirm('Disable login for {{e['Employee ID']}} ({{e['Name']}})? This employee will not be able to log in until you enable it again. Their data is not changed.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="do" value="disable"><button class="danger sm" type="submit" {{'disabled' if off else ''}}>Disable Login</button></form></td></tr>
+<form method="post" action="/admin/employee-info/login-access/{{e['_row']}}" onsubmit="return confirm('Disable login for {{e['Employee ID']}} ({{e['Name']}})? This employee will not be able to log in until you enable it again. Their data is not changed.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="do" value="disable"><button class="danger sm" type="submit" {{'disabled' if off else ''}}>Disable Login</button></form>
+<form method="post" action="/admin/employees/{{e['_row']}}/reset-password" onsubmit="var p=prompt('Set password for {{e['Employee ID']}} (leave empty to generate one):','');if(p===null)return false;this.newpw.value=p;return true"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="newpw" value=""><button class="back sm" type="submit">Set Password</button></form></td></tr>
 {% else %}<tr><td colspan="5">No employees found.</td></tr>{% endfor %}</table>
 {% elif view=='notifications' %}
 <table><tr><th>Employee Name</th><th>Date &amp; Time</th><th>Section / Log</th><th>Action</th><th>Details</th><th>Summary</th></tr>
@@ -2967,13 +2981,54 @@ def admin_employee_info():
         for e in emps: e["login_off"] = emp_locked(e)
         off = sum(1 for e in emps if e["login_off"])
         return page(EMP_LIST, title="Employee Info", view="access", emps=emps, q=request.args.get("q", ""),
-                    n_on=len(emps) - off, n_off=off, new_count=sum(1 for r in update_log() if r["new"]))
+                    n_on=len(emps) - off, n_off=off, new_count=sum(1 for r in update_log() if r["new"]),
+                    ad=session.pop("_ad", {}))
     # Employees with unseen login/logout notifications get their name highlighted in red.
     unseen_ids = {str(r["Employee ID"]) for r in rows("Notifications") if str(r.get("Seen", "")).strip() != "Yes"}
     for e in emps: e["flag"] = str(e["Employee ID"]) in unseen_ids
     log = update_log()
     return page(EMP_LIST, title="Employee Info", view="employees", emps=emps, q=request.args.get("q", ""),
                 new_count=sum(1 for r in log if r["new"]), ftr="@2026_Mobius365_LN_MAP_Ai")
+
+@app.route("/admin/employee-info/login-access/add", methods=["POST"])
+@need("admin")
+def admin_login_add():
+    """Update121: Admin adds a new employee's login (username = Employee ID, initial password) and enables it.
+    The Employee login already accepts Employee ID or Email + Password and honours the Account-locked flag, so nothing there changes."""
+    f = request.form; heads = HEADERS["Employees"]
+    eid, name = f.get("eid", "").strip(), f.get("name", "").strip()
+    email, pw = f.get("email", "").strip(), f.get("pw", "").strip()
+    keep = dict(eid=eid, name=name, email=email, band=f.get("band", "").strip(), designation=f.get("designation", "").strip(), gender=f.get("gender", ""))
+    back = redirect("/admin/employee-info?view=access#addlogin")
+    def fail(m):
+        session["_ad"] = keep; flash(m, "error"); return back
+    if not eid or not name: return fail("Employee ID (username) and name are required.")
+    if re.search(r"\s", eid) or "@" in eid: return fail("The username (Employee ID) cannot contain spaces or '@'. Use the Email field for an email address.")
+    if len(pw) < 4: return fail("The password must be at least 4 characters.")
+    if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email): return fail("Please enter a valid email address.")
+    invalidate_cache("Employees")
+    emps = rows("Employees"); k = _key(eid); ek = email.lower()
+    for e in emps:                                               # the username / email must be unique across all logins
+        if email and (_key(e["Employee ID"]) == _key(email) or str(e.get("Email", "")).strip().lower() == ek) and _key(e["Employee ID"]) != k:
+            return fail(f"The email {email} already belongs to {e['Employee ID']}.")
+    existing = next((e for e in emps if _key(e["Employee ID"]) == k), None)
+    enable = f.get("enable") == "1"
+    if existing:
+        if str(existing.get("Password", "")).strip():
+            return fail(f"{eid} already has a login. Use 'Set Password' in the table below to change the password.")
+        row = existing["_row"]
+        set_employee_cell(row, eid, "Password", pw)
+        set_employee_cell(row, eid, "Account locked", "" if enable else "Yes")
+        flash(f"Password saved for {eid}. Login {'enabled' if enable else 'saved but disabled'}. Share the credentials with the employee: username {eid} / password {pw}")
+        return redirect("/admin/employee-info?view=access")
+    full = {h: "" for h in heads}
+    full.update({"Employee ID": eid, "Name": name, "Band": keep["band"], "Email": email, "Office Email ID": email, "Password": pw,
+                 "Designation": keep["designation"], "Gender": keep["gender"], "Account locked": "" if enable else "Yes",
+                 "Joining date": str(now_local().date())})
+    _with_retry(ws_of("Employees").append_row, [full[h] for h in heads], value_input_option="RAW")
+    invalidate_cache("Employees")
+    flash(f"Login created for {name}. Username: {eid} / Password: {pw} - {'login enabled' if enable else 'login is DISABLED until you enable it'}. Share these with the employee.")
+    return redirect("/admin/employee-info?view=access")
 
 @app.route("/admin/employee-info/login-access/<int:row>", methods=["POST"])
 @need("admin")

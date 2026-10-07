@@ -59,6 +59,9 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update123: (1) Admin > Email Controls > Automatic Email: Admin-selectable SEND TIME (saved in the Settings sheet, used by the daily background job; AUTO_MAIL_TIME env is only the default).
+    (2) 3D profile image REMOVED from the Employee page (hero picture and sidebar picture); nothing else on the Employee page changed.
+    (3) Footer "@2026_Mobius365 | LN_Map_AI" on ALL pages (Admin, Employee, login, welcome) - small, subtle, centred at the bottom, responsive.
   * Update122: Missed Entries - AUTOMATIC e-mail (Admin only). Admin > Email Controls > "Automatic Email" switch (Enable / Disable, saved in the Settings sheet,
     default OFF). When ON, a background job runs once a day (AUTO_MAIL_TIME, default 09:30, app timezone) and e-mails every employee who has missed
     Productivity Entries this month (only dates not e-mailed before): employee name, missed date(s) and the Productivity Tracker login link.
@@ -1240,6 +1243,14 @@ main{flex:1;display:flex;flex-direction:column;padding:24px 28px;min-width:0;ani
 /* Update113: subtle page-bottom credit (Admin -> Employees page) */
 .pg-ftr{flex:none;margin:26px auto 0;padding:8px 12px;text-align:center;font-size:11px;font-weight:400;letter-spacing:.2px;color:var(--mut);opacity:.75;background:none;border:0}
 .center{max-width:420px;margin:12vh auto;padding:0 16px}
+/* Update123: global footer - same text and bottom-centre position on every page */
+.site-foot{flex:none;margin:auto auto 0;padding:14px 12px calc(10px + env(safe-area-inset-bottom,0px));width:100%;text-align:center;font:400 11px/1.4 Poppins,system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:.3px;color:var(--mut);opacity:.8;overflow-wrap:anywhere;pointer-events:none;user-select:none}
+.lg{padding-bottom:44px}
+.lg .site-foot,.wl .site-foot{position:absolute;left:0;right:0;bottom:0;margin:0;padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));width:auto}
+.lg .site-foot{color:#6b4a43;opacity:.85}
+.wl .site-foot{z-index:10001;color:#fff;opacity:.8;text-shadow:0 1px 2px #0008}
+@media(max-width:800px){.site-foot{font-size:10.5px;padding-top:12px}}
+@media print{.site-foot{display:none}}
 h1{font-size:22px;margin:0}h2{font-size:17px;margin:22px 0 10px}h3{font-size:15px;margin:14px 0 6px}
 .head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
 .mut{color:var(--mut);margin:2px 0 0;font-size:13px}
@@ -1798,8 +1809,8 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 <div class="prof"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
-<main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div>{% if ftr %}<div class="pg-ftr" role="contentinfo">{{ftr}}</div>{% endif %}</main></div>
-{% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}</div>{% endif %}
+<main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></main></div>
+{% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}<div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></div>{% endif %}
 {% if session.role and not bare %}<script>
 (function(){var g=document.getElementById('cal_g');if(!g)return;var d=document.getElementById('cal');
 var M=['January','February','March','April','May','June','July','August','September','October','November','December'],W=['S','M','T','W','T','F','S'];
@@ -2097,18 +2108,10 @@ def page(body, title="Productivity Tracker", **ctx):
     if session.get("role") == "admin":
         side_avatar = ADMIN_AVATAR
     elif session.get("role") == "employee":
-        try:
-            g = gender_of(my_emp_row())
-        except Exception:                      # never break a page just because the avatar could not load
-            g = ""
-        side_avatar = render_fast(AVATAR3D, gender=g, initials=initials_of(session.get("name", "")))
-    hero_avatar = ""
-    if side_avatar and session.get("role") == "employee":      # Update120: large 3D avatar (male / female by Gender) on the employee page
-        hero_avatar = '<div class="av-hero">' + side_avatar.split("<script>")[0] + '</div>'
-    ctx["hero_avatar"] = hero_avatar
+        side_avatar = ""                       # Update123: the 3D profile image is no longer shown anywhere on the Employee page
+    ctx["hero_avatar"] = ""
     return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar, bare=bool(ctx.get("bare")),
-                                  ftr=ctx.get("ftr", ""))
+                                  side_avatar=side_avatar, bare=bool(ctx.get("bare")))
 
 
 LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></div>
@@ -2993,7 +2996,7 @@ def admin_employee_info():
     for e in emps: e["flag"] = str(e["Employee ID"]) in unseen_ids
     log = update_log()
     return page(EMP_LIST, title="Employee Info", view="employees", emps=emps, q=request.args.get("q", ""),
-                new_count=sum(1 for r in log if r["new"]), ftr="@2026_Mobius365_LN_MAP_Ai")
+                new_count=sum(1 for r in log if r["new"]))
 
 @app.route("/admin/employee-info/login-access/add", methods=["POST"])
 @need("admin")
@@ -3244,7 +3247,7 @@ WELCOME = """<style>
  <div class="wl-card"><h1>Welcome, {{session.name}}</h1>
  <p>{{ 'Syncing live data from the server' if session.role=='admin' else 'Securely connecting to the server' }}&hellip;</p>
  <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div><div class="wl-st" style="margin-top:6px;font-weight:500"><span id="wl_msg">&nbsp;</span></div></div>
-{% if session.role=='admin' %}<div class="wl-ftr" role="contentinfo">&copy; 2026 LN_MAP_AI</div>{% endif %}
+<div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div>
 </div>
 <script>
 (function(){
@@ -6200,16 +6203,21 @@ def mail_status(v):
 
 # ---------------------------------------------------------------- Update122: AUTOMATIC missed-entry e-mail (Admin-only switch)
 AUTO_MAIL_KEY = "Auto Missed Email"
-AUTO_MAIL_TIME = os.getenv("AUTO_MAIL_TIME", "09:30").strip()      # HH:MM, app timezone
+AUTO_MAIL_TIME_KEY = "Auto Missed Email Time"                       # Update123: Admin-selected send time (Settings sheet, HH:MM)
+AUTO_MAIL_TIME = os.getenv("AUTO_MAIL_TIME", "09:30").strip()      # HH:MM, app timezone - default until the Admin saves a time
 
 def auto_mail_on(fresh=False):
     return _setting(AUTO_MAIL_KEY, fresh).lower() in ("yes", "on", "true", "1", "enabled")
 
+def _parse_hhmm(s):
+    m = re.fullmatch(r"\s*([01]?\d|2[0-3]):([0-5]\d)\s*", str(s or ""))
+    return dt.time(int(m.group(1)), int(m.group(2))) if m else None
+
 def _auto_time():
-    try:
-        h, m = AUTO_MAIL_TIME.split(":"); return dt.time(int(h), int(m))
-    except Exception:
-        return dt.time(9, 30)
+    """Admin-selected time (Settings sheet) -> AUTO_MAIL_TIME env default -> 09:30."""
+    try: saved = _setting(AUTO_MAIL_TIME_KEY)
+    except Exception: saved = ""
+    return _parse_hhmm(saved) or _parse_hhmm(AUTO_MAIL_TIME) or dt.time(9, 30)
 
 def _auto_claim_run(today):
     """One automatic run per day across all workers: the first '__RUN__' row of the day wins."""
@@ -6270,8 +6278,12 @@ threading.Thread(target=_auto_mail_loop, daemon=True).start()
 def admin_email_controls_auto():
     _admin_only_mail()                                   # Admin session only - employees get 403
     on = request.form.get("auto") == "on"
+    t = _parse_hhmm(request.form.get("auto_time", ""))
+    if t is None:
+        flash("Please choose a valid send time (HH:MM).", "error"); return redirect("/admin/email-controls")
+    _set_setting(AUTO_MAIL_TIME_KEY, t.strftime("%H:%M"))
     _set_setting(AUTO_MAIL_KEY, "Yes" if on else "No")
-    flash("Automatic Email ENABLED - employees with missed entries will be e-mailed every day." if on else "Automatic Email DISABLED.")
+    flash(f"Automatic Email ENABLED - employees with missed entries will be e-mailed every day at {t.strftime('%I:%M %p')}." if on else f"Automatic Email DISABLED (send time saved: {t.strftime('%I:%M %p')}).")
     return redirect("/admin/email-controls")
 
 EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
@@ -6283,8 +6295,9 @@ EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
 <div class="card"><h2>Automatic Email</h2>
 <form method="post" action="/admin/email-controls/auto" class="grid" style="align-items:end">
 <label style="display:inline-flex;gap:8px;align-items:center"><input type="checkbox" name="auto" value="on" {{'checked' if auto_on else ''}}> Send missed-entry e-mails automatically</label>
+<label>Send time<input type="time" name="auto_time" value="{{auto_time_val}}" required></label>
 <button class="primary sm">Save</button></form>
-<p class="mut">Status: <b style="color:{{'#15803d' if auto_on else '#991b1b'}}">{{'ENABLED' if auto_on else 'DISABLED'}}</b>. When enabled, every day at <b>{{auto_time}}</b> each employee who has missed a Productivity Entry this month receives an e-mail with their name, the missed date(s) and the Productivity Tracker login link. A date is never e-mailed twice. Last automatic run: <b>{{auto_last or 'never'}}</b>. Only Admin can change this.</p></div>
+<p class="mut">Status: <b style="color:{{'#15803d' if auto_on else '#991b1b'}}">{{'ENABLED' if auto_on else 'DISABLED'}}</b>. When enabled, every day at <b>{{auto_time}}</b> (the time set here by the Admin) each employee who has missed a Productivity Entry this month receives an e-mail with their name, the missed date(s) and the Productivity Tracker login link. A date is never e-mailed twice. Last automatic run: <b>{{auto_last or 'never'}}</b>. Only Admin can change this.</p></div>
 
 <div class="card"><h2>1. Send a reminder manually</h2>
 <form method="post" action="/admin/email-controls/send" id="ec-form" onsubmit="return ecCheck()">
@@ -6371,7 +6384,7 @@ def admin_email_controls():
     return page(EMAIL_CONTROLS, title="Email Controls", mail_ok=MAIL_READY, login_link=employee_login_link(), counts=counts, emps=emps, missed_map=missed_map, month_label=today.strftime("%B %Y"), sender_name=_setting(MAIL_SENDER_NAME_KEY),
                 sender_email=_setting(MAIL_SENDER_EMAIL_KEY), env_from=MAIL_FROM, cur_sender=cur, transport=transport,
                 history=hist[:100], total=len(hist), status=status, q=request.args.get("q", ""),
-                auto_on=auto_mail_on(fresh=True), auto_time=_auto_time().strftime("%I:%M %p"),
+                auto_on=auto_mail_on(fresh=True), auto_time=_auto_time().strftime("%I:%M %p"), auto_time_val=_auto_time().strftime("%H:%M"),
                 auto_last=max([str(r.get("Date sent", "")) for r in rows(MISSED_LOG) if str(r.get("Employee ID", "")) == "__RUN__" and str(r.get("Mode", "")) == "Auto"] or [""]))
 
 @app.route("/admin/email-controls/sender", methods=["POST"])

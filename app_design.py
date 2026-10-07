@@ -59,6 +59,7 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update120: large 3D profile avatar (male / female from the employee's Gender) on the Employee page.
   * Update119: Admin + Employee login pages redesigned to the fire-theme reference (dark crimson window, orange grid floor, logo in card, orange 3D button). UI only; login logic unchanged.
   * Update117: Admin > Employee Info > new "Employee Login Access" tab (ID, name, Office Email, status, Enable / Disable Login with confirmation). Admin only; uses the existing Account-locked flag, login logic unchanged.
   * Update116: E-mail templates (Leave/Permission approval + Missed Entries): the data is shown in ONE line (single row) on an orange highlight.
@@ -1748,6 +1749,14 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .lg .adp-c.c3{background:linear-gradient(160deg,#f2542dee,#c8102ecc)}
 .lg .adp-3d{height:230px}
 @media(max-width:800px){.lg .win.admin,.lg .win.employee{transform:none!important}.lg .win.admin .wbody,.lg .win.employee .wbody{padding:22px 12px;min-height:0}.lg .win.admin .lcard,.lg .win.employee .lcard{width:100%;max-width:380px}}
+/* Update120: large 3D profile avatar on the Employee page */
+.av-hero{flex:none}
+.av-hero .av3d{width:112px;height:112px;margin:0 0 10px}
+.av-hero .av3d .av-stage{animation:avSway 7s ease-in-out infinite}
+.av-hero .av3d.live .av-stage{animation:none}
+.av-hero .av-l:first-child{box-shadow:0 18px 28px -10px #e8501a88,0 0 0 4px #fff,0 0 0 6px #ff8a3c55}
+@media(max-width:800px){.av-hero .av3d{width:72px;height:72px;margin:0 0 6px}}
+@media(prefers-reduced-motion:reduce){.av-hero .av3d .av-stage{animation:none}}
 /* Update108: admin 3D avatar + sidebar calendar */
 .av-adm{position:relative;flex:none;width:64px;height:64px;border-radius:50%;overflow:hidden;border:3px solid #ffffffd9;
  box-shadow:inset 0 -6px 10px #0000004d,inset 0 4px 8px #ffffff59,0 10px 0 -4px #151b3f,0 14px 20px -4px #000a,0 0 0 3px #4f46e555,0 0 18px #6d70f566;transition:transform .25s ease}
@@ -2087,6 +2096,10 @@ def page(body, title="Productivity Tracker", **ctx):
         except Exception:                      # never break a page just because the avatar could not load
             g = ""
         side_avatar = render_fast(AVATAR3D, gender=g, initials=initials_of(session.get("name", "")))
+    hero_avatar = ""
+    if side_avatar and session.get("role") == "employee":      # Update120: large 3D avatar (male / female by Gender) on the employee page
+        hero_avatar = '<div class="av-hero">' + side_avatar.split("<script>")[0] + '</div>'
+    ctx["hero_avatar"] = hero_avatar
     return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
                                   side_avatar=side_avatar, bare=bool(ctx.get("bare")),
                                   ftr=ctx.get("ftr", ""))
@@ -3142,7 +3155,7 @@ def form_page(sub, action, heading):
 
 def gender_of(emp):
     g = str(emp.get("Gender", "")).strip().lower()
-    return "male" if g in ("male", "m", "man", "boy") else ("female" if g in ("female", "f", "woman", "girl") else "")
+    return "male" if g in ("male", "m", "man", "boy") or g.startswith("male") else ("female" if g in ("female", "f", "woman", "girl") or g.startswith("female") else "")
 
 def initials_of(name):
     parts = str(name).replace(".", " ").split()
@@ -3749,18 +3762,18 @@ AVATAR3D = """<div class="av3d" role="img" aria-label="{{ (gender|capitalize) if
 {% endif %}
 </div></div>
 <script>
-(function(){var a=document.querySelector('.av3d');if(!a||!window.requestAnimationFrame)return;
-var w=a.closest('aside')||a.closest('.lg')||a,raf=0,px=0,py=0;
+(function(){var A=document.querySelectorAll('.av3d');if(!A.length||!window.requestAnimationFrame)return;
+var a=A[0],w=document.body,raf=0,px=0,py=0;
 w.addEventListener('pointermove',function(e){var r=a.getBoundingClientRect();
 px=(e.clientX-(r.left+r.width/2))/260;py=(e.clientY-(r.top+r.height/2))/160;
-if(raf)return;raf=requestAnimationFrame(function(){raf=0;a.classList.add('live');
-a.style.setProperty('--ry',Math.max(-24,Math.min(24,px*24))+'deg');
-a.style.setProperty('--rx',Math.max(-16,Math.min(16,-py*16))+'deg')})});
-w.addEventListener('pointerleave',function(){a.classList.remove('live');a.style.removeProperty('--ry');a.style.removeProperty('--rx')});
+if(raf)return;raf=requestAnimationFrame(function(){raf=0;A.forEach(function(x){x.classList.add('live');
+x.style.setProperty('--ry',Math.max(-24,Math.min(24,px*24))+'deg');
+x.style.setProperty('--rx',Math.max(-16,Math.min(16,-py*16))+'deg')})})});
+w.addEventListener('pointerleave',function(){A.forEach(function(x){x.classList.remove('live');x.style.removeProperty('--ry');x.style.removeProperty('--rx')})});
 })();
 </script>"""
 
-EMP_TOP = """<div class="head hero"><div class="welcome wflex"><div class="wtxt"><h1 class="wt"><span class="wt-hi">Hello,</span> <span class="wt-name">{{session.name}}</span></h1>
+EMP_TOP = """<div class="head hero"><div class="welcome wflex">{{ hero_avatar|safe }}<div class="wtxt"><h1 class="wt"><span class="wt-hi">Hello,</span> <span class="wt-name">{{session.name}}</span></h1>
 <p class="mut wsub"><span class="seg">{{today}}</span>{% if session.designation %}<span class="dot">&middot;</span><span class="seg">{{session.designation}}</span>{% endif %}<span class="dot">&middot;</span><span class="seg">Band {{session.band}}</span><span class="dot">&middot;</span><span class="seg">{{month_label}} summary</span>
 {% if today_perm %}<span class="dot">&middot;</span>Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div></div></div>""" + KPI
 

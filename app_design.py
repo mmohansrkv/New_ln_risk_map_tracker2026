@@ -59,6 +59,8 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update117: Admin > Employee Info > new "Employee Login Access" tab (ID, name, Office Email, status, Enable / Disable Login with confirmation). Admin only; uses the existing Account-locked flag, login logic unchanged.
+  * Update116: E-mail templates (Leave/Permission approval + Missed Entries): the data is shown in ONE line (single row) on an orange highlight.
   * Update115: Automatic reminder e-mails REMOVED (daily 1:35 PM REMINDER_TIME scheduler + scheduled missed-entries e-mail + their Email Controls schedule). Reminder e-mails are manual and Admin-only
     (menu, buttons and every send route; employees get 403 / are redirected). All other e-mails (leave / permission approval etc.) are unchanged.
   * Update114: Welcome Page (Admin + Employee) has NO AI voice and NO audio/music of any kind - animation only, then the dashboard opens after 2.2 s.
@@ -2762,12 +2764,22 @@ def admin_notify_poll():
 TABS = [("personal", "Personal Details"), ("missed", "Missed Entries"), ("leave", "Leave Log"),
         ("holidays", "Holidays"), ("mahizhchi", "Mahizhchi Log"), ("notifications", "Notifications")]
 
-EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if view=='notifications' %}A log of what employees have added, updated or deleted, newest first (latest 200).{% else %}Click an employee's name to open their details. A name in red has unseen login/logout notifications.{% endif %}</p></div>
+EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if view=='notifications' %}A log of what employees have added, updated or deleted, newest first (latest 200).{% elif view=='access' %}Enable or disable each employee's login. Disabled employees cannot log in; their data is not changed.{% else %}Click an employee's name to open their details. A name in red has unseen login/logout notifications.{% endif %}</p></div>
 {% if view!='notifications' %}<form class="grid" method="get"><input name="q" placeholder="Search ID / name" value="{{q}}">
 <button class="primary">Search</button><a href="/admin/employee-info">Reset</a></form>{% endif %}</div>
-<div class="tabs no-print"><a href="/admin/employee-info" class="{{'' if view=='notifications' else 'on'}}">Employees</a>
+<div class="tabs no-print"><a href="/admin/employee-info" class="{{'on' if view=='employees' else ''}}">Employees</a>
+<a href="/admin/employee-info?view=access" class="{{'on' if view=='access' else ''}}">Employee Login Access</a>
 <a href="/admin/employee-info?view=notifications" class="{{'on' if view=='notifications' else ''}}">Notifications{% if new_count %} ({{new_count}} new){% endif %}</a></div>
-{% if view=='notifications' %}
+{% if view=='access' %}
+<p class="mut">Login enabled: <b>{{n_on}}</b> &middot; Login disabled: <b>{{n_off}}</b></p>
+<table><tr><th>Employee ID</th><th>Employee Name</th><th>Office Email ID</th><th>Login Access Status</th><th class="no-print">Action (Admin only)</th></tr>
+{% for e in emps %}{% set off = e.login_off %}<tr><td>{{e['Employee ID']}}</td><td><b>{{e['Name']}}</b></td><td>{{e['Email'] or '-'}}</td>
+<td>{% if off %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% endif %}</td>
+<td class="act no-print">
+<form method="post" action="/admin/employee-info/login-access/{{e['_row']}}"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="do" value="enable"><button class="primary sm" type="submit" {{'' if off else 'disabled'}}>Enable Login</button></form>
+<form method="post" action="/admin/employee-info/login-access/{{e['_row']}}" onsubmit="return confirm('Disable login for {{e['Employee ID']}} ({{e['Name']}})? This employee will not be able to log in until you enable it again. Their data is not changed.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="do" value="disable"><button class="danger sm" type="submit" {{'disabled' if off else ''}}>Disable Login</button></form></td></tr>
+{% else %}<tr><td colspan="5">No employees found.</td></tr>{% endfor %}</table>
+{% elif view=='notifications' %}
 <table><tr><th>Employee Name</th><th>Date &amp; Time</th><th>Section / Log</th><th>Action</th><th>Details</th><th>Summary</th></tr>
 {% for r in log %}<tr{% if r.new %} style="font-weight:600"{% endif %}>
 <td><a href="/admin/employee-info/{{r.id|urlencode}}">{{r.name}}</a></td><td>{{r.time|t12}}</td><td>{{r.section}}</td>
@@ -2859,12 +2871,33 @@ def admin_employee_info():
     q = request.args.get("q", "").strip().lower()
     emps = [e for e in rows("Employees") if not q or q in str(e["Employee ID"]).lower() or q in str(e["Name"]).lower()]
     emps.sort(key=lambda e: str(e["Name"]).lower())
+    if request.args.get("view") == "access":            # Update117: Employee Login Access tab (Admin only)
+        for e in emps: e["login_off"] = emp_locked(e)
+        off = sum(1 for e in emps if e["login_off"])
+        return page(EMP_LIST, title="Employee Info", view="access", emps=emps, q=request.args.get("q", ""),
+                    n_on=len(emps) - off, n_off=off, new_count=sum(1 for r in update_log() if r["new"]))
     # Employees with unseen login/logout notifications get their name highlighted in red.
     unseen_ids = {str(r["Employee ID"]) for r in rows("Notifications") if str(r.get("Seen", "")).strip() != "Yes"}
     for e in emps: e["flag"] = str(e["Employee ID"]) in unseen_ids
     log = update_log()
     return page(EMP_LIST, title="Employee Info", view="employees", emps=emps, q=request.args.get("q", ""),
                 new_count=sum(1 for r in log if r["new"]), ftr="@2026_Mobius365_LN_MAP_Ai")
+
+@app.route("/admin/employee-info/login-access/<int:row>", methods=["POST"])
+@need("admin")
+def admin_login_access(row):
+    """Update117: Enable / Disable an employee's login. Uses the existing "Account locked" flag, which the employee login already honours
+    (blank = login enabled, Yes = disabled). No change to the login logic or to any other employee data."""
+    if session.get("role") != "admin": abort(403)
+    eid = request.form.get("eid", ""); disable = request.form.get("do") == "disable"
+    if request.form.get("do") not in ("enable", "disable"): abort(400)
+    if _admin_emp(row, eid) is None:
+        flash("That employee changed - please refresh and try again.", "error"); return redirect(_acct_back())
+    set_employee_cell(row, eid, "Account locked", "Yes" if disable else "")
+    try: log_change("Employees", "Login disabled" if disable else "Login enabled", f"Employee ID {eid}")
+    except Exception as ex: print("log_change failed:", ex)
+    flash(f"Login {'disabled - ' + eid + ' can no longer log in.' if disable else 'enabled - ' + eid + ' can log in again.'}")
+    return redirect(request.form.get("back") if (request.form.get("back") or "").startswith("/admin/employee-info") and "//" not in request.form.get("back") else "/admin/employee-info?view=access")
 
 def emp_or_404(eid):
     e = next((e for e in rows("Employees") if _key(e["Employee ID"]) == _key(eid)), None)
@@ -5751,10 +5784,10 @@ def _html3d(nm, preheader, lead_html, middle_html, link, cta_text):
     if link:
         lk = _h.escape(link)
         button = ('<table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:6px auto 4px auto"><tr>'
-                  '<td align="center" bgcolor="#4f46e5" style="background:linear-gradient(180deg,#6366f1,#4338ca);border-radius:14px;border-bottom:6px solid #2e2a8f;box-shadow:0 12px 22px rgba(67,56,202,.50)">'
-                  f'<a href="{lk}" target="_blank" style="display:inline-block;padding:16px 40px;{F}font-size:17px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:14px">Login to Productivity Tracker &rarr;</a>'
+                  '<td align="center" bgcolor="#d4af37" style="background:linear-gradient(180deg,#e8c95a,#c9a227);border-radius:14px;border-bottom:6px solid #8a6d1a;box-shadow:0 12px 22px rgba(201,162,39,.50)">'
+                  f'<a href="{lk}" target="_blank" style="display:inline-block;padding:16px 40px;{F}font-size:17px;font-weight:bold;color:#1a1a1a;text-decoration:none;border-radius:14px">Login to Productivity Tracker &rarr;</a>'
                   '</td></tr></table>'
-                  f'<p style="{F}margin:12px 0 0 0;font-size:12px;color:#64748b;text-align:center;word-break:break-all">Or copy this link: <a href="{lk}" style="color:#4338ca">{lk}</a></p>')
+                  f'<p style="{F}margin:12px 0 0 0;font-size:12px;color:#64748b;text-align:center;word-break:break-all">Or copy this link: <a href="{lk}" style="color:#8a6d1a">{lk}</a></p>')
     else:
         button = f'<p style="{F}text-align:center;color:#b91c1c;font-size:14px">Please open the Productivity Tracker and log in.</p>'
     if not cta_text and not link:      # Update101: approval mails carry no login text / button / link
@@ -5763,13 +5796,13 @@ def _html3d(nm, preheader, lead_html, middle_html, link, cta_text):
         cta_row = f'<tr><td style="padding:8px 34px 8px 34px;{F}color:#1e293b"><p style="margin:0 0 18px 0;font-size:16px;line-height:1.55">{_h.escape(cta_text)}</p>{button}</td></tr>'
     return (
         '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
-        '<body style="margin:0;padding:0;background:#e0e7ff">'
+        '<body style="margin:0;padding:0;background:#efe9d8">'
         f'<div style="display:none;max-height:0;overflow:hidden;opacity:0">{_h.escape(preheader)}</div>'
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#e0e7ff" style="background:linear-gradient(160deg,#e0e7ff,#f1f5f9)"><tr><td align="center" style="padding:32px 12px">'
-        '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:20px;border-bottom:7px solid #c7d2fe;box-shadow:0 26px 50px rgba(15,23,42,.28)">'
-        '<tr><td bgcolor="#312e81" style="background:linear-gradient(135deg,#1e1b4b,#4338ca 60%,#6366f1);border-radius:20px 20px 0 0;padding:26px 30px"><table role="presentation" cellpadding="0" cellspacing="0"><tr>'
-        f'<td style="padding-right:16px"><table role="presentation" cellpadding="0" cellspacing="0"><tr><td align="center" width="58" height="58" bgcolor="#818cf8" style="width:58px;height:58px;background:linear-gradient(145deg,#c7d2fe,#6366f1);border-radius:16px;border-bottom:5px solid #3730a3;box-shadow:0 8px 14px rgba(0,0,0,.35);{F}font-size:22px;font-weight:bold;color:#1e1b4b">PT</td></tr></table></td>'
-        f'<td style="{F}color:#ffffff"><div style="font-size:22px;font-weight:bold;letter-spacing:.3px">Productivity Tracker</div><div style="font-size:13px;color:#c7d2fe;letter-spacing:2px;margin-top:3px">LN_MAP</div></td></tr></table></td></tr>'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#efe9d8" style="background:linear-gradient(160deg,#efe9d8,#faf7f0)"><tr><td align="center" style="padding:32px 12px">'
+        '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:20px;border-bottom:7px solid #e6c76a;box-shadow:0 26px 50px rgba(15,23,42,.28)">'
+        '<tr><td bgcolor="#2b2b2b" style="background:linear-gradient(135deg,#111111,#2b2b2b 60%,#424242);border-radius:20px 20px 0 0;padding:26px 30px"><table role="presentation" cellpadding="0" cellspacing="0"><tr>'
+        f'<td style="padding-right:16px"><table role="presentation" cellpadding="0" cellspacing="0"><tr><td align="center" width="58" height="58" bgcolor="#d4af37" style="width:58px;height:58px;background:linear-gradient(145deg,#f3dc8c,#d4af37);border-radius:16px;border-bottom:5px solid #8a6d1a;box-shadow:0 8px 14px rgba(0,0,0,.35);{F}font-size:22px;font-weight:bold;color:#1a1a1a">PT</td></tr></table></td>'
+        f'<td style="{F}color:#ffffff"><div style="font-size:22px;font-weight:bold;letter-spacing:.3px">Productivity Tracker</div><div style="font-size:13px;color:#e6c76a;letter-spacing:2px;margin-top:3px">LN_MAP</div></td></tr></table></td></tr>'
         f'<tr><td style="padding:32px 34px 10px 34px;{F}color:#1e293b">'
         f'<p style="margin:0 0 14px 0;font-size:18px;font-weight:bold">Hello {nm},</p>'
         f'<p style="margin:0 0 18px 0;font-size:16px;line-height:1.55">{lead_html}</p></td></tr>'
@@ -5779,21 +5812,26 @@ def _html3d(nm, preheader, lead_html, middle_html, link, cta_text):
         f'<tr><td style="padding:6px 34px 30px 34px;{F}color:#1e293b;font-size:15px;line-height:1.5"><p style="margin:0">Thanks,<br><b>Productivity Tracker (LN_Map)</b></p></td></tr>'
         '</table></td></tr></table></body></html>')
 
+def _orange_row(cells, F="font-family:'Segoe UI',Arial,Helvetica,sans-serif;"):
+    """Update116: the e-mail data shown as ONE line (single table row) on an orange highlight. cells = [(label, value_html)]."""
+    tds = "".join(
+        f'<td align="center" valign="middle" style="padding:13px 8px;{F}{"border-left:1px solid #fb923c;" if i else ""}">'
+        f'<div style="font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:#7c2d12">{k}</div>'
+        f'<div style="font-size:14px;font-weight:bold;color:#431407;margin-top:3px">{v}</div></td>' for i, (k, v) in enumerate(cells))
+    return ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#fdba74" '
+            'style="max-width:532px;background:linear-gradient(180deg,#fed7aa,#fdba74);border-radius:14px;border-bottom:5px solid #ea580c;'
+            f'box-shadow:0 10px 18px rgba(234,88,12,.35)"><tr>{tds}</tr></table>')
+
 def _missed_html(nm, ds, pretty, link):
     import html as _h
     F = "font-family:'Segoe UI',Arial,Helvetica,sans-serif;"
-    tiles = ""
-    for d in ds[:4]:
-        tiles += ('<td align="center" style="padding:0 7px 14px 7px"><table role="presentation" cellpadding="0" cellspacing="0" '
-                  'style="width:88px;background:#ffffff;border-radius:14px;border-bottom:5px solid #cbd5e1;box-shadow:0 10px 18px rgba(30,41,59,.30)">'
-                  f'<tr><td align="center" bgcolor="#dc2626" style="background:linear-gradient(180deg,#f87171,#dc2626);border-radius:14px 14px 0 0;border-bottom:3px solid #991b1b;color:#ffffff;{F}font-size:11px;font-weight:bold;letter-spacing:1.5px;padding:7px 0">{d.strftime("%b %Y").upper()}</td></tr>'
-                  f'<tr><td align="center" style="{F}font-size:34px;font-weight:bold;color:#1e293b;padding:8px 0 0 0">{d.strftime("%d")}</td></tr>'
-                  f'<tr><td align="center" style="{F}font-size:12px;color:#64748b;padding:0 0 11px 0">{d.strftime("%A")}</td></tr></table></td>')
+    line = "  &bull;  ".join(_h.escape(d.strftime("%d %b %Y (%a)")) for d in ds[:4])
+    tiles = _orange_row([("Missing Productivity Entry", line)], F)
     more = (f'<p style="{F}margin:0 0 6px 0;font-size:13px;color:#64748b;text-align:center">+ {len(ds) - 4} more date(s)</p>' if len(ds) > 4 else "")
     dl = _h.escape(", ".join(pretty))
     return _html3d(nm, f"Your Productivity Entry is missing for {', '.join(pretty)}.",
                    f'Your Productivity Entry is missing for <b style="color:#b91c1c">{dl}</b>.',
-                   f'<table role="presentation" cellpadding="0" cellspacing="0"><tr>{tiles}</tr></table>{more}', link,
+                   f'{tiles}{more.replace("margin:0 0 6px 0","margin:8px 0 6px 0")}', link,
                    "Please log in to the Productivity Tracker and complete the required entry:")
 
 def approval_message(emp, kind, date_txt, duration_txt):
@@ -5801,14 +5839,11 @@ def approval_message(emp, kind, date_txt, duration_txt):
     import html as _h
     F = "font-family:'Segoe UI',Arial,Helvetica,sans-serif;"
     name = str(emp["name"])
-    badge = ('<span style="display:inline-block;padding:5px 15px;border-radius:99px;background:#16a34a;border-bottom:3px solid #166534;'
+    badge = ('<span style="display:inline-block;padding:4px 10px;border-radius:99px;background:#16a34a;border-bottom:3px solid #166534;'
              f'color:#ffffff;{F}font-size:13px;font-weight:bold;letter-spacing:.5px">&#10003; Approved</span>')
     fields = [("Employee Name", _h.escape(name)), ("Request Type", _h.escape(kind)), ("Date", _h.escape(date_txt)),
-              ("Duration / Hours", _h.escape(duration_txt)), ("Approval Status", badge)]
-    body = "".join(f'<tr><td style="padding:12px 18px;{F}font-size:13px;color:#64748b;border-bottom:1px solid #e2e8f0;width:40%;text-align:left">{k}</td>'
-                   f'<td style="padding:12px 18px;{F}font-size:15px;font-weight:bold;color:#1e293b;border-bottom:1px solid #e2e8f0;text-align:left">{v}</td></tr>' for k, v in fields)
-    card = ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#f8fafc;border-radius:14px;'
-            f'border-bottom:5px solid #cbd5e1;box-shadow:0 10px 18px rgba(30,41,59,.25)">{body}</table>')
+              ("Duration / Hours", _h.escape(duration_txt)), ("Status", badge)]
+    card = _orange_row(fields, F)
     msg = EmailMessage()
     msg["Subject"] = f"{kind} request approved - {date_txt}"
     msg["From"] = formataddr(mail_sender()); msg["To"] = emp["email"]

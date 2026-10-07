@@ -55,6 +55,7 @@ Access rules (Update59):
   * Update105: View-Only Productivity for designations Senior Team Lead / Team Lead / Associate Manager (no entry, no %, no missed entries, no reminder e-mails; Leave & Permission unchanged).
   * Update106: 3D dashboard-style Employee login (UI only; login logic unchanged).
   * Update107: Mobius365 / LN_Map branding and logo removed from the Admin & Employee panels (sidebar, footer, login title bar, emblem, welcome page).
+  * Update108: Admin login text removed, welcome page is a separate page (no panel behind it), 3D admin avatar, sidebar calendar for both panels.
   * Update102: Admin -> Audit Log (By Process): after choosing a Process and a Month, the new "Productivity" button opens the
     Productivity report for exactly that Process + Month, with "Download Excel" and "Print" buttons. The Excel file (and the printout)
     contain ONLY that Process + Month. The per-employee Productivity page (opened from a process) gets the same two buttons.
@@ -1652,17 +1653,56 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .win.employee .lcard>form>button:not(.pw-toggle):active{transform:translateY(4px);box-shadow:0 1px 0 #3730a3,0 4px 8px -4px #4f46e588,inset 0 1px 0 #ffffff44}
 @media(max-width:800px){.win.employee .wbody{padding:20px 12px;min-height:0}.win.employee .lcard{width:100%;max-width:360px}.win.employee .scene .rb.hm,.win.employee .scene .fl.hm{display:none}}
 @media(prefers-reduced-motion:reduce){.win.employee .scene .rb,.win.employee .scene .fl,.win.employee .scene .cube{animation:none}}
+/* Update108: admin 3D avatar + sidebar calendar */
+.av-adm{position:relative;flex:none;width:64px;height:64px;border-radius:50%;overflow:hidden;border:3px solid #ffffffd9;
+ box-shadow:inset 0 -6px 10px #0000004d,inset 0 4px 8px #ffffff59,0 10px 0 -4px #151b3f,0 14px 20px -4px #000a,0 0 0 3px #4f46e555,0 0 18px #6d70f566;transition:transform .25s ease}
+.av-adm svg{display:block;width:100%;height:100%}
+.prof:hover .av-adm{transform:translateY(-2px) rotate(-2deg)}
+.prof .av-adm{width:64px;height:64px}
+@media(max-width:800px){.prof .av-adm{width:40px;height:40px;border-width:2px}}
+.cal{margin:10px 2px 8px;padding:7px 6px 8px;border:1px solid #2b3560;border-radius:10px;background:#ffffff0a;color:#c9d0ee;font-size:11px}
+.cal summary{cursor:pointer;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#9aa3c7;list-style:none;padding:0 2px}
+.cal summary::-webkit-details-marker{display:none}
+.cal-h{display:flex;align-items:center;justify-content:space-between;margin:6px 0 4px}
+.cal-h b{font-size:12px;color:#fff;font-weight:600}
+.cal-h button{width:20px;height:20px;padding:0;margin:0;border:0;border-radius:6px;background:#2b3560;color:#fff;font-size:14px;line-height:1;box-shadow:none;cursor:pointer}
+.cal-h button:hover{background:#4f46e5;transform:none}
+.cal-g{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;text-align:center}
+.cal-g span{padding:3px 0;border-radius:6px;font-size:10.5px;line-height:1.2}
+.cal-g .w{color:#7f89b8;font-size:9.5px}.cal-g .o{color:#5d6794}.cal-g .e{color:#aab3e0}
+.cal-g .t{background:linear-gradient(180deg,#6d70f5,#4f46e5);color:#fff;font-weight:700;box-shadow:0 2px 0 #3730a3,0 0 10px #6d70f588}
+.cal-today{display:block;width:100%;margin:6px 0 0;padding:3px 0;border:0;border-radius:6px;background:#2b3560;color:#fff;font-size:10.5px;box-shadow:none;cursor:pointer}
+.cal-today:hover{background:#4f46e5;transform:none}
+@media print{.cal{display:none!important}}
 </style></head><body>
-{% if session.role %}<div class="app"><aside class="emp">
+{% if bare %}{{body|safe}}
+{% elif session.role %}<div class="app"><aside class="emp">
 {% for h,l,on,kids in nav %}{% if kids %}<div class="ng{{' open' if on else ''}}"><a class="ng-h" href="{{h}}" role="button" aria-expanded="{{'true' if on else 'false'}}" onclick="var g=this.parentNode;var o=g.classList.toggle('open');this.setAttribute('aria-expanded',o);return false">{{l}}<span class="chev">&#9650;</span></a>
 <div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
+<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
 <div class="prof"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
 <main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div></main></div>
 {% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}</div>{% endif %}
+{% if session.role and not bare %}<script>
+(function(){var g=document.getElementById('cal_g');if(!g)return;var d=document.getElementById('cal');
+var M=['January','February','March','April','May','June','July','August','September','October','November','December'],W=['S','M','T','W','T','F','S'];
+var now=new Date(),y=now.getFullYear(),m=now.getMonth();
+if(window.matchMedia&&window.matchMedia('(min-width:801px)').matches)d.open=true;
+function draw(){var h='',i,first=new Date(y,m,1).getDay(),n=new Date(y,m+1,0).getDate(),pn=new Date(y,m,0).getDate();
+document.getElementById('cal_t').textContent=M[m].slice(0,3)+' '+y;
+for(i=0;i<7;i++)h+='<span class="w">'+W[i]+'</span>';
+for(i=first-1;i>=0;i--)h+='<span class="o">'+(pn-i)+'</span>';
+for(i=1;i<=n;i++){var t=(i===now.getDate()&&m===now.getMonth()&&y===now.getFullYear());h+='<span class="'+(t?'t':'e')+'"'+(t?' aria-current="date"':'')+'>'+i+'</span>'}
+var tail=(7-(first+n)%7)%7;for(i=1;i<=tail;i++)h+='<span class="o">'+i+'</span>';g.innerHTML=h}
+document.getElementById('cal_p').onclick=function(){m--;if(m<0){m=11;y--}draw()};
+document.getElementById('cal_n').onclick=function(){m++;if(m>11){m=0;y++}draw()};
+document.getElementById('cal_td').onclick=function(){now=new Date();y=now.getFullYear();m=now.getMonth();draw()};
+draw()})();
+</script>{% endif %}
 {% if session.role=='admin' %}<div id="toasts"></div><script>
 (function(){var since="0",first=1;
 function toast(t){var d=document.createElement('div');d.className='toast';d.textContent=t;
@@ -1932,7 +1972,7 @@ def page(body, title="Productivity Tracker", **ctx):
                by_h["/admin/employee-info"]]
     side_avatar = ""
     if session.get("role") == "admin":
-        side_avatar = '<div class="av-flat" role="img" aria-label="Admin profile picture"><span>A</span></div>'
+        side_avatar = ADMIN_AVATAR
     elif session.get("role") == "employee":
         try:
             g = gender_of(my_emp_row())
@@ -1940,7 +1980,7 @@ def page(body, title="Productivity Tracker", **ctx):
             g = ""
         side_avatar = render_template_string(AVATAR3D, gender=g, initials=initials_of(session.get("name", "")))
     return render_template_string(BASE, body=render_template_string(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar, music_engine=BGM_ENGINE)
+                                  side_avatar=side_avatar, music_engine=BGM_ENGINE, bare=bool(ctx.get("bare")))
 
 
 LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></div>
@@ -1954,7 +1994,7 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
 <div class="fl" style="left:22%;top:6%;--bt:6s;--d:-2.5s"><div class="sph" style="--s:26px"></div></div>
 <div class="fl hm" style="right:5%;top:46%;--bt:7s;--d:-1.5s"><div class="sph" style="--s:34px"></div></div>
 <div class="fl hm" style="left:4%;top:48%;--bt:8s;--d:-5s"><div class="sph" style="--s:20px"></div></div>{% if role=='admin' %}<div class="dp adm"><div class="dp-lab"><b>&#9664;&#9664;&#9664;</b>&nbsp; LIVE DATA FEED &middot; INCOMING FROM SERVER</div><div class="dp-node l"><div class="dp-dash"><i></i><i></i><i></i><i></i></div><div class="dp-stand"></div><small>ADMIN DASHBOARD</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% else %}<div class="dp emp"><div class="dp-lab">UPLOADING ENCRYPTED DATA TO SERVER &nbsp;<b>&#9654;&#9654;&#9654;</b></div><div class="dp-node l"><div class="dp-scr"><i></i><i></i><i></i></div><div class="dp-stand"></div><small>EMPLOYEE</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% endif %}</div>
-{% if role=='admin' %}<div class="adp" aria-hidden="true"><p class="adp-t">Admin Panel</p><h3>Productivity<br>Dashboard</h3><p class="adp-s">Monitor attendance, tasks and team performance in one place.</p><div class="adp-3d"><div class="adp-st"><div class="adp-c c1"><small>Performance</small><div class="adp-bars"><i style="height:38%"></i><i style="height:62%"></i><i style="height:48%"></i><i style="height:80%"></i><i style="height:58%"></i><i style="height:92%"></i><i style="height:70%"></i></div></div><div class="adp-c c2"><small>Attendance</small><div class="adp-ring"></div></div><div class="adp-c c3"><small>Reports</small><div class="adp-ln"></div><div class="adp-ln s"></div></div></div></div></div>{% endif %}{% if role=='employee' %}<div class="rb" style="left:14%;top:56%;width:54px;height:54px;--d:-3s"></div><div class="rb hm" style="right:16%;top:14%;width:70px;height:40px;animation-delay:-6s"></div><div class="rb" style="right:8%;bottom:12%;width:44px;height:44px;animation-delay:-9s"></div>{% endif %}<div class="lcard">{% if role=='admin' %}<div class="lav">{{admin_avatar|safe}}</div>{% endif %}<h2>Welcome back</h2><p>{{title}}</p>
+{% if role=='admin' %}<div class="adp" aria-hidden="true"><div class="adp-3d"><div class="adp-st"><div class="adp-c c1"><small>Performance</small><div class="adp-bars"><i style="height:38%"></i><i style="height:62%"></i><i style="height:48%"></i><i style="height:80%"></i><i style="height:58%"></i><i style="height:92%"></i><i style="height:70%"></i></div></div><div class="adp-c c2"><small>Attendance</small><div class="adp-ring"></div></div><div class="adp-c c3"><small>Reports</small><div class="adp-ln"></div><div class="adp-ln s"></div></div></div></div></div>{% endif %}{% if role=='employee' %}<div class="rb" style="left:14%;top:56%;width:54px;height:54px;--d:-3s"></div><div class="rb hm" style="right:16%;top:14%;width:70px;height:40px;animation-delay:-6s"></div><div class="rb" style="right:8%;bottom:12%;width:44px;height:44px;animation-delay:-9s"></div>{% endif %}<div class="lcard">{% if role=='admin' %}<div class="lav">{{admin_avatar|safe}}</div>{% endif %}<h2>Welcome back</h2><p>{{title}}</p>
 <form method="post">
 <div class="field"><input id="login_u" name="u" placeholder="{{ph}}" required autofocus autocomplete="off"></div>
 <div class="field pw"><input id="login_p" name="p" type="password" placeholder="Password" required autocomplete="off">
@@ -3216,7 +3256,7 @@ WELCOME = """<style>
 @app.route("/admin/welcome")
 @need("admin")
 def admin_welcome():
-    return page(WELCOME, title="Welcome", wl_gender="male")
+    return page(WELCOME, title="Welcome", wl_gender="male", bare=True)
 
 # ---------------------------------------------------------------- employee GROUP CHAT (Update80 / Update82)
 # ONE group = every employee who is online right now. Nobody is added by hand: coming online joins the group, going offline leaves it.
@@ -3351,7 +3391,7 @@ def employee_welcome():
         g = gender_of(my_emp_row())
     except Exception:
         g = ""
-    return page(WELCOME, title="Welcome", wl_gender=g or "male")
+    return page(WELCOME, title="Welcome", wl_gender=g or "male", bare=True)
 
 @app.route("/employee")
 @need("employee")
@@ -3743,6 +3783,18 @@ KPI = """<div class="kpis">
 {% if a1 is not none %}<div class="kpi"><span>{{lab1}}</span><b>{{a1}}%</b><i class="bar {{a1|tone}}"><u style="width:{{[a1,100]|min}}%"></u></i></div>{% endif %}
 {% if a2 is none %}<div class="kpi"><span>{{lab2}}</span><b>View Only</b></div>{% else %}<div class="kpi"><span>{{lab2}}</span><b>{{a2}}%</b><i class="bar {{a2|tone}}"><u style="width:{{[a2,100]|min}}%"></u></i></div>{% endif %}
 {% for l,v in extra %}<div class="kpi"><span>{{l}}</span><b>{{v}}</b></div>{% endfor %}</div>"""
+
+ADMIN_AVATAR = ('<div class="av-adm" role="img" aria-label="Admin profile picture"><svg viewBox="0 0 100 100" aria-hidden="true"><defs>'
+ '<radialGradient id="aab" cx="30%" cy="22%" r="90%"><stop offset="0" stop-color="#9fb4ff"/><stop offset="1" stop-color="#2a2f8f"/></radialGradient>'
+ '<linearGradient id="aas" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffdcbc"/><stop offset="1" stop-color="#dc9f74"/></linearGradient>'
+ '<linearGradient id="aau" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#34407a"/><stop offset="1" stop-color="#151b3f"/></linearGradient></defs>'
+ '<rect width="100" height="100" fill="url(#aab)"/>'
+ '<path d="M10 100c1-22 18-31 40-31s39 9 40 31z" fill="url(#aau)"/>'
+ '<path d="M39 69l11 15 11-15-5-4H44z" fill="#f3f5ff"/><path d="M47.5 74h5l2.2 15L50 94l-4.7-5z" fill="#4f46e5"/>'
+ '<rect x="43" y="55" width="14" height="14" rx="6" fill="#d2956b"/>'
+ '<ellipse cx="50" cy="40" rx="15" ry="17.5" fill="url(#aas)"/>'
+ '<path d="M34.5 39c-2-15 8-22 16-22 9 0 17 6 15 22-3-7-8-10-15.500-10S37.500 32 34.500 39z" fill="#2a2233"/>'
+ '<ellipse cx="41" cy="22" rx="15" ry="7" fill="#fff" opacity=".16"/></svg></div>')
 
 AVATAR3D = """<div class="av3d" role="img" aria-label="{{ (gender|capitalize) if gender else 'Employee' }} profile picture"><div class="av-stage">
 {% set c = ('#fce7f3','#f9a8d4','#c026d3') if gender=='female' else (('#dbeafe','#93c5fd','#4f46e5') if gender=='male' else ('#ccfbf1','#5eead4','#0d9488')) %}

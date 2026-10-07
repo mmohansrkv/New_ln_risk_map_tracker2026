@@ -52,6 +52,7 @@ Access rules (Update59):
     Sidebar 'Group Chat' removed - only a round Chat icon (bottom-right) opens the Group Chat. NEW Tamil flute BGM (raga Kalyani, new
     melody, different from the earlier Mohanam tune), Welcome Page only.
   * Update104: compact Employee + Admin UI (smaller text/buttons) and a dashboard-style 3D Admin login (UI only; login logic unchanged).
+  * Update105: View-Only Productivity for designations Senior Team Lead / Team Lead / Associate Manager (no entry, no %, no missed entries, no reminder e-mails; Leave & Permission unchanged).
   * Update102: Admin -> Audit Log (By Process): after choosing a Process and a Month, the new "Productivity" button opens the
     Productivity report for exactly that Process + Month, with "Download Excel" and "Print" buttons. The Excel file (and the printout)
     contain ONLY that Process + Month. The per-employee Productivity page (opened from a process) gets the same two buttons.
@@ -684,6 +685,21 @@ def find_designation(emp_id, name="", band=""):
         e = next((e for e in emps if _key(e["Name"]) == _key(name) and _key(e["Band"]) == _key(band)), None)
     return str(e.get("Designation", "")).strip() if e else ""
 
+# ---- Update105: View-Only productivity access, decided ONLY by the employee's Designation field ----
+VIEW_ONLY_DESIGNATIONS = ("Senior Team Lead", "Team Lead", "Associate Manager")
+def _norm_desig(d): return re.sub(r"[^a-z]+", " ", str(d or "").lower()).strip()      # case / spacing / punctuation insensitive
+_VIEW_ONLY_SET = {_norm_desig(x) for x in VIEW_ONLY_DESIGNATIONS}
+def desig_view_only(d): return _norm_desig(d) in _VIEW_ONLY_SET
+_vo_cache = [0.0, frozenset()]
+def view_only_ids():
+    """Employee IDs (normalised) whose Designation is view-only. Re-read every few seconds, so a Designation change applies automatically."""
+    if time.monotonic() - _vo_cache[0] > 8:
+        ids = frozenset(_key(e.get("Employee ID", "")) for e in rows("Employees") if desig_view_only(e.get("Designation", "")))
+        _vo_cache[0], _vo_cache[1] = time.monotonic(), ids
+    return _vo_cache[1]
+def is_view_only(eid): return _key(eid) in view_only_ids()
+VIEW_ONLY_MSG = "Your designation has View Only access to Productivity - entries cannot be added or edited."
+
 def load_subs(emp_id=None):
     """All submissions, or (emp_id given) only that employee's - far less work on a big Productivity log."""
     T = target_hours()
@@ -843,6 +859,7 @@ def duplicate_entry(emp_id, date, skip_sid=None, fresh=False):
     return any(_key(r["Employee ID"]) == k and str(r["Date"]) == str(date) and str(r["Submission ID"]) != str(skip_sid) for r in recs)
 
 def write_sub(sid, date, emp, procs, notes):
+    if is_view_only(emp[1]): raise PermissionError("View Only designation: productivity entry is not allowed")      # Update105
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
     base = [sid, date, *emp]      # emp = (band, id, name)
     out = [base + ["Process", n, h, c, now, d] for n, h, c, d in procs] + \
@@ -2470,6 +2487,8 @@ def admin_log_add():
     if not e:
         flash("Please select an employee first.", "error"); return redirect("/admin/log")
     emp_id, name, band = str(e["Employee ID"]).strip(), str(e.get("Name", "")), str(e.get("Band", ""))
+    if is_view_only(emp_id):                                         # Update105
+        flash(f"{name} has a View Only designation - productivity entries cannot be added.", "error"); return redirect("/admin/log")
     action = "/admin/log/add?emp=" + urllib.parse.quote(emp_id, safe="")
     if request.method == "POST":
         try:
@@ -3310,6 +3329,11 @@ def employee_home():
     prefetch(*EMP_PAGE_SHEETS)          # cold cache: fetch all sheets together instead of one by one
     today = str(today_local())
     session["designation"] = find_designation(session["emp_id"], session["name"], session["band"])
+    if desig_view_only(session["designation"]) or is_view_only(session["emp_id"]):      # Update105: View Only - no entry form, no Productivity %
+        first_ = today_local().replace(day=1)
+        today_perm_ = next((r for r in rows("Permissions") if str(r["Employee ID"]) == session["emp_id"] and r["Date"] == today), None)
+        return page(EMP_TOP + VIEW_ONLY_CARD, title="Daily productivity", today=today, month_label=first_.strftime("%B %Y"),
+                    lab1="Attendance", lab2="Productivity", a1=None, a2=None, extra=[], today_perm=today_perm_)
     sub = dict(date=today, band=session["band"], designation=session["designation"],
                emp_id=session["emp_id"], emp_name=session["name"],
                procs=[{}], notes=[{}])
@@ -3404,6 +3428,8 @@ def _save_lock(key):
 @app.route("/employee/save", methods=["POST"])
 @need("employee")
 def employee_save():
+    if is_view_only(session.get("emp_id", "")):                  # Update105
+        flash(VIEW_ONLY_MSG, "error"); return redirect("/employee")
     try:
         date, procs, notes, err = parse_form(session["emp_id"])
         if err:
@@ -3436,6 +3462,8 @@ def employee_save():
 @need()
 def entry_edit(sid):
     s = get_sub(sid)
+    if is_view_only(s["emp_id"]):                                  # Update105
+        flash(VIEW_ONLY_MSG, "error"); return redirect(next_url() or home())
     if request.method == "POST":
         date, procs, notes, err = parse_form(s["emp_id"])
         if err:
@@ -3530,6 +3558,11 @@ def report(employees, subs, leaves, start, end):
                         att=min(round(credit / wd_e * 100), 100) if wd_e else 0,
                         pct=min(round(prod_hrs / base * 100), 100) if base else 0,
                         prod=prod_hrs, non=sum(s["non"] for s in mine), perm=perm_hrs))
+    for r_, e_ in zip(out, employees):      # Update105: Senior Team Lead / Team Lead / Associate Manager -> View Only, no Productivity %
+        if desig_view_only(e_.get("Designation", "")) or is_view_only(r_["id"]):
+            r_.update(vo=True, pct=None, att=None, present="-", absent="-", prod=0, non=0)
+        else:
+            r_["vo"] = False
     return out
 
 def leave_status(l):
@@ -3643,6 +3676,7 @@ app.jinja_env.filters["ppill"] = permission_pill
 def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
     """Working days (weekly offs and holidays excluded) in start..end with no entry and no leave."""
     eid = str(eid)
+    if is_view_only(eid): return []                    # Update105: no Missed Productivity Entry for View-Only designations
     jd = join_date(eid)
     if jd and start < jd: start = jd                  # Update97: dates before the joining date are never "missed" / "pending"
     leaves = live_leaves(leaves)
@@ -3676,8 +3710,8 @@ ADMIN_ALERT = """{% if miss or pend %}<div class="warn"><b>&#9888; Missed entrie
 <div><a href="/admin/missed-log">View full Missed Entries Log</a></div></div>{% endif %}"""
 
 KPI = """<div class="kpis">
-<div class="kpi"><span>{{lab1}}</span><b>{{a1}}%</b><i class="bar {{a1|tone}}"><u style="width:{{[a1,100]|min}}%"></u></i></div>
-<div class="kpi"><span>{{lab2}}</span><b>{{a2}}%</b><i class="bar {{a2|tone}}"><u style="width:{{[a2,100]|min}}%"></u></i></div>
+{% if a1 is not none %}<div class="kpi"><span>{{lab1}}</span><b>{{a1}}%</b><i class="bar {{a1|tone}}"><u style="width:{{[a1,100]|min}}%"></u></i></div>{% endif %}
+{% if a2 is none %}<div class="kpi"><span>{{lab2}}</span><b>View Only</b></div>{% else %}<div class="kpi"><span>{{lab2}}</span><b>{{a2}}%</b><i class="bar {{a2|tone}}"><u style="width:{{[a2,100]|min}}%"></u></i></div>{% endif %}
 {% for l,v in extra %}<div class="kpi"><span>{{l}}</span><b>{{v}}</b></div>{% endfor %}</div>"""
 
 AVATAR3D = """<div class="av3d" role="img" aria-label="{{ (gender|capitalize) if gender else 'Employee' }} profile picture"><div class="av-stage">
@@ -3718,6 +3752,11 @@ EMP_TOP = """<div class="head hero"><div class="welcome wflex"><div class="wtxt"
 <p class="mut wsub"><span class="seg">{{today}}</span>{% if session.designation %}<span class="dot">&middot;</span><span class="seg">{{session.designation}}</span>{% endif %}<span class="dot">&middot;</span><span class="seg">Band {{session.band}}</span><span class="dot">&middot;</span><span class="seg">{{month_label}} summary</span>
 {% if today_perm %}<span class="dot">&middot;</span>Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div></div></div>""" + KPI
 
+VIEW_ONLY_CARD = """<div class="card"><h2 style="margin-top:0">Productivity &mdash; View Only</h2>
+<p class="mut">Your designation ({{session.designation}}) has <b>View Only</b> access to Productivity. Daily productivity entry is not required,
+no productivity % is calculated, and no missed-entry reminders are sent. Leave &amp; Permission works as usual.</p>
+<a class="btnl" href="/employee/leave">Leave &amp; Permission</a> <a class="btnl" href="/employee/productivity">Productivity Info</a></div>"""
+
 SUMMARY = """<div class="head ov-head"><div><h1>Overview</h1>
 <p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; the daily target of {{target|g}} hrs per present day (capped at 100%).</p></div>
 <div class="ov-tools no-print">
@@ -3740,9 +3779,9 @@ setInterval(poll,5000);document.addEventListener('visibilitychange',function(){i
 <table><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Productivity</th></tr>
 {% for r in rep %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>
-<td>{{r.att}}%<i class="bar {{r.att|tone}}"><u style="width:{{r.att}}%"></u></i></td>
+{% if r.vo %}<td>-</td><td>-</td><td>-</td><td><span class="pill act">View Only</span></td></tr>{% else %}<td>{{r.att}}%<i class="bar {{r.att|tone}}"><u style="width:{{r.att}}%"></u></i></td>
 <td>{{r.prod|g}}</td><td>{{r.non|g}}</td>
-<td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td></tr>
+<td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td></tr>{% endif %}
 {% else %}<tr><td colspan="9">No employees yet.</td></tr>{% endfor %}</table>"""
 
 LEAVE_EMP = """<style>
@@ -3852,8 +3891,9 @@ def admin_summary():
         start, end = month_range(month); label = start.strftime("%B %Y")
     emps = rows("Employees")
     rep = sorted(report(emps, subs, leaves, start, end), key=lambda r: str(r["name"]))
-    n = len(rep) or 1
-    a1, a2 = round(sum(r["att"] for r in rep) / n), round(sum(r["pct"] for r in rep) / n)
+    std = [r for r in rep if not r.get("vo")]          # Update105: View-Only designations are excluded from the averages
+    n = len(std) or 1
+    a1, a2 = round(sum(r["att"] for r in std) / n), round(sum(r["pct"] for r in std) / n)
     extra = [("Employees", len(rep)), ("Total leave days", sum(r["leave"] for r in rep))]
     # Missed-entries list is intentionally NOT shown on the Overview page any more;
     # it lives only on the dedicated "Missed entries" page (/admin/missed).
@@ -4243,7 +4283,7 @@ AUD_LIST = """<div class="head"><div><h1>Audit Log</h1>
 <table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Attendance</th><th>Productivity</th>
 {% if admin %}<th>Processes worked</th><th>Audit Log access</th><th>Processes allowed</th>{% endif %}<th></th></tr>
 {% for r in rep %}<tr><td>{{r.id}}</td><td><a href="{{base}}/{{r.id|urlencode}}"><b>{{r.name}}</b></a></td><td>{{r.designation}}</td>
-<td>{{r.att}}%</td><td>{{r.pct}}%</td>
+{% if r.vo %}<td>-</td><td><span class="pill act">View Only</span></td>{% else %}<td>{{r.att}}%</td><td>{{r.pct}}%</td>{% endif %}
 {% if admin %}<td>{% if r.worked %}{{r.worked|join(', ')}}{% else %}<span class="mut">No entries yet</span>{% endif %}</td>
 <td><span class="pill {{'in' if r.active else 'out'}}">{{'Enabled' if r.active else 'Disabled'}}</span></td>
 <td>{% if r.acc.procs %}{{r.acc.procs|join(', ')}}{% if not r.active %} <span class="mut">(switched off)</span>{% endif %}{% else %}<span class="mut">None selected</span>{% endif %}</td>{% endif %}
@@ -4261,7 +4301,7 @@ AUD_HEAD = """<div class="head"><div><h1>{{'Audit Log' if not admin else emp.Nam
 <p class="mut">Period: <b>{{label}}</b></p>{% endif %}"""
 
 AUD_PROD = """<div class="totals">Working days: <b>{{k.wd}}</b> &middot; Present: <b>{{k.present}}</b> &middot; Productive: <b>{{k.prod|g}}</b> hrs
-&middot; Non-productive: <b>{{k.non|g}}</b> hrs &middot; Productivity: <b>{{k.pct}}%</b></div>
+&middot; Non-productive: <b>{{k.non|g}}</b> hrs &middot; Productivity: <b>{% if k.vo %}View Only{% else %}{{k.pct}}%{% endif %}</b></div>
 <h2>Daily entries</h2>
 <table><tr><th>Date</th><th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Productivity</th></tr>
 {% for s in subs %}<tr><td>{{s.date}}</td><td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
@@ -4378,7 +4418,7 @@ def _audit_process_view(base):
     if sel not in procs: sel = ""
     q = request.args.get("q", "").strip().lower()
     T = target_hours()
-    subs = load_subs()
+    subs = [x for x in load_subs() if not is_view_only(x["emp_id"])]          # Update105
     emap = {_key(e["Employee ID"]): e for e in rows("Employees")}
     agg = {}          # process -> {employee key: totals}
     for sub in subs:
@@ -4476,6 +4516,7 @@ def _aud_prod_report(process, start, end, emp_id=""):
     emap = {_key(e["Employee ID"]): e for e in rows("Employees")}
     lines, per = [], {}
     for sub in load_subs():
+        if is_view_only(sub["emp_id"]): continue                  # Update105
         if sub["off"] or not (str(start) <= str(sub["date"]) <= str(end)): continue
         if emp_id and _key(sub["emp_id"]) != _key(emp_id): continue
         for pr in sub["procs"]:
@@ -5693,6 +5734,7 @@ _reminder_done = set()          # dates this process has already handled
 
 def productivity_access(eid, access_rows):
     """Everyone may submit the Daily Productivity Entry unless the 'Productivity Access' sheet has a row for them with Enabled = No."""
+    if is_view_only(eid): return False                  # Update105: View-Only designations get no productivity reminder / missed-entry e-mails
     for r in access_rows:
         if _key(r.get("Employee ID", "")) == _key(eid):
             return str(r.get("Enabled", "")).strip().lower() not in ("no", "n", "false", "0", "disabled")

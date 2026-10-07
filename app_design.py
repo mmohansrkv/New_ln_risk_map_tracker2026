@@ -59,6 +59,7 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update119: Admin + Employee login pages redesigned to the fire-theme reference (dark crimson window, orange grid floor, logo in card, orange 3D button). UI only; login logic unchanged.
   * Update117: Admin > Employee Info > new "Employee Login Access" tab (ID, name, Office Email, status, Enable / Disable Login with confirmation). Admin only; uses the existing Account-locked flag, login logic unchanged.
   * Update116: E-mail templates (Leave/Permission approval + Missed Entries): the data is shown in ONE line (single row) on an orange highlight.
   * Update115: Automatic reminder e-mails REMOVED (daily 1:35 PM REMINDER_TIME scheduler + scheduled missed-entries e-mail + their Email Controls schedule). Reminder e-mails are manual and Admin-only
@@ -1210,6 +1211,7 @@ def temp_password():
 # ---------------------------------------------------------------- templates
 BASE = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{{title}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{--ink:#1c2340;--mut:#6b7390;--pri:#4f46e5;--line:#e6e9f2}
 *{box-sizing:border-box}
@@ -1689,6 +1691,63 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .win.employee .lcard>form>button:not(.pw-toggle):active{transform:translateY(4px);box-shadow:0 1px 0 #3730a3,0 4px 8px -4px #4f46e588,inset 0 1px 0 #ffffff44}
 @media(max-width:800px){.win.employee .wbody{padding:20px 12px;min-height:0}.win.employee .lcard{width:100%;max-width:360px}.win.employee .scene .rb.hm,.win.employee .scene .fl.hm{display:none}}
 @media(prefers-reduced-motion:reduce){.win.employee .scene .rb,.win.employee .scene .fl,.win.employee .scene .cube{animation:none}}
+/* Update119: Fire-theme login pages (Admin + Employee) - matches the shared reference design. UI only; form, ids and login routes untouched */
+.lg{background:radial-gradient(520px 420px at 0% 0%,#ffb27a 0%,#ffc9a0 40%,transparent 70%),radial-gradient(420px 380px at 100% 12%,#ffc58f 0%,transparent 65%),radial-gradient(460px 400px at 100% 100%,#f4857f 0%,transparent 65%),radial-gradient(380px 320px at 6% 100%,#f8c768 0%,transparent 65%),linear-gradient(135deg,#fde3d8 0%,#fbd3df 50%,#fde7d3 100%);font-family:Poppins,"Segoe UI",system-ui,-apple-system,sans-serif}
+.lg .blob{display:none}
+.lg .win.admin,.lg .win.employee{width:min(1000px,100%);border-radius:22px;transform:perspective(1800px) rotateX(calc(2deg + var(--rx,0deg))) rotateY(calc(-1.5deg + var(--ry,0deg))) rotateZ(-.6deg);box-shadow:0 50px 80px -24px #5a1020aa,0 24px 40px -20px #000a}
+.lg .win.admin .wbar,.lg .win.employee .wbar{height:36px;border-radius:22px 22px 0 0;background:#1d0b14;border-bottom:1px solid #8a5a3c;padding:0 18px;gap:8px}
+.lg .win.admin .wbar i,.lg .win.employee .wbar i{width:10px;height:10px;background:#ff5f57}
+.lg .win.admin .wbar i:nth-child(2),.lg .win.employee .wbar i:nth-child(2){background:#febc2e}
+.lg .win.admin .wbar i:nth-child(3),.lg .win.employee .wbar i:nth-child(3){background:#28c840}
+.lg .win.admin .wbody,.lg .win.employee .wbody{min-height:520px;border-radius:0 0 22px 22px;
+ background:radial-gradient(620px 380px at 18% 100%,#e8801f 0%,#b4531a66 40%,transparent 72%),radial-gradient(560px 420px at 92% 0%,#c3102b 0%,#9a0f2c88 45%,transparent 75%),radial-gradient(500px 360px at 70% 85%,#7a2418aa,transparent 70%),linear-gradient(135deg,#240b17 0%,#2d0a1a 40%,#4e0e1b 75%,#5c0f1c 100%)}
+.lg .win.admin .wbody{padding:36px 44px;gap:30px}
+.lg .win.employee .wbody{padding:36px 20px}
+/* orange perspective grid floor + fire palette for the animated scene */
+.lg .scene.admin,.lg .scene.employee{--c1:#ffffff26;--c2:#ffffff0d;--g:#ff9a3c;--r:#ffb067;--vt:#240b17;--pk:#ffd9a0;--pk2:#ff9a3c}
+.lg .win .scene .gfw{opacity:.8;height:34%}
+.lg .win .scene .gf::before{opacity:.5;animation:none}
+.lg .win .scene .cube i{border:1px solid #ffffff30;border-radius:18%;box-shadow:inset 0 0 18px #ffffff1c}
+.lg .win .scene .ring3d,.lg .win .scene .sph{display:none}
+.lg .win.employee .scene .fl,.lg .win.admin .scene .fl{opacity:.9}
+.lg .win.employee .scene .rb{display:none}
+.lg .win.employee .orb{display:none}
+.lg .win.employee .scene .dp{display:block}
+.lg .dp-lab{color:#ffe3c4;opacity:.9;letter-spacing:.3em;text-shadow:0 0 10px #ff9a3c88}
+.lg .dp-lab b{color:#ff9a3c}
+.lg .dp-scr{border:1.5px solid #ffb067;background:linear-gradient(140deg,#ffffff22,#ffffff08);box-shadow:0 0 16px #ff9a3c55}
+.lg .dp-scr i{background:#ffd9a0}
+.lg .dp-node small{color:#ffe3c4;letter-spacing:.3em}
+/* fire card */
+.lg .win.admin .lcard,.lg .win.employee .lcard{background:linear-gradient(180deg,#fff,#fdf3f0);border-radius:20px;box-shadow:0 1px 0 #fff inset,0 40px 60px -18px #000c,0 12px 20px -10px #0006}
+.lg .win.employee .lcard{width:350px;padding:26px 30px 22px;text-align:center}
+.lg .win.admin .lcard{width:360px;padding:26px 30px 28px;text-align:left}
+.lg .lcard h2{font-family:Poppins,"Segoe UI",system-ui,sans-serif;font-weight:700;font-size:22px;color:#2a0f1a;margin:6px 0 0}
+.lg .lcard>p{color:#8a6670;font-size:13px;margin:2px 0 14px}
+.lg .lcard input{border:1px solid #f0d9d4;border-radius:12px;padding:11px 14px;font-size:14px;background:#fff;color:#2a0f1a;box-shadow:none}
+.lg .lcard input::placeholder{color:#b49a9e}
+.lg .lcard input:focus,.lg .lcard input.key-pulse{outline:0;border-color:#ff8a3c;box-shadow:0 0 0 4px #ff8a3c33}
+.lg .lcard .pw-toggle{color:#e2531a;font-weight:700}
+.lg .lcard .pw-toggle:hover{background:#fff1e8;color:#c13f0d}
+.lg .lcard>form>button:not(.pw-toggle){border-radius:12px;padding:12px;font-size:15px;font-weight:700;color:#fff;background:linear-gradient(180deg,#ff8a2a,#e8501a);box-shadow:0 5px 0 #b3340f,0 14px 20px -8px #e8501acc,inset 0 1px 0 #ffffff66}
+.lg .lcard>form>button:not(.pw-toggle):hover{transform:translateY(-1px);box-shadow:0 6px 0 #b3340f,0 18px 24px -8px #e8501add,inset 0 1px 0 #ffffff66}
+.lg .lcard>form>button:not(.pw-toggle):active{transform:translateY(4px);box-shadow:0 1px 0 #b3340f}
+.lcard-logo{display:block;margin:0 auto 4px;width:clamp(130px,42%,170px);height:auto}
+.lcard-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 6px}
+.lcard-top .lav{margin:0}.lcard-top .lcard-logo{margin:0;width:clamp(100px,38%,128px)}
+.win.admin .lcard-top .lav .av3d,.win.admin .lcard-top .lav{width:64px;height:64px}
+.fgt{display:block;margin:12px 0 0;font-size:12.5px;color:#8a6670;text-align:center}
+/* admin left text panel */
+.lg .adp-t{color:#ffc58f;letter-spacing:.3em}
+.lg .adp h3{font-size:34px;font-weight:700;line-height:1.15;margin:0 0 14px}
+.lg .adp-s{color:#f3d3c6;font-size:14px;max-width:330px}
+.lg .adp-c{background:linear-gradient(160deg,#ffffff26,#ffffff0d);border:1px solid #ffffff33}
+.lg .adp-c small{color:#f0d3c6}
+.lg .adp-bars i{background:linear-gradient(180deg,#ffb067,#e8501a)}
+.lg .adp-ring{border-top-color:#ff9a3c;border-right-color:#ff9a3c}
+.lg .adp-c.c3{background:linear-gradient(160deg,#f2542dee,#c8102ecc)}
+.lg .adp-3d{height:230px}
+@media(max-width:800px){.lg .win.admin,.lg .win.employee{transform:none!important}.lg .win.admin .wbody,.lg .win.employee .wbody{padding:22px 12px;min-height:0}.lg .win.admin .lcard,.lg .win.employee .lcard{width:100%;max-width:380px}}
 /* Update108: admin 3D avatar + sidebar calendar */
 .av-adm{position:relative;flex:none;width:64px;height:64px;border-radius:50%;overflow:hidden;border:3px solid #ffffffd9;
  box-shadow:inset 0 -6px 10px #0000004d,inset 0 4px 8px #ffffff59,0 10px 0 -4px #151b3f,0 14px 20px -4px #000a,0 0 0 3px #4f46e555,0 0 18px #6d70f566;transition:transform .25s ease}
@@ -2044,7 +2103,7 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
 <div class="fl" style="left:22%;top:6%;--bt:6s;--d:-2.5s"><div class="sph" style="--s:26px"></div></div>
 <div class="fl hm" style="right:5%;top:46%;--bt:7s;--d:-1.5s"><div class="sph" style="--s:34px"></div></div>
 <div class="fl hm" style="left:4%;top:48%;--bt:8s;--d:-5s"><div class="sph" style="--s:20px"></div></div>{% if role=='admin' %}<div class="dp adm"><div class="dp-lab"><b>&#9664;&#9664;&#9664;</b>&nbsp; LIVE DATA FEED &middot; INCOMING FROM SERVER</div><div class="dp-node l"><div class="dp-dash"><i></i><i></i><i></i><i></i></div><div class="dp-stand"></div><small>ADMIN DASHBOARD</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% else %}<div class="dp emp"><div class="dp-lab">UPLOADING ENCRYPTED DATA TO SERVER &nbsp;<b>&#9654;&#9654;&#9654;</b></div><div class="dp-node l"><div class="dp-scr"><i></i><i></i><i></i></div><div class="dp-stand"></div><small>EMPLOYEE</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% endif %}</div>
-{% if role=='admin' %}<div class="adp"><div class="adp-logo"><img src="/logo.png" alt="Mobius Technologies and Services" width="190" height="99"></div><div class="adp-body" aria-hidden="true"><p class="adp-t">Admin Panel</p><h3>Productivity<br>Dashboard</h3><p class="adp-s">Monitor attendance, tasks and team performance in one place.</p><div class="adp-3d"><div class="adp-st"><div class="adp-c c1"><small>Performance</small><div class="adp-bars"><i style="height:38%"></i><i style="height:62%"></i><i style="height:48%"></i><i style="height:80%"></i><i style="height:58%"></i><i style="height:92%"></i><i style="height:70%"></i></div></div><div class="adp-c c2"><small>Attendance</small><div class="adp-ring"></div></div><div class="adp-c c3"><small>Reports</small><div class="adp-ln"></div><div class="adp-ln s"></div></div></div></div></div></div>{% endif %}{% if role=='employee' %}<div class="rb" style="left:14%;top:56%;width:54px;height:54px;--d:-3s"></div><div class="rb hm" style="right:16%;top:14%;width:70px;height:40px;animation-delay:-6s"></div><div class="rb" style="right:8%;bottom:12%;width:44px;height:44px;animation-delay:-9s"></div>{% endif %}<div class="lcard">{% if role=='admin' %}<div class="lav">{{admin_avatar|safe}}</div>{% endif %}<h2>Welcome back</h2><p>{{title}}</p>
+{% if role=='admin' %}<div class="adp"><div class="adp-body" aria-hidden="true"><p class="adp-t">Admin Panel</p><h3>Productivity<br>Dashboard</h3><p class="adp-s">Monitor attendance, tasks and team performance in one place.</p><div class="adp-3d"><div class="adp-st"><div class="adp-c c1"><small>Performance</small><div class="adp-bars"><i style="height:38%"></i><i style="height:62%"></i><i style="height:48%"></i><i style="height:80%"></i><i style="height:58%"></i><i style="height:92%"></i><i style="height:70%"></i></div></div><div class="adp-c c2"><small>Attendance</small><div class="adp-ring"></div></div><div class="adp-c c3"><small>Reports</small><div class="adp-ln"></div><div class="adp-ln s"></div></div></div></div></div></div>{% endif %}{% if role=='employee' %}<div class="rb" style="left:14%;top:56%;width:54px;height:54px;--d:-3s"></div><div class="rb hm" style="right:16%;top:14%;width:70px;height:40px;animation-delay:-6s"></div><div class="rb" style="right:8%;bottom:12%;width:44px;height:44px;animation-delay:-9s"></div>{% endif %}<div class="lcard">{% if role=='admin' %}<div class="lcard-top"><div class="lav">{{admin_avatar|safe}}</div><img class="lcard-logo" src="/logo.png" alt="Mobius Technologies and Services" width="190" height="99"></div>{% else %}<img class="lcard-logo" src="/logo.png" alt="Mobius Technologies and Services" width="190" height="99">{% endif %}<h2>Welcome back</h2><p>{{title}}</p>
 <form method="post">
 <div class="field"><input id="login_u" name="u" placeholder="{{ph}}" required autofocus autocomplete="off"></div>
 <div class="field pw"><input id="login_p" name="p" type="password" placeholder="Password" required autocomplete="off">
@@ -2052,7 +2111,7 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
 <svg class="eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
 <svg class="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.9 10.9 0 0 1 12 19c-7 0-11-7-11-7a19.8 19.8 0 0 1 5.1-5.9M9.9 4.2A10.6 10.6 0 0 1 12 5c7 0 11 7 11 7a19.7 19.7 0 0 1-3.2 4.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>
 <span class="pw-t">Show</span></button></div>
-<button>Log in</button></form></div></div>{% if role!='admin' %}<img class="orb" src="/photo/{{role}}" alt="">{% endif %}</div>
+<button>Log in</button></form>{% if role!='admin' %}<span class="fgt" title="Please contact your admin to reset your password">Forgot password?</span>{% endif %}</div></div>{% if role!='admin' %}<img class="orb" src="/photo/{{role}}" alt="">{% endif %}</div>
 <script>
 (function(){
   var u = document.getElementById('login_u'), p = document.getElementById('login_p');

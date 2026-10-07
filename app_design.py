@@ -59,6 +59,7 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update113: Admin -> Employee Info -> Employees (all employees page): subtle centred footer text "@2026_Mobius365_LN_MAP_Ai" at the bottom of the page.
   * Update112: "© 2026 LN_MAP_AI" on the Admin welcome page made reliably visible (fixed at the bottom-centre, slightly clearer).
   * Update102: Admin -> Audit Log (By Process): after choosing a Process and a Month, the new "Productivity" button opens the
     Productivity report for exactly that Process + Month, with "Download Excel" and "Print" buttons. The Excel file (and the printout)
@@ -1207,6 +1208,8 @@ main{flex:1;display:flex;flex-direction:column;padding:24px 28px;min-width:0;ani
 /* Update95: colourful copyright footer (same on Admin and Employee pages) */
 .site-ftr{flex:none;margin:22px auto 0;padding:6px 12px;text-align:center;font-weight:700;font-size:11.5px;color:var(--mut);background:none;border:0}
 .site-ftr span{color:var(--mut)}
+/* Update113: subtle page-bottom credit (Admin -> Employees page) */
+.pg-ftr{flex:none;margin:26px auto 0;padding:8px 12px;text-align:center;font-size:11px;font-weight:400;letter-spacing:.2px;color:var(--mut);opacity:.75;background:none;border:0}
 .center{max-width:420px;margin:12vh auto;padding:0 16px}
 h1{font-size:22px;margin:0}h2{font-size:17px;margin:22px 0 10px}h3{font-size:15px;margin:14px 0 6px}
 .head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
@@ -1692,7 +1695,7 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 <div class="prof"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
-<main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div></main></div>
+<main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div>{% if ftr %}<div class="pg-ftr" role="contentinfo">{{ftr}}</div>{% endif %}</main></div>
 {% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}</div>{% endif %}
 {% if session.role and not bare %}<script>
 (function(){var g=document.getElementById('cal_g');if(!g)return;var d=document.getElementById('cal');
@@ -1987,7 +1990,8 @@ def page(body, title="Productivity Tracker", **ctx):
             g = ""
         side_avatar = render_template_string(AVATAR3D, gender=g, initials=initials_of(session.get("name", "")))
     return render_template_string(BASE, body=render_template_string(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar, music_engine=BGM_ENGINE, bare=bool(ctx.get("bare")))
+                                  side_avatar=side_avatar, music_engine=BGM_ENGINE, bare=bool(ctx.get("bare")),
+                                  ftr=ctx.get("ftr", ""))
 
 
 LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></div>
@@ -2934,7 +2938,7 @@ def admin_employee_info():
     for e in emps: e["flag"] = str(e["Employee ID"]) in unseen_ids
     log = update_log()
     return page(EMP_LIST, title="Employee Info", view="employees", emps=emps, q=request.args.get("q", ""),
-                new_count=sum(1 for r in log if r["new"]))
+                new_count=sum(1 for r in log if r["new"]), ftr="@2026_Mobius365_LN_MAP_Ai")
 
 def emp_or_404(eid):
     e = next((e for e in rows("Employees") if _key(e["Employee ID"]) == _key(eid)), None)

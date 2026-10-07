@@ -54,6 +54,7 @@ Access rules (Update59):
   * Update104: compact Employee + Admin UI (smaller text/buttons) and a dashboard-style 3D Admin login (UI only; login logic unchanged).
   * Update105: View-Only Productivity for designations Senior Team Lead / Team Lead / Associate Manager (no entry, no %, no missed entries, no reminder e-mails; Leave & Permission unchanged).
   * Update106: 3D dashboard-style Employee login (UI only; login logic unchanged).
+  * Update107: Mobius365 / LN_Map branding and logo removed from the Admin & Employee panels (sidebar, footer, login title bar, emblem, welcome page).
   * Update102: Admin -> Audit Log (By Process): after choosing a Process and a Month, the new "Productivity" button opens the
     Productivity report for exactly that Process + Month, with "Download Excel" and "Print" buttons. The Excel file (and the printout)
     contain ONLY that Process + Month. The per-employee Productivity page (opened from a process) gets the same two buttons.
@@ -1588,7 +1589,6 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .win.admin{width:min(940px,100%);border-radius:16px;box-shadow:0 40px 70px -20px #05081c99,0 20px 36px -18px #000a}
 .win.admin .wbar{height:34px;border-radius:16px 16px 0 0;background:linear-gradient(180deg,#232c5c,#161d42);border-bottom:1px solid #2f3a74;position:relative}
 .win.admin .wbar i{width:8px;height:8px;background:#5b67b5}.win.admin .wbar i:first-child{background:#ef6a6a}.win.admin .wbar i:nth-child(2){background:#f2c25b}.win.admin .wbar i:nth-child(3){background:#5fd39a}
-.win.admin .wbar:after{content:"Mobius365  \00b7  Admin Panel";position:absolute;left:0;right:0;text-align:center;font-size:11.5px;letter-spacing:.08em;color:#aab3e6;pointer-events:none}
 .win.admin .wbody{min-height:420px;border-radius:0 0 16px 16px;gap:40px;padding:28px 36px;justify-content:space-between;
  background:radial-gradient(700px 380px at 15% 10%,#3b5bdb44,transparent 60%),radial-gradient(500px 300px at 90% 100%,#7c3aed33,transparent 60%),linear-gradient(135deg,#0a1030 0%,#111a4a 55%,#1d2470 100%)}
 .win.admin .scene .fl,.win.admin .scene .dp{display:none}
@@ -1626,7 +1626,6 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .win.employee{width:min(900px,100%);border-radius:18px;box-shadow:0 40px 70px -22px #020617b3,0 22px 38px -20px #000a}
 .win.employee .wbar{height:34px;border-radius:18px 18px 0 0;background:linear-gradient(180deg,#1b3550,#12263b);border-bottom:1px solid #2a4a6b;position:relative}
 .win.employee .wbar i{width:8px;height:8px;background:#5f7f9f}.win.employee .wbar i:first-child{background:#ef6a6a}.win.employee .wbar i:nth-child(2){background:#f2c25b}.win.employee .wbar i:nth-child(3){background:#5fd39a}
-.win.employee .wbar:after{content:"Mobius365  \00b7  Employee Portal";position:absolute;left:0;right:0;text-align:center;font-size:11.5px;letter-spacing:.08em;color:#a9c3dd;pointer-events:none}
 .win.employee .wbody{min-height:440px;border-radius:0 0 18px 18px;padding:30px 20px;
  background:radial-gradient(700px 360px at 20% 0%,#22d3ee33,transparent 60%),radial-gradient(520px 300px at 90% 100%,#6366f133,transparent 60%),linear-gradient(135deg,#08162b 0%,#0f2b4d 55%,#0e5a73 100%)}
 .win.employee .scene{border-radius:0 0 18px 18px}
@@ -1640,14 +1639,6 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .win.employee .lcard{width:330px;padding:24px 26px 26px;border-radius:20px;text-align:center;position:relative;
  background:linear-gradient(180deg,#ffffff,#eef3fb);
  box-shadow:0 1px 0 #fff inset,0 -2px 0 #d5deee inset,0 40px 60px -18px #000b,0 14px 22px -10px #0007,0 0 0 1px #9fd6ff55,0 0 46px -8px #38bdf855}
-.lnlogo{display:flex;flex-direction:column;align-items:center;gap:6px;margin:-4px 0 6px}
-.lnl-t{width:58px;height:58px;border-radius:17px;display:grid;place-items:center;
- background:linear-gradient(150deg,#38bdf8 0%,#4f46e5 100%);
- box-shadow:inset 0 2px 0 #ffffff77,inset 0 -5px 0 #2a2aa0aa,0 10px 0 -2px #25258f,0 18px 24px -6px #0007,0 0 22px #38bdf866;
- transform:rotateX(14deg) rotateY(-14deg);transform-style:preserve-3d;animation:lnFloat 6s ease-in-out infinite}
-@keyframes lnFloat{0%,100%{transform:rotateX(14deg) rotateY(-14deg) translateY(0)}50%{transform:rotateX(10deg) rotateY(-8deg) translateY(-4px)}}
-.lnl-t svg{width:30px;height:30px;filter:drop-shadow(0 2px 2px #0006)}
-.lnlogo b{font-size:13px;letter-spacing:.2em;color:#1c2340;text-transform:uppercase}
 .win.employee .lcard h2{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:20px;color:#1c2340;margin:6px 0 2px}
 .win.employee .lcard p{font-size:12px;margin:0 0 12px}
 .win.employee .lcard input{border:1px solid #c5cfe3;border-radius:11px;padding:10px 12px;font-size:13px;background:#f6f8fd;
@@ -1660,10 +1651,9 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .win.employee .lcard>form>button:not(.pw-toggle):hover{transform:translateY(-1px);box-shadow:0 6px 0 #3730a3,0 18px 24px -8px #4f46e5cc,inset 0 1px 0 #ffffff66}
 .win.employee .lcard>form>button:not(.pw-toggle):active{transform:translateY(4px);box-shadow:0 1px 0 #3730a3,0 4px 8px -4px #4f46e588,inset 0 1px 0 #ffffff44}
 @media(max-width:800px){.win.employee .wbody{padding:20px 12px;min-height:0}.win.employee .lcard{width:100%;max-width:360px}.win.employee .scene .rb.hm,.win.employee .scene .fl.hm{display:none}}
-@media(prefers-reduced-motion:reduce){.lnl-t,.win.employee .scene .rb,.win.employee .scene .fl,.win.employee .scene .cube{animation:none}}
+@media(prefers-reduced-motion:reduce){.win.employee .scene .rb,.win.employee .scene .fl,.win.employee .scene .cube{animation:none}}
 </style></head><body>
 {% if session.role %}<div class="app"><aside class="emp">
-<div class="brand">Mobius365<small>{{'Admin' if session.role=='admin' else 'Employee'}} panel</small></div>
 {% for h,l,on,kids in nav %}{% if kids %}<div class="ng{{' open' if on else ''}}"><a class="ng-h" href="{{h}}" role="button" aria-expanded="{{'true' if on else 'false'}}" onclick="var g=this.parentNode;var o=g.classList.toggle('open');this.setAttribute('aria-expanded',o);return false">{{l}}<span class="chev">&#9650;</span></a>
 <div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
@@ -1671,7 +1661,7 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 <div class="prof"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
-<main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><footer class="site-ftr" role="contentinfo"><span>&copy; 2026 LN_MAP_AI. All Rights Reserved.</span></footer></main></div>
+<main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div></main></div>
 {% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}</div>{% endif %}
 {% if session.role=='admin' %}<div id="toasts"></div><script>
 (function(){var since="0",first=1;
@@ -1964,7 +1954,7 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
 <div class="fl" style="left:22%;top:6%;--bt:6s;--d:-2.5s"><div class="sph" style="--s:26px"></div></div>
 <div class="fl hm" style="right:5%;top:46%;--bt:7s;--d:-1.5s"><div class="sph" style="--s:34px"></div></div>
 <div class="fl hm" style="left:4%;top:48%;--bt:8s;--d:-5s"><div class="sph" style="--s:20px"></div></div>{% if role=='admin' %}<div class="dp adm"><div class="dp-lab"><b>&#9664;&#9664;&#9664;</b>&nbsp; LIVE DATA FEED &middot; INCOMING FROM SERVER</div><div class="dp-node l"><div class="dp-dash"><i></i><i></i><i></i><i></i></div><div class="dp-stand"></div><small>ADMIN DASHBOARD</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% else %}<div class="dp emp"><div class="dp-lab">UPLOADING ENCRYPTED DATA TO SERVER &nbsp;<b>&#9654;&#9654;&#9654;</b></div><div class="dp-node l"><div class="dp-scr"><i></i><i></i><i></i></div><div class="dp-stand"></div><small>EMPLOYEE</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% endif %}</div>
-{% if role=='admin' %}<div class="adp" aria-hidden="true"><p class="adp-t">Admin Panel</p><h3>Productivity<br>Dashboard</h3><p class="adp-s">Monitor attendance, tasks and team performance in one place.</p><div class="adp-3d"><div class="adp-st"><div class="adp-c c1"><small>Performance</small><div class="adp-bars"><i style="height:38%"></i><i style="height:62%"></i><i style="height:48%"></i><i style="height:80%"></i><i style="height:58%"></i><i style="height:92%"></i><i style="height:70%"></i></div></div><div class="adp-c c2"><small>Attendance</small><div class="adp-ring"></div></div><div class="adp-c c3"><small>Reports</small><div class="adp-ln"></div><div class="adp-ln s"></div></div></div></div></div>{% endif %}{% if role=='employee' %}<div class="rb" style="left:14%;top:56%;width:54px;height:54px;--d:-3s"></div><div class="rb hm" style="right:16%;top:14%;width:70px;height:40px;animation-delay:-6s"></div><div class="rb" style="right:8%;bottom:12%;width:44px;height:44px;animation-delay:-9s"></div>{% endif %}<div class="lcard">{% if role=='admin' %}<div class="lav">{{admin_avatar|safe}}</div>{% endif %}{% if role=='employee' %}<div class="lnlogo" aria-hidden="true"><span class="lnl-t"><svg viewBox="0 0 32 32" fill="none"><path d="M16 3.5c-5 0-9 3.9-9 8.8 0 6.4 9 16.2 9 16.2s9-9.8 9-16.2c0-4.9-4-8.8-9-8.8z" fill="#fff"/><circle cx="16" cy="12.3" r="3.6" fill="#4f46e5"/></svg></span><b>LN_Map</b></div>{% endif %}<h2>Welcome back</h2><p>{{title}}</p>
+{% if role=='admin' %}<div class="adp" aria-hidden="true"><p class="adp-t">Admin Panel</p><h3>Productivity<br>Dashboard</h3><p class="adp-s">Monitor attendance, tasks and team performance in one place.</p><div class="adp-3d"><div class="adp-st"><div class="adp-c c1"><small>Performance</small><div class="adp-bars"><i style="height:38%"></i><i style="height:62%"></i><i style="height:48%"></i><i style="height:80%"></i><i style="height:58%"></i><i style="height:92%"></i><i style="height:70%"></i></div></div><div class="adp-c c2"><small>Attendance</small><div class="adp-ring"></div></div><div class="adp-c c3"><small>Reports</small><div class="adp-ln"></div><div class="adp-ln s"></div></div></div></div></div>{% endif %}{% if role=='employee' %}<div class="rb" style="left:14%;top:56%;width:54px;height:54px;--d:-3s"></div><div class="rb hm" style="right:16%;top:14%;width:70px;height:40px;animation-delay:-6s"></div><div class="rb" style="right:8%;bottom:12%;width:44px;height:44px;animation-delay:-9s"></div>{% endif %}<div class="lcard">{% if role=='admin' %}<div class="lav">{{admin_avatar|safe}}</div>{% endif %}<h2>Welcome back</h2><p>{{title}}</p>
 <form method="post">
 <div class="field"><input id="login_u" name="u" placeholder="{{ph}}" required autofocus autocomplete="off"></div>
 <div class="field pw"><input id="login_p" name="p" type="password" placeholder="Password" required autocomplete="off">
@@ -3154,7 +3144,6 @@ WELCOME = """<style>
  <div class="wl-card"><h1>Welcome, {{session.name}}</h1>
  <p>{{ 'Syncing live data from the server' if session.role=='admin' else 'Securely connecting to the server' }}&hellip;</p>
  <div class="wl-bar"><i></i></div><div class="wl-st">{{ 'RECEIVING DATA' if session.role=='admin' else 'SENDING DATA' }}</div><div class="wl-st" style="margin-top:6px;font-weight:500"><span id="wl_msg">&nbsp;</span></div></div>
- <div class="wl-ftr" role="contentinfo">&copy; 2026 LN_MAP_AI. All Rights Reserved.</div>
 </div>
 <script>
 (function(){

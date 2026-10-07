@@ -59,6 +59,10 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update127: the fixed shared picture in the Employee sidebar is replaced by a 3D animated profile avatar for the LOGGED-IN employee
+    (male / female chosen from the employee's Gender; initials if Gender is blank), with the employee's name below it. It follows whoever is signed in
+    (nothing is stored in the session or at login), is pure CSS-transform animation (gentle float + mouse tilt, paused for reduced-motion / hidden tabs).
+    Login, authentication and every other Employee page function are unchanged.
   * Update126: the shared picture (employee_corner.png, embedded) now sits ABOVE the employee name in the sidebar profile block (same layout for every employee); the bottom-left copy is removed.
   * Update125: Employee page - the shared picture was shown at the bottom-left (moved in Update126);
     the 3D profile avatar at the top of the page and the Logout button at the top-right are REMOVED. Sidebar Logout and everything else unchanged.
@@ -1414,6 +1418,13 @@ tbody tr{transition:background .15s ease}
 .av-l{position:absolute;inset:0;width:100%;height:100%;transform:translateZ(var(--z,0px));pointer-events:none}
 .av-l:first-child{border-radius:50%;box-shadow:0 12px 22px -8px #4f46e577,0 0 0 3px #fff}
 @keyframes avSway{0%,100%{transform:rotateX(2deg) rotateY(-11deg) translateY(0)}50%{transform:rotateX(-2deg) rotateY(11deg) translateY(-3px)}}
+/* Update127: sidebar 3D avatar - smooth endless float (transform only, GPU-friendly); pointer tilt (.live) still takes over */
+aside .prof .av3d{width:96px;height:96px;margin:0 0 6px}
+.prof .av3d .av-stage{animation:avFloat 6s ease-in-out infinite;will-change:transform}
+.prof .av3d.live .av-stage{animation:none}
+@keyframes avFloat{0%,100%{transform:rotateX(2deg) rotateY(-14deg) translateY(0)}50%{transform:rotateX(-2deg) rotateY(14deg) translateY(-4px)}}
+@media(max-width:800px){aside .prof .av3d{width:44px;height:44px;margin:0}}
+@media(prefers-reduced-motion:reduce){.prof .av3d .av-stage{animation:none!important}}
 /* employee profile block in the left panel */
 aside.emp{position:sticky;top:0;height:100vh;overflow-y:auto;align-self:flex-start}
 .prof{margin-top:auto;padding:14px 4px 6px;border-top:1px solid #2b3560;display:flex;flex-direction:column;gap:10px}
@@ -2112,7 +2123,12 @@ def page(body, title="Productivity Tracker", **ctx):
     if session.get("role") == "admin":
         side_avatar = ADMIN_AVATAR
     elif session.get("role") == "employee":
-        side_avatar = '<img class="prof-pic" src="/employee_corner.png" alt="Profile picture" width="96" height="123" decoding="async">'   # Update126: picture above the name
+        # Update127: 3D animated avatar of the signed-in employee (gender from the Employees sheet, looked up once per request, cached)
+        try:
+            _g = gender_of(my_emp_row())
+        except Exception:
+            _g = ""
+        side_avatar = render_fast(AVATAR3D, gender=_g, initials=initials_of(session.get("name", "")))
     return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
                                   side_avatar=side_avatar, bare=bool(ctx.get("bare")))
 

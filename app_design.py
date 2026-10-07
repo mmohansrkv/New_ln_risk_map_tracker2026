@@ -58,6 +58,7 @@ Access rules (Update59):
   * Update108: Admin login text removed, welcome page is a separate page (no panel behind it), 3D admin avatar, sidebar calendar for both panels.
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
+  * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
   * Update102: Admin -> Audit Log (By Process): after choosing a Process and a Month, the new "Productivity" button opens the
     Productivity report for exactly that Process + Month, with "Download Excel" and "Print" buttons. The Excel file (and the printout)
     contain ONLY that Process + Month. The per-employee Productivity page (opened from a process) gets the same two buttons.
@@ -1831,7 +1832,7 @@ function attach(a,stick){
  var n=el('div','gc-fn');n.appendChild(el('b','',a.name));n.appendChild(el('small','',fmt(a.size)+' \u00B7 tap to download'));f.appendChild(n);return f}
 
 function msgs(list,now){
- Array.prototype.slice.call(listEl.querySelectorAll('.gc-b')).forEach(function(b){if(now-parseFloat(b.getAttribute('data-ts'))>3600)b.remove()});
+ Array.prototype.slice.call(listEl.querySelectorAll('.gc-b')).forEach(function(b){if(now-parseFloat(b.getAttribute('data-ts'))>43200)b.remove()});
  if(!list.length)return;
  var e0=listEl.querySelector('.gc-e');if(e0)e0.remove();
  var down=listEl.scrollHeight-listEl.scrollTop-listEl.clientHeight<80||after<0;
@@ -3267,9 +3268,9 @@ def admin_welcome():
 # ---------------------------------------------------------------- employee GROUP CHAT (Update80 / Update82)
 # ONE group = every employee who is online right now. Nobody is added by hand: coming online joins the group, going offline leaves it.
 # The chat is a floating icon (bottom-right) on every employee page. Messages AND attachments live in memory only and are deleted GC_TTL seconds
-# (1 hour) after sending. Update82: files, images/photos and emoji.
+# (12 hours) after sending. Update82: files, images/photos and emoji.
 _gc, _gc_read, _gc_seq, _gc_lock = [], {}, [0], threading.Lock()
-GC_MAX_LEN, GC_KEEP, GC_TTL = 500, 3000, 3600
+GC_MAX_LEN, GC_KEEP, GC_TTL = 500, 30000, 12 * 3600      # Update111: messages + shared files live 12 hours, then are permanently deleted
 GC_MAX_FILE  = 5 * 1024 * 1024        # largest single attachment
 GC_MAX_STORE = 150 * 1024 * 1024      # all attachments together; the oldest ones are dropped first when this is exceeded
 # Never accept programs / scripts / web pages: they could be dangerous when opened. Everything else (documents, sheets, PDFs, zips, photos...) is fine.
@@ -3277,16 +3278,17 @@ GC_BLOCKED_EXT = {"exe", "bat", "cmd", "com", "scr", "msi", "msp", "dll", "js", 
                   "app", "pif", "cpl", "reg", "lnk", "hta", "html", "htm", "xhtml", "svg", "php", "py", "pyc", "iso", "dmg"}
 
 def _gc_purge():
-    """Delete messages (and their attachments) older than 1 hour (caller holds _gc_lock)."""
+    """Delete messages (and their attachments) older than GC_TTL = 12 hours (caller holds _gc_lock). Everything is memory-only, so nothing older survives."""
     cut = time.time() - GC_TTL
     _gc[:] = [m for m in _gc if m["ts"] > cut]
 
 def _gc_sweeper():
-    while True:
+    while True:                                   # Update111: background cleanup, no manual action; also runs on every chat poll / send
         time.sleep(60)
         try:
             with _gc_lock: _gc_purge()
-        except Exception: pass
+        except Exception as ex:
+            print("group chat cleanup error (will retry in 60 s):", ex)
 threading.Thread(target=_gc_sweeper, daemon=True).start()
 
 def _gc_img_mime(data):

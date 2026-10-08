@@ -59,6 +59,9 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update139: Work Time is never shown on any Employee page (no menu, no page, no message): every /employee/work-time* or /employee/working-time* URL answers 404, and the only Work Time
+    endpoint an employee's browser uses is the silent /employee/track. Tracking starts at the moment of login and, as a safety net, starts on the first background heartbeat if the
+    login-time start did not run (for example a session opened before an update).
   * Update138: "Working Time" is replaced by the new "Work Time" log (Admin > Log > Work Time). Tracking stays automatic and silent for EVERY employee (login, logout, screen lock / unlock,
     screen-off, active time, break / inactive time) - nothing is shown to employees and the login-page permission pop-up is now OFF by default (WT_LOGIN_PROMPT=1 brings it back).
     Admin > Work Time > "Work Time access" ticks which employees' Work Time is SHARED with the Admin ("Work Time Share" sheet); only those employees appear in the Admin's daily /
@@ -1417,7 +1420,10 @@ def wt_agent_token(eid):
 
 def wt_seen():
     st = _wt.get(session.get("wt_key", ""))
-    if st: st["seen"] = time.time()
+    if st: st["seen"] = time.time(); return
+    if session.get("role") == "employee" and session.get("att_eid"):      # Update139: safety net - the clock is always running while an employee is signed in
+        try: session["wt_key"] = wt_begin(session["att_eid"], session.get("att_name", ""))
+        except Exception as e: print("work-time late start error:", e)
 
 def _wt_report(d):
     """One dict per employee for date d: live memory first (today), then the sheet."""
@@ -3802,6 +3808,13 @@ def gc_file(fid):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
     return resp
+
+@app.route("/employee/work-time", defaults={"rest": ""})
+@app.route("/employee/work-time/<path:rest>")
+@app.route("/employee/working-time", defaults={"rest": ""})
+@app.route("/employee/working-time/<path:rest>")
+def employee_work_time_hidden(rest):
+    abort(404)          # Update139: Work Time exists for the Admin only - employees have no such page
 
 @app.route("/employee/ping")
 @need("employee")

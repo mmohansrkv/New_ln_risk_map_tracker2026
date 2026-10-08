@@ -63,6 +63,11 @@ Access rules (Update59):
     e-mail design (MAIL_NOTE_HTML = preview.html), selects the recipients (All Employees or only the ticked ones) and the DATE & TIME to send; a background job sends it automatically (checked every 30 s),
     or the Admin sends it immediately. A scheduled mail can be edited / cancelled. Sheets: "Mail Notes" and "Mail Notes Log" (employee name, e-mail, subject, e-mail sent date & time, status). Admin only.
   * Update154: one-day screen OFF / ON counts - the daily Work Time table has "Screen OFF count (locks)" and "Screen ON count (unlocks)" per employee, and the event list / events page shows both counts for the day.
+  * Update155: Win+L lock / unlock not showing - hardening of the whole lock path. (1) The "Lock tracking" column now says WHY nothing is recorded: "Not allowed yet" (browser never allowed idle
+    detection), "Blocked in browser", "Unsupported browser", "HTTPS required", "Agent needed" or "Active" / "Active (agent)". (2) The Windows agent sends a heartbeat every minute, so "Active (agent)"
+    shows as soon as it runs (it used to show only after the first lock), and it writes lock_agent.log next to itself with the last result. (3) A lock / unlock sent while the employee has no open Work Time
+    session is no longer thrown away: the server answers 409 and the agent keeps it and resends. (4) The browser resends a lock / unlock up to 40 times (was 5), still stamped with the real time.
+    (5) The one-click installer ignores the Microsoft Store "python" shortcut (it starts nothing) and checks the agent really started.
   * Update153: Screen OFF / ON times are saved and shown reliably. FIX: after a server restart or stale cache the day's Work Time row was rebuilt blank (Lock count 0, Break 0:00:00, login time reset) while the lock events were still saved -
     the day is now restored LIVE from the sheet and lock count / break time are rebuilt from the saved Lock Events (never lower than them); signing in again closes a lock left open. The browser now labels Win+L as "Manual lock"
     (user was active) and a lock after inactivity as "Automatic lock". Headings read Screen OFF (lock) / Screen ON (unlock).
@@ -1424,7 +1429,7 @@ def wt_apply(key, eid, name, kind, value, ago_ms, reason=None):
         st = _wt_get(key, eid, name); st["seen"] = now
         src = "Agent" if value == "agent" else "Browser"
         if kind == "support":
-            lt = {"yes": "Active", "no": "Unsupported browser", "insecure": "HTTPS required"}.get(str(value), "Agent needed")
+            lt = {"yes": "Active", "no": "Unsupported browser", "insecure": "HTTPS required", "denied": "Blocked in browser", "pending": "Not allowed yet", "agent": "Agent"}.get(str(value), "Agent needed")
             if st["lt"] != "Agent" and st["lt"] != lt: st["lt"], changed = lt, True
         elif kind == "locked" and st["sess_start"] is not None and st["lock_start"] is None:
             st["lock_start"] = max(t, st["sess_start"]); st["locks"] += 1; changed = True
@@ -2293,7 +2298,7 @@ poll();setInterval(poll,10000)})();</script>
 <script>(function(){function p(){fetch('/employee/ping',{credentials:'same-origin',cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();</script><script>(function(){if(!window.fetch)return;var W=location.pathname==='/employee/welcome',last=null,D=null;
 function post(e,v,t0,n,r){var body=JSON.stringify({e:e,v:v||'',ago:Date.now()-t0,r:r||''});
  fetch('/employee/track',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:body,keepalive:true})
- .then(function(x){if(!x.ok&&n<5)throw 0}).catch(function(){if(n<5)setTimeout(function(){post(e,v,t0,n+1,r)},5000)})}
+ .then(function(x){if(!x.ok&&n<40)throw 0}).catch(function(){if(n<40)setTimeout(function(){post(e,v,t0,n+1,r)},5000)})}
 function begin(){var c;try{D=new IdleDetector();c=new AbortController()}catch(x){post('support','no',Date.now(),0);return}
  var pu=null;function sync(){var s=D.screenState,u=D.userState;if(s&&s!==last){last=s;post(s,'',Date.now(),0,s==='locked'&&pu?(pu==='idle'?'Automatic lock':'Manual lock'):'')}pu=u}
  D.addEventListener('change',sync);
@@ -3949,14 +3954,14 @@ def agent_lock():
     j = request.get_json(silent=True) or {}
     eid = str(j.get("eid", "")).strip()
     if not eid or not hmac.compare_digest(str(j.get("token", "")), wt_agent_token(eid)): return ("", 403)
-    kind = {"start": "locked", "locked": "locked", "end": "unlocked", "unlocked": "unlocked", "reason": "reason"}.get(j.get("e"))
+    kind = {"start": "locked", "locked": "locked", "end": "unlocked", "unlocked": "unlocked", "reason": "reason", "hello": "support"}.get(j.get("e"))
     if kind:
         with _wt_lock:
             live = [(k, x) for k, x in _wt.items() if str(x["eid"]) == eid and x["sess_start"] is not None]
-        if live:
-            k, x = max(live, key=lambda kv: kv[1]["sess_start"])
-            try: wt_apply(k, eid, x["name"], kind, "agent", j.get("ago", 0), reason=str(j.get("reason", ""))[:40] or None)
-            except Exception as e: print("work-time agent error:", e)
+        if not live: return ("", 409)               # Update155: employee not signed in to the app (yet) - the agent keeps the event and resends, nothing is lost
+        k, x = max(live, key=lambda kv: kv[1]["sess_start"])
+        try: wt_apply(k, eid, x["name"], kind, "agent", j.get("ago", 0), reason=str(j.get("reason", ""))[:40] or None)
+        except Exception as e: print("work-time agent error:", e)
     return ("", 204)
 
 WT_EVENTS = """<div class="card"><h2 style="margin-top:0">Lock / Screen-off events{% if emp %} <small class="mut">&middot; {{emp}}</small>{% endif %}</h2>
@@ -4145,16 +4150,27 @@ def locked():
     user32.CloseDesktop(ctypes.c_void_p(h)); return False
 queue = []                                              # (event, reason, time) kept until the server confirms, so nothing is lost offline
 def add(e, t, reason=""): queue.append((e, reason, t))
+LOG = os.path.join(here, "lock_agent.log")
+def log(msg):
+    try: open(LOG, "w", encoding="utf-8").write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+    except Exception: pass
+def send(e, reason="", t=None):
+    body = json.dumps({"eid": cfg["employee"], "token": cfg["token"], "e": e, "reason": reason, "ago": int((time.time() - (t or time.time())) * 1000)}).encode()
+    urllib.request.urlopen(urllib.request.Request(URL, body, {"Content-Type": "application/json"}), timeout=10).read()
 def flush():
     while queue:
         e, reason, t = queue[0]
-        body = json.dumps({"eid": cfg["employee"], "token": cfg["token"], "e": e, "reason": reason, "ago": int((time.time() - t) * 1000)}).encode()
-        try: urllib.request.urlopen(urllib.request.Request(URL, body, {"Content-Type": "application/json"}), timeout=10).read()
-        except Exception: return
+        if time.time() - t > 7200: queue.pop(0); continue          # older than 2 h: stale, drop
+        try: send(e, reason, t); log("sent " + e)
+        except Exception as ex: log("waiting to send %s: %s" % (e, ex)); return        # e.g. 409 = employee not signed in to the app yet: retry
         queue.pop(0)
-state, prev_idle, last_tick = "active", 0.0, time.time()
+state, prev_idle, last_tick, last_hello = "active", 0.0, time.time(), 0.0
 while True:
     now = time.time()
+    if now - last_hello > 60:                                      # heartbeat: the Admin sees "Active (agent)" while this runs
+        last_hello = now
+        try: send("hello"); log("heartbeat OK")
+        except Exception as ex: log("heartbeat: %s" % ex)
     if now - last_tick > 30 and state == "active" and IDLE:      # the PC was asleep / switched off in between
         add("start", last_tick, "Sleep / screen-off"); state = "idle"
     last_tick = now
@@ -4187,17 +4203,20 @@ $agent = @'
 '@
 Set-Content -Path (Join-Path $dir 'lock_agent.py') -Value $agent -Encoding UTF8
 Set-Content -Path (Join-Path $dir 'lock_agent.ini') -Value @('server={base}','employee={eid}','token={wt_agent_token(eid)}','idle_minutes=5') -Encoding UTF8
-$pw = (Get-Command pythonw.exe -ErrorAction SilentlyContinue).Source
+$pw = $null
+foreach ($c in (Get-Command pythonw.exe -All -ErrorAction SilentlyContinue)) {{ if ($c.Source -notmatch 'WindowsApps') {{ $pw = $c.Source; break }} }}
 if (-not $pw) {{
   $py = (Get-Command py.exe -ErrorAction SilentlyContinue).Source
   if ($py) {{ $exe = (& $py -3 -c "import sys;print(sys.executable)"); $pw = $exe -replace 'python\\.exe$','pythonw.exe' }}
 }}
-if (-not $pw -or -not (Test-Path $pw)) {{ Write-Error 'Python 3 (pythonw.exe) was not found. Install Python 3, then run this installer again.' }}
+if (-not $pw -or -not (Test-Path $pw)) {{ Write-Error 'Python 3 (pythonw.exe) was not found (the Microsoft Store shortcut does not count). Install Python 3 from python.org, then run this installer again.' }}
 $act = New-ScheduledTaskAction -Execute $pw -Argument ('"' + (Join-Path $dir 'lock_agent.py') + '"') -WorkingDirectory $dir
 $trg = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
 Register-ScheduledTask -TaskName 'WorkTimeAgent' -Action $act -Trigger $trg -Settings $set -Force | Out-Null
 Start-ScheduledTask -TaskName 'WorkTimeAgent'
+Start-Sleep -Seconds 4
+if (-not (Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object {{ $_.CommandLine -like '*lock_agent.py*' }})) {{ Write-Error ('The lock agent did not start. See ' + (Join-Path $dir 'lock_agent.log')) }}
 """
     resp = Response("\ufeff" + ps, mimetype="text/plain"); resp.headers["Content-Disposition"] = f"attachment; filename=install_{re.sub(r'[^A-Za-z0-9_-]+', '_', eid)}.ps1"
     return resp

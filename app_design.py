@@ -59,6 +59,7 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update129: Employees see NO notifications: the winner pop-up toasts and the Group Chat unread badge / tab-title alert are removed (winner board, chat itself and inline page warnings unchanged). Admin notifications unchanged.
   * Update128: Working-time tracking from the computer's SCREEN LOCK / UNLOCK. On Employee login the day's clock starts (login time); every screen lock starts a Break and
     every unlock ends it (hours:minutes:seconds), automatically, until logout. Daily record per employee in the new "Work Time" sheet (login, logout, system-on time, break time,
     lock count, total working time, 8-hour status). Admin only: Log > Work Time (/admin/work-time, CSV export). Employees only send their own lock/unlock events (/employee/track).
@@ -2030,7 +2031,7 @@ poll();setInterval(poll,15000)})();
 </script>{% endif %}
 {% if session.role=='employee' %}<div id="toasts"></div><script>(function(){var K='mzSeen',seen=null;
 try{var raw=sessionStorage.getItem(K);seen=raw?JSON.parse(raw):null}catch(e){seen=null}
-function toast(t){var d=document.createElement('div');d.className='toast';d.textContent=t;document.getElementById('toasts').appendChild(d);setTimeout(function(){d.remove()},12000)}
+function toast(t){}   /* Update129: employees get no pop-up notifications */
 function board(j){var b=document.getElementById('mzboard');if(!b)return;b.textContent='';
  if(j.overall){var o=document.createElement('div');o.className='mz-win';o.style.fontWeight='700';o.textContent='🏆 Overall Winner: '+j.overall.name+' — first to complete all Sets';b.appendChild(o)}
  j.board.forEach(function(x){var d=document.createElement('div');d.className='mz-win'+(x.name?'':' none');
@@ -2137,7 +2138,7 @@ var btn=$('gcb'),pan=$('gcp'),listEl=$('gcl'),memEl=$('gcm'),inp=$('gci'),cnt=$(
 function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e}
 function cp(n){return String.fromCodePoint(n)}
 function fmt(n){return n<1024?n+' B':(n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(1)+' MB')}
-function badge(n){bdg.textContent=n>99?'99+':n;bdg.style.display=n?'block':'none';document.title=(n?'('+n+') New message - ':'')+base}
+function badge(n){bdg.style.display='none';document.title=base}   /* Update129: no unread badge / tab-title alert for employees */
 function note(t){var e=el('div','gc-e',t);listEl.appendChild(e);listEl.scrollTop=listEl.scrollHeight;setTimeout(function(){e.remove()},4500)}
 function members(list){memEl.textContent='';cnt.textContent=list.length+' online';
  list.forEach(function(m){memEl.appendChild(el('i',m.status==='Away'?'away':'',m.name+(m.me?' (You)':'')))})}

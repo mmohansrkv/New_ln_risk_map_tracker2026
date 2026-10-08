@@ -62,6 +62,8 @@ Access rules (Update59):
   * Update150: NEW Admin > Log > "Mail Notes" (/admin/mail-notes; the old /admin/maintenance-email redirects to it). Admin enters the Email Subject and Message, sees them live inside ONE dedicated HTML
     e-mail design (MAIL_NOTE_HTML = preview.html), selects the recipients (All Employees or only the ticked ones) and the DATE & TIME to send; a background job sends it automatically (checked every 30 s),
     or the Admin sends it immediately. A scheduled mail can be edited / cancelled. Sheets: "Mail Notes" and "Mail Notes Log" (employee name, e-mail, subject, e-mail sent date & time, status). Admin only.
+  * Update152: Admin > Work Time daily log now lists EVERY lock / screen-off event of the day inside each employee row (click "N lock / screen-off event(s)"): Lock #, lock time, unlock time,
+    lock duration (running time while still locked), reason (Manual lock / Automatic lock / Screen-off / Sleep) and source, with the day's total lock time. Recording itself (Update128-147) is unchanged.
   * Update149: NEW DESIGN for the Admin and Employee pages - style only (one CSS block at the end of the base template, scoped to .app): deep-indigo gradient sticky sidebar with pill menu,
     soft frosted cards with rounded corners and shadows, gradient buttons, modern inputs and tables, refreshed welcome card. No route, template logic, sheet, tracking or e-mail code changed;
     login / welcome pages unchanged.
@@ -4186,7 +4188,11 @@ Break time = the time the computer was locked. Total working time = system-on ti
 <div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last lock / screen-off</th><th>Last unlock / screen-on</th><th>Break duration</th><th>Lock count</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
 {% for r in rows %}<tr><td><a href="/admin/work-time/events?date={{d}}&emp={{r.eid|urlencode}}">{{r.eid}}</a></td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.last_lock or '-'}}</td><td>{{r.last_unlock or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td><b>{{r.work or '-'}}</b></td>
 <td><span style="padding:2px 8px;border-radius:10px;font-size:12px;white-space:nowrap;{% if r.tone=='ok' %}background:#dcfce7;color:#166534{% elif r.tone=='warn' %}background:#fef3c7;color:#92400e{% elif r.tone=='bad' %}background:#fee2e2;color:#991b1b{% else %}background:#eef0f6;color:#5b6280{% endif %}">{{r.status}}</span>{% if r.state=='Locked' %} <small class="mut">&#128274; locked now</small>{% endif %}</td>
-<td>{{r.lt}}</td></tr>{% endfor %}</table></div></div>
+<td>{{r.lt}}</td></tr>
+{% if r.events %}<tr><td colspan="12" style="padding:0 0 8px 28px;background:#f8f9ff"><details><summary class="mut" style="cursor:pointer;padding:6px 0">&#128274; {{r.events|length}} lock / screen-off event(s) &middot; total {{r.lock_total}} &mdash; click to view</summary>
+<table style="margin:4px 0 6px"><tr><th>Lock #</th><th>Locked / screen-off at</th><th>Unlocked / screen-on at</th><th>Lock duration</th><th>Reason</th><th>Source</th></tr>
+{% for e in r.events %}<tr><td>{{e.n}}</td><td>{{e.start}}</td><td>{{e.end or 'still locked / off'}}</td><td>{{e.dur}}</td><td>{{e.reason}}</td><td>{{e.src}}</td></tr>{% endfor %}</table></details></td></tr>{% endif %}
+{% endfor %}</table></div></div>
 {% if live %}<script>setTimeout(function(){location.reload()},30000)</script>{% endif %}"""
 
 def _wt_date_arg():
@@ -4211,6 +4217,12 @@ def admin_work_time():
         ev = last.get(_key(r_["eid"]))
         r_["last_lock"] = str(ev.get("Start time", "")) if ev else ""
         r_["last_unlock"] = (str(ev.get("End time", "")) or "still locked / off") if ev else ""
+    evs_by = {}                                         # Update152: every lock / screen-off event of the day, per employee, shown inside the Work Time Log row
+    for e_ in _wt_events(d):
+        evs_by.setdefault(_key(e_["eid"]), []).append(e_)
+    for r_ in data:
+        r_["events"] = evs_by.get(_key(r_["eid"]), [])
+        r_["lock_total"] = _hms(sum(e_["sec"] for e_ in r_["events"]))
     return page(WT_ADMIN, title="Work Time", back=request.full_path.rstrip("?"), unshared=[e for e in rows("Employees") if _key(e["Employee ID"]) not in wts_ids()], n_shared=len(wts_ids()), n_total=len(rows("Employees")), d=d, today=str(today_local()), rows=data, live=(d == str(today_local())),
                 req=_hms(WT_REQUIRED_SEC), brk_allowed=_hms(WT_ALLOWED_BREAK_SEC),
                 n_ok=sum(r["tone"] == "ok" for r in data), n_short=sum(r["tone"] in ("warn", "bad") for r in data),

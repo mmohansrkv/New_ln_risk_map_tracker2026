@@ -62,6 +62,9 @@ Access rules (Update59):
   * Update150: NEW Admin > Log > "Mail Notes" (/admin/mail-notes; the old /admin/maintenance-email redirects to it). Admin enters the Email Subject and Message, sees them live inside ONE dedicated HTML
     e-mail design (MAIL_NOTE_HTML = preview.html), selects the recipients (All Employees or only the ticked ones) and the DATE & TIME to send; a background job sends it automatically (checked every 30 s),
     or the Admin sends it immediately. A scheduled mail can be edited / cancelled. Sheets: "Mail Notes" and "Mail Notes Log" (employee name, e-mail, subject, e-mail sent date & time, status). Admin only.
+  * Update153: Screen OFF / ON times are saved and shown reliably. FIX: after a server restart or stale cache the day's Work Time row was rebuilt blank (Lock count 0, Break 0:00:00, login time reset) while the lock events were still saved -
+    the day is now restored LIVE from the sheet and lock count / break time are rebuilt from the saved Lock Events (never lower than them); signing in again closes a lock left open. The browser now labels Win+L as "Manual lock"
+    (user was active) and a lock after inactivity as "Automatic lock". Headings read Screen OFF (lock) / Screen ON (unlock).
   * Update152: Admin > Work Time daily log now lists EVERY lock / screen-off event of the day inside each employee row (click "N lock / screen-off event(s)"): Lock #, lock time, unlock time,
     lock duration (running time while still locked), reason (Manual lock / Automatic lock / Screen-off / Sleep) and source, with the day's total lock time. Recording itself (Update128-147) is unchanged.
   * Update149: NEW DESIGN for the Admin and Employee pages - style only (one CSS block at the end of the base template, scoped to .app): deep-indigo gradient sticky sidebar with pill menu,
@@ -1292,13 +1295,30 @@ def _wt_get(key, eid, name):
     date = key.split("|")[0]
     st = _wt_from_row({}, eid, name, date)
     try:
-        for r in rows(WT_SHEET):
+        for r in _fetch_rows(WT_SHEET):                      # Update153: read the sheet LIVE (a stale cache used to restore a blank day and wipe the counters)
             if str(r.get("Date")) == date and str(r.get("Employee ID")) == str(eid):
                 st = _wt_from_row(r, str(eid), name, date); _wt_rows[key] = r["_row"]; break
     except Exception as e:
         print("work-time restore error:", e)
+    _wt_merge_events(st)
     _wt[key] = st
     return st
+
+def _wt_merge_events(st):
+    """Update153: the Lock Events sheet is the record of every screen OFF / ON. Rebuild lock count, break time and any still-open lock from it,
+    so the counters can never show 0 while events exist (e.g. after a server restart)."""
+    try: evs = [r for r in _fetch_rows("Lock Events") if str(r.get("Date")) == st["date"] and str(r.get("Employee ID")) == str(st["eid"])]
+    except Exception as e: print("work-time event restore error:", e); return
+    if not evs: return
+    done = sum(_secs(r.get("Duration")) for r in evs if str(r.get("End time", "")).strip())
+    if len(evs) > st["locks"]: st["locks"] = len(evs)
+    if done > st["brk"]: st["brk"] = float(done)
+    opn = [r for r in evs if not str(r.get("End time", "")).strip() and _fl(r.get("Start epoch"))]
+    if opn and st["lock_start"] is None:
+        o = max(opn, key=lambda r: _fl(r.get("Start epoch"))); t0 = _fl(o.get("Start epoch"))
+        st["lock_start"] = t0
+        st["cur_ev"] = dict(date=st["date"], eid=str(st["eid"]), name=st["name"], start=t0, end=None, src=str(o.get("Source", "Browser")) or "Browser", reason=str(o.get("Reason", "")) or "Screen lock (type not detected)")
+    if st["first_login"] is None: st["first_login"] = min(_fl(r.get("Start epoch")) for r in evs if _fl(r.get("Start epoch"))) or None
 
 def _wt_close(st, end):
     """End the open session at `end`; an open screen lock ends there too (or, if it is far too long, the day simply ended when it locked)."""
@@ -1370,6 +1390,11 @@ def wt_login(key, eid, name, now):
         st = _wt_get(key, eid, name)
         if st["sess_start"] is not None:                     # an earlier session was never closed (tab / browser just closed): end it where it was last seen
             _wt_close(st, max(st["seen"] or st["sess_start"], st["lock_start"] or 0))
+        if st["lock_start"] is not None and st["sess_start"] is None:     # Update153: signing in again = the screen is on again; close the lock left open
+            ls = st["lock_start"]; end = now if now - ls <= WT_MAX_BREAK_SEC else ls
+            st["brk"] += max(end - ls, 0); st["lock_start"] = None
+            ev = st.pop("cur_ev", None)
+            if ev: ev["end"] = end; _wt_ev_queue(ev)
         if st["first_login"] is None: st["first_login"] = now
         st["sess_start"], st["seen"], st["name"] = now, now, name
     _wt_save(key)
@@ -1379,14 +1404,14 @@ def wt_logout(key, eid, name, now):
         st = _wt_get(key, eid, name); _wt_close(st, now); st["seen"] = now
     _wt_save(key)
 
-def wt_event(kind, value, ago_ms):
+def wt_event(kind, value, ago_ms, reason=None):
     """Own lock / unlock / support report from the signed-in employee's browser."""
     eid, name = str(session.get("emp_id", "")), session.get("name", "")
     if not eid: return
     key = session.get("wt_key")
     if not key:                                              # session that started before this feature: begin tracking now
         key = session["wt_key"] = _wt_key(eid, str(today_local())); wt_login(key, eid, name, time.time())
-    wt_apply(key, eid, name, kind, value, ago_ms)
+    wt_apply(key, eid, name, kind, value, ago_ms, reason=reason if reason in ("Manual lock", "Automatic lock") else None)
 
 def wt_apply(key, eid, name, kind, value, ago_ms, reason=None):
     """Idempotent: 'locked' while already locked does nothing. Server stamps the time (minus the reported age of the event).
@@ -1461,6 +1486,11 @@ def wt_seen():
 
 def _wt_report(d):
     """One dict per employee for date d: live memory first (today), then the sheet."""
+    evagg = {}                                               # Update153: lock count + completed lock time per employee from the saved events
+    for e_ in rows("Lock Events"):
+        if str(e_.get("Date")) == d:
+            a = evagg.setdefault(str(e_.get("Employee ID")), [0, 0]); a[0] += 1
+            if str(e_.get("End time", "")).strip(): a[1] += _secs(e_.get("Duration"))
     sheet = {str(r.get("Employee ID")): r for r in rows(WT_SHEET) if str(r.get("Date")) == d}
     with _wt_lock:
         live = {str(x["eid"]): dict(x) for x in _wt.values() if x["date"] == d}
@@ -1472,7 +1502,11 @@ def _wt_report(d):
         st = live.get(eid) or (_wt_from_row(sheet[eid], eid, name, d) if eid in sheet else None)
         if not st:
             out.append(dict(eid=eid, name=name, login="", logout="", sys_on="", brk="", locks="", work="", status="No login", tone="mut", lt="", state="No login", on_s=0, brk_s=0, work_s=0, n_locks=0)); continue
-        online, brk, active, state = _wt_calc(st, now); txt, tone = _wt_status(active, state, brk)
+        online, brk, active, state = _wt_calc(st, now)
+        n_ev, done = evagg.get(eid, (0, 0))
+        n_locks = max(st["locks"], n_ev)
+        if done > brk: active = max(active - (done - brk), 0); brk = done
+        txt, tone = _wt_status(active, state, brk); st = dict(st, locks=n_locks)
         out.append(dict(eid=eid, name=name or st["name"], login=_wt_clock(st["first_login"]),
                         logout=_wt_clock(st["last_logout"]) if st["sess_start"] is None else ("(not closed)" if state in ("Not closed", "Left (locked)") else ""),
                         sys_on=_hms(online), brk=_hms(brk), locks=st["locks"], work=_hms(active), status=txt, tone=tone, lt=("Active (agent)" if st["lt"] == "Agent" else st["lt"]) or "-", state=state, on_s=online, brk_s=brk, work_s=active, n_locks=st["locks"]))
@@ -2256,11 +2290,11 @@ function poll(){fetch('/employee/mahizhchi/winners',{credentials:'same-origin',c
  try{sessionStorage.setItem(K,JSON.stringify(seen))}catch(e){}}).catch(function(){})}
 poll();setInterval(poll,10000)})();</script>
 <script>(function(){function p(){fetch('/employee/ping',{credentials:'same-origin',cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();</script><script>(function(){if(!window.fetch)return;var W=location.pathname==='/employee/welcome',last=null,D=null;
-function post(e,v,t0,n){var body=JSON.stringify({e:e,v:v||'',ago:Date.now()-t0});
+function post(e,v,t0,n,r){var body=JSON.stringify({e:e,v:v||'',ago:Date.now()-t0,r:r||''});
  fetch('/employee/track',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:body,keepalive:true})
- .then(function(r){if(!r.ok&&n<5)throw 0}).catch(function(){if(n<5)setTimeout(function(){post(e,v,t0,n+1)},5000)})}
+ .then(function(x){if(!x.ok&&n<5)throw 0}).catch(function(){if(n<5)setTimeout(function(){post(e,v,t0,n+1,r)},5000)})}
 function begin(){var c;try{D=new IdleDetector();c=new AbortController()}catch(x){post('support','no',Date.now(),0);return}
- function sync(){var s=D.screenState;if(s&&s!==last){last=s;post(s,'',Date.now(),0)}}
+ var pu=null;function sync(){var s=D.screenState,u=D.userState;if(s&&s!==last){last=s;post(s,'',Date.now(),0,s==='locked'&&pu?(pu==='idle'?'Automatic lock':'Manual lock'):'')}pu=u}
  D.addEventListener('change',sync);
  D.start({threshold:60000,signal:c.signal}).then(function(){post('support','yes',Date.now(),0);sync()}).catch(function(){post('support','denied',Date.now(),0)})}
 function ask(){post('support','pending',Date.now(),0);
@@ -3931,7 +3965,7 @@ WT_EVENTS = """<div class="card"><h2 style="margin-top:0">Lock / Screen-off even
 <a class="btnl" href="/admin/work-time/events/export?date={{d}}{% if emp %}&emp={{emp|urlencode}}{% endif %}">Download CSV</a></form>
 <p class="mut" style="margin:0 0 10px">{{n}} event(s) &middot; total {{total}}. Reason: <b>Manual lock</b> (Win+L), <b>Automatic lock</b> (locked by inactivity), <b>Screen-off / idle</b> (no input for the idle limit), <b>Sleep / screen-off</b>.
 Events marked <i>Screen lock (type not detected)</i> came from the browser, which cannot tell the reason; install the agent for exact reasons.</p>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Lock #</th><th>Start (lock / screen-off)</th><th>End (unlock / screen-on)</th><th>Break duration</th><th>Reason</th><th>Source</th><th>Lock count</th><th>Total lock / break time</th></tr>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Lock #</th><th>Screen OFF (lock) at</th><th>Screen ON (unlock) at</th><th>Lock duration</th><th>Reason</th><th>Source</th><th>Lock count</th><th>Total lock / break time</th></tr>
 {% for r in evs %}<tr><td>{{r.eid}}</td><td>{{r.name}}</td><td>{{r.n}}</td><td>{{r.start}}</td><td>{{r.end or 'still locked / off'}}</td><td>{{r.dur}}</td><td>{{r.reason}}</td><td>{{r.src}}</td><td>{{r.cnt}}</td><td>{{r.tot}}</td></tr>
 {% else %}<tr><td colspan="10">No lock or screen-off events recorded.</td></tr>{% endfor %}</table></div></div>
 {% if live %}<script>setTimeout(function(){location.reload()},30000)</script>{% endif %}"""
@@ -4173,7 +4207,7 @@ def employee_track():
     """Update128: the employee's browser reports ITS OWN computer's screen state (locked / unlocked). Only writes this employee's record."""
     j = request.get_json(silent=True) or {}
     if j.get("e") in ("locked", "unlocked", "support"):
-        try: wt_event(j["e"], j.get("v", ""), j.get("ago", 0))
+        try: wt_event(j["e"], j.get("v", ""), j.get("ago", 0), j.get("r"))
         except Exception as e: print("work-time event error:", e)
     return ("", 204)
 
@@ -4185,12 +4219,12 @@ WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Work Time <small class=
 <p class="mut" style="margin:0 0 10px">Required = {{req}} of active (unlocked) time in a 9-hour day; allowed breaks = {{brk_allowed}} (30 min lunch + 30 min other).
 Break time = the time the computer was locked. Total working time = system-on time &minus; break time.</p>
 <p style="margin:0 0 10px"><b>{{n_ok}}</b> completed &middot; <b>{{n_short}}</b> short / in progress &middot; <b>{{n_none}}</b> no login{% if n_notrack %} &middot; <b style="color:#b45309">{{n_notrack}}</b> without lock tracking{% endif %}</p>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last lock / screen-off</th><th>Last unlock / screen-on</th><th>Break duration</th><th>Lock count</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last screen OFF (lock)</th><th>Last screen ON (unlock)</th><th>Break duration</th><th>Lock count</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
 {% for r in rows %}<tr><td><a href="/admin/work-time/events?date={{d}}&emp={{r.eid|urlencode}}">{{r.eid}}</a></td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.last_lock or '-'}}</td><td>{{r.last_unlock or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td><b>{{r.work or '-'}}</b></td>
 <td><span style="padding:2px 8px;border-radius:10px;font-size:12px;white-space:nowrap;{% if r.tone=='ok' %}background:#dcfce7;color:#166534{% elif r.tone=='warn' %}background:#fef3c7;color:#92400e{% elif r.tone=='bad' %}background:#fee2e2;color:#991b1b{% else %}background:#eef0f6;color:#5b6280{% endif %}">{{r.status}}</span>{% if r.state=='Locked' %} <small class="mut">&#128274; locked now</small>{% endif %}</td>
 <td>{{r.lt}}</td></tr>
 {% if r.events %}<tr><td colspan="12" style="padding:0 0 8px 28px;background:#f8f9ff"><details><summary class="mut" style="cursor:pointer;padding:6px 0">&#128274; {{r.events|length}} lock / screen-off event(s) &middot; total {{r.lock_total}} &mdash; click to view</summary>
-<table style="margin:4px 0 6px"><tr><th>Lock #</th><th>Locked / screen-off at</th><th>Unlocked / screen-on at</th><th>Lock duration</th><th>Reason</th><th>Source</th></tr>
+<table style="margin:4px 0 6px"><tr><th>Lock #</th><th>Screen OFF (locked) at</th><th>Screen ON (unlocked) at</th><th>Lock duration</th><th>Reason</th><th>Source</th></tr>
 {% for e in r.events %}<tr><td>{{e.n}}</td><td>{{e.start}}</td><td>{{e.end or 'still locked / off'}}</td><td>{{e.dur}}</td><td>{{e.reason}}</td><td>{{e.src}}</td></tr>{% endfor %}</table></details></td></tr>{% endif %}
 {% endfor %}</table></div></div>
 {% if live %}<script>setTimeout(function(){location.reload()},30000)</script>{% endif %}"""

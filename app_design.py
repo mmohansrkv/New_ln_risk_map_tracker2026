@@ -59,6 +59,8 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update144: the Admin "Work Time" and "Work Time Access" pages are removed from Admin > Log (menu entries gone, every /admin/work-time* URL answers 404). Nothing else is touched:
+    the silent background tracking and its Google Sheets data (Work Time, Lock Events, Work Time Share) keep working unchanged.
   * Update143: Admin > Work Time daily table now shows Employee ID | Name | Login | Logout | System-on | Last lock / screen-off | Last unlock / screen-on | Break duration | Lock count |
     Total working time | Status (same data as before, columns added to match the requested layout). Admin > Work Time > All lock events numbers every lock (Lock #) per employee per day.
     Nothing changes for employees (still silent, no page, no pop-up).
@@ -2453,7 +2455,7 @@ def page(body, title="Productivity Tracker", **ctx):
         # Update103: Productivity Log / Leave & Permission Log / Audit Log / Email Controls are grouped under one expandable "Log" menu.
         # Every URL is unchanged - only the sidebar grouping changed. Overview, Processes and Employee Info stay as main menu items.
         LOG_KIDS = [("/admin/log", "Productivity Log"), ("/admin/leave-permission", "Leave & Permission Log"),
-                    ("/admin/audit", "Audit Log"), ("/admin/email-controls", "Email Controls"), ("/admin/work-time", "Work Time"), ("/admin/work-time/access", "Work Time Access")]
+                    ("/admin/audit", "Audit Log"), ("/admin/email-controls", "Email Controls")]
         def _on(h): return p == h or p.startswith(h + "/")
         log_kids = [(h, l, _on(h) and not (h == "/admin/work-time" and p.startswith("/admin/work-time/access"))) for h, l in LOG_KIDS]
         by_h = {n[0]: n for n in nav}
@@ -4129,6 +4131,10 @@ def _wt_date_arg():
     try: dt.date.fromisoformat(d)
     except ValueError: d = str(today_local())
     return d
+
+@app.before_request
+def _wt_admin_pages_removed():          # Update144: Work Time / Work Time Access admin pages no longer exist
+    if request.path == "/admin/work-time" or request.path.startswith("/admin/work-time/"): abort(404)
 
 @app.route("/admin/work-time")
 @need("admin")

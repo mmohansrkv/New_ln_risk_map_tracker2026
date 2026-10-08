@@ -59,6 +59,9 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update141: Lock tracking "Permission needed" explained and fixed at the source. A web page can never switch on the browser's Idle Detection by itself (the browser always asks the user),
+    so the permission-free way is the silent Windows lock agent: Admin > Work Time > Lock-tracking agent now gives a ONE-CLICK PowerShell installer per employee (no admin rights, hidden,
+    starts at every logon) and the status shows "Active (agent)". "Permission needed" now reads "Agent needed". Agent employees are no longer counted as "without lock tracking".
   * Update140: FIX - the Work Time table was empty because no employee was shared yet. Until Admin saves "Work Time access" for the first time, EVERY employee is shared with the Admin
     (all columns fill automatically); after the first save, exactly the ticked employees are shared.
   * Update139: Work Time is never shown on any Employee page (no menu, no page, no message): every /employee/work-time* or /employee/working-time* URL answers 404, and the only Work Time
@@ -1366,7 +1369,7 @@ def wt_apply(key, eid, name, kind, value, ago_ms, reason=None):
         st = _wt_get(key, eid, name); st["seen"] = now
         src = "Agent" if value == "agent" else "Browser"
         if kind == "support":
-            lt = {"yes": "Active", "no": "Unsupported browser", "insecure": "HTTPS required"}.get(str(value), "Permission needed")
+            lt = {"yes": "Active", "no": "Unsupported browser", "insecure": "HTTPS required"}.get(str(value), "Agent needed")
             if st["lt"] != "Agent" and st["lt"] != lt: st["lt"], changed = lt, True
         elif kind == "locked" and st["sess_start"] is not None and st["lock_start"] is None:
             st["lock_start"] = max(t, st["sess_start"]); st["locks"] += 1; changed = True
@@ -1443,7 +1446,7 @@ def _wt_report(d):
         online, brk, active, state = _wt_calc(st, now); txt, tone = _wt_status(active, state, brk)
         out.append(dict(eid=eid, name=name or st["name"], login=_wt_clock(st["first_login"]),
                         logout=_wt_clock(st["last_logout"]) if st["sess_start"] is None else ("(not closed)" if state in ("Not closed", "Left (locked)") else ""),
-                        sys_on=_hms(online), brk=_hms(brk), locks=st["locks"], work=_hms(active), status=txt, tone=tone, lt=st["lt"] or "-", state=state, on_s=online, brk_s=brk, work_s=active, n_locks=st["locks"]))
+                        sys_on=_hms(online), brk=_hms(brk), locks=st["locks"], work=_hms(active), status=txt, tone=tone, lt=("Active (agent)" if st["lt"] == "Agent" else st["lt"]) or "-", state=state, on_s=online, brk_s=brk, work_s=active, n_locks=st["locks"]))
     shared = wts_ids()                                       # Update138: Admin sees only the employees shared with the Admin (tracking itself covers everyone)
     out = [r for r in out if _key(r["eid"]) in shared]
     return sorted(out, key=lambda r: (r["state"] == "No login", r["name"].lower()))
@@ -3992,12 +3995,15 @@ def admin_work_time_agent_file():
 WT_AGENT = """<div class="card"><h2 style="margin-top:0">Lock-tracking agent (Windows)</h2>
 <p class="mut">A tiny background program on each employee's PC reports screen lock / unlock to this server - no browser, no permission dialog, nothing shown to the employee.
 Break time is recorded only while the employee is logged in to the Employee page. Each employee has their own token; keep this page Admin-only.</p>
+<p><b>Quickest:</b> a browser can never turn lock tracking on by itself (it always asks the user), so this agent is the no-permission way. Download the employee's <b>install.ps1</b> below and run it once on that PC, signed in as that employee:
+<code>powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File install.ps1</code>. It needs Python 3 on the PC, no administrator rights; it saves the agent and its settings and starts it hidden at every Windows logon. The Work Time status then shows <b>Active (agent)</b>.</p>
+<p class="mut">Manual alternative:</p>
 <ol><li>Install Python 3 on the PC (or ask IT to wrap <b>lock_agent.py</b> as an .exe / scheduled task).</li>
 <li>Download <a class="btnl" href="/admin/work-time/agent.py">lock_agent.py</a>.</li>
 <li>Create <code>lock_agent.ini</code> next to it: <code>server=<b>{{base}}</b></code>, <code>employee=&lt;ID&gt;</code>, <code>token=&lt;token below&gt;</code> (one per line; optional <code>idle_minutes=5</code> = screen-off / idle limit, <code>0</code> switches it off).</li>
 <li>Run it at Windows logon (Task Scheduler &rarr; "At log on", <code>pythonw lock_agent.py</code>), hidden.</li></ol>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Token</th></tr>
-{% for r in data %}<tr><td>{{r.eid}}</td><td>{{r.name}}</td><td><code>{{r.token}}</code></td></tr>{% endfor %}</table></div></div>"""
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Token</th><th>One-click installer</th></tr>
+{% for r in data %}<tr><td>{{r.eid}}</td><td>{{r.name}}</td><td><code>{{r.token}}</code></td><td><a class="btnl" href="/admin/work-time/agent/install.ps1?eid={{r.eid|urlencode}}">install.ps1</a></td></tr>{% endfor %}</table></div></div>"""
 
 WT_AGENT_PY = r'''"""Lock agent (Windows). Reports every screen LOCK (Win+L = manual, inactivity = automatic) and SCREEN-OFF / IDLE period to the
 Productivity Tracker, with start and end times. Standard library only.
@@ -4050,6 +4056,37 @@ while True:
     flush(); time.sleep(1)
 '''
 
+@app.route("/admin/work-time/agent/install.ps1")
+@need("admin")
+def admin_work_time_agent_installer():
+    """Update141: one-click, per-employee installer for the silent lock agent (current user, no admin rights, hidden, runs at every logon)."""
+    eid = request.args.get("eid", "").strip()
+    e = next((x for x in rows("Employees") if _key(x.get("Employee ID", "")) == _key(eid)), None)
+    if not e: abort(404)
+    eid = str(e["Employee ID"]).strip(); base = request.url_root.rstrip("/")
+    ps = f"""$ErrorActionPreference = 'Stop'
+$dir = Join-Path $env:LOCALAPPDATA 'WorkTimeAgent'
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+$agent = @'
+{WT_AGENT_PY}
+'@
+Set-Content -Path (Join-Path $dir 'lock_agent.py') -Value $agent -Encoding UTF8
+Set-Content -Path (Join-Path $dir 'lock_agent.ini') -Value @('server={base}','employee={eid}','token={wt_agent_token(eid)}','idle_minutes=5') -Encoding UTF8
+$pw = (Get-Command pythonw.exe -ErrorAction SilentlyContinue).Source
+if (-not $pw) {{
+  $py = (Get-Command py.exe -ErrorAction SilentlyContinue).Source
+  if ($py) {{ $exe = (& $py -3 -c "import sys;print(sys.executable)"); $pw = $exe -replace 'python\\.exe$','pythonw.exe' }}
+}}
+if (-not $pw -or -not (Test-Path $pw)) {{ Write-Error 'Python 3 (pythonw.exe) was not found. Install Python 3, then run this installer again.' }}
+$act = New-ScheduledTaskAction -Execute $pw -Argument ('"' + (Join-Path $dir 'lock_agent.py') + '"') -WorkingDirectory $dir
+$trg = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
+Register-ScheduledTask -TaskName 'WorkTimeAgent' -Action $act -Trigger $trg -Settings $set -Force | Out-Null
+Start-ScheduledTask -TaskName 'WorkTimeAgent'
+"""
+    resp = Response("\ufeff" + ps, mimetype="text/plain"); resp.headers["Content-Disposition"] = f"attachment; filename=install_{re.sub(r'[^A-Za-z0-9_-]+', '_', eid)}.ps1"
+    return resp
+
 @app.route("/employee/track", methods=["POST"])
 @need("employee")
 def employee_track():
@@ -4089,7 +4126,7 @@ def admin_work_time():
                 req=_hms(WT_REQUIRED_SEC), brk_allowed=_hms(WT_ALLOWED_BREAK_SEC),
                 n_ok=sum(r["tone"] == "ok" for r in data), n_short=sum(r["tone"] in ("warn", "bad") for r in data),
                 n_none=sum(r["state"] == "No login" for r in data),
-                n_notrack=sum(r["state"] != "No login" and r["lt"] not in ("Active",) for r in data))
+                n_notrack=sum(r["state"] != "No login" and r["lt"] not in ("Active", "Active (agent)") for r in data))
 
 @app.route("/admin/work-time/export")
 @need("admin")

@@ -59,6 +59,8 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update135: Admin > Productivity Log: "Month report" panel - pick a Month (view that month), and optionally an Employee; Print and Download Excel (Employee totals + Daily summary + Entry details)
+    for the selected month, for one employee (all months' current-month default) or for Employee + Month. Report/Excel also carry target / completed count / target status.
   * Update134: Admin > Work Time > Weekly report / Monthly report: per-employee totals (days worked, system-on, lock / screen-off time and count, working time, average, required, difference, days 8h met / short),
     day-wise drill-down per employee, Download Excel (Summary + Day-wise) / CSV / Print.
   * Update133: every lock / screen-off period is stored as its own event (start, end, duration, reason: Manual lock / Automatic lock / Screen-off-idle / Sleep) in the new "Lock Events" sheet;
@@ -2814,18 +2816,33 @@ LOG_MANAGE = """<div class="card no-print"><h2>Manage employee entries</h2>
 LOG_TOP = """<div class="card"><div class="loghead"><h2>Productivity log</h2>
 <details class="exp no-print"><summary class="btnl pbtn">&#128438; Print / Export &#9662;</summary>
 <div class="menu">
-<a href="/admin/log/report?period=month&print=1&emp={{emp|urlencode}}" target="_blank">&#128438;<span>Print current month report<small>{{month_label}}</small></span></a>
+<a href="/admin/log/report?period=month&print=1&emp={{emp|urlencode}}&month={{rep_month}}" target="_blank">&#128438;<span>Print month report<small>{{month_label}}</small></span></a>
 <a href="/admin/log/report?period=week&print=1&emp={{emp|urlencode}}" target="_blank">&#128438;<span>Print weekly report<small>{{week_label}}</small></span></a>
 <hr>
-<a href="/admin/log/export?period=month&emp={{emp|urlencode}}">&#128196;<span>Download Excel &mdash; current month<small>.xlsx &middot; {{month_label}}</small></span></a>
+<a href="/admin/log/export?period=month&emp={{emp|urlencode}}&month={{rep_month}}">&#128196;<span>Download Excel &mdash; month<small>.xlsx &middot; {{month_label}}</small></span></a>
 <a href="/admin/log/export?period=week&emp={{emp|urlencode}}">&#128196;<span>Download Excel &mdash; weekly<small>.xlsx &middot; {{week_label}}</small></span></a>
 </div></details></div>
-{% if emp %}<p class="mut">Reports below are limited to employee filter: <b>{{emp}}</b></p>{% endif %}
-<form class="grid"><label>Date<input type="date" name="date" value="{{request.args.get('date','')}}"></label>
+<form class="grid no-print" method="get" action="/admin/log" style="background:#f6f7ff;border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:10px">
+<label>Month<input type="month" name="month" value="{{rep_month}}"></label>
+<label>Employee<select name="emp"><option value="">All employees</option>
+{% for e in emp_list %}<option value="{{e['Employee ID']}}" {{'selected' if emp and (emp|upper) == (e['Employee ID']|string|trim|upper) else ''}}>{{e['Employee ID']}} &middot; {{e['Name']}}</option>{% endfor %}</select></label>
+<div><button class="primary pbtn" type="submit">View</button>
+<button class="primary pbtn" type="submit" formaction="/admin/log/report" formtarget="_blank" name="print" value="1">&#128438; Print</button>
+<button class="primary pbtn" type="submit" formaction="/admin/log/export" style="background:#22a06b;box-shadow:0 4px 0 #17734d">&#128196; Download Excel</button>
+<a href="/admin/log">Clear</a></div>
+<p class="mut" style="grid-column:1/-1;margin:0">Month + Employee = that employee's month. Employee only = that employee's current month. Leave Month blank to view all months (Print / Download then use the current month).</p></form>
+<p class="mut">Showing: <b>{{month_label if rep_month else 'all months'}}</b>{% if emp %} &middot; employee filter: <b>{{emp}}</b>{% endif %} &middot; Entries: <b>{{subs|length}}</b></p>
+<form class="grid"><input type="hidden" name="month" value="{{rep_month}}"><label>Date<input type="date" name="date" value="{{request.args.get('date','')}}"></label>
 <label>Employee ID / name<input name="emp" value="{{request.args.get('emp','')}}"></label>
 <button class="primary pbtn">Filter</button> <a href="/admin/log">Clear</a></form>
 <p class="totals no-print">Target check (Admin-set Target Count): <span class="tg-badge met">{{tg_met}} met</span> <span class="tg-badge miss">{{tg_miss}} not met</span>
 <span class="mut">&middot; targets are set on the <a href="/admin/processes">Processes</a> page.</span></p></div>"""
+
+def report_scope():
+    """Update135: ?month=YYYY-MM (Admin's month picker) -> (month, an 'on' date inside it); else the legacy ?on=."""
+    m = (request.args.get("month") or "").strip()
+    month = m if re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", m) else ""
+    return month, ((month + "-01") if month else request.args.get("on"))
 
 def period_range(period, on=None):
     """(start, end, label) for the month or Monday-Sunday week containing `on` (default today)."""
@@ -2840,38 +2857,58 @@ def period_range(period, on=None):
 def log_report_data(period, emp_q="", on=None):
     st, en, label = period_range(period, on)
     q = (emp_q or "").strip().lower()
-    subs = [s for s in load_subs() if str(st) <= str(s["date"]) <= str(en)
-            and (not q or q in (str(s["emp_id"]).lower(), str(s["emp_name"]).lower()) or q in str(s["emp_name"]).lower())]
+    allsubs = load_subs()
+    exact = q in {str(s["emp_id"]).strip().lower() for s in allsubs}        # Update135: a picked Employee ID matches only that employee
+    subs = [s for s in allsubs if str(st) <= str(s["date"]) <= str(en)
+            and (not q or (str(s["emp_id"]).strip().lower() == q if exact else
+                           (q in (str(s["emp_id"]).lower(), str(s["emp_name"]).lower()) or q in str(s["emp_name"]).lower())))]
     subs.sort(key=lambda s: (s["date"], str(s["emp_name"]).lower()))
     day = lambda d: dt.date.fromisoformat(str(d)).strftime("%a") if str(d)[:4].isdigit() else ""
     summary, detail = [], []
     for s in subs:
         pct = "Weekend - not counted" if s["off"] else s["pct"]
+        tstat = {"off": "Weekend - not counted", "none": "No target", "met": "Target met"}.get(s["tgt_state"], "Target not met")
         summary.append([s["date"], day(s["date"]), s["emp_id"], s["emp_name"], s["designation"], s["band"],
-                        s["prod"], s["non"], s["total"], pct])
+                        s["prod"], s["non"], s["total"], pct, s["tgt_total"], s["cnt_total"], tstat])
         base = [s["date"], day(s["date"]), s["emp_id"], s["emp_name"], s["designation"], s["band"]]
         for p_ in s["procs"]:
             detail.append(base + ["Process", p_["name"], p_["desc"], p_["hour"], p_["count"], p_["target"],
                                   "" if p_["pct"] is None else p_["pct"]])
         for n_ in s["notes"]:
             detail.append(base + ["Note", n_["desc"], "", n_["hour"], "", "", ""])
-    return dict(start=st, end=en, label=label, subs=subs, summary=summary, detail=detail, emp=emp_q)
+    tot = {}
+    for s in subs:
+        t = tot.setdefault(str(s["emp_id"]), dict(id=s["emp_id"], name=s["emp_name"], des=s["designation"], days=0, off=0,
+                                                  prod=0.0, non=0.0, pcts=[], met=0, miss=0))
+        if s["off"]: t["off"] += 1; continue
+        t["days"] += 1; t["prod"] += s["prod"]; t["non"] += s["non"]; t["pcts"].append(s["pct"])
+        t["met"] += s["tgt_state"] == "met"; t["miss"] += s["tgt_state"] == "miss"
+    totals = [[t["id"], t["name"], t["des"], t["days"], t["off"], round(t["prod"], 2), round(t["non"], 2), round(t["prod"] + t["non"], 2),
+               round(sum(t["pcts"]) / len(t["pcts"]), 2) if t["pcts"] else "", t["met"], t["miss"]]
+              for t in sorted(tot.values(), key=lambda t: str(t["name"]).lower())]
+    return dict(start=st, end=en, label=label, subs=subs, summary=summary, detail=detail, emp=emp_q, totals=totals)
 
 SUMMARY_HEADS = ["Date", "Day", "Employee ID", "Employee name", "Designation", "Band",
-                 "Productive hrs", "Non-productive hrs", "Total hrs", "Productivity %"]
+                 "Productive hrs", "Non-productive hrs", "Total hrs", "Productivity %", "Target count", "Completed count", "Target status"]
+TOTAL_HEADS = ["Employee ID", "Employee name", "Designation", "Days with entry", "Weekly-off entries", "Productive hrs", "Non-productive hrs",
+               "Total hrs", "Avg productivity %", "Days target met", "Days target not met"]
 DETAIL_HEADS = ["Date", "Day", "Employee ID", "Employee name", "Designation", "Band", "Type",
                 "Process / Note", "Description", "Hours", "Count", "Target count", "Achievement %"]
 
 LOG_REPORT = """<div class="rep-tools no-print"><button type="button" class="btnl pbtn" onclick="window.print()">&#128438; Print</button>
-<a class="btnl pbtn" style="background:#22a06b;box-shadow:0 4px 0 #17734d" href="/admin/log/export?period={{period}}&emp={{emp|urlencode}}">&#128196; Download Excel</a>
-<a href="/admin/log{% if emp %}?emp={{emp|urlencode}}{% endif %}">&larr; Back to log</a></div>
+<a class="btnl pbtn" style="background:#22a06b;box-shadow:0 4px 0 #17734d" href="/admin/log/export?period={{period}}&emp={{emp|urlencode}}&month={{rep_month}}">&#128196; Download Excel</a>
+<a href="/admin/log?emp={{emp|urlencode}}&month={{rep_month}}">&larr; Back to log</a></div>
 <h1 class="rep-title">Productivity Log &mdash; {{'Weekly' if period=='week' else 'Monthly'}} report</h1>
 <p class="rep-meta">{{label}}{% if emp %} &middot; Employee filter: {{emp}}{% endif %} &middot; Generated {{now}}</p>
 <div class="totals">Entries: <b>{{summary|length}}</b> &middot; Productive: <b>{{tp|g}}</b> hrs &middot; Non-productive: <b>{{tn|g}}</b> hrs &middot; Total: <b>{{(tp+tn)|g}}</b> hrs</div>
+<h2>Employee totals</h2>
+<table><tr>{% for h in th %}<th>{{h}}</th>{% endfor %}</tr>
+{% for r in totals %}<tr>{% for v in r %}<td>{% if loop.index in (6,7,8) %}{{v|g}}{% elif loop.index==9 and v != '' %}{{v}}%{% else %}{{v}}{% endif %}</td>{% endfor %}</tr>
+{% else %}<tr><td colspan="11">No productivity entries for this period.</td></tr>{% endfor %}</table>
 <h2>Daily summary</h2>
 <table><tr>{% for h in sh %}<th>{{h}}</th>{% endfor %}</tr>
-{% for r in summary %}<tr>{% for v in r %}<td>{% if loop.index in (7,8,9) %}{{v|g}}{% elif loop.last and v is number %}{{v}}%{% else %}{{v}}{% endif %}</td>{% endfor %}</tr>
-{% else %}<tr><td colspan="10">No productivity entries for this period.</td></tr>{% endfor %}</table>
+{% for r in summary %}<tr>{% for v in r %}<td>{% if loop.index in (7,8,9,11,12) %}{{v|g}}{% elif loop.index==10 and v is number %}{{v}}%{% else %}{{v}}{% endif %}</td>{% endfor %}</tr>
+{% else %}<tr><td colspan="13">No productivity entries for this period.</td></tr>{% endfor %}</table>
 <h2>Entry details</h2>
 <table><tr>{% for h in dh %}<th>{{h}}</th>{% endfor %}</tr>
 {% for r in detail %}<tr>{% for v in r %}<td>{% if loop.index in (10,11,12) and v != '' %}{{v|g}}{% elif loop.last and v != '' %}{{v}}%{% else %}{{v}}{% endif %}</td>{% endfor %}</tr>
@@ -2882,14 +2919,15 @@ LOG_REPORT = """<div class="rep-tools no-print"><button type="button" class="btn
 @need("admin")
 def admin_log():
     d, e = request.args.get("date", ""), request.args.get("emp", "").strip().lower()
-    subs = [s for s in load_subs() if (not d or s["date"] == d) and
+    rep_month, _on = report_scope()
+    subs = [s for s in load_subs() if (not d or s["date"] == d) and (not rep_month or str(s["date"]).startswith(rep_month)) and
             (not e or e in (str(s["emp_id"]).lower(), str(s["emp_name"]).lower()))]
     emp_list = sorted(rows("Employees"), key=lambda x: str(x.get("Name", "")).lower())
     return page(LOG_MANAGE + LOG_TOP + LIST + LOG_MISSED, title="Productivity log", subs=subs, emp=request.args.get("emp", "").strip(), **log_missed_section(),
                 emp_list=emp_list, sel_emp=request.args.get("emp", "").strip(), today_str=str(today_local()),
                 nxt=request.full_path.rstrip("?"),
                 tg_met=sum(1 for s in subs if s["tgt_state"] == "met"), tg_miss=sum(1 for s in subs if s["tgt_state"] == "miss"),
-                month_label=period_range("month")[2], week_label=period_range("week")[2])
+                month_label=period_range("month", _on)[2], week_label=period_range("week")[2], rep_month=rep_month)
 
 @app.route("/admin/log/add", methods=["GET", "POST"])
 @need("admin")
@@ -2928,27 +2966,31 @@ def admin_log_add():
 @need("admin")
 def admin_log_report():
     period = "week" if request.args.get("period") == "week" else "month"
-    r = log_report_data(period, request.args.get("emp", ""), request.args.get("on"))
+    rep_month, on = report_scope()
+    r = log_report_data(period, request.args.get("emp", ""), on)
     tp = sum(x[6] for x in r["summary"] if x[9] != "Weekend - not counted")
     tn = sum(x[7] for x in r["summary"] if x[9] != "Weekend - not counted")
     return page(LOG_REPORT, title="Productivity report", period=period, label=r["label"], emp=r["emp"],
-                summary=r["summary"], detail=r["detail"], sh=SUMMARY_HEADS, dh=DETAIL_HEADS, tp=tp, tn=tn,
+                summary=r["summary"], detail=r["detail"], totals=r["totals"], th=TOTAL_HEADS, rep_month=rep_month, sh=SUMMARY_HEADS, dh=DETAIL_HEADS, tp=tp, tn=tn,
                 now=now_local().strftime("%Y-%m-%d %I:%M %p"), autoprint=request.args.get("print") == "1")
 
 @app.route("/admin/log/export")
 @need("admin")
 def admin_log_export():
     period = "week" if request.args.get("period") == "week" else "month"
-    r = log_report_data(period, request.args.get("emp", ""), request.args.get("on"))
+    _m, on = report_scope()
+    r = log_report_data(period, request.args.get("emp", ""), on)
     tag = ("week_" + str(r["start"])) if period == "week" else str(r["start"])[:7]
-    fname = f"Productivity_Log_{tag}"
+    who = re.sub(r"[^A-Za-z0-9_-]+", "_", (r["emp"] or "").strip()).strip("_")
+    fname = f"Productivity_Log_{who + '_' if who else ''}{tag}"
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
         from openpyxl.utils import get_column_letter
     except ImportError:      # openpyxl not installed: still give a file Excel opens
         buf = io.StringIO(); w = csv.writer(buf)
-        w.writerow([f"Productivity Log - {r['label']}"]); w.writerow(SUMMARY_HEADS); w.writerows(r["summary"])
+        w.writerow([f"Productivity Log - {r['label']}"]); w.writerow(TOTAL_HEADS); w.writerows(r["totals"])
+        w.writerow([]); w.writerow(SUMMARY_HEADS); w.writerows(r["summary"])
         w.writerow([]); w.writerow(DETAIL_HEADS); w.writerows(r["detail"])
         return Response("\ufeff" + buf.getvalue(), mimetype="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="{fname}.csv"'})
@@ -2971,7 +3013,8 @@ def admin_log_export():
         for i, wd in enumerate(widths, start=1): ws.column_dimensions[get_column_letter(i)].width = wd
         ws.freeze_panes = "A4"
         if data: ws.auto_filter.ref = f"A3:{get_column_letter(len(heads))}{ws.max_row}"
-    sheet(wb.active, "Daily summary", SUMMARY_HEADS, r["summary"], [12, 6, 12, 22, 20, 8, 14, 18, 10, 22], {7, 8, 9, 10})
+    sheet(wb.active, "Employee totals", TOTAL_HEADS, r["totals"], [12, 22, 20, 14, 14, 14, 18, 10, 16, 14, 16], {4, 5, 6, 7, 8, 9, 10, 11})
+    sheet(wb.create_sheet(), "Daily summary", SUMMARY_HEADS, r["summary"], [12, 6, 12, 22, 20, 8, 14, 18, 10, 22, 14, 16, 22], {7, 8, 9, 10, 11, 12})
     sheet(wb.create_sheet(), "Entry details", DETAIL_HEADS, r["detail"], [12, 6, 12, 22, 20, 8, 10, 26, 30, 8, 8, 12, 14], {10, 11, 12, 13})
     out = io.BytesIO(); wb.save(out)
     return Response(out.getvalue(), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

@@ -59,6 +59,8 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update140: FIX - the Work Time table was empty because no employee was shared yet. Until Admin saves "Work Time access" for the first time, EVERY employee is shared with the Admin
+    (all columns fill automatically); after the first save, exactly the ticked employees are shared.
   * Update139: Work Time is never shown on any Employee page (no menu, no page, no message): every /employee/work-time* or /employee/working-time* URL answers 404, and the only Work Time
     endpoint an employee's browser uses is the silent /employee/track. Tracking starts at the moment of login and, as a safety net, starts on the first background heartbeat if the
     login-time start did not run (for example a session opened before an update).
@@ -1449,9 +1451,16 @@ def _wt_report(d):
 # ---------------------------------------------------------------- Update138: which employees' Work Time is shared with the Admin
 WTS_SHEET = "Work Time Share"
 
+WTS_CFG_KEY = "Work Time access configured"
+def wts_configured(fresh=False):
+    src = _fetch_rows("Settings") if fresh else rows("Settings")
+    return any(str(r.get("Key", "")).strip() == WTS_CFG_KEY and str(r.get("Value", "")).strip().lower() == "yes" for r in src)
+
 def wts_map(fresh=False):
     """{EMPLOYEE KEY: dict(eid, name, updated)} for every employee whose Work Time is shared with the Admin."""
     out = {}
+    if not wts_configured(fresh):                       # Update140: never configured -> everyone is shared
+        return {_key(e["Employee ID"]): dict(eid=str(e["Employee ID"]).strip(), name=str(e.get("Name", "")), updated="") for e in rows("Employees") if str(e.get("Employee ID", "")).strip()}
     for r in (_fetch_rows(WTS_SHEET) if fresh else rows(WTS_SHEET)):
         if str(r.get("Employee ID", "")).strip() and str(r.get("Shared", "")).strip().lower() == "yes":
             out[_key(r["Employee ID"])] = dict(eid=str(r["Employee ID"]).strip(), name=str(r.get("Employee name", "")), updated=str(r.get("Updated at", "")))
@@ -7188,7 +7197,7 @@ Work Time log, the weekly / monthly reports, the lock events and the downloads. 
 @app.route("/admin/work-time/access")
 @need("admin")
 def admin_work_time_access():
-    prefetch(WTS_SHEET, "Employees")
+    prefetch(WTS_SHEET, "Employees", "Settings")
     q = request.args.get("q", "").strip(); ql = q.lower(); sm = wts_map(fresh=True)
     allemps = sorted(rows("Employees"), key=lambda e: str(e.get("Name", "")).lower())
     emps = [dict(e, shared=_key(e["Employee ID"]) in sm, since=sm.get(_key(e["Employee ID"]), {}).get("updated", ""))
@@ -7204,6 +7213,7 @@ def admin_work_time_access_save():
     keep = {k for k in wts_map(fresh=True) if k in valid and k not in shown}          # employees hidden by the search filter keep their current setting
     final = keep | ticked
     wts_write([e for e in allemps if _key(e["Employee ID"]) in final])
+    _set_setting(WTS_CFG_KEY, "Yes")                       # from now on exactly the ticked employees are shared
     flash(f"Work Time access saved: {len(final)} of {len(valid)} employee(s) shared with the Admin.")
     return redirect("/admin/work-time/access" + ("?q=" + urllib.parse.quote(request.args.get("q", "")) if request.args.get("q") else ""))
 

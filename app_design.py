@@ -59,6 +59,8 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update142: Work Time Access is one click away everywhere: sidebar Log > "Work Time Access", and on the Work Time page itself the Admin can ADD an employee (dropdown) or REMOVE one
+    (button on each row) instantly; the full tick-list page stays for bulk changes. Only employees with access appear in the daily view, reports, lock events and downloads.
   * Update141: Lock tracking "Permission needed" explained and fixed at the source. A web page can never switch on the browser's Idle Detection by itself (the browser always asks the user),
     so the permission-free way is the silent Windows lock agent: Admin > Work Time > Lock-tracking agent now gives a ONE-CLICK PowerShell installer per employee (no admin rights, hidden,
     starts at every logon) and the status shows "Active (agent)". "Permission needed" now reads "Agent needed". Agent employees are no longer counted as "without lock tracking".
@@ -1481,6 +1483,11 @@ def wts_write(emps):
         _with_retry(ws.update, range_name="A2", values=[[str(e["Employee ID"]), str(e.get("Name", "")), "Yes", now, "Admin"] for e in emps], value_input_option="RAW")
     invalidate_cache(WTS_SHEET)
 
+def wts_apply(keys):
+    """Share exactly these employees (keys = normalised IDs) with the Admin; from now on only they are visible."""
+    wts_write([e for e in rows("Employees") if _key(e["Employee ID"]) in keys])
+    _set_setting(WTS_CFG_KEY, "Yes")
+
 # ---------------------------------------------------------------- auth helpers
 def need(role=None):
     def deco(f):
@@ -2443,9 +2450,9 @@ def page(body, title="Productivity Tracker", **ctx):
         # Update103: Productivity Log / Leave & Permission Log / Audit Log / Email Controls are grouped under one expandable "Log" menu.
         # Every URL is unchanged - only the sidebar grouping changed. Overview, Processes and Employee Info stay as main menu items.
         LOG_KIDS = [("/admin/log", "Productivity Log"), ("/admin/leave-permission", "Leave & Permission Log"),
-                    ("/admin/audit", "Audit Log"), ("/admin/email-controls", "Email Controls"), ("/admin/work-time", "Work Time")]
+                    ("/admin/audit", "Audit Log"), ("/admin/email-controls", "Email Controls"), ("/admin/work-time", "Work Time"), ("/admin/work-time/access", "Work Time Access")]
         def _on(h): return p == h or p.startswith(h + "/")
-        log_kids = [(h, l, _on(h)) for h, l in LOG_KIDS]
+        log_kids = [(h, l, _on(h) and not (h == "/admin/work-time" and p.startswith("/admin/work-time/access"))) for h, l in LOG_KIDS]
         by_h = {n[0]: n for n in nav}
         nav = [by_h["/admin/summary"], by_h["/admin/processes"],
                ("/admin/log", "Log", any(k[2] for k in log_kids), log_kids),
@@ -4098,6 +4105,9 @@ def employee_track():
     return ("", 204)
 
 WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Work Time <small class="mut">&middot; automatic, silent tracking &middot; showing <b>{{n_shared}}</b> of {{n_total}} employees shared with Admin</small></h2>
+<form method="post" action="/admin/work-time/access/add" class="no-print" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px"><input type="hidden" name="back" value="{{back}}">
+<label>Add employee access <select name="eid" required><option value="">- select employee -</option>{% for e in unshared %}<option value="{{e['Employee ID']}}">{{e['Employee ID']}} &middot; {{e['Name']}}</option>{% endfor %}</select></label>
+<button class="primary pbtn" type="submit" {{'disabled' if not unshared else ''}}>Add</button> <small class="mut">{{'Everyone already has access.' if not unshared else ''}}</small></form>
 {% if not rows %}<p class="mut">No employee is shared with the Admin yet. <a href="/admin/work-time/access">Choose employees</a>.</p>{% endif %}
 <form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
 <label>Date <input type="date" name="date" value="{{d}}" max="{{today}}" onchange="this.form.submit()"></label>
@@ -4105,10 +4115,10 @@ WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Work Time <small class=
 <p class="mut" style="margin:0 0 10px">Required = {{req}} of active (unlocked) time in a 9-hour day; allowed breaks = {{brk_allowed}} (30 min lunch + 30 min other).
 Break time = the time the computer was locked. Total working time = system-on time &minus; break time.</p>
 <p style="margin:0 0 10px"><b>{{n_ok}}</b> completed &middot; <b>{{n_short}}</b> short / in progress &middot; <b>{{n_none}}</b> no login{% if n_notrack %} &middot; <b style="color:#b45309">{{n_notrack}}</b> without lock tracking{% endif %}</p>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Lock / screen-off time</th><th>Times</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Lock / screen-off time</th><th>Times</th><th>Total working time</th><th>Status</th><th>Lock tracking</th><th class="no-print">Access</th></tr>
 {% for r in rows %}<tr><td><a href="/admin/work-time/events?date={{d}}&emp={{r.eid|urlencode}}">{{r.eid}}</a></td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td><b>{{r.work or '-'}}</b></td>
 <td><span style="padding:2px 8px;border-radius:10px;font-size:12px;white-space:nowrap;{% if r.tone=='ok' %}background:#dcfce7;color:#166534{% elif r.tone=='warn' %}background:#fef3c7;color:#92400e{% elif r.tone=='bad' %}background:#fee2e2;color:#991b1b{% else %}background:#eef0f6;color:#5b6280{% endif %}">{{r.status}}</span>{% if r.state=='Locked' %} <small class="mut">&#128274; locked now</small>{% endif %}</td>
-<td>{{r.lt}}</td></tr>{% endfor %}</table></div></div>
+<td>{{r.lt}}</td><td class="no-print"><form method="post" action="/admin/work-time/access/remove" style="margin:0" onsubmit="return confirm('Remove Work Time access for {{r.name|e}}?')"><input type="hidden" name="back" value="{{back}}"><input type="hidden" name="eid" value="{{r.eid}}"><button class="btnl" type="submit" style="background:#dc2626;box-shadow:0 3px 0 #991b1b;padding:4px 10px">Remove</button></form></td></tr>{% endfor %}</table></div></div>
 {% if live %}<script>setTimeout(function(){location.reload()},30000)</script>{% endif %}"""
 
 def _wt_date_arg():
@@ -4122,7 +4132,7 @@ def _wt_date_arg():
 def admin_work_time():
     prefetch(WT_SHEET, "Employees")
     d = _wt_date_arg(); data = _wt_report(d)
-    return page(WT_ADMIN, title="Work Time", n_shared=len(wts_ids()), n_total=len(rows("Employees")), d=d, today=str(today_local()), rows=data, live=(d == str(today_local())),
+    return page(WT_ADMIN, title="Work Time", back=request.full_path.rstrip("?"), unshared=[e for e in rows("Employees") if _key(e["Employee ID"]) not in wts_ids()], n_shared=len(wts_ids()), n_total=len(rows("Employees")), d=d, today=str(today_local()), rows=data, live=(d == str(today_local())),
                 req=_hms(WT_REQUIRED_SEC), brk_allowed=_hms(WT_ALLOWED_BREAK_SEC),
                 n_ok=sum(r["tone"] == "ok" for r in data), n_short=sum(r["tone"] in ("warn", "bad") for r in data),
                 n_none=sum(r["state"] == "No login" for r in data),
@@ -7249,10 +7259,29 @@ def admin_work_time_access_save():
     ticked = {_key(x) for x in request.form.getlist("share")} & shown
     keep = {k for k in wts_map(fresh=True) if k in valid and k not in shown}          # employees hidden by the search filter keep their current setting
     final = keep | ticked
-    wts_write([e for e in allemps if _key(e["Employee ID"]) in final])
-    _set_setting(WTS_CFG_KEY, "Yes")                       # from now on exactly the ticked employees are shared
+    wts_apply(final)
     flash(f"Work Time access saved: {len(final)} of {len(valid)} employee(s) shared with the Admin.")
     return redirect("/admin/work-time/access" + ("?q=" + urllib.parse.quote(request.args.get("q", "")) if request.args.get("q") else ""))
+
+
+def _wts_one(add):
+    eid = request.form.get("eid", "").strip()
+    e = next((x for x in rows("Employees") if _key(x.get("Employee ID", "")) == _key(eid)), None)
+    back = request.form.get("back", "")
+    back = back if back.startswith("/admin/work-time") and not back.startswith("//") else "/admin/work-time"
+    if not e: flash("Choose an employee.", "error"); return redirect(back)
+    cur = set(wts_map(fresh=True)); k = _key(e["Employee ID"])
+    wts_apply((cur | {k}) if add else (cur - {k}))
+    flash(f"Work Time access {'added for' if add else 'removed for'} {e['Name']}.")
+    return redirect(back)
+
+@app.route("/admin/work-time/access/add", methods=["POST"])
+@need("admin")
+def admin_work_time_access_add(): return _wts_one(True)
+
+@app.route("/admin/work-time/access/remove", methods=["POST"])
+@need("admin")
+def admin_work_time_access_remove(): return _wts_one(False)
 
 
 if __name__ == "__main__":

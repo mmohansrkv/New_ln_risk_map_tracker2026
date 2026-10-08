@@ -59,6 +59,9 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update146: Work Time page: the "Work Time access" button, the Add-employee-access box and the per-row Remove button are gone. The page now has ONE "Reports" button with
+    Weekly Report / Monthly Report / All Lock Events / Lock-Tracking Agent. All Lock Events lists every lock (Employee ID, Name, Lock #, Lock time, Unlock time, Break duration,
+    Reason) plus that employee's Lock count and Total lock / break time for the day (also in its CSV). Locks (Win+L, automatic lock, screen-off) are recorded by the existing silent tracking.
   * Update145: Admin > Log > Work Time is back (the full Work Time Log: Employee ID | Name | Login | Logout | System-on | Last lock | Last unlock | Break duration | Lock count |
     Total working time | Status, per-lock history, weekly / monthly reports, CSV, lock agent). Every employee is included automatically. The separate "Work Time Access" page stays removed.
   * Update144: the Admin "Work Time" and "Work Time Access" pages are removed from Admin > Log (menu entries gone, every /admin/work-time* URL answers 404). Nothing else is touched:
@@ -3872,9 +3875,9 @@ WT_EVENTS = """<div class="card"><h2 style="margin-top:0">Lock / Screen-off even
 <a class="btnl" href="/admin/work-time/events/export?date={{d}}{% if emp %}&emp={{emp|urlencode}}{% endif %}">Download CSV</a></form>
 <p class="mut" style="margin:0 0 10px">{{n}} event(s) &middot; total {{total}}. Reason: <b>Manual lock</b> (Win+L), <b>Automatic lock</b> (locked by inactivity), <b>Screen-off / idle</b> (no input for the idle limit), <b>Sleep / screen-off</b>.
 Events marked <i>Screen lock (type not detected)</i> came from the browser, which cannot tell the reason; install the agent for exact reasons.</p>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Lock #</th><th>Start (lock / screen-off)</th><th>End (unlock / screen-on)</th><th>Duration</th><th>Reason</th><th>Source</th></tr>
-{% for r in evs %}<tr><td>{{r.eid}}</td><td>{{r.name}}</td><td>{{r.n}}</td><td>{{r.start}}</td><td>{{r.end or 'still locked / off'}}</td><td>{{r.dur}}</td><td>{{r.reason}}</td><td>{{r.src}}</td></tr>
-{% else %}<tr><td colspan="8">No lock or screen-off events recorded.</td></tr>{% endfor %}</table></div></div>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Lock #</th><th>Start (lock / screen-off)</th><th>End (unlock / screen-on)</th><th>Break duration</th><th>Reason</th><th>Source</th><th>Lock count</th><th>Total lock / break time</th></tr>
+{% for r in evs %}<tr><td>{{r.eid}}</td><td>{{r.name}}</td><td>{{r.n}}</td><td>{{r.start}}</td><td>{{r.end or 'still locked / off'}}</td><td>{{r.dur}}</td><td>{{r.reason}}</td><td>{{r.src}}</td><td>{{r.cnt}}</td><td>{{r.tot}}</td></tr>
+{% else %}<tr><td colspan="10">No lock or screen-off events recorded.</td></tr>{% endfor %}</table></div></div>
 {% if live %}<script>setTimeout(function(){location.reload()},30000)</script>{% endif %}"""
 
 def _wt_events(d, emp=""):
@@ -3976,19 +3979,26 @@ def admin_work_time_report_download():
     return Response(out.getvalue(), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f"attachment; filename={fname}.xlsx"})
 
+def _wt_events_totals(evs):
+    """Update146: add each employee's lock count and total lock / break time for the day to every event row."""
+    cnt, tot = {}, {}
+    for e in evs: cnt[e["eid"]] = cnt.get(e["eid"], 0) + 1; tot[e["eid"]] = tot.get(e["eid"], 0) + e["sec"]
+    for e in evs: e["cnt"] = cnt[e["eid"]]; e["tot"] = _hms(tot[e["eid"]])
+    return evs
+
 @app.route("/admin/work-time/events")
 @need("admin")
 def admin_work_time_events():
     prefetch("Lock Events")
-    d = _wt_date_arg(); emp = request.args.get("emp", "").strip(); evs = _wt_events(d, emp)
+    d = _wt_date_arg(); emp = request.args.get("emp", "").strip(); evs = _wt_events_totals(_wt_events(d, emp))
     return page(WT_EVENTS, title="Lock events", d=d, emp=emp, today=str(today_local()), evs=evs, n=len(evs), total=_hms(sum(e["sec"] for e in evs)), live=(d == str(today_local())))
 
 @app.route("/admin/work-time/events/export")
 @need("admin")
 def admin_work_time_events_export():
     d = _wt_date_arg(); emp = request.args.get("emp", "").strip(); buf = io.StringIO(); w = csv.writer(buf)
-    w.writerow(["Date", "Employee ID", "Employee name", "Lock / screen-off start", "Unlock / screen-on", "Duration", "Reason", "Source"])
-    for r in _wt_events(d, emp): w.writerow([d, r["eid"], r["name"], r["start"], r["end"], r["dur"], r["reason"], r["src"]])
+    w.writerow(["Date", "Employee ID", "Employee name", "Lock #", "Lock / screen-off start", "Unlock / screen-on", "Break duration", "Reason", "Source", "Lock count", "Total lock / break time"])
+    for r in _wt_events_totals(_wt_events(d, emp)): w.writerow([d, r["eid"], r["name"], r["n"], r["start"], r["end"], r["dur"], r["reason"], r["src"], r["cnt"], r["tot"]])
     resp = Response("\ufeff" + buf.getvalue(), mimetype="text/csv")
     resp.headers["Content-Disposition"] = f"attachment; filename=lock_events_{d}.csv"
     return resp
@@ -4111,21 +4121,18 @@ def employee_track():
         except Exception as e: print("work-time event error:", e)
     return ("", 204)
 
-WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Work Time <small class="mut">&middot; automatic, silent tracking &middot; showing <b>{{n_shared}}</b> of {{n_total}} employees shared with Admin</small></h2>
-<form method="post" action="/admin/work-time/access/add" class="no-print" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px"><input type="hidden" name="back" value="{{back}}">
-<label>Add employee access <select name="eid" required><option value="">- select employee -</option>{% for e in unshared %}<option value="{{e['Employee ID']}}">{{e['Employee ID']}} &middot; {{e['Name']}}</option>{% endfor %}</select></label>
-<button class="primary pbtn" type="submit" {{'disabled' if not unshared else ''}}>Add</button> <small class="mut">{{'Everyone already has access.' if not unshared else ''}}</small></form>
-{% if not rows %}<p class="mut">No employee is shared with the Admin yet. <a href="/admin/work-time/access">Choose employees</a>.</p>{% endif %}
+WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Work Time <small class="mut">&middot; automatic, silent tracking</small></h2>
+{% if not rows %}<p class="mut">No employees found.</p>{% endif %}
 <form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
 <label>Date <input type="date" name="date" value="{{d}}" max="{{today}}" onchange="this.form.submit()"></label>
-<a class="btnl" href="/admin/work-time/export?date={{d}}">Download CSV</a> <a class="btnl" href="/admin/work-time/report?period=week&date={{d}}">Weekly report</a> <a class="btnl" href="/admin/work-time/report?period=month&date={{d}}">Monthly report</a> <a class="btnl" href="/admin/work-time/events?date={{d}}">All lock events</a> <a class="btnl" href="/admin/work-time/agent">Lock-tracking agent</a> <a class="btnl" href="/admin/work-time/access">&#128101; Work Time access</a></form>
+<details class="no-print" style="position:relative;display:inline-block"><summary class="btnl" style="list-style:none;cursor:pointer;display:inline-block">&#128202; Reports &#9662;</summary><div class="card" style="position:absolute;z-index:20;margin:6px 0 0;padding:8px;min-width:200px;display:flex;flex-direction:column;gap:6px"><a class="btnl" href="/admin/work-time/report?period=week&date={{d}}">Weekly Report</a><a class="btnl" href="/admin/work-time/report?period=month&date={{d}}">Monthly Report</a><a class="btnl" href="/admin/work-time/events?date={{d}}">All Lock Events</a><a class="btnl" href="/admin/work-time/agent">Lock-Tracking Agent</a></div></details></form>
 <p class="mut" style="margin:0 0 10px">Required = {{req}} of active (unlocked) time in a 9-hour day; allowed breaks = {{brk_allowed}} (30 min lunch + 30 min other).
 Break time = the time the computer was locked. Total working time = system-on time &minus; break time.</p>
 <p style="margin:0 0 10px"><b>{{n_ok}}</b> completed &middot; <b>{{n_short}}</b> short / in progress &middot; <b>{{n_none}}</b> no login{% if n_notrack %} &middot; <b style="color:#b45309">{{n_notrack}}</b> without lock tracking{% endif %}</p>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last lock / screen-off</th><th>Last unlock / screen-on</th><th>Break duration</th><th>Lock count</th><th>Total working time</th><th>Status</th><th>Lock tracking</th><th class="no-print">Access</th></tr>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last lock / screen-off</th><th>Last unlock / screen-on</th><th>Break duration</th><th>Lock count</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
 {% for r in rows %}<tr><td><a href="/admin/work-time/events?date={{d}}&emp={{r.eid|urlencode}}">{{r.eid}}</a></td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.last_lock or '-'}}</td><td>{{r.last_unlock or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td><b>{{r.work or '-'}}</b></td>
 <td><span style="padding:2px 8px;border-radius:10px;font-size:12px;white-space:nowrap;{% if r.tone=='ok' %}background:#dcfce7;color:#166534{% elif r.tone=='warn' %}background:#fef3c7;color:#92400e{% elif r.tone=='bad' %}background:#fee2e2;color:#991b1b{% else %}background:#eef0f6;color:#5b6280{% endif %}">{{r.status}}</span>{% if r.state=='Locked' %} <small class="mut">&#128274; locked now</small>{% endif %}</td>
-<td>{{r.lt}}</td><td class="no-print"><form method="post" action="/admin/work-time/access/remove" style="margin:0" onsubmit="return confirm('Remove Work Time access for {{r.name|e}}?')"><input type="hidden" name="back" value="{{back}}"><input type="hidden" name="eid" value="{{r.eid}}"><button class="btnl" type="submit" style="background:#dc2626;box-shadow:0 3px 0 #991b1b;padding:4px 10px">Remove</button></form></td></tr>{% endfor %}</table></div></div>
+<td>{{r.lt}}</td></tr>{% endfor %}</table></div></div>
 {% if live %}<script>setTimeout(function(){location.reload()},30000)</script>{% endif %}"""
 
 def _wt_date_arg():

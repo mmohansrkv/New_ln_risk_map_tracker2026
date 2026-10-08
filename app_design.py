@@ -7276,7 +7276,7 @@ MN_LOG = "Mail Notes Log"
 _MN_FMT = "%Y-%m-%d %H:%M"
 _mn_inflight, _mn_inflight_lock = set(), threading.Lock()
 
-# The dedicated e-mail design. Placeholders (filled per employee): {{subject}}  {{message}}  {{employee_name}}
+# The dedicated e-mail design. Placeholders: {{subject}}  {{message}}
 MAIL_NOTE_HTML = r'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7314,7 +7314,6 @@ MAIL_NOTE_HTML = r'''<!DOCTYPE html>
 
     <!-- Message -->
     <tr><td style="padding:18px 34px 8px 34px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#1e293b;font-size:16px;line-height:1.65;">
-      <p style="margin:0 0 14px 0;font-weight:bold;">Dear {{employee_name}},</p>
       {{message}}
     </td></tr>
 
@@ -7341,19 +7340,18 @@ def _mn_body_html(text):
     paras = [p.strip() for p in re.split(r"\n\s*\n", str(text).replace("\r\n", "\n")) if p.strip()]
     return "".join('<p style="margin:0 0 14px 0;">' + _h.escape(p).replace("\n", "<br>") + "</p>" for p in paras)
 
-def mail_note_html(subject, message, name):
+def mail_note_html(subject, message):
     import html as _h
-    vals = {"subject": _h.escape(str(subject)), "message": _mn_body_html(message), "employee_name": _h.escape(str(name or "").strip() or "Team")}
+    vals = {"subject": _h.escape(str(subject)), "message": _mn_body_html(message)}
     return re.sub(r"\{\{(\w+)\}\}", lambda m: vals.get(m.group(1), m.group(0)), MAIL_NOTE_HTML)      # one pass: typed text is never re-expanded
 
 def mail_note_message(emp, rec):
     """The mail for ONE employee: the Admin's subject + message inside the dedicated HTML design."""
-    name = str(emp.get("name", "")).strip() or "Team"
     msg = EmailMessage()
     msg["Subject"] = re.sub(r"[\r\n]+", " ", str(rec["Subject"])).strip()
     msg["From"] = formataddr(mail_sender()); msg["To"] = emp["email"]
-    msg.set_content(f"Dear {name},\n\n{str(rec['Message']).strip()}\n\nThis is an automated email. Please do not reply to this email.\n\nThanks,\nProductivity Tracker (LN_Map)")
-    msg.add_alternative(mail_note_html(rec["Subject"], rec["Message"], name), subtype="html")
+    msg.set_content(f"{str(rec['Message']).strip()}\n\nThis is an automated email. Please do not reply to this email.\n\nThanks,\nProductivity Tracker (LN_Map)")
+    msg.add_alternative(mail_note_html(rec["Subject"], rec["Message"]), subtype="html")
     return msg
 
 def _mn_ids(rec): return [x.strip() for x in str(rec.get("Recipient IDs", "")).split("|") if x.strip()]
@@ -7462,7 +7460,7 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
 <label style="display:block">Email Subject<input name="subject" id="mn-subject" maxlength="150" value="{{form.subject}}" placeholder="e.g. Holiday notice" required style="width:100%"></label>
 <label style="display:block;margin-top:10px">Email Message
 <textarea name="message" id="mn-message" rows="10" maxlength="5000" required placeholder="Type your message here. Leave a blank line to start a new paragraph." style="width:100%;font-family:inherit">{{form.message}}</textarea></label>
-<p class="mut" style="margin:4px 0 0">The e-mail starts with &ldquo;Dear &lt;employee name&gt;,&rdquo; and ends with the standard footer.</p>
+<p class="mut" style="margin:4px 0 0">Your message is placed under the subject and followed by the standard footer.</p>
 
 <h3 style="margin:18px 0 6px">Employee access &mdash; who receives it?</h3>
 <div style="border:1px solid #d0d5dd;border-radius:10px;padding:10px 14px">
@@ -7526,8 +7524,7 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
    .map(function(p){return '<p style="margin:0 0 14px 0;">'+esc(p).replace(/\n/g,'<br>')+'</p>';}).join('');}
  function render(){
   var v={subject:esc(sub.value.trim())||'Your subject appears here',
-         message:body(msg.value)||'<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>',
-         employee_name:'[Employee name]'};
+         message:body(msg.value)||'<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>'};
   frame.srcdoc=T.replace(/[{][{](\w+)[}][}]/g,function(m,k){return (k in v)?v[k]:m;});}
  function cbs(){return document.querySelectorAll('.mn-cb:not(:disabled)');}
  function shown(){return Array.prototype.filter.call(cbs(),function(c){return c.closest('.mn-emp').style.display!=='none';});}
@@ -7670,7 +7667,7 @@ def admin_mn_preview(mid):
     _admin_only_mail()
     rec = _mn_get(mid, fresh=False)
     if not rec: abort(404)
-    return Response(mail_note_html(rec["Subject"], rec["Message"], "[Employee name]"), mimetype="text/html")
+    return Response(mail_note_html(rec["Subject"], rec["Message"]), mimetype="text/html")
 
 @app.route("/admin/mail-notes/template")
 @need("admin")

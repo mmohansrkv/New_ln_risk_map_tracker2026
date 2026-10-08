@@ -59,6 +59,8 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update130: screen-lock tracking is completely silent for employees - the on-page "Enable" banner and every message about it are removed. It starts by itself when the browser already allows Idle Detection
+    (pre-grant it by browser policy); optional WT_PROMPT_ONCE=1 shows only the browser's own one-time permission dialog. Lock details stay Admin-only (/admin/work-time).
   * Update129: Employees see NO notifications: the winner pop-up toasts and the Group Chat unread badge / tab-title alert are removed (winner board, chat itself and inline page warnings unchanged). Admin notifications unchanged.
   * Update128: Working-time tracking from the computer's SCREEN LOCK / UNLOCK. On Employee login the day's clock starts (login time); every screen lock starts a Break and
     every unlock ends it (hours:minutes:seconds), automatically, until logout. Daily record per employee in the new "Work Time" sheet (login, logout, system-on time, break time,
@@ -415,6 +417,7 @@ app.jinja_env.filters["t12"] = t12
 app.jinja_env.filters["cnt"] = lambda x: "{:,.2f}".format(float(x or 0)).rstrip("0").rstrip(".")      # 8000 -> 8,000
 app.jinja_env.filters["g"] = lambda x: "%g" % (float(x) if str(x).strip() else 0)
 app.jinja_env.globals["PERMISSION_MONTHLY_LIMIT"] = PERMISSION_MONTHLY_LIMIT
+app.jinja_env.globals["WT_PROMPT_ONCE"] = os.getenv("WT_PROMPT_ONCE", "0") == "1"      # Update130: default OFF - no prompt of any kind for employees
 app.jinja_env.globals["LEAVE_MONTHLY_LIMIT"] = LEAVE_MONTHLY_LIMIT
 
 @app.before_request
@@ -2050,11 +2053,9 @@ function begin(){var c;try{D=new IdleDetector();c=new AbortController()}catch(x)
  function sync(){var s=D.screenState;if(s&&s!==last){last=s;post(s,'',Date.now(),0)}}
  D.addEventListener('change',sync);
  D.start({threshold:60000,signal:c.signal}).then(function(){post('support','yes',Date.now(),0);sync()}).catch(function(){post('support','denied',Date.now(),0)})}
-function ask(){post('support','pending',Date.now(),0);if(W)return;var b=document.createElement('div');
- b.style.cssText='position:fixed;left:14px;bottom:14px;z-index:9000;max-width:300px;background:#1c2340;color:#fff;border-radius:10px;padding:10px 12px;font:12.5px/1.4 system-ui,sans-serif;box-shadow:0 8px 24px #0005';
- b.innerHTML='Allow screen-lock tracking so breaks are recorded automatically. <button type="button" style="margin-top:6px;display:block;background:#6366f1;color:#fff;border:0;border-radius:6px;padding:5px 12px;cursor:pointer">Enable</button>';
- b.querySelector('button').onclick=function(){IdleDetector.requestPermission().then(function(r){if(r==='granted'){b.remove();begin()}else{post('support','denied',Date.now(),0);b.textContent='Permission was blocked - allow "Idle detection" in the browser site settings.'}})};
- document.body.appendChild(b)}
+function ask(){post('support','pending',Date.now(),0);
+ /* Update130: nothing is ever drawn on the page. Only if WT_PROMPT_ONCE=1: the first click asks the BROWSER (its own one-time dialog) for permission. */
+ {% if WT_PROMPT_ONCE %}var f=function(){document.removeEventListener('click',f,true);try{IdleDetector.requestPermission().then(function(r){if(r==='granted')begin();else post('support','denied',Date.now(),0)}).catch(function(){})}catch(x){}};document.addEventListener('click',f,true);{% endif %}}
 if(!('IdleDetector' in window)){post('support','no',Date.now(),0);return}
 if(!window.isSecureContext){post('support','insecure',Date.now(),0);return}
 if(navigator.permissions&&navigator.permissions.query){navigator.permissions.query({name:'idle-detection'}).then(function(p){p.state==='granted'?begin():ask()}).catch(ask)}else ask()})();</script>{% endif %}

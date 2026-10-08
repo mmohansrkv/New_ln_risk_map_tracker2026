@@ -59,6 +59,10 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update128: Working-time tracking from the computer's SCREEN LOCK / UNLOCK. On Employee login the day's clock starts (login time); every screen lock starts a Break and
+    every unlock ends it (hours:minutes:seconds), automatically, until logout. Daily record per employee in the new "Work Time" sheet (login, logout, system-on time, break time,
+    lock count, total working time, 8-hour status). Admin only: Log > Work Time (/admin/work-time, CSV export). Employees only send their own lock/unlock events (/employee/track).
+    Lock detection uses the browser Idle Detection API (Chrome / Edge, HTTPS, one-time permission); the Admin report shows "Lock tracking" per employee so unsupported browsers are visible.
   * Update127: the fixed shared picture in the Employee sidebar is replaced by a 3D animated profile avatar for the LOGGED-IN employee
     (male / female chosen from the employee's Gender; initials if Gender is blank), with the employee's name below it. It follows whoever is signed in
     (nothing is stored in the session or at login), is pure CSS-transform animation (gentle float + mouse tilt, paused for reduced-motion / hidden tabs).
@@ -272,6 +276,9 @@ HEADERS = {
     # Background login/logout tracking (never shown to employees)
     "Attendance": ["Session ID", "Date", "Employee ID", "Employee name", "Band",
                    "Login time", "Logout time", "Duration", "Logout type"],
+    # Update128: one row per employee per day (screen lock / unlock working-time tracking) - Admin report only
+    "Work Time": ["Date", "Employee ID", "Employee name", "Login time", "Logout time", "System-on time", "Break time", "Screen locks",
+                  "Total working time", "Required", "Status", "Lock tracking", "Online sec", "Break sec", "Lock start", "Session start", "Last seen"],
     "Notifications": ["Notification ID", "Time", "Employee ID", "Employee name", "Event", "Seen",
                       "Section", "Action", "Details"],
     # Audit Log permissions set by Admin: one row per employee. Processes = the ticked process names "A | B | C".
@@ -1123,6 +1130,9 @@ def track_login(emp_id, name, band):
     session["last_seen"] = time.time()
     _bg(_log_login, session["att_id"], emp_id, name, band, now_local())
     online_set(session["att_id"], emp_id, name)
+    if session.get("role") == "employee":                 # Update128: start the day's working-time clock (background; never slows login)
+        try: session["wt_key"] = wt_begin(emp_id, name)
+        except Exception as e: print("work-time start error:", e)
 
 def track_logout(auto=False, reason=""):
     """Save the logout time for whoever is currently logged in (Admin or Employee); no-op otherwise.
@@ -1133,6 +1143,9 @@ def track_logout(auto=False, reason=""):
         _bg(_log_logout, session["att_id"], session.get("att_eid", "ADMIN"),
             session.get("att_name", "Admin"), session.get("att_band", "-"), now_local(), logout_type)
         online_drop(session.get("att_id"))
+        if session.get("wt_key"):                          # Update128: close the working-time session (any logout path)
+            try: _bg(wt_logout, session["wt_key"], session.get("att_eid", ""), session.get("att_name", ""), time.time())
+            except Exception as e: print("work-time stop error:", e)
         session.pop("att_id", None)
 
 # ---------------------------------------------------------------- online employees (Update71)
@@ -1162,6 +1175,170 @@ def online_list():
         out = [dict(id=v["eid"], name=v["name"], status="Away" if now - v["active"] > AWAY_AFTER else "Online",
                     since=dt.datetime.fromtimestamp(v["since"], TZ).strftime("%I:%M %p")) for v in best.values()]
     return sorted(out, key=lambda r: r["name"].lower())
+
+
+# ---------------------------------------------------------------- Update128: working time from screen lock / unlock
+# One in-memory state per employee per day (written to the "Work Time" sheet on login, lock, unlock and logout - never on every heartbeat).
+# Lock / unlock events come from the employee's browser (Idle Detection API); the SERVER stamps the time, so the clock cannot be edited by the employee.
+WT_SHEET = "Work Time"
+WT_REQUIRED_SEC = int(float(os.getenv("WT_REQUIRED_HOURS", str(DAY_HOURS))) * 3600)       # 8 h of active (unlocked) time
+WT_ALLOWED_BREAK_SEC = int(float(os.getenv("WT_ALLOWED_BREAK_MIN", "60")) * 60)           # 30 min lunch + 30 min other
+WT_MAX_BREAK_SEC = int(float(os.getenv("WT_MAX_BREAK_HOURS", "3")) * 3600)                # a lock longer than this = left for the day, not a break
+WT_STALE_SEC = 150                                                                         # no heartbeat for this long (and not locked) = page closed
+_wt, _wt_lock, _wt_rows, _wt_write_lock = {}, threading.RLock(), {}, threading.Lock()
+
+def _wt_key(eid, d): return f"{d}|{eid}"
+def _fl(x):
+    try: return float(x)
+    except (TypeError, ValueError): return 0.0
+def _wt_clock(ts): return dt.datetime.fromtimestamp(ts, TZ).strftime(TIME_FMT) if ts else ""
+def _wt_epoch(date, t):
+    if not str(t).strip(): return None
+    x = _ts(date, str(t))
+    return None if x == dt.datetime.min else x.replace(tzinfo=TZ).timestamp()
+
+def _wt_from_row(r, eid, name, date):
+    return dict(date=date, eid=eid, name=name, first_login=_wt_epoch(date, r.get("Login time", "")), last_logout=_wt_epoch(date, r.get("Logout time", "")),
+                online=_fl(r.get("Online sec")), brk=_fl(r.get("Break sec")), locks=int(_fl(r.get("Screen locks"))),
+                lock_start=_fl(r.get("Lock start")) or None, sess_start=_fl(r.get("Session start")) or None,
+                seen=_fl(r.get("Last seen")) or None, lt=str(r.get("Lock tracking", "")))
+
+def _wt_get(key, eid, name):
+    """The day's state (created or restored from the sheet after a restart). Caller holds _wt_lock."""
+    st = _wt.get(key)
+    if st: return st
+    date = key.split("|")[0]
+    st = _wt_from_row({}, eid, name, date)
+    try:
+        for r in rows(WT_SHEET):
+            if str(r.get("Date")) == date and str(r.get("Employee ID")) == str(eid):
+                st = _wt_from_row(r, str(eid), name, date); _wt_rows[key] = r["_row"]; break
+    except Exception as e:
+        print("work-time restore error:", e)
+    _wt[key] = st
+    return st
+
+def _wt_close(st, end):
+    """End the open session at `end`; an open screen lock ends there too (or, if it is far too long, the day simply ended when it locked)."""
+    s = st["sess_start"]
+    if s is None: return
+    end = max(end, s); ls = st["lock_start"]
+    if ls is not None:
+        if end - ls > WT_MAX_BREAK_SEC: end = max(ls, s)
+        else: st["brk"] += max(end - ls, 0)
+        st["lock_start"] = None
+    st["online"] += max(end - s, 0); st["sess_start"] = None; st["last_logout"] = end
+
+def _wt_calc(st, now=None):
+    """-> (system-on seconds, break seconds, active/working seconds, state) as of `now`."""
+    now = now or time.time(); online, brk, state = st["online"], st["brk"], "Offline"
+    s = st["sess_start"]
+    if s is not None:
+        seen, ls = st["seen"] or s, st["lock_start"]
+        if ls is not None:
+            if now - ls > WT_MAX_BREAK_SEC: end, state = max(ls, s), "Left (locked)"
+            else: end, state = now, "Locked"; brk += max(end - ls, 0)
+        elif now - seen > WT_STALE_SEC: end, state = seen, "Not closed"
+        else: end, state = now, "Active"
+        online += max(end - s, 0)
+    return online, brk, max(online - brk, 0), state
+
+def _wt_status(active, state, brk):
+    if active >= WT_REQUIRED_SEC: txt, tone = f"Completed {WT_REQUIRED_SEC / 3600:g} hrs", "ok"
+    elif state in ("Active", "Locked"): txt, tone = f"In progress - {_hms(WT_REQUIRED_SEC - active)} to go", "warn"
+    else: txt, tone = f"Short by {_hms(WT_REQUIRED_SEC - active)}", "bad"
+    if brk > WT_ALLOWED_BREAK_SEC: txt += f" | break over allowed by {_hms(brk - WT_ALLOWED_BREAK_SEC)}"
+    return txt, tone
+
+def _wt_vals(st, now):
+    online, brk, active, state = _wt_calc(st, now)
+    logout = _wt_clock(st["last_logout"]) if st["sess_start"] is None else ""
+    return [st["date"], st["eid"], st["name"], _wt_clock(st["first_login"]), logout, _hms(online), _hms(brk), st["locks"], _hms(active),
+            _hms(WT_REQUIRED_SEC), _wt_status(active, state, brk)[0], st["lt"], round(st["online"], 1), round(st["brk"], 1),
+            st["lock_start"] or "", st["sess_start"] or "", st["seen"] or ""]
+
+def _wt_save(key):
+    with _wt_lock:
+        st = _wt.get(key)
+        if not st: return
+        vals = _wt_vals(st, time.time()); date, eid = st["date"], str(st["eid"])
+    with _wt_write_lock:
+        ws = ws_of(WT_SHEET); r = _wt_rows.get(key)
+        if not r:
+            for i, v in enumerate(_with_retry(ws.get_values, "A2:B"), start=2):
+                if len(v) >= 2 and v[0] == date and v[1] == eid: r = i; break
+        if r:
+            _with_retry(ws.update, range_name=f"A{r}:Q{r}", values=[vals], value_input_option="RAW")
+        else:
+            res = _with_retry(ws.append_row, vals, value_input_option="RAW")
+            m = re.search(r"!A(\d+)", str(((res or {}).get("updates") or {}).get("updatedRange", "")))
+            r = int(m.group(1)) if m else None
+        if r: _wt_rows[key] = r
+    invalidate_cache(WT_SHEET)
+
+def wt_begin(eid, name):
+    key = _wt_key(eid, str(today_local()))
+    _bg(wt_login, key, str(eid), name, time.time())
+    return key
+
+def wt_login(key, eid, name, now):
+    with _wt_lock:
+        st = _wt_get(key, eid, name)
+        if st["sess_start"] is not None:                     # an earlier session was never closed (tab / browser just closed): end it where it was last seen
+            _wt_close(st, max(st["seen"] or st["sess_start"], st["lock_start"] or 0))
+        if st["first_login"] is None: st["first_login"] = now
+        st["sess_start"], st["seen"], st["name"] = now, now, name
+    _wt_save(key)
+
+def wt_logout(key, eid, name, now):
+    with _wt_lock:
+        st = _wt_get(key, eid, name); _wt_close(st, now); st["seen"] = now
+    _wt_save(key)
+
+def wt_event(kind, value, ago_ms):
+    """Own lock / unlock / support report from the signed-in employee's browser. Idempotent: 'locked' while already locked does nothing."""
+    eid, name = str(session.get("emp_id", "")), session.get("name", "")
+    if not eid: return
+    key = session.get("wt_key")
+    if not key:                                              # session that started before this feature: begin tracking now
+        key = session["wt_key"] = _wt_key(eid, str(today_local())); wt_login(key, eid, name, time.time())
+    try: ago = max(0.0, min(float(ago_ms or 0) / 1000.0, 12 * 3600))
+    except (TypeError, ValueError): ago = 0.0
+    now = time.time(); t = now - ago; changed = False
+    with _wt_lock:
+        st = _wt_get(key, eid, name); st["seen"] = now
+        if kind == "support":
+            lt = {"yes": "Active", "no": "Unsupported browser", "insecure": "HTTPS required"}.get(str(value), "Permission needed")
+            if st["lt"] != lt: st["lt"], changed = lt, True
+        elif kind == "locked" and st["sess_start"] is not None and st["lock_start"] is None:
+            st["lock_start"] = max(t, st["sess_start"]); st["locks"] += 1; changed = True
+            if st["lt"] != "Active": st["lt"] = "Active"
+        elif kind == "unlocked" and st["lock_start"] is not None:
+            st["brk"] += max(max(t, st["lock_start"]) - st["lock_start"], 0); st["lock_start"] = None; changed = True
+    if changed: _bg(_wt_save, key)
+
+def wt_seen():
+    st = _wt.get(session.get("wt_key", ""))
+    if st: st["seen"] = time.time()
+
+def _wt_report(d):
+    """One dict per employee for date d: live memory first (today), then the sheet."""
+    sheet = {str(r.get("Employee ID")): r for r in rows(WT_SHEET) if str(r.get("Date")) == d}
+    with _wt_lock:
+        live = {str(x["eid"]): dict(x) for x in _wt.values() if x["date"] == d}
+    now = time.time(); people = [(str(e["Employee ID"]), str(e.get("Name", ""))) for e in rows("Employees")]
+    known = {p[0] for p in people}
+    people += [(i, str((live.get(i) or {}).get("name") or sheet[i].get("Employee name", ""))) for i in list(live) + list(sheet) if i not in known and not known.add(i)]
+    out = []
+    for eid, name in people:
+        st = live.get(eid) or (_wt_from_row(sheet[eid], eid, name, d) if eid in sheet else None)
+        if not st:
+            out.append(dict(eid=eid, name=name, login="", logout="", sys_on="", brk="", locks="", work="", status="No login", tone="mut", lt="", state="No login")); continue
+        online, brk, active, state = _wt_calc(st, now); txt, tone = _wt_status(active, state, brk)
+        out.append(dict(eid=eid, name=name or st["name"], login=_wt_clock(st["first_login"]),
+                        logout=_wt_clock(st["last_logout"]) if st["sess_start"] is None else ("(not closed)" if state in ("Not closed", "Left (locked)") else ""),
+                        sys_on=_hms(online), brk=_hms(brk), locks=st["locks"], work=_hms(active), status=txt, tone=tone, lt=st["lt"] or "-", state=state))
+    return sorted(out, key=lambda r: (r["state"] == "No login", r["name"].lower()))
 
 # ---------------------------------------------------------------- auth helpers
 def need(role=None):
@@ -1864,7 +2041,22 @@ function poll(){fetch('/employee/mahizhchi/winners',{credentials:'same-origin',c
   if(j.overall&&seen.indexOf('ALL')<0){seen.push('ALL');toast(j.overall.text)}}
  try{sessionStorage.setItem(K,JSON.stringify(seen))}catch(e){}}).catch(function(){})}
 poll();setInterval(poll,10000)})();</script>
-<script>(function(){function p(){fetch('/employee/ping',{credentials:'same-origin',cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();</script>{% endif %}
+<script>(function(){function p(){fetch('/employee/ping',{credentials:'same-origin',cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();</script><script>(function(){if(!window.fetch)return;var W=location.pathname==='/employee/welcome',last=null,D=null;
+function post(e,v,t0,n){var body=JSON.stringify({e:e,v:v||'',ago:Date.now()-t0});
+ fetch('/employee/track',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:body,keepalive:true})
+ .then(function(r){if(!r.ok&&n<5)throw 0}).catch(function(){if(n<5)setTimeout(function(){post(e,v,t0,n+1)},5000)})}
+function begin(){var c;try{D=new IdleDetector();c=new AbortController()}catch(x){post('support','no',Date.now(),0);return}
+ function sync(){var s=D.screenState;if(s&&s!==last){last=s;post(s,'',Date.now(),0)}}
+ D.addEventListener('change',sync);
+ D.start({threshold:60000,signal:c.signal}).then(function(){post('support','yes',Date.now(),0);sync()}).catch(function(){post('support','denied',Date.now(),0)})}
+function ask(){post('support','pending',Date.now(),0);if(W)return;var b=document.createElement('div');
+ b.style.cssText='position:fixed;left:14px;bottom:14px;z-index:9000;max-width:300px;background:#1c2340;color:#fff;border-radius:10px;padding:10px 12px;font:12.5px/1.4 system-ui,sans-serif;box-shadow:0 8px 24px #0005';
+ b.innerHTML='Allow screen-lock tracking so breaks are recorded automatically. <button type="button" style="margin-top:6px;display:block;background:#6366f1;color:#fff;border:0;border-radius:6px;padding:5px 12px;cursor:pointer">Enable</button>';
+ b.querySelector('button').onclick=function(){IdleDetector.requestPermission().then(function(r){if(r==='granted'){b.remove();begin()}else{post('support','denied',Date.now(),0);b.textContent='Permission was blocked - allow "Idle detection" in the browser site settings.'}})};
+ document.body.appendChild(b)}
+if(!('IdleDetector' in window)){post('support','no',Date.now(),0);return}
+if(!window.isSecureContext){post('support','insecure',Date.now(),0);return}
+if(navigator.permissions&&navigator.permissions.query){navigator.permissions.query({name:'idle-detection'}).then(function(p){p.state==='granted'?begin():ask()}).catch(ask)}else ask()})();</script>{% endif %}
 {% if session.role=='employee' and request.path!='/employee/welcome' %}<style>
 #gcb{position:fixed;right:20px;bottom:20px;z-index:98;width:62px;height:62px;border-radius:50%;border:0;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center;
  background:radial-gradient(circle at 32% 26%,#5fe0c8 0%,#1f9fd8 46%,#4a3fd0 100%);box-shadow:0 10px 22px #2b3fa866,0 2px 0 #ffffff66 inset,0 -4px 8px #1b1f7a55 inset;transition:transform .15s ease}
@@ -2112,7 +2304,7 @@ def page(body, title="Productivity Tracker", **ctx):
         # Update103: Productivity Log / Leave & Permission Log / Audit Log / Email Controls are grouped under one expandable "Log" menu.
         # Every URL is unchanged - only the sidebar grouping changed. Overview, Processes and Employee Info stay as main menu items.
         LOG_KIDS = [("/admin/log", "Productivity Log"), ("/admin/leave-permission", "Leave & Permission Log"),
-                    ("/admin/audit", "Audit Log"), ("/admin/email-controls", "Email Controls")]
+                    ("/admin/audit", "Audit Log"), ("/admin/email-controls", "Email Controls"), ("/admin/work-time", "Work Time")]
         def _on(h): return p == h or p.startswith(h + "/")
         log_kids = [(h, l, _on(h)) for h, l in LOG_KIDS]
         by_h = {n[0]: n for n in nav}
@@ -3410,7 +3602,61 @@ def gc_file(fid):
 @app.route("/employee/ping")
 @need("employee")
 def employee_ping():
+    wt_seen()                 # Update128: heartbeat also tells the work-time tracker the page is still open
     return ("", 204)          # heartbeat; the online bookkeeping happens in _idle_auto_logout
+
+@app.route("/employee/track", methods=["POST"])
+@need("employee")
+def employee_track():
+    """Update128: the employee's browser reports ITS OWN computer's screen state (locked / unlocked). Only writes this employee's record."""
+    j = request.get_json(silent=True) or {}
+    if j.get("e") in ("locked", "unlocked", "support"):
+        try: wt_event(j["e"], j.get("v", ""), j.get("ago", 0))
+        except Exception as e: print("work-time event error:", e)
+    return ("", 204)
+
+WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Working Time <small class="mut">&middot; computer screen lock / unlock</small></h2>
+<form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+<label>Date <input type="date" name="date" value="{{d}}" max="{{today}}" onchange="this.form.submit()"></label>
+<a class="btnl" href="/admin/work-time/export?date={{d}}">Download CSV</a></form>
+<p class="mut" style="margin:0 0 10px">Required = {{req}} of active (unlocked) time in a 9-hour day; allowed breaks = {{brk_allowed}} (30 min lunch + 30 min other).
+Break time = the time the computer was locked. Total working time = system-on time &minus; break time.</p>
+<p style="margin:0 0 10px"><b>{{n_ok}}</b> completed &middot; <b>{{n_short}}</b> short / in progress &middot; <b>{{n_none}}</b> no login{% if n_notrack %} &middot; <b style="color:#b45309">{{n_notrack}}</b> without lock tracking{% endif %}</p>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Break (locked)</th><th>Locks</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
+{% for r in rows %}<tr><td>{{r.eid}}</td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td><b>{{r.work or '-'}}</b></td>
+<td><span style="padding:2px 8px;border-radius:10px;font-size:12px;white-space:nowrap;{% if r.tone=='ok' %}background:#dcfce7;color:#166534{% elif r.tone=='warn' %}background:#fef3c7;color:#92400e{% elif r.tone=='bad' %}background:#fee2e2;color:#991b1b{% else %}background:#eef0f6;color:#5b6280{% endif %}">{{r.status}}</span>{% if r.state=='Locked' %} <small class="mut">&#128274; locked now</small>{% endif %}</td>
+<td>{{r.lt}}</td></tr>{% endfor %}</table></div></div>
+{% if live %}<script>setTimeout(function(){location.reload()},30000)</script>{% endif %}"""
+
+def _wt_date_arg():
+    d = request.args.get("date") or str(today_local())
+    try: dt.date.fromisoformat(d)
+    except ValueError: d = str(today_local())
+    return d
+
+@app.route("/admin/work-time")
+@need("admin")
+def admin_work_time():
+    prefetch(WT_SHEET, "Employees")
+    d = _wt_date_arg(); data = _wt_report(d)
+    return page(WT_ADMIN, title="Working Time", d=d, today=str(today_local()), rows=data, live=(d == str(today_local())),
+                req=_hms(WT_REQUIRED_SEC), brk_allowed=_hms(WT_ALLOWED_BREAK_SEC),
+                n_ok=sum(r["tone"] == "ok" for r in data), n_short=sum(r["tone"] in ("warn", "bad") for r in data),
+                n_none=sum(r["state"] == "No login" for r in data),
+                n_notrack=sum(r["state"] != "No login" and r["lt"] not in ("Active",) for r in data))
+
+@app.route("/admin/work-time/export")
+@need("admin")
+def admin_work_time_export():
+    import csv, io
+    d = _wt_date_arg(); buf = io.StringIO(); w = csv.writer(buf)
+    w.writerow(["Date", "Employee ID", "Employee name", "Login time", "Logout time", "System-on time", "Break time (locked)", "Screen locks",
+                "Total working time", "Required", "Status", "Lock tracking"])
+    for r in _wt_report(d):
+        w.writerow([d, r["eid"], r["name"], r["login"], r["logout"], r["sys_on"], r["brk"], r["locks"], r["work"], _hms(WT_REQUIRED_SEC), r["status"], r["lt"]])
+    resp = Response("\ufeff" + buf.getvalue(), mimetype="text/csv")
+    resp.headers["Content-Disposition"] = f"attachment; filename=work_time_{d}.csv"
+    return resp
 
 @app.route("/admin/online/poll")
 @need("admin")

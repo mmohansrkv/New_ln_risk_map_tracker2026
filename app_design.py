@@ -59,6 +59,9 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update150: Employee Save / pages - an employee never sees a 404 or a system error: a missing page sends the employee back to their own page, background requests (heartbeat,
+    polls, images) that fail answer silently, and a busy Google Sheet shows the normal "press Save again" message on the same page. Saving itself is unchanged
+    (success message, validation messages, target alert).
   * Update149: NEW DESIGN for the Admin and Employee pages - style only (one CSS block at the end of the base template, scoped to .app): deep-indigo gradient sticky sidebar with pill menu,
     soft frosted cards with rounded corners and shadows, gradient buttons, modern inputs and tables, refreshed welcome card. No route, template logic, sheet, tracking or e-mail code changed;
     login / welcome pages unchanged.
@@ -417,10 +420,26 @@ def _method_not_allowed(e):
     if session.get("role") == "admin": return redirect("/admin/summary")
     return redirect("/")
 
+def _is_navigation():
+    """True for a page the person opened / a form post (not a background fetch, image or script request)."""
+    m = request.headers.get("Sec-Fetch-Mode")
+    return m == "navigate" or (not m and "text/html" in request.headers.get("Accept", ""))
+
+@app.errorhandler(404)
+def _not_found_quiet(e):
+    """Update150: an employee never sees a 404. Page -> back to their own page; background request -> silent empty answer."""
+    if session.get("role") == "employee":
+        if not _is_navigation() or request.path.rstrip("/") == "/employee": return ("", 204)
+        return redirect("/employee")
+    return e
+
 @app.errorhandler(500)
 def _server_error(e):
     import traceback; traceback.print_exc()
     try:
+        if session.get("role") == "employee" and not _is_navigation(): return ("", 204)      # Update150: background request - nothing shown
+        if request.method == "GET" and session.get("role") == "employee" and request.path.rstrip("/") != "/employee":
+            return redirect("/employee")                                                       # Update150: no system error page for employees
         if request.method == "POST" and session.get("role") in ("employee", "admin"):
             flash("Something went wrong and the request could not be completed. Please try again in a few seconds.", "error")
             return redirect(request.referrer or ("/employee" if session.get("role") == "employee" else "/admin/summary"))
@@ -432,6 +451,15 @@ def _server_error(e):
 def _handle_sheets_api_error(e):
     # Reached only if retries in _with_retry were exhausted (Sheets still
     # unavailable/rate-limited after ~6 attempts with backoff).
+    try:
+        if session.get("role") == "employee":                    # Update150: employees get a normal message on their own page, not a system text
+            if not _is_navigation(): return ("", 204)
+            if request.method == "POST":
+                flash("The data service is busy right now. Nothing was lost - please wait a few seconds and press Save again.", "error")
+                return redirect(request.referrer or "/employee")
+            if request.path.rstrip("/") != "/employee": return redirect("/employee")
+    except Exception:
+        pass
     return ("Google Sheets is temporarily busy handling everyone's requests. "
             "Please wait a few seconds and try again."), 503
 def _load_secret_key():

@@ -59,6 +59,14 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update134: Admin > Work Time > Weekly report / Monthly report: per-employee totals (days worked, system-on, lock / screen-off time and count, working time, average, required, difference, days 8h met / short),
+    day-wise drill-down per employee, Download Excel (Summary + Day-wise) / CSV / Print.
+  * Update133: every lock / screen-off period is stored as its own event (start, end, duration, reason: Manual lock / Automatic lock / Screen-off-idle / Sleep) in the new "Lock Events" sheet;
+    Admin > Work Time > "All lock events" (per day, per employee, CSV). The agent classifies Win+L vs automatic lock vs idle. Employees see nothing.
+  * Update132: silent Windows lock agent (no browser permission): Admin > Work Time > "Lock-tracking agent" gives lock_agent.py + a per-employee token; it reports screen lock / unlock to /agent/lock.
+    Lock tracking column shows "Agent" for those employees. Browser tracking still works as before.
+  * Update131: Employee login asks for the screen-lock (Idle Detection) permission automatically at the Log in click (the user gesture the browser requires), once per browser;
+    afterwards every login starts tracking by itself. Login still works if the permission is declined, unsupported or unanswered (20 s).
   * Update130: screen-lock tracking is completely silent for employees - the on-page "Enable" banner and every message about it are removed. It starts by itself when the browser already allows Idle Detection
     (pre-grant it by browser policy); optional WT_PROMPT_ONCE=1 shows only the browser's own one-time permission dialog. Lock details stay Admin-only (/admin/work-time).
   * Update129: Employees see NO notifications: the winner pop-up toasts and the Group Chat unread badge / tab-title alert are removed (winner board, chat itself and inline page warnings unchanged). Admin notifications unchanged.
@@ -282,6 +290,8 @@ HEADERS = {
     # Update128: one row per employee per day (screen lock / unlock working-time tracking) - Admin report only
     "Work Time": ["Date", "Employee ID", "Employee name", "Login time", "Logout time", "System-on time", "Break time", "Screen locks",
                   "Total working time", "Required", "Status", "Lock tracking", "Online sec", "Break sec", "Lock start", "Session start", "Last seen"],
+    # Update133: one row per lock / screen-off event (start, end, duration, reason) - Admin report only
+    "Lock Events": ["Date", "Employee ID", "Employee name", "Start time", "End time", "Duration", "Reason", "Source", "Start epoch"],
     "Notifications": ["Notification ID", "Time", "Employee ID", "Employee name", "Event", "Seen",
                       "Section", "Action", "Details"],
     # Audit Log permissions set by Admin: one row per employee. Processes = the ticked process names "A | B | C".
@@ -1231,6 +1241,8 @@ def _wt_close(st, end):
         if end - ls > WT_MAX_BREAK_SEC: end = max(ls, s)
         else: st["brk"] += max(end - ls, 0)
         st["lock_start"] = None
+        ev = st.pop("cur_ev", None)
+        if ev: ev["end"] = max(end, ls); _wt_ev_queue(ev)
     st["online"] += max(end - s, 0); st["sess_start"] = None; st["last_logout"] = end
 
 def _wt_calc(st, now=None):
@@ -1300,26 +1312,77 @@ def wt_logout(key, eid, name, now):
     _wt_save(key)
 
 def wt_event(kind, value, ago_ms):
-    """Own lock / unlock / support report from the signed-in employee's browser. Idempotent: 'locked' while already locked does nothing."""
+    """Own lock / unlock / support report from the signed-in employee's browser."""
     eid, name = str(session.get("emp_id", "")), session.get("name", "")
     if not eid: return
     key = session.get("wt_key")
     if not key:                                              # session that started before this feature: begin tracking now
         key = session["wt_key"] = _wt_key(eid, str(today_local())); wt_login(key, eid, name, time.time())
+    wt_apply(key, eid, name, kind, value, ago_ms)
+
+def wt_apply(key, eid, name, kind, value, ago_ms, reason=None):
+    """Idempotent: 'locked' while already locked does nothing. Server stamps the time (minus the reported age of the event).
+    Every lock / screen-off period is also kept as one event (start, end, duration, reason) in the "Lock Events" sheet."""
     try: ago = max(0.0, min(float(ago_ms or 0) / 1000.0, 12 * 3600))
     except (TypeError, ValueError): ago = 0.0
     now = time.time(); t = now - ago; changed = False
     with _wt_lock:
         st = _wt_get(key, eid, name); st["seen"] = now
+        src = "Agent" if value == "agent" else "Browser"
         if kind == "support":
             lt = {"yes": "Active", "no": "Unsupported browser", "insecure": "HTTPS required"}.get(str(value), "Permission needed")
-            if st["lt"] != lt: st["lt"], changed = lt, True
+            if st["lt"] != "Agent" and st["lt"] != lt: st["lt"], changed = lt, True
         elif kind == "locked" and st["sess_start"] is not None and st["lock_start"] is None:
             st["lock_start"] = max(t, st["sess_start"]); st["locks"] += 1; changed = True
-            if st["lt"] != "Active": st["lt"] = "Active"
+            if st["lt"] not in ("Active", "Agent"): st["lt"] = "Active"
+            ev = dict(date=st["date"], eid=str(eid), name=name, start=st["lock_start"], end=None, src=src,
+                      reason=reason or "Screen lock (type not detected)")
+            st["cur_ev"] = ev; _wt_ev_queue(ev)
         elif kind == "unlocked" and st["lock_start"] is not None:
-            st["brk"] += max(max(t, st["lock_start"]) - st["lock_start"], 0); st["lock_start"] = None; changed = True
+            end = max(t, st["lock_start"]); st["brk"] += end - st["lock_start"]; st["lock_start"] = None; changed = True
+            ev = st.pop("cur_ev", None)
+            if ev: ev["end"] = end; _wt_ev_queue(ev)
+        elif kind == "reason" and st.get("cur_ev") and reason and st["cur_ev"]["reason"] != reason:
+            st["cur_ev"]["reason"] = reason; _wt_ev_queue(st["cur_ev"])
+        if value == "agent" and st["lt"] != "Agent": st["lt"], changed = "Agent", True
     if changed: _bg(_wt_save, key)
+
+_wt_evrow, _wt_evq = {}, None
+def _wt_ev_queue(ev):
+    """Event rows are written by ONE worker thread, in order (a quick lock/unlock must not write its end before its start)."""
+    global _wt_evq
+    import queue
+    if _wt_evq is None:
+        _wt_evq = queue.Queue()
+        def worker():
+            while True:
+                e = _wt_evq.get()
+                try: _wt_ev_write(e)
+                except Exception as ex: print("lock-event write error:", ex)
+        threading.Thread(target=worker, daemon=True).start()
+    _wt_evq.put(dict(ev))
+
+def _wt_ev_write(ev):
+    start = int(ev["start"]); end = ev.get("end")
+    vals = [ev["date"], str(ev["eid"]), ev["name"], _wt_clock(ev["start"]), _wt_clock(end) if end else "", _hms(end - ev["start"]) if end else "",
+            ev["reason"], ev["src"], start]
+    k = (str(ev["eid"]), start)
+    with _wt_write_lock:
+        ws = ws_of("Lock Events"); r = _wt_evrow.get(k)
+        if not r:
+            for i, v in enumerate(_with_retry(ws.get_values, "A2:I"), start=2):
+                if len(v) >= 9 and v[1] == k[0] and v[8] == str(k[1]): r = i; break
+        if r: _with_retry(ws.update, range_name=f"A{r}:I{r}", values=[vals], value_input_option="RAW")
+        else:
+            res = _with_retry(ws.append_row, vals, value_input_option="RAW")
+            m = re.search(r"!A(\d+)", str(((res or {}).get("updates") or {}).get("updatedRange", "")))
+            r = int(m.group(1)) if m else None
+        if r: _wt_evrow[k] = r
+    invalidate_cache("Lock Events")
+
+# ---- Update132: Windows background agent (no browser permission needed). Per-employee token = HMAC(app secret, employee id).
+def wt_agent_token(eid):
+    return hmac.new(app.secret_key if isinstance(app.secret_key, bytes) else str(app.secret_key).encode(), ("wt-agent|" + str(eid)).encode(), "sha256").hexdigest()[:32]
 
 def wt_seen():
     st = _wt.get(session.get("wt_key", ""))
@@ -1337,11 +1400,11 @@ def _wt_report(d):
     for eid, name in people:
         st = live.get(eid) or (_wt_from_row(sheet[eid], eid, name, d) if eid in sheet else None)
         if not st:
-            out.append(dict(eid=eid, name=name, login="", logout="", sys_on="", brk="", locks="", work="", status="No login", tone="mut", lt="", state="No login")); continue
+            out.append(dict(eid=eid, name=name, login="", logout="", sys_on="", brk="", locks="", work="", status="No login", tone="mut", lt="", state="No login", on_s=0, brk_s=0, work_s=0, n_locks=0)); continue
         online, brk, active, state = _wt_calc(st, now); txt, tone = _wt_status(active, state, brk)
         out.append(dict(eid=eid, name=name or st["name"], login=_wt_clock(st["first_login"]),
                         logout=_wt_clock(st["last_logout"]) if st["sess_start"] is None else ("(not closed)" if state in ("Not closed", "Left (locked)") else ""),
-                        sys_on=_hms(online), brk=_hms(brk), locks=st["locks"], work=_hms(active), status=txt, tone=tone, lt=st["lt"] or "-", state=state))
+                        sys_on=_hms(online), brk=_hms(brk), locks=st["locks"], work=_hms(active), status=txt, tone=tone, lt=st["lt"] or "-", state=state, on_s=online, brk_s=brk, work_s=active, n_locks=st["locks"]))
     return sorted(out, key=lambda r: (r["state"] == "No login", r["name"].lower()))
 
 # ---------------------------------------------------------------- auth helpers
@@ -2347,6 +2410,24 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
 <svg class="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.9 10.9 0 0 1 12 19c-7 0-11-7-11-7a19.8 19.8 0 0 1 5.1-5.9M9.9 4.2A10.6 10.6 0 0 1 12 5c7 0 11 7 11 7a19.7 19.7 0 0 1-3.2 4.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>
 <span class="pw-t">Show</span></button></div>
 <button>Log in</button></form>{% if role!='admin' %}<span class="fgt" title="Please contact your admin to reset your password">Forgot password?</span>{% endif %}</div></div>{% if role!='admin' %}<img class="orb" src="/photo/{{role}}" alt="">{% endif %}</div>
+{% if role=='employee' %}<script>
+/* Update131: the Log in click is the user gesture the browser needs, so screen-lock tracking permission is requested right there - once per browser.
+   After "Allow", every later login starts tracking by itself. Login is never blocked: any error / no support / no answer within 20 s just signs in. */
+(function(){
+  var fm = document.querySelector('form'), ok = false;
+  if (!fm || !('IdleDetector' in window) || !window.isSecureContext || !navigator.permissions) return;
+  fm.addEventListener('submit', function(e){
+    if (ok) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    var go = function(){ if (ok) return; ok = true; try { fm.requestSubmit(); } catch (x) { fm.submit(); } };
+    var t = setTimeout(go, 20000);
+    navigator.permissions.query({name:'idle-detection'}).then(function(p){
+      if (p.state !== 'prompt') { clearTimeout(t); go(); return; }
+      IdleDetector.requestPermission().then(function(){ clearTimeout(t); go(); }, function(){ clearTimeout(t); go(); });
+    }).catch(function(){ clearTimeout(t); go(); });
+  }, true);
+})();
+</script>{% endif %}
 <script>
 (function(){
   var u = document.getElementById('login_u'), p = document.getElementById('login_p');
@@ -3607,6 +3688,225 @@ def employee_ping():
     wt_seen()                 # Update128: heartbeat also tells the work-time tracker the page is still open
     return ("", 204)          # heartbeat; the online bookkeeping happens in _idle_auto_logout
 
+@app.route("/agent/lock", methods=["POST"])
+def agent_lock():
+    """Update132: called by the background agent on the employee's PC (no browser, no session). Authenticated by the employee's own token.
+    Only records lock / unlock for an employee who is logged in today; the response never contains any data."""
+    j = request.get_json(silent=True) or {}
+    eid = str(j.get("eid", "")).strip()
+    if not eid or not hmac.compare_digest(str(j.get("token", "")), wt_agent_token(eid)): return ("", 403)
+    kind = {"start": "locked", "locked": "locked", "end": "unlocked", "unlocked": "unlocked", "reason": "reason"}.get(j.get("e"))
+    if kind:
+        with _wt_lock:
+            live = [(k, x) for k, x in _wt.items() if str(x["eid"]) == eid and x["sess_start"] is not None]
+        if live:
+            k, x = max(live, key=lambda kv: kv[1]["sess_start"])
+            try: wt_apply(k, eid, x["name"], kind, "agent", j.get("ago", 0), reason=str(j.get("reason", ""))[:40] or None)
+            except Exception as e: print("work-time agent error:", e)
+    return ("", 204)
+
+WT_EVENTS = """<div class="card"><h2 style="margin-top:0">Lock / Screen-off events{% if emp %} <small class="mut">&middot; {{emp}}</small>{% endif %}</h2>
+<form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+<label>Date <input type="date" name="date" value="{{d}}" max="{{today}}" onchange="this.form.submit()"></label>{% if emp %}<input type="hidden" name="emp" value="{{emp}}">{% endif %}
+<a class="btnl" href="/admin/work-time?date={{d}}">&larr; Daily summary</a>
+<a class="btnl" href="/admin/work-time/events/export?date={{d}}{% if emp %}&emp={{emp|urlencode}}{% endif %}">Download CSV</a></form>
+<p class="mut" style="margin:0 0 10px">{{n}} event(s) &middot; total {{total}}. Reason: <b>Manual lock</b> (Win+L), <b>Automatic lock</b> (locked by inactivity), <b>Screen-off / idle</b> (no input for the idle limit), <b>Sleep / screen-off</b>.
+Events marked <i>Screen lock (type not detected)</i> came from the browser, which cannot tell the reason; install the agent for exact reasons.</p>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Start (lock / screen-off)</th><th>End (unlock / screen-on)</th><th>Duration</th><th>Reason</th><th>Source</th></tr>
+{% for r in evs %}<tr><td>{{r.eid}}</td><td>{{r.name}}</td><td>{{r.start}}</td><td>{{r.end or 'still locked / off'}}</td><td>{{r.dur}}</td><td>{{r.reason}}</td><td>{{r.src}}</td></tr>
+{% else %}<tr><td colspan="7">No lock or screen-off events recorded.</td></tr>{% endfor %}</table></div></div>
+{% if live %}<script>setTimeout(function(){location.reload()},30000)</script>{% endif %}"""
+
+def _wt_events(d, emp=""):
+    now = time.time(); out = []
+    for r in sorted(rows("Lock Events"), key=lambda x: _fl(x.get("Start epoch"))):
+        if str(r.get("Date")) != d or (emp and str(r.get("Employee ID")) != emp): continue
+        st0 = _fl(r.get("Start epoch")); end = str(r.get("End time", ""))
+        out.append(dict(eid=str(r.get("Employee ID")), name=str(r.get("Employee name", "")), start=str(r.get("Start time", "")), end=end,
+                        dur=str(r.get("Duration", "")) if end else (_hms(now - st0) + " (running)" if st0 else ""), reason=str(r.get("Reason", "")), src=str(r.get("Source", "")),
+                        sec=_secs(r.get("Duration", "")) if end else int(max(now - st0, 0))))
+    return out
+
+# ---------------------------------------------------------------- Update134: weekly / monthly working-time report (Admin only)
+def _wt_period(period, d):
+    day = dt.date.fromisoformat(d)
+    if period == "week":
+        a = day - dt.timedelta(days=day.weekday()); b = a + dt.timedelta(days=6); label = f"Week {a.strftime('%d %b')} - {b.strftime('%d %b %Y')}"
+    else:
+        a = day.replace(day=1); b = (a.replace(day=28) + dt.timedelta(days=4)); b = b - dt.timedelta(days=b.day); label = a.strftime("%B %Y")
+    return a, min(b, today_local()), label
+
+def _wt_period_data(period, d):
+    """-> (label, summary rows per employee, day-wise rows). Days with no login are not counted as worked days."""
+    a, b, label = _wt_period(period, d)
+    days, x = [], a
+    while x <= b: days.append(str(x)); x += dt.timedelta(days=1)
+    summ, daywise = {}, []
+    for ds in days:
+        for r in _wt_report(ds):
+            if r["state"] == "No login": continue
+            sm = summ.setdefault(r["eid"], dict(eid=r["eid"], name=r["name"], days=0, on=0, brk=0, work=0, locks=0, done=0, short=0))
+            sm["days"] += 1; sm["on"] += r["on_s"]; sm["brk"] += r["brk_s"]; sm["work"] += r["work_s"]; sm["locks"] += r["n_locks"]
+            if r["work_s"] >= WT_REQUIRED_SEC: sm["done"] += 1
+            else: sm["short"] += 1
+            daywise.append(dict(date=ds, **r))
+    out = []
+    for sm in summ.values():
+        out.append(dict(sm, on_t=_hms(sm["on"]), brk_t=_hms(sm["brk"]), work_t=_hms(sm["work"]), avg_t=_hms(sm["work"] / sm["days"]) if sm["days"] else "0:00:00",
+                        req_t=_hms(sm["days"] * WT_REQUIRED_SEC), diff_t=("+" if sm["work"] >= sm["days"] * WT_REQUIRED_SEC else "-") + _hms(abs(sm["work"] - sm["days"] * WT_REQUIRED_SEC))))
+    return label, sorted(out, key=lambda r: r["name"].lower()), daywise
+
+WT_PERIOD = """<div class="card"><h2 style="margin-top:0">Working Time Report &middot; {{label}}</h2>
+<form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+<label>Report <select name="period" onchange="this.form.submit()"><option value="week" {{'selected' if period=='week'}}>Weekly</option><option value="month" {{'selected' if period=='month'}}>Monthly</option></select></label>
+<label>Date in the period <input type="date" name="date" value="{{d}}" max="{{today}}" onchange="this.form.submit()"></label>
+<a class="btnl" href="/admin/work-time/report/download?period={{period}}&date={{d}}">Download Excel</a>
+<a class="btnl" href="/admin/work-time/report/download?period={{period}}&date={{d}}&fmt=csv">Download CSV</a>
+<a class="btnl" href="#" onclick="window.print();return false">Print</a>
+<a class="btnl" href="/admin/work-time?date={{d}}">&larr; Daily</a></form>
+<p class="mut" style="margin:0 0 10px">Required per worked day = {{req}} of active (unlocked) time. Days with no login are not counted. Lock / screen-off = break time.</p>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Days worked</th><th>System-on time</th><th>Lock / screen-off time</th><th>Times</th><th>Total working time</th><th>Avg / day</th><th>Required</th><th>Difference</th><th>Days 8h met</th><th>Days short</th></tr>
+{% for r in rows %}<tr><td><a href="?period={{period}}&date={{d}}&emp={{r.eid|urlencode}}">{{r.eid}}</a></td><td>{{r.name}}</td><td>{{r.days}}</td><td>{{r.on_t}}</td><td>{{r.brk_t}}</td><td>{{r.locks}}</td><td><b>{{r.work_t}}</b></td><td>{{r.avg_t}}</td><td>{{r.req_t}}</td>
+<td style="color:{{'#166534' if r.diff_t[0]=='+' else '#991b1b'}}">{{r.diff_t}}</td><td>{{r.done}}</td><td>{{r.short}}</td></tr>
+{% else %}<tr><td colspan="12">No working-time records in this period.</td></tr>{% endfor %}</table></div></div>
+{% if emp %}<div class="card"><h2 style="margin-top:0">Day-wise &middot; {{emp}}</h2><div style="overflow-x:auto"><table><tr><th>Date</th><th>Login</th><th>Logout</th><th>System-on</th><th>Lock / screen-off</th><th>Times</th><th>Working time</th><th>Status</th></tr>
+{% for r in days %}<tr><td><a href="/admin/work-time/events?date={{r.date}}&emp={{emp|urlencode}}">{{r.date}}</a></td><td>{{r.login}}</td><td>{{r.logout or '-'}}</td><td>{{r.sys_on}}</td><td>{{r.brk}}</td><td>{{r.locks}}</td><td><b>{{r.work}}</b></td><td>{{r.status}}</td></tr>{% endfor %}</table></div></div>{% endif %}"""
+
+def _wt_period_args():
+    period = "month" if request.args.get("period") == "month" else "week"
+    return period, _wt_date_arg()
+
+@app.route("/admin/work-time/report")
+@need("admin")
+def admin_work_time_report():
+    prefetch(WT_SHEET, "Employees")
+    period, d = _wt_period_args(); emp = request.args.get("emp", "").strip()
+    label, summ, days = _wt_period_data(period, d)
+    return page(WT_PERIOD, title="Working time report", period=period, d=d, today=str(today_local()), label=label, rows=summ, emp=emp,
+                days=[r for r in days if r["eid"] == emp], req=_hms(WT_REQUIRED_SEC))
+
+@app.route("/admin/work-time/report/download")
+@need("admin")
+def admin_work_time_report_download():
+    period, d = _wt_period_args(); label, summ, days = _wt_period_data(period, d)
+    H1 = ["Employee ID", "Employee name", "Days worked", "System-on time", "Lock / screen-off time", "Times locked / screen-off", "Total working time",
+          "Average per day", "Required", "Difference", "Days 8h met", "Days short"]
+    R1 = [[r["eid"], r["name"], r["days"], r["on_t"], r["brk_t"], r["locks"], r["work_t"], r["avg_t"], r["req_t"], r["diff_t"], r["done"], r["short"]] for r in summ]
+    H2 = ["Date", "Employee ID", "Employee name", "Login", "Logout", "System-on time", "Lock / screen-off time", "Times", "Total working time", "Status"]
+    R2 = [[r["date"], r["eid"], r["name"], r["login"], r["logout"], r["sys_on"], r["brk"], r["locks"], r["work"], r["status"]] for r in days]
+    fname = f"work_time_{period}_{d}"
+    if request.args.get("fmt") == "csv":
+        buf = io.StringIO(); w = csv.writer(buf); w.writerow([label]); w.writerow(H1); w.writerows(R1)
+        resp = Response("\ufeff" + buf.getvalue(), mimetype="text/csv"); resp.headers["Content-Disposition"] = f"attachment; filename={fname}.csv"; return resp
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill
+    except ImportError:
+        buf = io.StringIO(); w = csv.writer(buf); w.writerow([label]); w.writerow(H1); w.writerows(R1)
+        resp = Response("\ufeff" + buf.getvalue(), mimetype="text/csv"); resp.headers["Content-Disposition"] = f"attachment; filename={fname}.csv"; return resp
+    wb = Workbook(); ws1 = wb.active; ws1.title = "Summary"; ws1.append([label]); ws1["A1"].font = Font(bold=True, size=13)
+    ws2 = wb.create_sheet("Day-wise")
+    for ws, H, R in ((ws1, H1, R1), (ws2, H2, R2)):
+        ws.append(H if ws is ws2 else H)
+        hr = ws.max_row
+        for c in ws[hr]: c.font = Font(bold=True, color="FFFFFF"); c.fill = PatternFill("solid", fgColor="4F46E5")
+        for row in R: ws.append(row)
+        for i, col in enumerate(ws.columns, 1): ws.column_dimensions[col[0].column_letter].width = 22 if i <= 3 else 18
+    out = io.BytesIO(); wb.save(out)
+    return Response(out.getvalue(), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename={fname}.xlsx"})
+
+@app.route("/admin/work-time/events")
+@need("admin")
+def admin_work_time_events():
+    prefetch("Lock Events")
+    d = _wt_date_arg(); emp = request.args.get("emp", "").strip(); evs = _wt_events(d, emp)
+    return page(WT_EVENTS, title="Lock events", d=d, emp=emp, today=str(today_local()), evs=evs, n=len(evs), total=_hms(sum(e["sec"] for e in evs)), live=(d == str(today_local())))
+
+@app.route("/admin/work-time/events/export")
+@need("admin")
+def admin_work_time_events_export():
+    d = _wt_date_arg(); emp = request.args.get("emp", "").strip(); buf = io.StringIO(); w = csv.writer(buf)
+    w.writerow(["Date", "Employee ID", "Employee name", "Lock / screen-off start", "Unlock / screen-on", "Duration", "Reason", "Source"])
+    for r in _wt_events(d, emp): w.writerow([d, r["eid"], r["name"], r["start"], r["end"], r["dur"], r["reason"], r["src"]])
+    resp = Response("\ufeff" + buf.getvalue(), mimetype="text/csv")
+    resp.headers["Content-Disposition"] = f"attachment; filename=lock_events_{d}.csv"
+    return resp
+
+@app.route("/admin/work-time/agent")
+@need("admin")
+def admin_work_time_agent():
+    base = request.url_root.rstrip("/")
+    data = [dict(eid=str(e["Employee ID"]), name=str(e.get("Name", "")), token=wt_agent_token(e["Employee ID"])) for e in rows("Employees")]
+    return page(WT_AGENT, title="Lock-tracking agent", data=data, base=base)
+
+@app.route("/admin/work-time/agent.py")
+@need("admin")
+def admin_work_time_agent_file():
+    resp = Response(WT_AGENT_PY, mimetype="text/x-python"); resp.headers["Content-Disposition"] = "attachment; filename=lock_agent.py"
+    return resp
+
+WT_AGENT = """<div class="card"><h2 style="margin-top:0">Lock-tracking agent (Windows)</h2>
+<p class="mut">A tiny background program on each employee's PC reports screen lock / unlock to this server - no browser, no permission dialog, nothing shown to the employee.
+Break time is recorded only while the employee is logged in to the Employee page. Each employee has their own token; keep this page Admin-only.</p>
+<ol><li>Install Python 3 on the PC (or ask IT to wrap <b>lock_agent.py</b> as an .exe / scheduled task).</li>
+<li>Download <a class="btnl" href="/admin/work-time/agent.py">lock_agent.py</a>.</li>
+<li>Create <code>lock_agent.ini</code> next to it: <code>server=<b>{{base}}</b></code>, <code>employee=&lt;ID&gt;</code>, <code>token=&lt;token below&gt;</code> (one per line; optional <code>idle_minutes=5</code> = screen-off / idle limit, <code>0</code> switches it off).</li>
+<li>Run it at Windows logon (Task Scheduler &rarr; "At log on", <code>pythonw lock_agent.py</code>), hidden.</li></ol>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Token</th></tr>
+{% for r in data %}<tr><td>{{r.eid}}</td><td>{{r.name}}</td><td><code>{{r.token}}</code></td></tr>{% endfor %}</table></div></div>"""
+
+WT_AGENT_PY = r'''"""Lock agent (Windows). Reports every screen LOCK (Win+L = manual, inactivity = automatic) and SCREEN-OFF / IDLE period to the
+Productivity Tracker, with start and end times. Standard library only.
+lock_agent.ini (same folder):  server=https://your-site   employee=1001   token=xxxxxxxx   idle_minutes=5   (idle_minutes=0 turns idle / screen-off tracking off)
+Run hidden at logon:  pythonw lock_agent.py"""
+import ctypes, json, os, time, urllib.request
+here = os.path.dirname(os.path.abspath(__file__))
+cfg = {"idle_minutes": "5"}
+for line in open(os.path.join(here, "lock_agent.ini"), encoding="utf-8"):
+    if "=" in line: k, v = line.split("=", 1); cfg[k.strip().lower()] = v.strip()
+URL = cfg["server"].rstrip("/") + "/agent/lock"
+IDLE = float(cfg["idle_minutes"]) * 60            # no keyboard / mouse for this long (and not locked) = screen-off / idle
+MANUAL_MAX = 15                                   # idle seconds just before a lock: below = pressed Win+L (manual), above = locked by itself
+user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+user32.OpenInputDesktop.restype = ctypes.c_void_p
+class LII(ctypes.Structure): _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+def idle_sec():
+    i = LII(); i.cbSize = ctypes.sizeof(i)
+    if not user32.GetLastInputInfo(ctypes.byref(i)): return 0.0
+    return ((kernel32.GetTickCount() - i.dwTime) & 0xFFFFFFFF) / 1000.0
+def locked():
+    h = user32.OpenInputDesktop(0, False, 0x0100)       # fails while the secure (lock-screen) desktop is active
+    if not h: return True
+    user32.CloseDesktop(ctypes.c_void_p(h)); return False
+queue = []                                              # (event, reason, time) kept until the server confirms, so nothing is lost offline
+def add(e, t, reason=""): queue.append((e, reason, t))
+def flush():
+    while queue:
+        e, reason, t = queue[0]
+        body = json.dumps({"eid": cfg["employee"], "token": cfg["token"], "e": e, "reason": reason, "ago": int((time.time() - t) * 1000)}).encode()
+        try: urllib.request.urlopen(urllib.request.Request(URL, body, {"Content-Type": "application/json"}), timeout=10).read()
+        except Exception: return
+        queue.pop(0)
+state, prev_idle, last_tick = "active", 0.0, time.time()
+while True:
+    now = time.time()
+    if now - last_tick > 30 and state == "active" and IDLE:      # the PC was asleep / switched off in between
+        add("start", last_tick, "Sleep / screen-off"); state = "idle"
+    last_tick = now
+    if locked():
+        if state == "active": add("start", now, "Manual lock" if prev_idle < MANUAL_MAX else "Automatic lock")
+        elif state == "idle": add("reason", now, "Automatic lock")
+        state = "locked"
+    else:
+        idle = idle_sec()
+        if state == "locked": add("end", now); state = "active"
+        elif state == "active" and IDLE and idle >= IDLE: add("start", now - idle, "Screen-off / idle"); state = "idle"
+        elif state == "idle" and idle < (IDLE or 1): add("end", now); state = "active"
+        prev_idle = idle
+    flush(); time.sleep(1)
+'''
+
 @app.route("/employee/track", methods=["POST"])
 @need("employee")
 def employee_track():
@@ -3620,12 +3920,12 @@ def employee_track():
 WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Working Time <small class="mut">&middot; computer screen lock / unlock</small></h2>
 <form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
 <label>Date <input type="date" name="date" value="{{d}}" max="{{today}}" onchange="this.form.submit()"></label>
-<a class="btnl" href="/admin/work-time/export?date={{d}}">Download CSV</a></form>
+<a class="btnl" href="/admin/work-time/export?date={{d}}">Download CSV</a> <a class="btnl" href="/admin/work-time/report?period=week&date={{d}}">Weekly report</a> <a class="btnl" href="/admin/work-time/report?period=month&date={{d}}">Monthly report</a> <a class="btnl" href="/admin/work-time/events?date={{d}}">All lock events</a> <a class="btnl" href="/admin/work-time/agent">Lock-tracking agent</a></form>
 <p class="mut" style="margin:0 0 10px">Required = {{req}} of active (unlocked) time in a 9-hour day; allowed breaks = {{brk_allowed}} (30 min lunch + 30 min other).
 Break time = the time the computer was locked. Total working time = system-on time &minus; break time.</p>
 <p style="margin:0 0 10px"><b>{{n_ok}}</b> completed &middot; <b>{{n_short}}</b> short / in progress &middot; <b>{{n_none}}</b> no login{% if n_notrack %} &middot; <b style="color:#b45309">{{n_notrack}}</b> without lock tracking{% endif %}</p>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Break (locked)</th><th>Locks</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
-{% for r in rows %}<tr><td>{{r.eid}}</td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td><b>{{r.work or '-'}}</b></td>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Lock / screen-off time</th><th>Times</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
+{% for r in rows %}<tr><td><a href="/admin/work-time/events?date={{d}}&emp={{r.eid|urlencode}}">{{r.eid}}</a></td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td><b>{{r.work or '-'}}</b></td>
 <td><span style="padding:2px 8px;border-radius:10px;font-size:12px;white-space:nowrap;{% if r.tone=='ok' %}background:#dcfce7;color:#166534{% elif r.tone=='warn' %}background:#fef3c7;color:#92400e{% elif r.tone=='bad' %}background:#fee2e2;color:#991b1b{% else %}background:#eef0f6;color:#5b6280{% endif %}">{{r.status}}</span>{% if r.state=='Locked' %} <small class="mut">&#128274; locked now</small>{% endif %}</td>
 <td>{{r.lt}}</td></tr>{% endfor %}</table></div></div>
 {% if live %}<script>setTimeout(function(){location.reload()},30000)</script>{% endif %}"""

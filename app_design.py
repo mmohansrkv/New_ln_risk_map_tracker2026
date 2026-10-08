@@ -59,6 +59,10 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update148: Admin > Work Time page has "Download CSV" (the day shown) and "Print" buttons next to Reports (both Admin-only; the print view hides the buttons and menus).
+  * Update147: the Update134 browser lock-tracking script is ON by default again (WT_LOGIN_PROMPT=1). Employees' browsers record lock / unlock / screen-off while the Employee page is open
+    (the browser asks each employee once to allow it - this cannot be hidden). Set WT_LOGIN_PROMPT=0 on Render to switch it off and rely only on the silent Windows agent. Everything else is
+    exactly as in Update146.
   * Update146: Work Time page: the "Work Time access" button, the Add-employee-access box and the per-row Remove button are gone. The page now has ONE "Reports" button with
     Weekly Report / Monthly Report / All Lock Events / Lock-Tracking Agent. All Lock Events lists every lock (Employee ID, Name, Lock #, Lock time, Unlock time, Break duration,
     Reason) plus that employee's Lock count and Total lock / break time for the day (also in its CSV). Locks (Win+L, automatic lock, screen-off) are recorded by the existing silent tracking.
@@ -462,7 +466,7 @@ app.jinja_env.filters["t12"] = t12
 app.jinja_env.filters["cnt"] = lambda x: "{:,.2f}".format(float(x or 0)).rstrip("0").rstrip(".")      # 8000 -> 8,000
 app.jinja_env.filters["g"] = lambda x: "%g" % (float(x) if str(x).strip() else 0)
 app.jinja_env.globals["PERMISSION_MONTHLY_LIMIT"] = PERMISSION_MONTHLY_LIMIT
-app.jinja_env.globals["WT_LOGIN_PROMPT"] = os.getenv("WT_LOGIN_PROMPT", "0") == "1"      # Update138: default OFF - no permission pop-up at employee login
+app.jinja_env.globals["WT_LOGIN_PROMPT"] = os.getenv("WT_LOGIN_PROMPT", "1") == "1"      # Update147: default ON (the Update134 browser lock tracking); set WT_LOGIN_PROMPT=0 for no pop-up (Windows agent only)
 app.jinja_env.globals["WT_PROMPT_ONCE"] = os.getenv("WT_PROMPT_ONCE", "0") == "1"      # Update130: default OFF - no prompt of any kind for employees
 app.jinja_env.globals["LEAVE_MONTHLY_LIMIT"] = LEAVE_MONTHLY_LIMIT
 
@@ -4125,7 +4129,7 @@ WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Work Time <small class=
 {% if not rows %}<p class="mut">No employees found.</p>{% endif %}
 <form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
 <label>Date <input type="date" name="date" value="{{d}}" max="{{today}}" onchange="this.form.submit()"></label>
-<details class="no-print" style="position:relative;display:inline-block"><summary class="btnl" style="list-style:none;cursor:pointer;display:inline-block">&#128202; Reports &#9662;</summary><div class="card" style="position:absolute;z-index:20;margin:6px 0 0;padding:8px;min-width:200px;display:flex;flex-direction:column;gap:6px"><a class="btnl" href="/admin/work-time/report?period=week&date={{d}}">Weekly Report</a><a class="btnl" href="/admin/work-time/report?period=month&date={{d}}">Monthly Report</a><a class="btnl" href="/admin/work-time/events?date={{d}}">All Lock Events</a><a class="btnl" href="/admin/work-time/agent">Lock-Tracking Agent</a></div></details></form>
+<a class="btnl no-print" href="/admin/work-time/export?date={{d}}">&#128196; Download CSV</a> <a class="btnl no-print" href="#" onclick="window.print();return false">&#128438; Print</a> <details class="no-print" style="position:relative;display:inline-block"><summary class="btnl" style="list-style:none;cursor:pointer;display:inline-block">&#128202; Reports &#9662;</summary><div class="card" style="position:absolute;z-index:20;margin:6px 0 0;padding:8px;min-width:200px;display:flex;flex-direction:column;gap:6px"><a class="btnl" href="/admin/work-time/report?period=week&date={{d}}">Weekly Report</a><a class="btnl" href="/admin/work-time/report?period=month&date={{d}}">Monthly Report</a><a class="btnl" href="/admin/work-time/events?date={{d}}">All Lock Events</a><a class="btnl" href="/admin/work-time/agent">Lock-Tracking Agent</a></div></details></form>
 <p class="mut" style="margin:0 0 10px">Required = {{req}} of active (unlocked) time in a 9-hour day; allowed breaks = {{brk_allowed}} (30 min lunch + 30 min other).
 Break time = the time the computer was locked. Total working time = system-on time &minus; break time.</p>
 <p style="margin:0 0 10px"><b>{{n_ok}}</b> completed &middot; <b>{{n_short}}</b> short / in progress &middot; <b>{{n_none}}</b> no login{% if n_notrack %} &middot; <b style="color:#b45309">{{n_notrack}}</b> without lock tracking{% endif %}</p>

@@ -59,6 +59,9 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update149: NEW DESIGN for the Admin and Employee pages - style only (one CSS block at the end of the base template, scoped to .app): deep-indigo gradient sticky sidebar with pill menu,
+    soft frosted cards with rounded corners and shadows, gradient buttons, modern inputs and tables, refreshed welcome card. No route, template logic, sheet, tracking or e-mail code changed;
+    login / welcome pages unchanged.
   * Update148: Admin > Work Time page has "Download CSV" (the day shown) and "Print" buttons next to Reports (both Admin-only; the print view hides the buttons and menus).
   * Update147: the Update134 browser lock-tracking script is ON by default again (WT_LOGIN_PROMPT=1). Employees' browsers record lock / unlock / screen-off while the Employee page is open
     (the browser asks each employee once to allow it - this cannot be hidden). Set WT_LOGIN_PROMPT=0 on Render to switch it off and rely only on the silent Windows agent. Everything else is
@@ -2151,6 +2154,45 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 @media print{.cal{display:none!important}}
 .panel-ttl{padding:2px 9px 9px;margin:0 0 4px;border-bottom:1px solid #2b3560;font-size:12.5px;font-weight:700;letter-spacing:.06em;color:#fff;text-transform:none}
 @media(max-width:800px){.panel-ttl{border:0;padding:4px 8px;margin:0}}
+/* ============ Update149: NEW DESIGN for the Admin and Employee pages (style only - no functionality touched; login / welcome pages unchanged) ============ */
+.app{--ink:#0f172a;--mut:#64748b;--pri:#6366f1;--pri2:#8b5cf6;--line:#e6eaf3;--sh:0 1px 2px #0f172a0a,0 10px 28px -8px #0f172a1a;
+  font-family:Poppins,system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);
+  background:radial-gradient(900px 420px at 92% -8%,#e6e3ff 0,transparent 62%),radial-gradient(700px 380px at -6% 105%,#dff3ff 0,transparent 60%),#f5f7fc}
+.app aside{width:244px;background:linear-gradient(185deg,#0f1535 0%,#1a2050 55%,#2a2a73 100%);padding:22px 14px;gap:4px;position:sticky;top:0;height:100vh;overflow-y:auto;box-shadow:6px 0 30px -10px #0f172a55}
+.app aside::-webkit-scrollbar{width:6px}.app aside::-webkit-scrollbar-thumb{background:#ffffff2a;border-radius:6px}
+.app .brand{font-size:18px;font-weight:700;letter-spacing:.2px;color:#fff;padding:2px 10px 18px}
+.app .brand small{color:#a9b2e3;font-weight:400;font-size:12px;margin-top:2px}
+.app aside a{color:#cfd5f7;font-weight:500;font-size:13.5px;padding:10px 14px;border-radius:12px}
+.app aside a:hover{background:#ffffff17;color:#fff;transform:translateX(3px)}
+.app aside a.on{background:linear-gradient(135deg,var(--pri),var(--pri2));color:#fff;box-shadow:0 8px 18px -6px #6366f199}
+.app .me{border-bottom:1px solid #ffffff1f;color:#aab3e6;padding:0 10px 16px;margin-bottom:16px}
+.app .me a{background:#ffffff1a;color:#fff;border-radius:10px}.app .me a:hover{background:#ef4444}
+.app .panel-ttl{border-bottom:1px solid #ffffff1f}
+.app main{padding:30px 36px}
+.app h1{font-size:25px;font-weight:700;letter-spacing:-.3px}
+.app h2{font-size:17px;font-weight:600;letter-spacing:-.1px}
+.app .card,.app .kpi{background:#ffffffeb;border:1px solid var(--line);border-radius:18px;box-shadow:var(--sh)}
+.app .card{padding:20px 22px}
+.app .card:hover,.app .kpi:hover{box-shadow:0 14px 34px -10px #4f46e535;transform:translateY(-2px)}
+.app .kpi span{font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:.5px}
+.app .kpi b{font-size:28px;font-weight:700;letter-spacing:-.5px}
+.app .welcome{border-radius:20px;border:1px solid #e0e3ff;background:linear-gradient(120deg,#fff 0%,#f1f0ff 55%,#e6f1ff 100%);box-shadow:var(--sh)}
+.app input,.app select,.app textarea{border:1px solid #dde2ef;border-radius:10px;padding:9px 12px;background:#fff}
+.app input:focus,.app select:focus,.app textarea:focus{outline:0;border-color:var(--pri);box-shadow:0 0 0 4px #6366f126}
+.app .primary,.app .btnl{background:linear-gradient(135deg,var(--pri),var(--pri2));border-radius:10px;font-weight:500;padding:9px 18px;box-shadow:0 8px 18px -8px #6366f1cc}
+.app .primary:hover,.app .btnl:hover{background:linear-gradient(135deg,#5457e6,#7c4ee6);box-shadow:0 12px 22px -8px #6366f1e6}
+.app button:not(.primary):not(.btnl){border-radius:10px;border-color:#dde2ef}
+.app .danger{color:#dc2626;border-color:#fbcaca}.app .danger:hover{background:#fef2f2}
+.app table{border-radius:16px;border:1px solid var(--line);box-shadow:var(--sh)}
+.app th{background:#f1f4fb;color:#64748b;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.45px;padding:10px 12px}
+.app td{padding:9px 12px;font-size:13px}
+.app tbody tr:nth-child(even){background:#fafbff}.app tbody tr:hover{background:#f0f1ff!important}
+.app .flash{background:#eef0ff;border:1px solid #d9dcff;border-radius:12px}
+.app .warn{border-radius:12px}.app .totals{border-radius:12px;background:#eef0ff}
+.app .bar{height:7px;border-radius:7px;background:#e9edf8}
+.app ::-webkit-scrollbar{height:8px;width:8px}.app ::-webkit-scrollbar-thumb{background:#c9d0e6;border-radius:8px}
+@media(max-width:800px){.app aside{position:static;height:auto;width:auto;padding:10px 12px;box-shadow:none;overflow:visible}.app main{padding:16px 14px}.app .card{padding:16px}}
+@media print{.app{background:#fff}.app .card,.app .kpi,.app table{box-shadow:none;border-radius:0}}
 </style></head><body>
 {% if bare %}{{body|safe}}
 {% elif session.role %}<div class="app"><aside class="emp">

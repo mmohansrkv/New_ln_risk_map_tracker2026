@@ -62,6 +62,7 @@ Access rules (Update59):
   * Update150: NEW Admin > Log > "Mail Notes" (/admin/mail-notes; the old /admin/maintenance-email redirects to it). Admin enters the Email Subject and Message, sees them live inside ONE dedicated HTML
     e-mail design (MAIL_NOTE_HTML = preview.html), selects the recipients (All Employees or only the ticked ones) and the DATE & TIME to send; a background job sends it automatically (checked every 30 s),
     or the Admin sends it immediately. A scheduled mail can be edited / cancelled. Sheets: "Mail Notes" and "Mail Notes Log" (employee name, e-mail, subject, e-mail sent date & time, status). Admin only.
+  * Update154: one-day screen OFF / ON counts - the daily Work Time table has "Screen OFF count (locks)" and "Screen ON count (unlocks)" per employee, and the event list / events page shows both counts for the day.
   * Update153: Screen OFF / ON times are saved and shown reliably. FIX: after a server restart or stale cache the day's Work Time row was rebuilt blank (Lock count 0, Break 0:00:00, login time reset) while the lock events were still saved -
     the day is now restored LIVE from the sheet and lock count / break time are rebuilt from the saved Lock Events (never lower than them); signing in again closes a lock left open. The browser now labels Win+L as "Manual lock"
     (user was active) and a lock after inactivity as "Automatic lock". Headings read Screen OFF (lock) / Screen ON (unlock).
@@ -3963,7 +3964,7 @@ WT_EVENTS = """<div class="card"><h2 style="margin-top:0">Lock / Screen-off even
 <label>Date <input type="date" name="date" value="{{d}}" max="{{today}}" onchange="this.form.submit()"></label>{% if emp %}<input type="hidden" name="emp" value="{{emp}}">{% endif %}
 <a class="btnl" href="/admin/work-time?date={{d}}">&larr; Daily summary</a>
 <a class="btnl" href="/admin/work-time/events/export?date={{d}}{% if emp %}&emp={{emp|urlencode}}{% endif %}">Download CSV</a></form>
-<p class="mut" style="margin:0 0 10px">{{n}} event(s) &middot; total {{total}}. Reason: <b>Manual lock</b> (Win+L), <b>Automatic lock</b> (locked by inactivity), <b>Screen-off / idle</b> (no input for the idle limit), <b>Sleep / screen-off</b>.
+<p class="mut" style="margin:0 0 10px">Screen OFF {{n}} time(s) &middot; Screen ON {{n_on}} time(s) &middot; total {{total}}. Reason: <b>Manual lock</b> (Win+L), <b>Automatic lock</b> (locked by inactivity), <b>Screen-off / idle</b> (no input for the idle limit), <b>Sleep / screen-off</b>.
 Events marked <i>Screen lock (type not detected)</i> came from the browser, which cannot tell the reason; install the agent for exact reasons.</p>
 <div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Lock #</th><th>Screen OFF (lock) at</th><th>Screen ON (unlock) at</th><th>Lock duration</th><th>Reason</th><th>Source</th><th>Lock count</th><th>Total lock / break time</th></tr>
 {% for r in evs %}<tr><td>{{r.eid}}</td><td>{{r.name}}</td><td>{{r.n}}</td><td>{{r.start}}</td><td>{{r.end or 'still locked / off'}}</td><td>{{r.dur}}</td><td>{{r.reason}}</td><td>{{r.src}}</td><td>{{r.cnt}}</td><td>{{r.tot}}</td></tr>
@@ -4081,7 +4082,7 @@ def _wt_events_totals(evs):
 def admin_work_time_events():
     prefetch("Lock Events")
     d = _wt_date_arg(); emp = request.args.get("emp", "").strip(); evs = _wt_events_totals(_wt_events(d, emp))
-    return page(WT_EVENTS, title="Lock events", d=d, emp=emp, today=str(today_local()), evs=evs, n=len(evs), total=_hms(sum(e["sec"] for e in evs)), live=(d == str(today_local())))
+    return page(WT_EVENTS, title="Lock events", d=d, emp=emp, today=str(today_local()), evs=evs, n=len(evs), n_on=sum(1 for e in evs if e["end"]), total=_hms(sum(e["sec"] for e in evs)), live=(d == str(today_local())))
 
 @app.route("/admin/work-time/events/export")
 @need("admin")
@@ -4219,11 +4220,11 @@ WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Work Time <small class=
 <p class="mut" style="margin:0 0 10px">Required = {{req}} of active (unlocked) time in a 9-hour day; allowed breaks = {{brk_allowed}} (30 min lunch + 30 min other).
 Break time = the time the computer was locked. Total working time = system-on time &minus; break time.</p>
 <p style="margin:0 0 10px"><b>{{n_ok}}</b> completed &middot; <b>{{n_short}}</b> short / in progress &middot; <b>{{n_none}}</b> no login{% if n_notrack %} &middot; <b style="color:#b45309">{{n_notrack}}</b> without lock tracking{% endif %}</p>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last screen OFF (lock)</th><th>Last screen ON (unlock)</th><th>Break duration</th><th>Lock count</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
-{% for r in rows %}<tr><td><a href="/admin/work-time/events?date={{d}}&emp={{r.eid|urlencode}}">{{r.eid}}</a></td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.last_lock or '-'}}</td><td>{{r.last_unlock or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td><b>{{r.work or '-'}}</b></td>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last screen OFF (lock)</th><th>Last screen ON (unlock)</th><th>Break duration</th><th>Screen OFF count (locks)</th><th>Screen ON count (unlocks)</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
+{% for r in rows %}<tr><td><a href="/admin/work-time/events?date={{d}}&emp={{r.eid|urlencode}}">{{r.eid}}</a></td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.last_lock or '-'}}</td><td>{{r.last_unlock or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td>{{r.on_n}}</td><td><b>{{r.work or '-'}}</b></td>
 <td><span style="padding:2px 8px;border-radius:10px;font-size:12px;white-space:nowrap;{% if r.tone=='ok' %}background:#dcfce7;color:#166534{% elif r.tone=='warn' %}background:#fef3c7;color:#92400e{% elif r.tone=='bad' %}background:#fee2e2;color:#991b1b{% else %}background:#eef0f6;color:#5b6280{% endif %}">{{r.status}}</span>{% if r.state=='Locked' %} <small class="mut">&#128274; locked now</small>{% endif %}</td>
 <td>{{r.lt}}</td></tr>
-{% if r.events %}<tr><td colspan="12" style="padding:0 0 8px 28px;background:#f8f9ff"><details><summary class="mut" style="cursor:pointer;padding:6px 0">&#128274; {{r.events|length}} lock / screen-off event(s) &middot; total {{r.lock_total}} &mdash; click to view</summary>
+{% if r.events %}<tr><td colspan="13" style="padding:0 0 8px 28px;background:#f8f9ff"><details><summary class="mut" style="cursor:pointer;padding:6px 0">&#128274; Screen OFF {{r.events|length}} time(s) &middot; Screen ON {{r.on_n}} time(s) &middot; total {{r.lock_total}} &mdash; click to view</summary>
 <table style="margin:4px 0 6px"><tr><th>Lock #</th><th>Screen OFF (locked) at</th><th>Screen ON (unlocked) at</th><th>Lock duration</th><th>Reason</th><th>Source</th></tr>
 {% for e in r.events %}<tr><td>{{e.n}}</td><td>{{e.start}}</td><td>{{e.end or 'still locked / off'}}</td><td>{{e.dur}}</td><td>{{e.reason}}</td><td>{{e.src}}</td></tr>{% endfor %}</table></details></td></tr>{% endif %}
 {% endfor %}</table></div></div>
@@ -4257,6 +4258,7 @@ def admin_work_time():
     for r_ in data:
         r_["events"] = evs_by.get(_key(r_["eid"]), [])
         r_["lock_total"] = _hms(sum(e_["sec"] for e_ in r_["events"]))
+        r_["on_n"] = sum(1 for e_ in r_["events"] if e_["end"])          # Update154: times the screen came back ON (unlocked) that day
     return page(WT_ADMIN, title="Work Time", back=request.full_path.rstrip("?"), unshared=[e for e in rows("Employees") if _key(e["Employee ID"]) not in wts_ids()], n_shared=len(wts_ids()), n_total=len(rows("Employees")), d=d, today=str(today_local()), rows=data, live=(d == str(today_local())),
                 req=_hms(WT_REQUIRED_SEC), brk_allowed=_hms(WT_ALLOWED_BREAK_SEC),
                 n_ok=sum(r["tone"] == "ok" for r in data), n_short=sum(r["tone"] in ("warn", "bad") for r in data),

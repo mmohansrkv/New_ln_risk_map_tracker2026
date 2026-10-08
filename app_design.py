@@ -59,9 +59,10 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
-  * Update150: Employee Save / pages - an employee never sees a 404 or a system error: a missing page sends the employee back to their own page, background requests (heartbeat,
-    polls, images) that fail answer silently, and a busy Google Sheet shows the normal "press Save again" message on the same page. Saving itself is unchanged
-    (success message, validation messages, target alert).
+  * Update150: NEW Admin > Log > "Maintenance Email" (/admin/maintenance-email): Admin composes a maintenance notice (subject, message, maintenance DATE, START and END time) and schedules
+    when it is e-mailed to ALL employees (Office Email ID) - or sends it immediately. A background job sends it automatically at the scheduled time (checked every 30 s). The mail starts
+    "Dear Team," and always carries a highlighted notice that the Productivity Tracker will be unavailable from start to end. Notices live in the new "Maintenance Email" sheet
+    (Scheduled / Sending / Sent / Partly sent / Failed / Cancelled / Expired); each mail is also logged in Email Controls (Mode = Maintenance). Admin only.
   * Update149: NEW DESIGN for the Admin and Employee pages - style only (one CSS block at the end of the base template, scoped to .app): deep-indigo gradient sticky sidebar with pill menu,
     soft frosted cards with rounded corners and shadows, gradient buttons, modern inputs and tables, refreshed welcome card. No route, template logic, sheet, tracking or e-mail code changed;
     login / welcome pages unchanged.
@@ -356,6 +357,9 @@ HEADERS = {
     # Update92: one row per Missed Entries e-mail. "Dates" = the missed dates in that mail (used so the same date is never e-mailed twice by Auto).
     # A "__RUN__" row (Mode = Auto) claims one automatic run per day so several workers never double-send.
     "Missed Email Log": ["Date sent", "Employee ID", "Employee name", "Email", "Missed dates", "Count", "Sent at", "Mode", "Status", "Sent by"],
+    # Update150: one row per Maintenance Email notice (compose + schedule); "Claimed by" stops two workers sending the same notice.
+    "Maintenance Email": ["ID", "Subject", "Message", "Maintenance date", "Start time", "End time", "Send at", "Status", "Recipients", "Sent", "Failed",
+                          "Created by", "Created at", "Completed at", "Claimed by", "Detail"],
     "Mahizhchi Connection Attempts": ["Employee ID", "Employee name", "Game", "Started at", "Closed at", "Solved", "Mistakes", "Result", "Extra seconds"],
 }
 PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
@@ -420,26 +424,10 @@ def _method_not_allowed(e):
     if session.get("role") == "admin": return redirect("/admin/summary")
     return redirect("/")
 
-def _is_navigation():
-    """True for a page the person opened / a form post (not a background fetch, image or script request)."""
-    m = request.headers.get("Sec-Fetch-Mode")
-    return m == "navigate" or (not m and "text/html" in request.headers.get("Accept", ""))
-
-@app.errorhandler(404)
-def _not_found_quiet(e):
-    """Update150: an employee never sees a 404. Page -> back to their own page; background request -> silent empty answer."""
-    if session.get("role") == "employee":
-        if not _is_navigation() or request.path.rstrip("/") == "/employee": return ("", 204)
-        return redirect("/employee")
-    return e
-
 @app.errorhandler(500)
 def _server_error(e):
     import traceback; traceback.print_exc()
     try:
-        if session.get("role") == "employee" and not _is_navigation(): return ("", 204)      # Update150: background request - nothing shown
-        if request.method == "GET" and session.get("role") == "employee" and request.path.rstrip("/") != "/employee":
-            return redirect("/employee")                                                       # Update150: no system error page for employees
         if request.method == "POST" and session.get("role") in ("employee", "admin"):
             flash("Something went wrong and the request could not be completed. Please try again in a few seconds.", "error")
             return redirect(request.referrer or ("/employee" if session.get("role") == "employee" else "/admin/summary"))
@@ -451,15 +439,6 @@ def _server_error(e):
 def _handle_sheets_api_error(e):
     # Reached only if retries in _with_retry were exhausted (Sheets still
     # unavailable/rate-limited after ~6 attempts with backoff).
-    try:
-        if session.get("role") == "employee":                    # Update150: employees get a normal message on their own page, not a system text
-            if not _is_navigation(): return ("", 204)
-            if request.method == "POST":
-                flash("The data service is busy right now. Nothing was lost - please wait a few seconds and press Save again.", "error")
-                return redirect(request.referrer or "/employee")
-            if request.path.rstrip("/") != "/employee": return redirect("/employee")
-    except Exception:
-        pass
     return ("Google Sheets is temporarily busy handling everyone's requests. "
             "Please wait a few seconds and try again."), 503
 def _load_secret_key():
@@ -2495,7 +2474,7 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"), 
               ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log"),
-              ("/admin/email-controls", "Email Controls")],
+              ("/admin/email-controls", "Email Controls"), ("/admin/maintenance-email", "Maintenance Email")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
@@ -2534,7 +2513,7 @@ def page(body, title="Productivity Tracker", **ctx):
         # Update103: Productivity Log / Leave & Permission Log / Audit Log / Email Controls are grouped under one expandable "Log" menu.
         # Every URL is unchanged - only the sidebar grouping changed. Overview, Processes and Employee Info stay as main menu items.
         LOG_KIDS = [("/admin/log", "Productivity Log"), ("/admin/leave-permission", "Leave & Permission Log"),
-                    ("/admin/audit", "Audit Log"), ("/admin/email-controls", "Email Controls"), ("/admin/work-time", "Work Time")]
+                    ("/admin/audit", "Audit Log"), ("/admin/email-controls", "Email Controls"), ("/admin/maintenance-email", "Maintenance Email"), ("/admin/work-time", "Work Time")]
         def _on(h): return p == h or p.startswith(h + "/")
         log_kids = [(h, l, _on(h) and not (h == "/admin/work-time" and p.startswith("/admin/work-time/access"))) for h, l in LOG_KIDS]
         by_h = {n[0]: n for n in nav}
@@ -6797,10 +6776,11 @@ def employee_login_link():
     u = app_url()
     return (u + "/employee/login") if u else ""
 
-def _html3d(nm, preheader, lead_html, middle_html, link, cta_text):
+def _html3d(nm, preheader, lead_html, middle_html, link, cta_text, greet=None):
     """Update100: the ONE 3D-style e-mail design (table layout + inline CSS = works in Gmail/Outlook). Missed-entry AND approval mails use it."""
     import html as _h
     F = "font-family:'Segoe UI',Arial,Helvetica,sans-serif;"
+    _greet = greet or f"Hello {nm},"      # Update150: optional custom greeting (Maintenance Email passes "Dear Team,")
     if link:
         lk = _h.escape(link)
         button = ('<table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:6px auto 4px auto"><tr>'
@@ -6824,7 +6804,7 @@ def _html3d(nm, preheader, lead_html, middle_html, link, cta_text):
         f'<td style="padding-right:16px"><table role="presentation" cellpadding="0" cellspacing="0"><tr><td align="center" width="58" height="58" bgcolor="#d4af37" style="width:58px;height:58px;background:linear-gradient(145deg,#f3dc8c,#d4af37);border-radius:16px;border-bottom:5px solid #8a6d1a;box-shadow:0 8px 14px rgba(0,0,0,.35);{F}font-size:22px;font-weight:bold;color:#1a1a1a">PT</td></tr></table></td>'
         f'<td style="{F}color:#ffffff"><div style="font-size:22px;font-weight:bold;letter-spacing:.3px">Productivity Tracker</div><div style="font-size:13px;color:#e6c76a;letter-spacing:2px;margin-top:3px">LN_MAP</div></td></tr></table></td></tr>'
         f'<tr><td style="padding:32px 34px 10px 34px;{F}color:#1e293b">'
-        f'<p style="margin:0 0 14px 0;font-size:18px;font-weight:bold">Hello {nm},</p>'
+        f'<p style="margin:0 0 14px 0;font-size:18px;font-weight:bold">{_greet}</p>'
         f'<p style="margin:0 0 18px 0;font-size:16px;line-height:1.55">{lead_html}</p></td></tr>'
         f'<tr><td align="center" style="padding:6px 24px 0 24px">{middle_html}</td></tr>'
         + cta_row +
@@ -7285,6 +7265,300 @@ def admin_email_controls_send():
     if st == "Sent": flash(f"Reminder sent to {e['Name']} ({mail}) for {len(chosen)} date(s).")
     else: flash(f"E-mail to {e['Name']} could not be sent: {st}", "error")
     return redirect(back)
+
+
+# ---------------------------------------------------------------- Update150: ADMIN > MAINTENANCE EMAIL
+# Admin composes a maintenance notice (date, start time, end time) and schedules WHEN it is e-mailed to ALL employees (Office Email ID).
+# A background job sends it automatically at the scheduled time. Every notice is kept in the "Maintenance Email" sheet (status Scheduled /
+# Sending / Sent / Partly sent / Failed / Cancelled / Expired) and every individual mail is also logged in the Email Controls status board
+# (Mode = Maintenance). The mail always carries a highlighted "application unavailable" box, whatever the Admin types in the message.
+MAINT_SHEET = "Maintenance Email"
+MAINT_DEFAULT_SUBJECT = "Scheduled Server Maintenance"
+MAINT_DEFAULT_BODY = ("Please be informed that the server will be under maintenance on {day}, {date} from {start} to {end}. "
+                      "During this period, the Productivity Tracker application will not be available.\n\n"
+                      "Please complete any required work before the maintenance begins.\n\n"
+                      "Thank you for your understanding.")
+_MT_FMT = "%Y-%m-%d %H:%M"
+_mt_inflight, _mt_inflight_lock = set(), threading.Lock()
+
+def _t12s(t): return t.strftime("%I:%M %p")                     # dt.time -> '09:30 AM'
+
+def _mt_window(rec):
+    """-> (start datetime, end datetime). An end time earlier than the start time means the maintenance ends the NEXT day."""
+    d = dt.date.fromisoformat(str(rec["Maintenance date"]).strip())
+    s, e = _parse_hhmm(rec["Start time"]), _parse_hhmm(rec["End time"])
+    start, end = dt.datetime.combine(d, s), dt.datetime.combine(d, e)
+    if end <= start: end += dt.timedelta(days=1)
+    return start, end
+
+def _mt_texts(rec):
+    """-> (date text, day name, start text, end text) used in the mail and in the {placeholders}."""
+    start, end = _mt_window(rec)
+    end_txt = _t12s(end.time()) + (" (next day)" if end.date() != start.date() else "")
+    return start.strftime("%d %b %Y"), start.strftime("%A"), _t12s(start.time()), end_txt
+
+def _mt_fill(text, rec):
+    dtxt, day, st, en = _mt_texts(rec)
+    return str(text).replace("{date}", dtxt).replace("{day}", day).replace("{start}", st).replace("{end}", en)
+
+def maintenance_message(emp, rec):
+    """The maintenance notice for ONE employee (same 3D template as the other mails). rec = a 'Maintenance Email' row."""
+    import html as _h
+    F = "font-family:'Segoe UI',Arial,Helvetica,sans-serif;"
+    dtxt, day, st, en = _mt_texts(rec)
+    body = _mt_fill(rec["Message"], rec)
+    paras = [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
+    lead = "<br><br>".join(_h.escape(p).replace("\n", "<br>") for p in paras)
+    card = _orange_row([("Date", _h.escape(f"{day}, {dtxt}")), ("Start time", _h.escape(st)), ("End time", _h.escape(en))], F)
+    banner = ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:532px;margin:16px auto 8px auto;background:#fef2f2;'
+              'border:1px solid #fecaca;border-left:6px solid #dc2626;border-radius:10px"><tr>'
+              f'<td style="padding:14px 16px;{F}font-size:15px;line-height:1.5;color:#7f1d1d;text-align:left">'
+              '<b>&#9888; Application unavailable.</b> The Productivity Tracker will <b>not be available</b> from '
+              f'<b>{_h.escape(st)}</b> to <b>{_h.escape(en)}</b> on <b>{_h.escape(day + ", " + dtxt)}</b>.</td></tr></table>')
+    msg = EmailMessage()
+    msg["Subject"] = re.sub(r"[\r\n]+", " ", str(rec["Subject"])).strip() or MAINT_DEFAULT_SUBJECT
+    msg["From"] = formataddr(mail_sender()); msg["To"] = emp["email"]
+    msg.set_content("Dear Team,\n\n" + body + "\n\nMaintenance window:\n"
+                    f"Date: {day}, {dtxt}\nStart time: {st}\nEnd time: {en}\n"
+                    "The Productivity Tracker application will be UNAVAILABLE during this period.\n\n"
+                    "This is an automated email. Please do not reply to this email.\n\nThanks,\nProductivity Tracker (LN_Map)")
+    msg.add_alternative(_html3d("", f"Scheduled maintenance on {dtxt}, {st} to {en}: the Productivity Tracker will be unavailable.",
+                                lead, card + banner, "", "", greet="Dear Team,"), subtype="html")
+    return msg
+
+def _mt_save(rec):
+    ws = ws_of(MAINT_SHEET)
+    ws.update(range_name=f"A{rec['_row']}", values=[[str(rec.get(h, "")) for h in HEADERS[MAINT_SHEET]]], value_input_option="RAW")
+    invalidate_cache(MAINT_SHEET)
+
+def _mt_get(mid, fresh=True):
+    return next((r for r in (_fetch_rows(MAINT_SHEET) if fresh else rows(MAINT_SHEET)) if str(r.get("ID", "")) == str(mid)), None)
+
+def _mt_claim(mid):
+    """Scheduled -> Sending for ONE sender only (workers / threads each write a unique token; the last write wins; only that one continues)."""
+    rec = _mt_get(mid)
+    if not rec or str(rec.get("Status")) != "Scheduled": return None
+    token = f"{_WORKER_ID}-{uuid.uuid4().hex[:6]}"
+    rec["Status"], rec["Claimed by"] = "Sending", token
+    _mt_save(rec)
+    time.sleep(2)
+    cur = _mt_get(mid)
+    return cur if cur and cur.get("Status") == "Sending" and cur.get("Claimed by") == token else None
+
+def run_maintenance_mail(mid):
+    """Send ONE scheduled maintenance notice to every employee. Background-safe (no request / session). Never raises."""
+    with _mt_inflight_lock:
+        if mid in _mt_inflight: return
+        _mt_inflight.add(mid)
+    rec = None
+    try:
+        if not MAIL_READY: return
+        rec = _mt_claim(mid)
+        if not rec: return
+        stamp = lambda: now_local().strftime("%Y-%m-%d %H:%M:%S")
+        if now_local() >= _mt_window(rec)[1]:
+            rec.update({"Status": "Expired", "Completed at": stamp(), "Detail": "Not sent: the maintenance period was already over at the scheduled send time."})
+            _mt_save(rec); return
+        items, skipped = [], 0
+        for e in _fetch_rows("Employees"):
+            eid, mail = str(e.get("Employee ID", "")).strip(), employee_office_email(e)
+            if not eid or not EMAIL_RE.match(mail): skipped += 1; continue
+            emp = dict(eid=eid, name=str(e.get("Name", "")), email=mail)
+            items.append((emp, maintenance_message(emp, rec), f"{rec['Maintenance date']} {rec['Start time']}-{rec['End time']}", 1))
+        sent, failed, why = 0, 0, ""
+        for i in range(0, len(items), 25):
+            out = send_logged(items[i:i + 25], "Maintenance", str(rec.get("Created by") or "System"))
+            for st in out.values():
+                if st == "Sent": sent += 1
+                else: failed += 1; why = why or str(st)
+        detail = []
+        if skipped: detail.append(f"{skipped} employee(s) skipped - no valid Office Email ID.")
+        if why: detail.append("First failure: " + why[:150])
+        if not items: detail.append("No employee has a valid Office Email ID.")
+        rec.update({"Status": "Sent" if (sent and not failed) else ("Partly sent" if sent else "Failed"), "Recipients": len(items), "Sent": sent,
+                    "Failed": failed, "Completed at": stamp(), "Detail": " ".join(detail)})
+        _mt_save(rec)
+        print(f"Maintenance e-mail {mid}: {sent} sent, {failed} failed, {skipped} skipped.")
+    except Exception as ex:
+        print("Maintenance e-mail error:", ex)
+        try:
+            if rec: rec.update({"Status": "Failed", "Detail": ("Error: " + str(ex))[:200]}); _mt_save(rec)
+        except Exception: pass
+    finally:
+        with _mt_inflight_lock: _mt_inflight.discard(mid)
+
+def _maint_loop():
+    """Every 30 s: send every 'Scheduled' notice whose send time has arrived (also catches up after a restart)."""
+    time.sleep(45)
+    while True:
+        try:
+            if MAIL_READY:
+                now = now_local()
+                for r in _fetch_rows(MAINT_SHEET):
+                    if str(r.get("Status")) != "Scheduled": continue
+                    try: due = dt.datetime.strptime(str(r.get("Send at", "")).strip(), _MT_FMT) <= now
+                    except ValueError: continue
+                    if due: run_maintenance_mail(str(r["ID"]))
+        except Exception as ex:
+            print("maintenance mail loop error:", ex)
+        time.sleep(30)
+
+threading.Thread(target=_maint_loop, daemon=True).start()
+
+MAINT_PAGE = r"""<div class="head"><div><h1>Maintenance Email</h1>
+<p class="mut">Compose a maintenance notice and schedule it for <b>all employees</b> ({{n_recipients}} with a valid Office Email ID). It is sent automatically at the time you choose and always states that the Productivity Tracker will be unavailable during the maintenance period. All times are {{tz}} time. Only Admin can open this page.</p></div></div>
+{% if not mail_ok %}<div class="warn"><b>&#9888; E-mail service is not set up on the server.</b> Add <code>BREVO_API_KEY</code> (or <code>SMTP_HOST</code>) in the Render Environment settings and redeploy. Nothing can be scheduled until then.</div>{% endif %}
+<div class="card"><h2>Compose &amp; schedule</h2>
+<form method="post" action="/admin/maintenance-email/schedule" id="mt-form" onsubmit="return mtCheck()">
+<div class="grid" style="align-items:end">
+<label>Maintenance date<input type="date" name="mdate" id="mt-date" min="{{today}}" value="{{form.mdate}}" required></label>
+<label>Start time<input type="time" name="start" id="mt-start" value="{{form.start}}" required></label>
+<label>End time<input type="time" name="end" id="mt-end" value="{{form.end}}" required></label></div>
+<label style="display:block;margin-top:10px">Subject<input name="subject" maxlength="150" value="{{form.subject}}" required style="width:100%"></label>
+<label style="display:block;margin-top:10px">Message
+<textarea name="message" id="mt-msg" rows="9" maxlength="3000" required style="width:100%;font-family:inherit">{{form.message}}</textarea></label>
+<p class="mut" style="margin:4px 0 10px">The message fills in the date and times automatically until you edit it. You can also type <code>{date}</code> <code>{day}</code> <code>{start}</code> <code>{end}</code>. The e-mail begins with &ldquo;Dear Team,&rdquo; and always ends with a highlighted notice that the application will be unavailable.</p>
+<div style="border:1px solid #d0d5dd;border-radius:10px;padding:10px 14px;margin:6px 0 12px">
+<b>When should it be sent?</b>
+<p style="margin:8px 0 4px"><label style="display:inline-flex;gap:6px;align-items:center"><input type="radio" name="mode" value="later" {{'checked' if form.mode!='now' else ''}}> Schedule it for</label>
+<input type="date" name="sdate" id="mt-sdate" min="{{today}}" value="{{form.sdate}}"> <input type="time" name="stime" id="mt-stime" value="{{form.stime}}"></p>
+<p style="margin:4px 0"><label style="display:inline-flex;gap:6px;align-items:center"><input type="radio" name="mode" value="now" {{'checked' if form.mode=='now' else ''}}> Send immediately</label></p></div>
+<button class="primary"{{' disabled' if not mail_ok else ''}}>&#9993; Schedule maintenance e-mail</button></form></div>
+
+<div class="card"><h2>Scheduled &amp; sent notices</h2>
+<table><tr><th>Subject</th><th>Maintenance</th><th>Send at</th><th>Status</th><th>Sent / Failed</th><th>Created by</th><th class="no-print">Action</th></tr>
+{% for n in notices %}<tr><td>{{n.subject}}</td><td>{{n.mdate}}<br><small class="mut">{{n.start|t12}} &ndash; {{n.end|t12}}</small></td><td>{{n.send_at|t12}}</td>
+<td><span style="padding:2px 9px;border-radius:99px;font-weight:600;{{ n.badge }}">{{n.status}}</span>{% if n.detail %}<br><small class="mut">{{n.detail}}</small>{% endif %}</td>
+<td>{{n.sent}} / {{n.failed}}{% if n.recipients %} <small class="mut">of {{n.recipients}}</small>{% endif %}</td><td>{{n.by}}<br><small class="mut">{{n.created|t12}}</small></td>
+<td class="act no-print"><a href="/admin/maintenance-email/{{n.id}}/preview" target="_blank">Preview</a>
+{% if n.status=='Scheduled' %}<form method="post" action="/admin/maintenance-email/{{n.id}}/send-now" style="display:inline" onsubmit="return confirm('Send this e-mail to all employees right now?')"><button class="primary sm">Send now</button></form>
+<form method="post" action="/admin/maintenance-email/{{n.id}}/cancel" style="display:inline" onsubmit="return confirm('Cancel this scheduled e-mail?')"><button class="sm">Cancel</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="7">No maintenance e-mail has been scheduled yet.</td></tr>{% endfor %}</table>
+<p class="mut">Each individual mail also appears in <a href="/admin/email-controls">Email Controls &rarr; E-mail status</a> (Mode = Maintenance). The server checks for due notices every 30 seconds.</p></div>
+<script>
+(function(){
+ var TPL={{ default_body|tojson }}, msg=document.getElementById('mt-msg'), d=document.getElementById('mt-date'),
+     s=document.getElementById('mt-start'), e=document.getElementById('mt-end'), edited=(msg.value.trim()!==TPL.trim());
+ if(!msg.value.trim()){msg.value=TPL;edited=false;}
+ function f12(v){if(!v)return null;var p=v.split(':'),h=+p[0],ap=h>=12?'PM':'AM';h=h%12||12;return (h<10?'0':'')+h+':'+p[1]+' '+ap;}
+ function fill(){
+  if(edited)return;
+  var dt=d.value?new Date(d.value+'T00:00:00'):null;
+  var dtxt=dt?dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}):'[date]';
+  var day=dt?dt.toLocaleDateString('en-GB',{weekday:'long'}):'[day]';
+  var st=f12(s.value)||'[start time]', en=f12(e.value)||'[end time]';
+  if(s.value&&e.value&&e.value<s.value)en+=' (next day)';
+  msg.value=TPL.split('{date}').join(dtxt).split('{day}').join(day).split('{start}').join(st).split('{end}').join(en);
+ }
+ msg.addEventListener('input',function(){edited=true;});
+ [d,s,e].forEach(function(x){x.addEventListener('input',fill);x.addEventListener('change',fill);});
+ var sd=document.getElementById('mt-sdate'),stm=document.getElementById('mt-stime'),radios=document.querySelectorAll('input[name=mode]');
+ function mode(){var later=document.querySelector('input[name=mode]:checked').value==='later';
+  sd.disabled=!later;stm.disabled=!later;sd.required=later;stm.required=later;}
+ radios.forEach(function(r){r.addEventListener('change',mode);});
+ window.mtCheck=function(){
+  if(!/^[^{}]*$/.test(msg.value.replace(/[{](date|day|start|end)[}]/g,''))){alert('Please remove any unknown {placeholders} from the message.');return false;}
+  return confirm('Schedule this maintenance e-mail for all employees?');};
+ mode();fill();
+})();
+</script>"""
+
+def _mt_badge(st):
+    return {"Sent": "background:#dcfce7;color:#166534", "Scheduled": "background:#dbeafe;color:#1e40af", "Sending": "background:#fef3c7;color:#92400e",
+            "Partly sent": "background:#fef3c7;color:#92400e", "Failed": "background:#fee2e2;color:#991b1b",
+            "Cancelled": "background:#eef0f6;color:#5b6280", "Expired": "background:#eef0f6;color:#5b6280"}.get(st, "background:#eef0f6;color:#5b6280")
+
+def _maint_render(form=None):
+    prefetch(MAINT_SHEET, "Employees")
+    form = form or dict(subject=MAINT_DEFAULT_SUBJECT, message=MAINT_DEFAULT_BODY, mdate="", start="", end="", mode="later", sdate="", stime="09:00")
+    notices = []
+    for r in sorted(rows(MAINT_SHEET), key=lambda r: str(r.get("Created at", "")), reverse=True)[:60]:
+        st = str(r.get("Status", ""))
+        notices.append(dict(id=r.get("ID", ""), subject=r.get("Subject", ""), mdate=r.get("Maintenance date", ""), start=r.get("Start time", ""), end=r.get("End time", ""),
+                            send_at=r.get("Send at", ""), status=st, badge=_mt_badge(st), detail=str(r.get("Detail", ""))[:220], sent=r.get("Sent", "") or 0,
+                            failed=r.get("Failed", "") or 0, recipients=r.get("Recipients", ""), by=r.get("Created by", ""), created=r.get("Created at", "")))
+    n_rec = sum(1 for e in rows("Employees") if EMAIL_RE.match(employee_office_email(e)))
+    return page(MAINT_PAGE, title="Maintenance Email", mail_ok=MAIL_READY, form=form, notices=notices, default_body=MAINT_DEFAULT_BODY,
+                today=today_local().isoformat(), tz=os.getenv("APP_TZ", "Asia/Kolkata"), n_recipients=n_rec)
+
+@app.route("/admin/maintenance-email")
+@need("admin")
+def admin_maintenance_email():
+    _admin_only_mail()
+    return _maint_render()
+
+@app.route("/admin/maintenance-email/schedule", methods=["POST"])
+@need("admin")
+def admin_maint_schedule():
+    _admin_only_mail()
+    f = request.form
+    form = dict(subject=re.sub(r"[\r\n]+", " ", f.get("subject", "")).strip()[:150], message=(f.get("message") or "").replace("\r\n", "\n").strip()[:3000],
+                mdate=(f.get("mdate") or "").strip(), start=(f.get("start") or "").strip(), end=(f.get("end") or "").strip(),
+                mode="now" if f.get("mode") == "now" else "later", sdate=(f.get("sdate") or "").strip(), stime=(f.get("stime") or "").strip() or "09:00")
+    def bad(text): flash(text, "error"); return _maint_render(form)
+    if not MAIL_READY: return bad("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST).")
+    if not form["subject"]: return bad("Enter the e-mail subject.")
+    if not form["message"]: return bad("Enter the message.")
+    try: d = dt.date.fromisoformat(form["mdate"])
+    except ValueError: return bad("Choose the maintenance date.")
+    s_t, e_t = _parse_hhmm(form["start"]), _parse_hhmm(form["end"])
+    if not s_t or not e_t: return bad("Choose both the start time and the end time.")
+    if s_t == e_t: return bad("The end time must be different from the start time.")
+    start_dt = dt.datetime.combine(d, s_t); now = now_local()
+    if start_dt <= now: return bad("The maintenance start time has already passed. Choose a future date / time.")
+    if form["mode"] == "now": send_at = now.replace(second=0, microsecond=0)
+    else:
+        try: send_at = dt.datetime.combine(dt.date.fromisoformat(form["sdate"]), _parse_hhmm(form["stime"]) or dt.time(9, 0))
+        except ValueError: return bad("Choose the date and time to send the e-mail, or pick \"Send immediately\".")
+        if send_at < now.replace(second=0, microsecond=0): return bad("The send time is in the past. Choose a later time or \"Send immediately\".")
+    if send_at >= start_dt: return bad("The e-mail must be sent BEFORE the maintenance starts.")
+    rec = {"ID": f"MT{now:%Y%m%d%H%M%S}{uuid.uuid4().hex[:3]}", "Subject": form["subject"], "Message": "", "Maintenance date": d.isoformat(),
+           "Start time": s_t.strftime("%H:%M"), "End time": e_t.strftime("%H:%M"), "Send at": send_at.strftime(_MT_FMT), "Status": "Scheduled",
+           "Recipients": "", "Sent": "", "Failed": "", "Created by": session.get("name", "Admin"), "Created at": now.strftime("%Y-%m-%d %H:%M:%S"),
+           "Completed at": "", "Claimed by": "", "Detail": ""}
+    rec["Message"] = _mt_fill(form["message"], rec)           # {date} {day} {start} {end} typed by the Admin are resolved now
+    ws_of(MAINT_SHEET).append_row([rec[h] for h in HEADERS[MAINT_SHEET]], value_input_option="RAW")
+    invalidate_cache(MAINT_SHEET)
+    if form["mode"] == "now":
+        threading.Thread(target=run_maintenance_mail, args=(rec["ID"],), daemon=True).start()
+        flash("Maintenance e-mail is being sent to all employees now. Refresh this page in a minute to see the result.")
+    else:
+        flash(f"Maintenance e-mail scheduled: it will be sent to all employees on {send_at.strftime('%d %b %Y')} at {_t12s(send_at.time())}.")
+    return redirect("/admin/maintenance-email")
+
+@app.route("/admin/maintenance-email/<mid>/cancel", methods=["POST"])
+@need("admin")
+def admin_maint_cancel(mid):
+    _admin_only_mail()
+    rec = _mt_get(mid)
+    if not rec: flash("Notice not found.", "error")
+    elif rec.get("Status") != "Scheduled": flash(f"This e-mail is already {str(rec.get('Status')).lower()} and cannot be cancelled.", "error")
+    else:
+        rec["Status"], rec["Detail"] = "Cancelled", f"Cancelled by {session.get('name', 'Admin')} at {now_local():%Y-%m-%d %H:%M}."
+        _mt_save(rec); flash("Scheduled maintenance e-mail cancelled.")
+    return redirect("/admin/maintenance-email")
+
+@app.route("/admin/maintenance-email/<mid>/send-now", methods=["POST"])
+@need("admin")
+def admin_maint_send_now(mid):
+    _admin_only_mail()
+    rec = _mt_get(mid)
+    if not MAIL_READY: flash("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST).", "error")
+    elif not rec or rec.get("Status") != "Scheduled": flash("Only a Scheduled e-mail can be sent now.", "error")
+    elif _mt_window(rec)[1] <= now_local(): flash("The maintenance period is already over - nothing to send.", "error")
+    else:
+        threading.Thread(target=run_maintenance_mail, args=(str(mid),), daemon=True).start()
+        flash("Sending to all employees now. Refresh this page in a minute to see the result.")
+    return redirect("/admin/maintenance-email")
+
+@app.route("/admin/maintenance-email/<mid>/preview")
+@need("admin")
+def admin_maint_preview(mid):
+    _admin_only_mail()
+    rec = _mt_get(mid, fresh=False)
+    if not rec: abort(404)
+    m = maintenance_message(dict(eid="PREVIEW", name="Preview", email="preview@example.com"), rec)
+    return Response(m.get_body(preferencelist=("html",)).get_content(), mimetype="text/html")
 
 
 # ---------------------------------------------------------------- Update99: "Missed Entries" section below the Productivity log

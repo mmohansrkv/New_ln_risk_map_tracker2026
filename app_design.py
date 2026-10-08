@@ -59,10 +59,9 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
-  * Update150: NEW Admin > Log > "Maintenance Email" (/admin/maintenance-email). Admin selects the maintenance DATE, START and END time, schedules when the e-mail is sent (or sends it now)
-    and chooses the recipients (All Employees, or only the ticked employees; a scheduled notice can be edited / cancelled). No subject / message to type: the e-mail is ONE predefined HTML template
-    (MAINT_EMAIL_HTML = preview.html) stating that the Productivity Tracker will be unavailable. A background job sends it at the scheduled time (checked every 30 s). Sheets: "Maintenance Schedule"
-    and "Mail to Employees Log" (employee name, e-mail, maintenance date, start, end, e-mail sent date & time, status). Admin only.
+  * Update150: NEW Admin > Log > "Mail Notes" (/admin/mail-notes; the old /admin/maintenance-email redirects to it). Admin enters the Email Subject and Message, sees them live inside ONE dedicated HTML
+    e-mail design (MAIL_NOTE_HTML = preview.html), selects the recipients (All Employees or only the ticked ones) and the DATE & TIME to send; a background job sends it automatically (checked every 30 s),
+    or the Admin sends it immediately. A scheduled mail can be edited / cancelled. Sheets: "Mail Notes" and "Mail Notes Log" (employee name, e-mail, subject, e-mail sent date & time, status). Admin only.
   * Update149: NEW DESIGN for the Admin and Employee pages - style only (one CSS block at the end of the base template, scoped to .app): deep-indigo gradient sticky sidebar with pill menu,
     soft frosted cards with rounded corners and shadows, gradient buttons, modern inputs and tables, refreshed welcome card. No route, template logic, sheet, tracking or e-mail code changed;
     login / welcome pages unchanged.
@@ -357,11 +356,11 @@ HEADERS = {
     # Update92: one row per Missed Entries e-mail. "Dates" = the missed dates in that mail (used so the same date is never e-mailed twice by Auto).
     # A "__RUN__" row (Mode = Auto) claims one automatic run per day so several workers never double-send.
     "Missed Email Log": ["Date sent", "Employee ID", "Employee name", "Email", "Missed dates", "Count", "Sent at", "Mode", "Status", "Sent by"],
-    # Update150: "Maintenance Schedule" = one row per Maintenance Email notice (date, times, send time, recipients); "Claimed by" stops two workers sending the same notice.
-    "Maintenance Schedule": ["ID", "Maintenance date", "Start time", "End time", "Send at", "Status", "Recipient mode", "Recipient IDs", "Recipients", "Sent", "Failed",
-                             "Created by", "Created at", "Completed at", "Claimed by", "Detail"],
-    # Update150: "Mail to Employees Log" = one row per employee mailed (the Maintenance Email log on the Admin page).
-    "Mail to Employees Log": ["Notice ID", "Employee ID", "Employee Name", "Employee Email", "Maintenance Date", "Start Time", "End Time", "Email Sent At", "Email Status", "Detail"],
+    # Update150 (Mail Notes): "Mail Notes" = one row per e-mail the Admin composed + scheduled; "Claimed by" stops two workers sending the same one.
+    "Mail Notes": ["ID", "Subject", "Message", "Send at", "Status", "Recipient mode", "Recipient IDs", "Recipients", "Sent", "Failed",
+                   "Created by", "Created at", "Completed at", "Claimed by", "Detail"],
+    # Update150: "Mail Notes Log" = one row per employee mailed (shown as "Mail to Employees Log" on the Admin > Mail Notes page).
+    "Mail Notes Log": ["Notice ID", "Employee ID", "Employee Name", "Employee Email", "Subject", "Email Sent At", "Email Status", "Detail"],
     "Mahizhchi Connection Attempts": ["Employee ID", "Employee name", "Game", "Started at", "Closed at", "Solved", "Mistakes", "Result", "Extra seconds"],
 }
 PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
@@ -2476,7 +2475,7 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"), 
               ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log"),
-              ("/admin/email-controls", "Email Controls"), ("/admin/maintenance-email", "Maintenance Email")],
+              ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
@@ -2515,7 +2514,7 @@ def page(body, title="Productivity Tracker", **ctx):
         # Update103: Productivity Log / Leave & Permission Log / Audit Log / Email Controls are grouped under one expandable "Log" menu.
         # Every URL is unchanged - only the sidebar grouping changed. Overview, Processes and Employee Info stay as main menu items.
         LOG_KIDS = [("/admin/log", "Productivity Log"), ("/admin/leave-permission", "Leave & Permission Log"),
-                    ("/admin/audit", "Audit Log"), ("/admin/email-controls", "Email Controls"), ("/admin/maintenance-email", "Maintenance Email"), ("/admin/work-time", "Work Time")]
+                    ("/admin/audit", "Audit Log"), ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes"), ("/admin/work-time", "Work Time")]
         def _on(h): return p == h or p.startswith(h + "/")
         log_kids = [(h, l, _on(h) and not (h == "/admin/work-time" and p.startswith("/admin/work-time/access"))) for h, l in LOG_KIDS]
         by_h = {n[0]: n for n in nav}
@@ -7268,27 +7267,25 @@ def admin_email_controls_send():
     return redirect(back)
 
 
-# ---------------------------------------------------------------- Update150: ADMIN > MAINTENANCE EMAIL
-# Admin picks the maintenance DATE, START and END time, chooses WHEN the notice is e-mailed (a scheduled time or immediately) and WHO receives it
-# (All Employees or only the employees ticked). The e-mail itself is ONE predefined HTML template (MAINT_EMAIL_HTML - the same markup as preview.html);
-# the Admin never types a subject or message. A background job sends it automatically at the scheduled time (checked every 30 s).
-# Sheets: "Maintenance Schedule" (one row per notice) and "Mail to Employees Log" (one row per employee mailed).
-MAINT_SHEET = "Maintenance Schedule"
-MAINT_LOG = "Mail to Employees Log"
-MAINT_SUBJECT = "Scheduled Server Maintenance"
-_MT_FMT = "%Y-%m-%d %H:%M"
-_mt_inflight, _mt_inflight_lock = set(), threading.Lock()
+# ---------------------------------------------------------------- Update150: ADMIN > MAIL NOTES
+# Admin writes an e-mail (subject + message), sees it live in ONE dedicated HTML e-mail design (MAIL_NOTE_HTML - the same markup as preview.html),
+# chooses the recipients (All Employees or only the ticked ones) and the DATE & TIME it is sent. A background job sends it automatically at that time
+# (checked every 30 s) - or the Admin can send it immediately. Sheets: "Mail Notes" (one row per note) and "Mail Notes Log" (one row per employee mailed).
+MN_SHEET = "Mail Notes"
+MN_LOG = "Mail Notes Log"
+_MN_FMT = "%Y-%m-%d %H:%M"
+_mn_inflight, _mn_inflight_lock = set(), threading.Lock()
 
-# The predefined e-mail. Only these three placeholders are ever filled in: {{maintenance_date}}  {{start_time}}  {{end_time}}
-MAINT_EMAIL_HTML = r'''<!DOCTYPE html>
+# The dedicated e-mail design. Placeholders (filled per employee): {{subject}}  {{message}}  {{employee_name}}
+MAIL_NOTE_HTML = r'''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scheduled Server Maintenance</title>
+<title>{{subject}}</title>
 </head>
 <body style="margin:0;padding:0;background:#efe9d8;">
-<div style="display:none;max-height:0;overflow:hidden;opacity:0;">Scheduled maintenance on {{maintenance_date}}, {{start_time}} to {{end_time}}. The Productivity Tracker will be unavailable.</div>
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">{{subject}}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#efe9d8" style="background:#efe9d8;">
 <tr><td align="center" style="padding:32px 12px;">
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:20px;border-bottom:7px solid #e6c76a;box-shadow:0 26px 50px rgba(15,23,42,.28);">
@@ -7308,55 +7305,21 @@ MAINT_EMAIL_HTML = r'''<!DOCTYPE html>
       </tr></table>
     </td></tr>
 
-    <!-- Title -->
-    <tr><td style="padding:30px 34px 4px 34px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#1e293b;">
-      <div style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#b45309;font-weight:bold;">Maintenance Notice</div>
-      <div style="font-size:26px;font-weight:bold;margin-top:6px;">Scheduled Server Maintenance</div>
+    <!-- Subject / title -->
+    <tr><td style="padding:30px 34px 6px 34px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#1e293b;">
+      <div style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#b45309;font-weight:bold;">Mail Note</div>
+      <div style="font-size:26px;font-weight:bold;line-height:1.25;margin-top:6px;">{{subject}}</div>
+      <div style="height:4px;width:56px;background:#d4af37;border-radius:4px;margin-top:14px;"></div>
     </td></tr>
 
     <!-- Message -->
-    <tr><td style="padding:18px 34px 6px 34px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#1e293b;font-size:16px;line-height:1.6;">
-      <p style="margin:0 0 14px 0;font-weight:bold;">Dear Team,</p>
-      <p style="margin:0 0 14px 0;">Please be informed that the server will be under maintenance on <b>{{maintenance_date}}</b> from <b>{{start_time}}</b> to <b>{{end_time}}</b>. During this period, the Productivity Tracker application will not be available.</p>
-    </td></tr>
-
-    <!-- Maintenance details -->
-    <tr><td align="center" style="padding:6px 24px 0 24px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#fdba74" style="max-width:532px;background:linear-gradient(180deg,#fed7aa,#fdba74);border-radius:14px;border-bottom:5px solid #ea580c;">
-        <tr>
-          <td align="center" valign="middle" style="padding:14px 8px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;">
-            <div style="font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:#7c2d12;">Maintenance Date</div>
-            <div style="font-size:15px;font-weight:bold;color:#431407;margin-top:4px;">{{maintenance_date}}</div>
-          </td>
-          <td align="center" valign="middle" style="padding:14px 8px;border-left:1px solid #fb923c;font-family:'Segoe UI',Arial,Helvetica,sans-serif;">
-            <div style="font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:#7c2d12;">Start Time</div>
-            <div style="font-size:15px;font-weight:bold;color:#431407;margin-top:4px;">{{start_time}}</div>
-          </td>
-          <td align="center" valign="middle" style="padding:14px 8px;border-left:1px solid #fb923c;font-family:'Segoe UI',Arial,Helvetica,sans-serif;">
-            <div style="font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:#7c2d12;">End Time</div>
-            <div style="font-size:15px;font-weight:bold;color:#431407;margin-top:4px;">{{end_time}}</div>
-          </td>
-        </tr>
-      </table>
-    </td></tr>
-
-    <!-- Unavailable notice -->
-    <tr><td align="center" style="padding:16px 24px 0 24px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:532px;background:#fef2f2;border:1px solid #fecaca;border-left:6px solid #dc2626;border-radius:10px;">
-        <tr><td style="padding:14px 16px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#7f1d1d;">
-          <b>&#9888; Application unavailable.</b> The Productivity Tracker will <b>not be available</b> from <b>{{start_time}}</b> to <b>{{end_time}}</b> on <b>{{maintenance_date}}</b>.
-        </td></tr>
-      </table>
-    </td></tr>
-
-    <!-- Closing -->
-    <tr><td style="padding:20px 34px 8px 34px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#1e293b;font-size:16px;line-height:1.6;">
-      <p style="margin:0 0 14px 0;">Please complete any required work before the maintenance begins.</p>
-      <p style="margin:0;">Thank you for your understanding.</p>
+    <tr><td style="padding:18px 34px 8px 34px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#1e293b;font-size:16px;line-height:1.65;">
+      <p style="margin:0 0 14px 0;font-weight:bold;">Dear {{employee_name}},</p>
+      {{message}}
     </td></tr>
 
     <!-- Footer -->
-    <tr><td style="padding:18px 34px 8px 34px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#475569;font-size:13px;line-height:1.5;">
+    <tr><td style="padding:14px 34px 8px 34px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#475569;font-size:13px;line-height:1.5;">
       <p style="margin:0;border-top:1px solid #e2e8f0;padding-top:16px;">This is an automated email. Please do not reply to this email.</p>
     </td></tr>
     <tr><td style="padding:6px 34px 30px 34px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#1e293b;font-size:15px;line-height:1.5;">
@@ -7372,91 +7335,76 @@ MAINT_EMAIL_HTML = r'''<!DOCTYPE html>
 
 def _t12s(t): return t.strftime("%I:%M %p")                     # dt.time -> '09:30 AM'
 
-def _mt_window(rec):
-    """-> (start datetime, end datetime). An end time earlier than the start time means the maintenance ends the NEXT day."""
-    d = dt.date.fromisoformat(str(rec["Maintenance date"]).strip())
-    s, e = _parse_hhmm(rec["Start time"]), _parse_hhmm(rec["End time"])
-    start, end = dt.datetime.combine(d, s), dt.datetime.combine(d, e)
-    if end <= start: end += dt.timedelta(days=1)
-    return start, end
-
-def _mt_texts(rec):
-    """-> (date text, start text, end text) that fill the three placeholders."""
-    start, end = _mt_window(rec)
-    return start.strftime("%A, %d %b %Y"), _t12s(start.time()), _t12s(end.time()) + (" (next day)" if end.date() != start.date() else "")
-
-def maint_html(date_txt, start_txt, end_txt):
+def _mn_body_html(text):
+    """Plain message -> HTML paragraphs (blank line = new paragraph, line break kept). Always escaped."""
     import html as _h
-    return (MAINT_EMAIL_HTML.replace("{{maintenance_date}}", _h.escape(date_txt)).replace("{{start_time}}", _h.escape(start_txt))
-            .replace("{{end_time}}", _h.escape(end_txt)))
+    paras = [p.strip() for p in re.split(r"\n\s*\n", str(text).replace("\r\n", "\n")) if p.strip()]
+    return "".join('<p style="margin:0 0 14px 0;">' + _h.escape(p).replace("\n", "<br>") + "</p>" for p in paras)
 
-def maintenance_message(emp, rec):
-    """The maintenance notice for ONE employee: fixed subject + the predefined HTML template filled with the Admin's date / start / end."""
-    d, s, e = _mt_texts(rec)
+def mail_note_html(subject, message, name):
+    import html as _h
+    vals = {"subject": _h.escape(str(subject)), "message": _mn_body_html(message), "employee_name": _h.escape(str(name or "").strip() or "Team")}
+    return re.sub(r"\{\{(\w+)\}\}", lambda m: vals.get(m.group(1), m.group(0)), MAIL_NOTE_HTML)      # one pass: typed text is never re-expanded
+
+def mail_note_message(emp, rec):
+    """The mail for ONE employee: the Admin's subject + message inside the dedicated HTML design."""
+    name = str(emp.get("name", "")).strip() or "Team"
     msg = EmailMessage()
-    msg["Subject"] = MAINT_SUBJECT
+    msg["Subject"] = re.sub(r"[\r\n]+", " ", str(rec["Subject"])).strip()
     msg["From"] = formataddr(mail_sender()); msg["To"] = emp["email"]
-    msg.set_content("Dear Team,\n\n"
-                    f"Please be informed that the server will be under maintenance on {d} from {s} to {e}. "
-                    "During this period, the Productivity Tracker application will not be available.\n\n"
-                    f"Maintenance date: {d}\nStart time: {s}\nEnd time: {e}\n\n"
-                    "Please complete any required work before the maintenance begins.\n\nThank you for your understanding.\n\n"
-                    "This is an automated email. Please do not reply to this email.\n\nThanks,\nProductivity Tracker (LN_Map)")
-    msg.add_alternative(maint_html(d, s, e), subtype="html")
+    msg.set_content(f"Dear {name},\n\n{str(rec['Message']).strip()}\n\nThis is an automated email. Please do not reply to this email.\n\nThanks,\nProductivity Tracker (LN_Map)")
+    msg.add_alternative(mail_note_html(rec["Subject"], rec["Message"], name), subtype="html")
     return msg
 
-def _mt_ids(rec): return [x.strip() for x in str(rec.get("Recipient IDs", "")).split("|") if x.strip()]
+def _mn_ids(rec): return [x.strip() for x in str(rec.get("Recipient IDs", "")).split("|") if x.strip()]
 
-def _mt_recipient_label(rec):
-    return f"{len(_mt_ids(rec))} selected" if str(rec.get("Recipient mode")) == "selected" else "All employees"
+def _mn_who(rec):
+    return f"{len(_mn_ids(rec))} selected" if str(rec.get("Recipient mode")) == "selected" else "All employees"
 
-def _mt_save(rec):
-    ws = ws_of(MAINT_SHEET)
-    ws.update(range_name=f"A{rec['_row']}", values=[[str(rec.get(h, "")) for h in HEADERS[MAINT_SHEET]]], value_input_option="RAW")
-    invalidate_cache(MAINT_SHEET)
+def _mn_save(rec):
+    ws = ws_of(MN_SHEET)
+    ws.update(range_name=f"A{rec['_row']}", values=[[str(rec.get(h, "")) for h in HEADERS[MN_SHEET]]], value_input_option="RAW")
+    invalidate_cache(MN_SHEET)
 
-def _mt_get(mid, fresh=True):
-    return next((r for r in (_fetch_rows(MAINT_SHEET) if fresh else rows(MAINT_SHEET)) if str(r.get("ID", "")) == str(mid)), None)
+def _mn_get(mid, fresh=True):
+    return next((r for r in (_fetch_rows(MN_SHEET) if fresh else rows(MN_SHEET)) if str(r.get("ID", "")) == str(mid)), None)
 
-def _mt_claim(mid):
+def _mn_claim(mid):
     """Scheduled -> Sending for ONE sender only (workers / threads each write a unique token; the last write wins; only that one continues)."""
-    rec = _mt_get(mid)
+    rec = _mn_get(mid)
     if not rec or str(rec.get("Status")) != "Scheduled": return None
     token = f"{_WORKER_ID}-{uuid.uuid4().hex[:6]}"
     rec["Status"], rec["Claimed by"] = "Sending", token
-    _mt_save(rec)
+    _mn_save(rec)
     time.sleep(2)
-    cur = _mt_get(mid)
+    cur = _mn_get(mid)
     return cur if cur and cur.get("Status") == "Sending" and cur.get("Claimed by") == token else None
 
-def run_maintenance_mail(mid):
-    """Send ONE scheduled notice to its recipients (All Employees, or only the selected ones) and log every employee in 'Mail to Employees Log'.
+def run_mail_note(mid):
+    """Send ONE scheduled mail note to its recipients (All Employees, or only the selected ones) and log every employee in 'Mail Notes Log'.
     Background-safe (no request / session). Never raises."""
-    with _mt_inflight_lock:
-        if mid in _mt_inflight: return
-        _mt_inflight.add(mid)
+    with _mn_inflight_lock:
+        if mid in _mn_inflight: return
+        _mn_inflight.add(mid)
     rec = None
     try:
         if not MAIL_READY: return
-        rec = _mt_claim(mid)
+        rec = _mn_claim(mid)
         if not rec: return
         stamp = lambda: now_local().strftime("%Y-%m-%d %H:%M:%S")
-        if now_local() >= _mt_window(rec)[1]:
-            rec.update({"Status": "Expired", "Completed at": stamp(), "Detail": "Not sent: the maintenance period was already over at the scheduled send time."})
-            _mt_save(rec); return
         emps = _fetch_rows("Employees")
         if str(rec.get("Recipient mode")) == "selected":
-            want = {_key(x) for x in _mt_ids(rec)}
+            want = {_key(x) for x in _mn_ids(rec)}
             emps = [e for e in emps if _key(e.get("Employee ID", "")) in want]
         sender = mail_sender(fresh=True)[1]
-        ws = ws_of(MAINT_LOG)
+        ws = ws_of(MN_LOG)
         sent = failed = 0; why = ""; ready = []; out_rows = []
         def logrow(emp, status, detail=""):
-            return [str(rec["ID"]), emp["eid"], emp["name"], emp["email"], str(rec["Maintenance date"]), str(rec["Start time"]), str(rec["End time"]), stamp(), status, detail[:200]]
+            return [str(rec["ID"]), emp["eid"], emp["name"], emp["email"], str(rec["Subject"]), stamp(), status, detail[:200]]
         for e in emps:
             emp = dict(eid=str(e.get("Employee ID", "")).strip(), name=str(e.get("Name", "")), email=employee_office_email(e))
             if not EMAIL_RE.match(emp["email"]): out_rows.append(logrow(emp, "Failed", "No valid Office Email ID")); failed += 1; continue
-            ready.append((emp, maintenance_message(emp, rec)))
+            ready.append((emp, mail_note_message(emp, rec)))
         if out_rows: ws.append_rows(out_rows, value_input_option="RAW")
         for i in range(0, len(ready), 25):
             batch = ready[i:i + 25]
@@ -7470,249 +7418,265 @@ def run_maintenance_mail(mid):
                 if st == "Sent": sent += 1; part.append(logrow(emp, "Sent"))
                 else: failed += 1; why = why or str(st); part.append(logrow(emp, "Failed", str(st)))
             ws.append_rows(part, value_input_option="RAW")
-            invalidate_cache(MAINT_LOG)
-        invalidate_cache(MAINT_LOG)
+            invalidate_cache(MN_LOG)
+        invalidate_cache(MN_LOG)
         detail = ("No recipients: no employee matched the selection." if not emps else "") + (("First failure: " + why[:150]) if why else "")
         rec.update({"Status": "Sent" if (sent and not failed) else ("Partly sent" if sent else "Failed"), "Recipients": len(emps), "Sent": sent,
                     "Failed": failed, "Completed at": stamp(), "Detail": detail.strip()})
-        _mt_save(rec)
-        print(f"Maintenance e-mail {mid}: {sent} sent, {failed} failed.")
+        _mn_save(rec)
+        print(f"Mail note {mid}: {sent} sent, {failed} failed.")
     except Exception as ex:
-        print("Maintenance e-mail error:", ex)
+        print("Mail note error:", ex)
         try:
-            if rec: rec.update({"Status": "Failed", "Detail": ("Error: " + str(ex))[:200]}); _mt_save(rec)
+            if rec: rec.update({"Status": "Failed", "Detail": ("Error: " + str(ex))[:200]}); _mn_save(rec)
         except Exception: pass
     finally:
-        with _mt_inflight_lock: _mt_inflight.discard(mid)
+        with _mn_inflight_lock: _mn_inflight.discard(mid)
 
-def _maint_loop():
-    """Every 30 s: send every 'Scheduled' notice whose send time has arrived (also catches up after a restart)."""
+def _mn_loop():
+    """Every 30 s: send every 'Scheduled' note whose send time has arrived (also catches up after a restart)."""
     time.sleep(45)
     while True:
         try:
             if MAIL_READY:
                 now = now_local()
-                for r in _fetch_rows(MAINT_SHEET):
+                for r in _fetch_rows(MN_SHEET):
                     if str(r.get("Status")) != "Scheduled": continue
-                    try: due = dt.datetime.strptime(str(r.get("Send at", "")).strip(), _MT_FMT) <= now
+                    try: due = dt.datetime.strptime(str(r.get("Send at", "")).strip(), _MN_FMT) <= now
                     except ValueError: continue
-                    if due: run_maintenance_mail(str(r["ID"]))
+                    if due: run_mail_note(str(r["ID"]))
         except Exception as ex:
-            print("maintenance mail loop error:", ex)
+            print("mail notes loop error:", ex)
         time.sleep(30)
 
-threading.Thread(target=_maint_loop, daemon=True).start()
+threading.Thread(target=_mn_loop, daemon=True).start()
 
-MAINT_PAGE = r"""<div class="head"><div><h1>Maintenance Email</h1>
-<p class="mut">Choose the maintenance date and times, when the e-mail is sent and who receives it. The e-mail uses a fixed professional template (no subject or message to type) and always states that the Productivity Tracker will be unavailable during the maintenance period. All times are {{tz}} time. Only Admin can open this page.</p></div></div>
+MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
+<p class="mut">Write an e-mail, choose who receives it and when it is sent. Your subject and message are placed in one professional e-mail design (see the live preview). Scheduled mails are sent automatically. All times are {{tz}} time. Only Admin can open this page.</p></div></div>
 {% if not mail_ok %}<div class="warn"><b>&#9888; E-mail service is not set up on the server.</b> Add <code>BREVO_API_KEY</code> (or <code>SMTP_HOST</code>) in the Render Environment settings and redeploy. Nothing can be scheduled until then.</div>{% endif %}
-<div class="card"><h2>{{'Edit scheduled e-mail' if form.mid else 'Compose & Schedule'}}</h2>
-<form method="post" action="/admin/maintenance-email/schedule" id="mt-form" onsubmit="return mtCheck()">
+<form method="post" action="/admin/mail-notes/schedule" id="mn-form" onsubmit="return mnCheck()">
 <input type="hidden" name="mid" value="{{form.mid}}">
-<h3 style="margin:4px 0 6px">Maintenance period</h3>
-<div class="grid" style="align-items:end">
-<label>Maintenance date<input type="date" name="mdate" min="{{today}}" value="{{form.mdate}}" required></label>
-<label>Start time<input type="time" name="start" value="{{form.start}}" required></label>
-<label>End time<input type="time" name="end" value="{{form.end}}" required></label></div>
-<h3 style="margin:16px 0 6px">When should it be sent?</h3>
-<div style="border:1px solid #d0d5dd;border-radius:10px;padding:10px 14px;margin:0 0 6px">
-<p style="margin:4px 0"><label style="display:inline-flex;gap:6px;align-items:center"><input type="radio" name="mode" value="later" {{'checked' if form.mode!='now' else ''}}> Send automatically on</label>
-<input type="date" name="sdate" id="mt-sdate" min="{{today}}" value="{{form.sdate}}"> <input type="time" name="stime" id="mt-stime" value="{{form.stime}}"></p>
-<p style="margin:4px 0"><label style="display:inline-flex;gap:6px;align-items:center"><input type="radio" name="mode" value="now" {{'checked' if form.mode=='now' else ''}}> Send immediately</label></p></div>
-<h3 style="margin:16px 0 6px">Employee access &mdash; who receives it?</h3>
-<div style="border:1px solid #d0d5dd;border-radius:10px;padding:10px 14px;margin:0 0 12px">
+<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start">
+<div class="card" style="flex:1 1 400px;min-width:0">
+<h2>{{'Edit scheduled mail' if form.mid else 'Compose'}}</h2>
+<label style="display:block">Email Subject<input name="subject" id="mn-subject" maxlength="150" value="{{form.subject}}" placeholder="e.g. Holiday notice" required style="width:100%"></label>
+<label style="display:block;margin-top:10px">Email Message
+<textarea name="message" id="mn-message" rows="10" maxlength="5000" required placeholder="Type your message here. Leave a blank line to start a new paragraph." style="width:100%;font-family:inherit">{{form.message}}</textarea></label>
+<p class="mut" style="margin:4px 0 0">The e-mail starts with &ldquo;Dear &lt;employee name&gt;,&rdquo; and ends with the standard footer.</p>
+
+<h3 style="margin:18px 0 6px">Employee access &mdash; who receives it?</h3>
+<div style="border:1px solid #d0d5dd;border-radius:10px;padding:10px 14px">
 <p style="margin:4px 0"><label style="display:inline-flex;gap:6px;align-items:center"><input type="radio" name="rmode" value="all" {{'checked' if form.rmode!='selected' else ''}}> <b>All employees</b> <span class="mut">({{n_recipients}} with a valid Office Email ID)</span></label></p>
 <p style="margin:4px 0"><label style="display:inline-flex;gap:6px;align-items:center"><input type="radio" name="rmode" value="selected" {{'checked' if form.rmode=='selected' else ''}}> <b>Selected employees only</b></label></p>
-<div id="mt-pick" style="margin-top:8px">
-<p style="margin:0 0 6px"><input id="mt-q" placeholder="Search ID or name" style="min-width:200px">
-<button type="button" class="btnl" id="mt-all">Select all shown</button> <button type="button" class="btnl" id="mt-none">Clear shown</button>
-<span class="mut" id="mt-count"></span></p>
-<div style="max-height:260px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px;padding:6px 12px">
-{% for e in emps %}<label class="mt-emp" data-s="{{(e.id ~ ' ' ~ e.name)|lower}}" style="display:flex;gap:8px;align-items:center;margin:3px 0">
-<input type="checkbox" class="mt-cb" name="eids" value="{{e.id}}" {{'checked' if e.id in form.eids else ''}}{{' disabled' if not e.email else ''}}>
+<div id="mn-pick" style="margin-top:8px">
+<p style="margin:0 0 6px"><input id="mn-q" placeholder="Search ID or name" style="min-width:180px">
+<button type="button" class="btnl" id="mn-all">Select all shown</button> <button type="button" class="btnl" id="mn-none">Clear shown</button>
+<span class="mut" id="mn-count"></span></p>
+<div style="max-height:240px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px;padding:6px 12px">
+{% for e in emps %}<label class="mn-emp" data-s="{{(e.id ~ ' ' ~ e.name)|lower}}" style="display:flex;gap:8px;align-items:center;margin:3px 0">
+<input type="checkbox" class="mn-cb" name="eids" value="{{e.id}}" {{'checked' if e.id in form.eids else ''}}{{' disabled' if not e.email else ''}}>
 <span>{{e.id}} &middot; {{e.name}} &middot; <span class="mut">{{e.email or 'no valid Office Email ID'}}</span></span></label>
 {% else %}<p class="mut">No employees found.</p>{% endfor %}</div></div></div>
-<button class="primary"{{' disabled' if not mail_ok else ''}}>&#9993; {{'Save changes' if form.mid else 'Schedule maintenance e-mail'}}</button>
-{% if form.mid %}<a href="/admin/maintenance-email">Cancel editing</a>{% endif %}
-<a href="/admin/maintenance-email/template" target="_blank" style="margin-left:12px">View e-mail template</a></form></div>
 
-<div class="card"><h2>Scheduled notices</h2>
-<table><tr><th>Maintenance</th><th>Send at</th><th>Recipients</th><th>Status</th><th>Sent / Failed</th><th>Created by</th><th class="no-print">Action</th></tr>
-{% for n in notices %}<tr><td>{{n.mdate}}<br><small class="mut">{{n.start|t12}} &ndash; {{n.end|t12}}</small></td><td>{{n.send_at|t12}}</td><td>{{n.who}}</td>
+<h3 style="margin:18px 0 6px">Date &amp; time to send</h3>
+<div style="border:1px solid #d0d5dd;border-radius:10px;padding:10px 14px">
+<p style="margin:4px 0"><label style="display:inline-flex;gap:6px;align-items:center"><input type="radio" name="mode" value="later" {{'checked' if form.mode!='now' else ''}}> Send automatically on</label>
+<input type="date" name="sdate" id="mn-sdate" min="{{today}}" value="{{form.sdate}}"> <input type="time" name="stime" id="mn-stime" value="{{form.stime}}"></p>
+<p style="margin:4px 0"><label style="display:inline-flex;gap:6px;align-items:center"><input type="radio" name="mode" value="now" {{'checked' if form.mode=='now' else ''}}> Send immediately</label></p></div>
+
+<p style="margin:16px 0 0"><button class="primary"{{' disabled' if not mail_ok else ''}}>&#9993; {{'Save changes' if form.mid else 'Schedule mail'}}</button>
+{% if form.mid %}<a href="/admin/mail-notes">Cancel editing</a>{% endif %}</p>
+</div>
+<div class="card" style="flex:1 1 400px;min-width:0"><h2>Live preview</h2>
+<p class="mut" style="margin-top:0">Updates as you type. This is exactly how employees will see the e-mail.</p>
+<iframe id="mn-prev" title="E-mail preview" sandbox="" style="width:100%;height:680px;border:1px solid #e2e8f0;border-radius:10px;background:#efe9d8"></iframe>
+<p class="mut"><a href="/admin/mail-notes/template" target="_blank">View empty e-mail template</a></p></div>
+</div></form>
+
+<div class="card"><h2>Scheduled mails</h2>
+<table><tr><th>Subject</th><th>Send at</th><th>Recipients</th><th>Status</th><th>Sent / Failed</th><th>Created by</th><th class="no-print">Action</th></tr>
+{% for n in notices %}<tr><td>{{n.subject}}</td><td>{{n.send_at|t12}}</td><td>{{n.who}}</td>
 <td><span style="padding:2px 9px;border-radius:99px;font-weight:600;{{ n.badge }}">{{n.status}}</span>{% if n.detail %}<br><small class="mut">{{n.detail}}</small>{% endif %}</td>
 <td>{{n.sent}} / {{n.failed}}</td><td>{{n.by}}<br><small class="mut">{{n.created|t12}}</small></td>
-<td class="act no-print"><a href="/admin/maintenance-email/{{n.id}}/preview" target="_blank">Preview</a>
-{% if n.status=='Scheduled' %}<a href="/admin/maintenance-email?edit={{n.id}}">Edit</a>
-<form method="post" action="/admin/maintenance-email/{{n.id}}/send-now" style="display:inline" onsubmit="return confirm('Send this e-mail to the selected employees right now?')"><button class="primary sm">Send now</button></form>
-<form method="post" action="/admin/maintenance-email/{{n.id}}/cancel" style="display:inline" onsubmit="return confirm('Cancel this scheduled e-mail?')"><button class="sm">Cancel</button></form>{% endif %}</td></tr>
-{% else %}<tr><td colspan="7">No maintenance e-mail has been scheduled yet.</td></tr>{% endfor %}</table>
-<p class="mut">The server checks for due notices every 30 seconds.</p></div>
+<td class="act no-print"><a href="/admin/mail-notes/{{n.id}}/preview" target="_blank">Preview</a>
+{% if n.status=='Scheduled' %}<a href="/admin/mail-notes?edit={{n.id}}">Edit</a>
+<form method="post" action="/admin/mail-notes/{{n.id}}/send-now" style="display:inline" onsubmit="return confirm('Send this e-mail to its recipients right now?')"><button class="primary sm">Send now</button></form>
+<form method="post" action="/admin/mail-notes/{{n.id}}/cancel" style="display:inline" onsubmit="return confirm('Cancel this scheduled e-mail?')"><button class="sm">Cancel</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="7">No mail has been scheduled yet.</td></tr>{% endfor %}</table>
+<p class="mut">The server checks for due mails every 30 seconds.</p></div>
 
 <div class="card"><h2>Mail to Employees Log</h2>
 <div class="kpis"><div class="kpi"><span>Sent</span><b>{{counts.Sent}}</b></div><div class="kpi"><span>Failed</span><b>{{counts.Failed}}</b></div></div>
 <form method="get" class="grid no-print" style="align-items:end">
 <label>Status<select name="status"><option value="">All</option>{% for x in ['Sent','Failed'] %}<option{{' selected' if status==x else ''}}>{{x}}</option>{% endfor %}</select></label>
-<input name="q" placeholder="Employee name / email" value="{{q}}"><button class="primary sm">Show</button><a href="/admin/maintenance-email">Reset</a></form>
-<div style="overflow-x:auto"><table><tr><th>Employee Name</th><th>Employee Email</th><th>Maintenance Date</th><th>Start Time</th><th>End Time</th><th>Email Sent Date &amp; Time</th><th>Email Status</th></tr>
-{% for h in log %}<tr><td>{{h['Employee Name']}}</td><td>{{h['Employee Email']}}</td><td>{{h['Maintenance Date']}}</td><td>{{h['Start Time']|t12}}</td><td>{{h['End Time']|t12}}</td><td>{{h['Email Sent At']|t12}}</td>
+<input name="q" placeholder="Employee name / email / subject" value="{{q}}"><button class="primary sm">Show</button><a href="/admin/mail-notes">Reset</a></form>
+<div style="overflow-x:auto"><table><tr><th>Employee Name</th><th>Employee Email</th><th>Subject</th><th>Email Sent Date &amp; Time</th><th>Email Status</th></tr>
+{% for h in log %}<tr><td>{{h['Employee Name']}}</td><td>{{h['Employee Email']}}</td><td>{{h['Subject']}}</td><td>{{h['Email Sent At']|t12}}</td>
 <td><span style="padding:2px 9px;border-radius:99px;font-weight:600;{{ 'background:#dcfce7;color:#166534' if h['Email Status']=='Sent' else 'background:#fee2e2;color:#991b1b' }}">{{h['Email Status']}}</span>
 {% if h['Email Status']!='Sent' and h['Detail'] %}<br><small class="mut">{{h['Detail']}}</small>{% endif %}</td></tr>
-{% else %}<tr><td colspan="7">No e-mail has been sent yet{{' for this filter' if status or q else ''}}.</td></tr>{% endfor %}</table></div>
+{% else %}<tr><td colspan="5">No e-mail has been sent yet{{' for this filter' if status or q else ''}}.</td></tr>{% endfor %}</table></div>
 <p class="mut">Latest {{log|length}} of {{log_total}} shown.</p></div>
 <script>
 (function(){
- var pick=document.getElementById('mt-pick'),sd=document.getElementById('mt-sdate'),stm=document.getElementById('mt-stime'),
-     q=document.getElementById('mt-q'),cnt=document.getElementById('mt-count');
- function cbs(){return document.querySelectorAll('.mt-cb:not(:disabled)');}
- function shown(){return Array.prototype.filter.call(cbs(),function(c){return c.closest('.mt-emp').style.display!=='none';});}
+ var T={{ template|tojson }}, sub=document.getElementById('mn-subject'), msg=document.getElementById('mn-message'), frame=document.getElementById('mn-prev'),
+     pick=document.getElementById('mn-pick'), sd=document.getElementById('mn-sdate'), stm=document.getElementById('mn-stime'),
+     q=document.getElementById('mn-q'), cnt=document.getElementById('mn-count');
+ function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+ function body(t){return t.replace(/\r\n/g,'\n').split(/\n\s*\n/).map(function(x){return x.trim();}).filter(Boolean)
+   .map(function(p){return '<p style="margin:0 0 14px 0;">'+esc(p).replace(/\n/g,'<br>')+'</p>';}).join('');}
+ function render(){
+  var v={subject:esc(sub.value.trim())||'Your subject appears here',
+         message:body(msg.value)||'<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>',
+         employee_name:'[Employee name]'};
+  frame.srcdoc=T.replace(/[{][{](\w+)[}][}]/g,function(m,k){return (k in v)?v[k]:m;});}
+ function cbs(){return document.querySelectorAll('.mn-cb:not(:disabled)');}
+ function shown(){return Array.prototype.filter.call(cbs(),function(c){return c.closest('.mn-emp').style.display!=='none';});}
  function count(){var n=0;cbs().forEach(function(c){if(c.checked)n++;});cnt.textContent=n+' selected';}
  function modes(){
   var later=document.querySelector('input[name=mode]:checked').value==='later';
   sd.disabled=!later;stm.disabled=!later;sd.required=later;stm.required=later;
   pick.style.display=document.querySelector('input[name=rmode]:checked').value==='selected'?'block':'none';}
  document.querySelectorAll('input[name=mode],input[name=rmode]').forEach(function(r){r.addEventListener('change',modes);});
+ sub.addEventListener('input',render); msg.addEventListener('input',render);
  q.addEventListener('input',function(){var t=q.value.trim().toLowerCase();
-  document.querySelectorAll('.mt-emp').forEach(function(l){l.style.display=(!t||l.getAttribute('data-s').indexOf(t)>-1)?'flex':'none';});});
- document.getElementById('mt-all').addEventListener('click',function(){shown().forEach(function(c){c.checked=true;});count();});
- document.getElementById('mt-none').addEventListener('click',function(){shown().forEach(function(c){c.checked=false;});count();});
- document.querySelectorAll('.mt-cb').forEach(function(c){c.addEventListener('change',count);});
- window.mtCheck=function(){
+  document.querySelectorAll('.mn-emp').forEach(function(l){l.style.display=(!t||l.getAttribute('data-s').indexOf(t)>-1)?'flex':'none';});});
+ document.getElementById('mn-all').addEventListener('click',function(){shown().forEach(function(c){c.checked=true;});count();});
+ document.getElementById('mn-none').addEventListener('click',function(){shown().forEach(function(c){c.checked=false;});count();});
+ document.querySelectorAll('.mn-cb').forEach(function(c){c.addEventListener('change',count);});
+ window.mnCheck=function(){
   var sel=document.querySelector('input[name=rmode]:checked').value==='selected',n=0;cbs().forEach(function(c){if(c.checked)n++;});
   if(sel&&!n){alert('Tick at least one employee, or choose All employees.');return false;}
-  return confirm(sel?('Schedule this maintenance e-mail for '+n+' selected employee(s)?'):'Schedule this maintenance e-mail for ALL employees?');};
- modes();count();
+  return confirm(sel?('Schedule this e-mail for '+n+' selected employee(s)?'):'Schedule this e-mail for ALL employees?');};
+ modes();count();render();
 })();
 </script>"""
 
-def _mt_badge(st):
+def _mn_badge(st):
     return {"Sent": "background:#dcfce7;color:#166534", "Scheduled": "background:#dbeafe;color:#1e40af", "Sending": "background:#fef3c7;color:#92400e",
             "Partly sent": "background:#fef3c7;color:#92400e", "Failed": "background:#fee2e2;color:#991b1b"}.get(st, "background:#eef0f6;color:#5b6280")
 
-def _maint_render(form=None, edit=None):
-    prefetch(MAINT_SHEET, MAINT_LOG, "Employees")
+def _mn_render(form=None, edit=None):
+    prefetch(MN_SHEET, MN_LOG, "Employees")
     emps = []
     for e in sorted(rows("Employees"), key=lambda e: str(e.get("Name", "")).lower()):
         mail = employee_office_email(e)
         emps.append(dict(id=str(e["Employee ID"]), name=str(e.get("Name", "")), email=mail if EMAIL_RE.match(mail) else ""))
     if form is None:
-        form = dict(mid="", mdate="", start="", end="", mode="later", sdate="", stime="09:00", rmode="all", eids=[])
+        form = dict(mid="", subject="", message="", mode="later", sdate="", stime="09:00", rmode="all", eids=[])
         if edit:
-            r = _mt_get(edit, fresh=False)
+            r = _mn_get(edit, fresh=False)
             if r and r.get("Status") == "Scheduled":
                 sa = str(r.get("Send at", ""))
-                form.update(mid=r["ID"], mdate=r["Maintenance date"], start=r["Start time"], end=r["End time"], sdate=sa[:10], stime=sa[11:16] or "09:00",
-                            rmode="selected" if r.get("Recipient mode") == "selected" else "all", eids=_mt_ids(r))
+                form.update(mid=r["ID"], subject=r["Subject"], message=r["Message"], sdate=sa[:10], stime=sa[11:16] or "09:00",
+                            rmode="selected" if r.get("Recipient mode") == "selected" else "all", eids=_mn_ids(r))
             else: flash("Only a Scheduled e-mail can be edited.", "error")
     notices = []
-    for r in sorted(rows(MAINT_SHEET), key=lambda r: str(r.get("Created at", "")), reverse=True)[:30]:
+    for r in sorted(rows(MN_SHEET), key=lambda r: str(r.get("Created at", "")), reverse=True)[:30]:
         st = str(r.get("Status", ""))
-        notices.append(dict(id=r.get("ID", ""), mdate=r.get("Maintenance date", ""), start=r.get("Start time", ""), end=r.get("End time", ""), send_at=r.get("Send at", ""),
-                            status=st, badge=_mt_badge(st), detail=str(r.get("Detail", ""))[:200], sent=r.get("Sent", "") or 0, failed=r.get("Failed", "") or 0,
-                            who=_mt_recipient_label(r), by=r.get("Created by", ""), created=r.get("Created at", "")))
+        notices.append(dict(id=r.get("ID", ""), subject=r.get("Subject", ""), send_at=r.get("Send at", ""), status=st, badge=_mn_badge(st),
+                            detail=str(r.get("Detail", ""))[:200], sent=r.get("Sent", "") or 0, failed=r.get("Failed", "") or 0, who=_mn_who(r),
+                            by=r.get("Created by", ""), created=r.get("Created at", "")))
     status = request.args.get("status", "").strip(); q = request.args.get("q", "").strip().lower()
-    allog = rows(MAINT_LOG)
+    allog = rows(MN_LOG)
     counts = {"Sent": sum(1 for r in allog if r.get("Email Status") == "Sent"), "Failed": sum(1 for r in allog if r.get("Email Status") != "Sent")}
     flt = [r for r in allog if (not status or (r.get("Email Status") == "Sent") == (status == "Sent"))
-           and (not q or q in str(r.get("Employee Name", "")).lower() or q in str(r.get("Employee Email", "")).lower())]
+           and (not q or q in str(r.get("Employee Name", "")).lower() or q in str(r.get("Employee Email", "")).lower() or q in str(r.get("Subject", "")).lower())]
     flt.sort(key=lambda r: str(r.get("Email Sent At", "")), reverse=True)
-    return page(MAINT_PAGE, title="Maintenance Email", mail_ok=MAIL_READY, form=form, notices=notices, emps=emps, log=flt[:200], log_total=len(flt), counts=counts,
+    return page(MN_PAGE, title="Mail Notes", mail_ok=MAIL_READY, form=form, notices=notices, emps=emps, log=flt[:200], log_total=len(flt), counts=counts,
                 status=status, q=request.args.get("q", ""), today=today_local().isoformat(), tz=os.getenv("APP_TZ", "Asia/Kolkata"),
-                n_recipients=sum(1 for e in emps if e["email"]))
+                n_recipients=sum(1 for e in emps if e["email"]), template=MAIL_NOTE_HTML)
+
+@app.route("/admin/mail-notes")
+@need("admin")
+def admin_mail_notes():
+    _admin_only_mail()
+    return _mn_render(edit=(request.args.get("edit") or "").strip())
 
 @app.route("/admin/maintenance-email")
 @need("admin")
-def admin_maintenance_email():
-    _admin_only_mail()
-    return _maint_render(edit=(request.args.get("edit") or "").strip())
+def admin_maintenance_email_old(): return redirect("/admin/mail-notes")          # the page was renamed Maintenance Email -> Mail Notes
 
-@app.route("/admin/maintenance-email/schedule", methods=["POST"])
+@app.route("/admin/mail-notes/schedule", methods=["POST"])
 @need("admin")
-def admin_maint_schedule():
+def admin_mn_schedule():
     _admin_only_mail()
     f = request.form
-    form = dict(mid=(f.get("mid") or "").strip(), mdate=(f.get("mdate") or "").strip(), start=(f.get("start") or "").strip(), end=(f.get("end") or "").strip(),
+    form = dict(mid=(f.get("mid") or "").strip(), subject=re.sub(r"[\r\n]+", " ", f.get("subject", "")).strip()[:150],
+                message=(f.get("message") or "").replace("\r\n", "\n").strip()[:5000],
                 mode="now" if f.get("mode") == "now" else "later", sdate=(f.get("sdate") or "").strip(), stime=(f.get("stime") or "").strip() or "09:00",
                 rmode="selected" if f.get("rmode") == "selected" else "all", eids=[x.strip() for x in f.getlist("eids") if x.strip()])
-    def bad(text): flash(text, "error"); return _maint_render(form)
+    def bad(text): flash(text, "error"); return _mn_render(form)
     if not MAIL_READY: return bad("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST).")
-    try: d = dt.date.fromisoformat(form["mdate"])
-    except ValueError: return bad("Choose the maintenance date.")
-    s_t, e_t = _parse_hhmm(form["start"]), _parse_hhmm(form["end"])
-    if not s_t or not e_t: return bad("Choose both the start time and the end time.")
-    if s_t == e_t: return bad("The end time must be different from the start time.")
-    start_dt = dt.datetime.combine(d, s_t); now = now_local()
-    if start_dt <= now: return bad("The maintenance start time has already passed. Choose a future date / time.")
+    if not form["subject"]: return bad("Enter the email subject.")
+    if not form["message"]: return bad("Enter the email message.")
+    now = now_local()
     if form["mode"] == "now": send_at = now.replace(second=0, microsecond=0)
     else:
         try: send_at = dt.datetime.combine(dt.date.fromisoformat(form["sdate"]), _parse_hhmm(form["stime"]) or dt.time(9, 0))
         except ValueError: return bad("Choose the date and time to send the e-mail, or pick \"Send immediately\".")
         if send_at < now.replace(second=0, microsecond=0): return bad("The send time is in the past. Choose a later time or \"Send immediately\".")
-    if send_at >= start_dt: return bad("The e-mail must be sent BEFORE the maintenance starts.")
     valid = {_key(e["Employee ID"]): str(e["Employee ID"]) for e in rows("Employees") if EMAIL_RE.match(employee_office_email(e))}
+    ids = []
     if form["rmode"] == "selected":
-        ids = []
         for x in form["eids"]:
             if _key(x) in valid and valid[_key(x)] not in ids: ids.append(valid[_key(x)])
         if not ids: return bad("Tick at least one employee (with a valid Office Email ID), or choose All employees.")
-    else: ids = []
-    fields = {"Maintenance date": d.isoformat(), "Start time": s_t.strftime("%H:%M"), "End time": e_t.strftime("%H:%M"), "Send at": send_at.strftime(_MT_FMT),
-              "Recipient mode": form["rmode"], "Recipient IDs": "|".join(ids)}
-    if form["mid"]:                                           # editing a Scheduled notice
-        rec = _mt_get(form["mid"])
+    fields = {"Subject": form["subject"], "Message": form["message"], "Send at": send_at.strftime(_MN_FMT), "Recipient mode": form["rmode"], "Recipient IDs": "|".join(ids)}
+    if form["mid"]:                                           # editing a Scheduled mail
+        rec = _mn_get(form["mid"])
         if not rec or rec.get("Status") != "Scheduled": return bad("Only a Scheduled e-mail can be edited.")
-        rec.update(fields); _mt_save(rec)
+        rec.update(fields); _mn_save(rec)
     else:
-        rec = {"ID": f"MT{now:%Y%m%d%H%M%S}{uuid.uuid4().hex[:3]}", "Status": "Scheduled", "Recipients": "", "Sent": "", "Failed": "",
+        rec = {"ID": f"MN{now:%Y%m%d%H%M%S}{uuid.uuid4().hex[:3]}", "Status": "Scheduled", "Recipients": "", "Sent": "", "Failed": "",
                "Created by": session.get("name", "Admin"), "Created at": now.strftime("%Y-%m-%d %H:%M:%S"), "Completed at": "", "Claimed by": "", "Detail": ""}
         rec.update(fields)
-        ws_of(MAINT_SHEET).append_row([rec.get(h, "") for h in HEADERS[MAINT_SHEET]], value_input_option="RAW")
-        invalidate_cache(MAINT_SHEET)
+        ws_of(MN_SHEET).append_row([rec.get(h, "") for h in HEADERS[MN_SHEET]], value_input_option="RAW")
+        invalidate_cache(MN_SHEET)
     who = "all employees" if form["rmode"] == "all" else f"{len(ids)} selected employee(s)"
     if form["mode"] == "now":
-        threading.Thread(target=run_maintenance_mail, args=(rec["ID"],), daemon=True).start()
-        flash(f"Maintenance e-mail is being sent to {who} now. Refresh this page in a minute to see the log.")
+        threading.Thread(target=run_mail_note, args=(rec["ID"],), daemon=True).start()
+        flash(f"The e-mail is being sent to {who} now. Refresh this page in a minute to see the log.")
     else:
-        flash(f"Maintenance e-mail {'updated' if form['mid'] else 'scheduled'}: it will be sent to {who} on {send_at.strftime('%d %b %Y')} at {_t12s(send_at.time())}.")
-    return redirect("/admin/maintenance-email")
+        flash(f"E-mail {'updated' if form['mid'] else 'scheduled'}: it will be sent to {who} on {send_at.strftime('%d %b %Y')} at {_t12s(send_at.time())}.")
+    return redirect("/admin/mail-notes")
 
-@app.route("/admin/maintenance-email/<mid>/cancel", methods=["POST"])
+@app.route("/admin/mail-notes/<mid>/cancel", methods=["POST"])
 @need("admin")
-def admin_maint_cancel(mid):
+def admin_mn_cancel(mid):
     _admin_only_mail()
-    rec = _mt_get(mid)
-    if not rec: flash("Notice not found.", "error")
+    rec = _mn_get(mid)
+    if not rec: flash("Mail not found.", "error")
     elif rec.get("Status") != "Scheduled": flash(f"This e-mail is already {str(rec.get('Status')).lower()} and cannot be cancelled.", "error")
     else:
         rec["Status"], rec["Detail"] = "Cancelled", f"Cancelled by {session.get('name', 'Admin')} at {now_local():%Y-%m-%d %H:%M}."
-        _mt_save(rec); flash("Scheduled maintenance e-mail cancelled.")
-    return redirect("/admin/maintenance-email")
+        _mn_save(rec); flash("Scheduled e-mail cancelled.")
+    return redirect("/admin/mail-notes")
 
-@app.route("/admin/maintenance-email/<mid>/send-now", methods=["POST"])
+@app.route("/admin/mail-notes/<mid>/send-now", methods=["POST"])
 @need("admin")
-def admin_maint_send_now(mid):
+def admin_mn_send_now(mid):
     _admin_only_mail()
-    rec = _mt_get(mid)
+    rec = _mn_get(mid)
     if not MAIL_READY: flash("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST).", "error")
     elif not rec or rec.get("Status") != "Scheduled": flash("Only a Scheduled e-mail can be sent now.", "error")
-    elif _mt_window(rec)[1] <= now_local(): flash("The maintenance period is already over - nothing to send.", "error")
     else:
-        threading.Thread(target=run_maintenance_mail, args=(str(mid),), daemon=True).start()
+        threading.Thread(target=run_mail_note, args=(str(mid),), daemon=True).start()
         flash("Sending now. Refresh this page in a minute to see the log.")
-    return redirect("/admin/maintenance-email")
+    return redirect("/admin/mail-notes")
 
-@app.route("/admin/maintenance-email/<mid>/preview")
+@app.route("/admin/mail-notes/<mid>/preview")
 @need("admin")
-def admin_maint_preview(mid):
+def admin_mn_preview(mid):
     _admin_only_mail()
-    rec = _mt_get(mid, fresh=False)
+    rec = _mn_get(mid, fresh=False)
     if not rec: abort(404)
-    return Response(maint_html(*_mt_texts(rec)), mimetype="text/html")
+    return Response(mail_note_html(rec["Subject"], rec["Message"], "[Employee name]"), mimetype="text/html")
 
-@app.route("/admin/maintenance-email/template")
+@app.route("/admin/mail-notes/template")
 @need("admin")
-def admin_maint_template():
+def admin_mn_template():
     _admin_only_mail()
-    return Response(MAINT_EMAIL_HTML, mimetype="text/html")       # the empty template (placeholders only)
+    return Response(MAIL_NOTE_HTML, mimetype="text/html")       # the empty template (placeholders only)
 
 
 # ---------------------------------------------------------------- Update99: "Missed Entries" section below the Productivity log

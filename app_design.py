@@ -284,8 +284,8 @@ HEADERS = {
                   "Account locked", "Joining date"],      # Update96: "Account locked" = Yes / blank; Update97: "Joining date" (YYYY-MM-DD, set by Admin in Employee Info)
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour", "Target count / 8 hrs"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
-                         "Type", "Process / Description", "Hour", "Count", "Target Count", "Productivity %", "Submitted at", "Description",
-                         ],      # Update137: calculated and stored automatically
+                         "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description",
+                         "Target Count", "Productivity %"],      # Update137: calculated and stored automatically
     "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at",
               "Status", "Reviewed at", "Reviewed by", "Day type"],
     "Permissions": ["Permission ID", "Date", "Employee ID", "Employee name", "Band", "Hours", "Reason",

@@ -59,6 +59,9 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update137: "Productivity log" sheet has two new columns, "Target Count" and "Productivity %", filled automatically whenever an entry is saved / edited (employee or Admin).
+    Target Count = hours x the process's Admin target per hour (Process rows; blank when the process has no count target). Productivity % = that day's productivity % (same figure the app shows,
+    repeated on each row of the entry; blank on a weekly off). Admin > Productivity log > "Recalculate sheet columns" fills / refreshes them for existing rows.
   * Update136: Admin > Work Time > "Share Work Time log": Admin picks an employee and ticks the roles (Team Lead / Senior Team Lead / Associate Manager) that may view that employee's
     Work Time log; grant, change or remove at any time (sheet "Work Time Access"). Employees whose Designation matches a granted role get a view-only "Work Time" menu (day / week / month +
     lock events) limited to the employees shared with their role; access is re-checked live on every request, so a change or removal applies at once. Nobody else can open it.
@@ -281,7 +284,8 @@ HEADERS = {
                   "Account locked", "Joining date"],      # Update96: "Account locked" = Yes / blank; Update97: "Joining date" (YYYY-MM-DD, set by Admin in Employee Info)
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour", "Target count / 8 hrs"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
-                         "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description"],
+                         "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description",
+                         "Target Count", "Productivity %"],      # Update137: calculated and stored automatically
     "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at",
               "Status", "Reviewed at", "Reviewed by", "Day type"],
     "Permissions": ["Permission ID", "Date", "Employee ID", "Employee name", "Band", "Hours", "Reason",
@@ -778,6 +782,25 @@ def view_only_ids():
 def is_view_only(eid): return _key(eid) in view_only_ids()
 VIEW_ONLY_MSG = "Your designation has View Only access to Productivity - entries cannot be added or edited."
 
+def _day_pct(prod, avail, tph, procs):
+    """Productivity % of one day's entry. Hours-based (available hrs logged = 100%) unless the entry has processes with an Admin count target,
+    then completed count vs target count (hours of processes without a target count as achieved). procs = [{name, hour, count}]."""
+    pct = (min(round(prod / avail * 100), 100) if avail > 0 else (100 if prod > 0 else 0))
+    _tg_h = sum(p["hour"] for p in procs if tph.get(p["name"], 0) > 0)
+    if _tg_h > 0 and prod > 0:
+        _done = sum(p["count"] / tph[p["name"]] for p in procs if tph.get(p["name"], 0) > 0) + (prod - _tg_h)
+        pct = round(min(_done / prod * 100, 100), 2)
+    return pct
+
+def entry_metrics(date, emp_id, procs):
+    """Update137: procs = [(name, hours, count)] -> ([Target Count per process line or ''], day Productivity % or '' on a weekly off)."""
+    tph = process_rates()
+    items = [dict(name=n, hour=eff_hours(n, h), count=c) for n, h, c in procs]
+    targets = [round(i["hour"] * tph[i["name"]], 2) if tph.get(i["name"], 0) > 0 else "" for i in items]
+    prod = sum(i["hour"] for i in items)
+    avail = max(target_hours() - deduction_map(emp_id).get((_key(emp_id), str(date)), 0.0), 0.0)
+    return targets, ("" if is_off(date) else _day_pct(prod, avail, tph, items))
+
 def load_subs(emp_id=None):
     """All submissions, or (emp_id given) only that employee's - far less work on a big Productivity log."""
     T = target_hours()
@@ -811,13 +834,7 @@ def load_subs(emp_id=None):
         s["earned"] = sum(p["earned"] for p in s["procs"])     # hours' worth of standard output
         s["ded"] = ded.get((_key(s["emp_id"]), str(s["date"])), 0.0)          # approved permission / half-day leave hours that day
         s["avail"] = max(T - s["ded"], 0.0)                                   # working hours left = target hrs less those hours
-        s["pct"] = (min(round(s["prod"] / s["avail"] * 100), 100) if s["avail"] > 0 else (100 if s["prod"] > 0 else 0))   # available hrs logged = 100%
-        # Update94: when the entry has processes with an Admin target, productivity = completed count vs target count
-        # (hours of processes without a target - Training, Other(s), POC_Sample - count as achieved). No target at all -> hours-based above.
-        _tg_h = sum(p["hour"] for p in s["procs"] if tph.get(p["name"], 0) > 0)
-        if _tg_h > 0 and s["prod"] > 0:
-            _done = sum(p["count"] / tph[p["name"]] for p in s["procs"] if tph.get(p["name"], 0) > 0) + (s["prod"] - _tg_h)
-            s["pct"] = round(min(_done / s["prod"] * 100, 100), 2)
+        s["pct"] = _day_pct(s["prod"], s["avail"], tph, s["procs"])      # Update137: one shared formula (also stored in the sheet)
         s["off"] = is_off(s["date"])                            # weekly-off entry: saved, not counted
         # Update66: Admin-set Target Count vs. what the employee completed (target pro-rated to the hours booked)
         s["tgt_total"] = round(sum(p["hour"] * tph.get(p["name"], 0) for p in s["procs"]), 2)
@@ -940,8 +957,10 @@ def write_sub(sid, date, emp, procs, notes):
     if is_view_only(emp[1]): raise PermissionError("View Only designation: productivity entry is not allowed")      # Update105
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
     base = [sid, date, *emp]      # emp = (band, id, name)
-    out = [base + ["Process", n, h, c, now, d] for n, h, c, d in procs] + \
-          [base + ["Note", t, h, "", now, ""] for t, h in notes]
+    try: tgts, dpct = entry_metrics(date, emp[1], [(n, h, c) for n, h, c, _d in procs])      # Update137: never blocks a save
+    except Exception as ex: print("entry metrics error:", repr(ex)); tgts, dpct = [""] * len(procs), ""
+    out = [base + ["Process", n, h, c, now, d, tgts[i], dpct] for i, (n, h, c, d) in enumerate(procs)] + \
+          [base + ["Note", t, h, "", now, "", "", dpct] for t, h in notes]
     last = None
     for attempt in range(3):          # Update96: retry a failed write, but first check the rows did not already land (no duplicates, no loss)
         try:
@@ -2845,7 +2864,9 @@ LOG_TOP = """<div class="card"><div class="loghead"><h2>Productivity log</h2>
 <label>Employee ID / name<input name="emp" value="{{request.args.get('emp','')}}"></label>
 <button class="primary pbtn">Filter</button> <a href="/admin/log">Clear</a></form>
 <p class="totals no-print">Target check (Admin-set Target Count): <span class="tg-badge met">{{tg_met}} met</span> <span class="tg-badge miss">{{tg_miss}} not met</span>
-<span class="mut">&middot; targets are set on the <a href="/admin/processes">Processes</a> page.</span></p></div>"""
+<span class="mut">&middot; targets are set on the <a href="/admin/processes">Processes</a> page.</span></p>
+<form method="post" action="/admin/log/recalc" class="no-print" style="margin:6px 0 0" onsubmit="return confirm('Recalculate Target Count and Productivity % for every row of the Productivity log sheet?')">
+<button class="btnl pbtn" type="submit">&#8635; Recalculate sheet columns</button> <span class="mut">fills / refreshes "Target Count" and "Productivity %" in the Google Sheet for all entries (use after changing targets, leave or permissions).</span></form></div>"""
 
 def report_scope():
     """Update135: ?month=YYYY-MM (Admin's month picker) -> (month, an 'on' date inside it); else the legacy ?on=."""
@@ -2970,6 +2991,28 @@ def admin_log_add():
                emp_id=emp_id, emp_name=name, procs=[{}], notes=[{}])
     body, ctx = form_page(sub, action, f"Add entry for {name}")
     return page(body, title="Add entry", **ctx)
+
+@app.route("/admin/log/recalc", methods=["POST"])
+@need("admin")
+def admin_log_recalc():
+    """Update137: (re)write 'Target Count' and 'Productivity %' (columns L:M) for every row of the Productivity log sheet."""
+    invalidate_cache("Productivity log")
+    recs = _fetch_rows("Productivity log")
+    if not recs: flash("The Productivity log is empty - nothing to recalculate."); return redirect("/admin/log")
+    subs = {str(x["id"]): x for x in load_subs()}; tph = process_rates()
+    last = max(r["_row"] for r in recs); vals = [["", ""] for _ in range(last - 1)]          # row 2 .. last
+    for r in recs:
+        x = subs.get(str(r["Submission ID"]))
+        if not x: continue
+        rate = tph.get(r["Process / Description"], 0)
+        tgt = round(eff_hours(r["Process / Description"], num(r["Hour"])) * rate, 2) if r["Type"] == "Process" and rate > 0 else ""
+        vals[r["_row"] - 2] = [tgt, "" if x["off"] else x["pct"]]
+    ws = ws_of("Productivity log")
+    for i in range(0, len(vals), 4000):
+        _with_retry(ws.update, range_name=f"L{i + 2}:M{i + 1 + len(vals[i:i + 4000])}", values=vals[i:i + 4000], value_input_option="RAW")
+    invalidate_cache("Productivity log")
+    flash(f"Target Count and Productivity % recalculated for {len(recs)} row(s).")
+    return redirect("/admin/log")
 
 @app.route("/admin/log/report")
 @need("admin")

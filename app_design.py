@@ -59,6 +59,9 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update143: Admin > Work Time daily table now shows Employee ID | Name | Login | Logout | System-on | Last lock / screen-off | Last unlock / screen-on | Break duration | Lock count |
+    Total working time | Status (same data as before, columns added to match the requested layout). Admin > Work Time > All lock events numbers every lock (Lock #) per employee per day.
+    Nothing changes for employees (still silent, no page, no pop-up).
   * Update142: Work Time Access is one click away everywhere: sidebar Log > "Work Time Access", and on the Work Time page itself the Admin can ADD an employee (dropdown) or REMOVE one
     (button on each row) instantly; the full tick-list page stays for bulk changes. Only employees with access appear in the daily view, reports, lock events and downloads.
   * Update141: Lock tracking "Permission needed" explained and fixed at the source. A web page can never switch on the browser's Idle Detection by itself (the browser always asks the user),
@@ -3865,9 +3868,9 @@ WT_EVENTS = """<div class="card"><h2 style="margin-top:0">Lock / Screen-off even
 <a class="btnl" href="/admin/work-time/events/export?date={{d}}{% if emp %}&emp={{emp|urlencode}}{% endif %}">Download CSV</a></form>
 <p class="mut" style="margin:0 0 10px">{{n}} event(s) &middot; total {{total}}. Reason: <b>Manual lock</b> (Win+L), <b>Automatic lock</b> (locked by inactivity), <b>Screen-off / idle</b> (no input for the idle limit), <b>Sleep / screen-off</b>.
 Events marked <i>Screen lock (type not detected)</i> came from the browser, which cannot tell the reason; install the agent for exact reasons.</p>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Start (lock / screen-off)</th><th>End (unlock / screen-on)</th><th>Duration</th><th>Reason</th><th>Source</th></tr>
-{% for r in evs %}<tr><td>{{r.eid}}</td><td>{{r.name}}</td><td>{{r.start}}</td><td>{{r.end or 'still locked / off'}}</td><td>{{r.dur}}</td><td>{{r.reason}}</td><td>{{r.src}}</td></tr>
-{% else %}<tr><td colspan="7">No lock or screen-off events recorded.</td></tr>{% endfor %}</table></div></div>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Lock #</th><th>Start (lock / screen-off)</th><th>End (unlock / screen-on)</th><th>Duration</th><th>Reason</th><th>Source</th></tr>
+{% for r in evs %}<tr><td>{{r.eid}}</td><td>{{r.name}}</td><td>{{r.n}}</td><td>{{r.start}}</td><td>{{r.end or 'still locked / off'}}</td><td>{{r.dur}}</td><td>{{r.reason}}</td><td>{{r.src}}</td></tr>
+{% else %}<tr><td colspan="8">No lock or screen-off events recorded.</td></tr>{% endfor %}</table></div></div>
 {% if live %}<script>setTimeout(function(){location.reload()},30000)</script>{% endif %}"""
 
 def _wt_events(d, emp=""):
@@ -3875,7 +3878,7 @@ def _wt_events(d, emp=""):
     for r in sorted(rows("Lock Events"), key=lambda x: _fl(x.get("Start epoch"))):
         if str(r.get("Date")) != d or (emp and str(r.get("Employee ID")) != emp) or _key(r.get("Employee ID", "")) not in wts_ids(): continue
         st0 = _fl(r.get("Start epoch")); end = str(r.get("End time", ""))
-        out.append(dict(eid=str(r.get("Employee ID")), name=str(r.get("Employee name", "")), start=str(r.get("Start time", "")), end=end,
+        out.append(dict(n=sum(1 for o in out if o["eid"] == str(r.get("Employee ID"))) + 1, eid=str(r.get("Employee ID")), name=str(r.get("Employee name", "")), start=str(r.get("Start time", "")), end=end,
                         dur=str(r.get("Duration", "")) if end else (_hms(now - st0) + " (running)" if st0 else ""), reason=str(r.get("Reason", "")), src=str(r.get("Source", "")),
                         sec=_secs(r.get("Duration", "")) if end else int(max(now - st0, 0))))
     return out
@@ -4115,8 +4118,8 @@ WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Work Time <small class=
 <p class="mut" style="margin:0 0 10px">Required = {{req}} of active (unlocked) time in a 9-hour day; allowed breaks = {{brk_allowed}} (30 min lunch + 30 min other).
 Break time = the time the computer was locked. Total working time = system-on time &minus; break time.</p>
 <p style="margin:0 0 10px"><b>{{n_ok}}</b> completed &middot; <b>{{n_short}}</b> short / in progress &middot; <b>{{n_none}}</b> no login{% if n_notrack %} &middot; <b style="color:#b45309">{{n_notrack}}</b> without lock tracking{% endif %}</p>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Lock / screen-off time</th><th>Times</th><th>Total working time</th><th>Status</th><th>Lock tracking</th><th class="no-print">Access</th></tr>
-{% for r in rows %}<tr><td><a href="/admin/work-time/events?date={{d}}&emp={{r.eid|urlencode}}">{{r.eid}}</a></td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td><b>{{r.work or '-'}}</b></td>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last lock / screen-off</th><th>Last unlock / screen-on</th><th>Break duration</th><th>Lock count</th><th>Total working time</th><th>Status</th><th>Lock tracking</th><th class="no-print">Access</th></tr>
+{% for r in rows %}<tr><td><a href="/admin/work-time/events?date={{d}}&emp={{r.eid|urlencode}}">{{r.eid}}</a></td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.last_lock or '-'}}</td><td>{{r.last_unlock or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td><b>{{r.work or '-'}}</b></td>
 <td><span style="padding:2px 8px;border-radius:10px;font-size:12px;white-space:nowrap;{% if r.tone=='ok' %}background:#dcfce7;color:#166534{% elif r.tone=='warn' %}background:#fef3c7;color:#92400e{% elif r.tone=='bad' %}background:#fee2e2;color:#991b1b{% else %}background:#eef0f6;color:#5b6280{% endif %}">{{r.status}}</span>{% if r.state=='Locked' %} <small class="mut">&#128274; locked now</small>{% endif %}</td>
 <td>{{r.lt}}</td><td class="no-print"><form method="post" action="/admin/work-time/access/remove" style="margin:0" onsubmit="return confirm('Remove Work Time access for {{r.name|e}}?')"><input type="hidden" name="back" value="{{back}}"><input type="hidden" name="eid" value="{{r.eid}}"><button class="btnl" type="submit" style="background:#dc2626;box-shadow:0 3px 0 #991b1b;padding:4px 10px">Remove</button></form></td></tr>{% endfor %}</table></div></div>
 {% if live %}<script>setTimeout(function(){location.reload()},30000)</script>{% endif %}"""
@@ -4132,6 +4135,13 @@ def _wt_date_arg():
 def admin_work_time():
     prefetch(WT_SHEET, "Employees")
     d = _wt_date_arg(); data = _wt_report(d)
+    last = {}                                           # Update143: last lock / unlock time of the day per employee (from the Lock Events sheet)
+    for ev in sorted(rows("Lock Events"), key=lambda x: _fl(x.get("Start epoch"))):
+        if str(ev.get("Date")) == d: last[_key(ev.get("Employee ID", ""))] = ev
+    for r_ in data:
+        ev = last.get(_key(r_["eid"]))
+        r_["last_lock"] = str(ev.get("Start time", "")) if ev else ""
+        r_["last_unlock"] = (str(ev.get("End time", "")) or "still locked / off") if ev else ""
     return page(WT_ADMIN, title="Work Time", back=request.full_path.rstrip("?"), unshared=[e for e in rows("Employees") if _key(e["Employee ID"]) not in wts_ids()], n_shared=len(wts_ids()), n_total=len(rows("Employees")), d=d, today=str(today_local()), rows=data, live=(d == str(today_local())),
                 req=_hms(WT_REQUIRED_SEC), brk_allowed=_hms(WT_ALLOWED_BREAK_SEC),
                 n_ok=sum(r["tone"] == "ok" for r in data), n_short=sum(r["tone"] in ("warn", "bad") for r in data),

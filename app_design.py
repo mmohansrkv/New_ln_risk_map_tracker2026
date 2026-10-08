@@ -59,6 +59,10 @@ Access rules (Update59):
   * Update109: "Admin Panel" / "Employee Panel" heading at the top of each sidebar; the Admin Panel / Productivity Dashboard text is back on the Admin login page only.
   * Update110: Admin welcome page - login text panel removed from it; subtle "© 2026 LN_MAP_AI" added at the bottom.
   * Update111: Group Chat retention is now 12 hours (was 1 hour): messages AND shared files/images are permanently auto-deleted by a background sweeper every 60 s (and on every chat poll/send).
+  * Update138: "Working Time" is replaced by the new "Work Time" log (Admin > Log > Work Time). Tracking stays automatic and silent for EVERY employee (login, logout, screen lock / unlock,
+    screen-off, active time, break / inactive time) - nothing is shown to employees and the login-page permission pop-up is now OFF by default (WT_LOGIN_PROMPT=1 brings it back).
+    Admin > Work Time > "Work Time access" ticks which employees' Work Time is SHARED with the Admin ("Work Time Share" sheet); only those employees appear in the Admin's daily /
+    weekly / monthly reports, lock events and downloads. The Update136 role sharing (Team Lead etc.) and its employee-side page are removed - only the signed-in Admin can view Work Time.
   * Update137: "Productivity log" sheet has two new columns, "Target Count" and "Productivity %", filled automatically whenever an entry is saved / edited (employee or Admin).
     Target Count = hours x the process's Admin target per hour (Process rows; blank when the process has no count target). Productivity % = that day's productivity % (same figure the app shows,
     repeated on each row of the entry; blank on a weekly off). Admin > Productivity log > "Recalculate sheet columns" fills / refreshes them for existing rows.
@@ -301,8 +305,8 @@ HEADERS = {
                   "Total working time", "Required", "Status", "Lock tracking", "Online sec", "Break sec", "Lock start", "Session start", "Last seen"],
     # Update133: one row per lock / screen-off event (start, end, duration, reason) - Admin report only
     "Lock Events": ["Date", "Employee ID", "Employee name", "Start time", "End time", "Duration", "Reason", "Source", "Start epoch"],
-    # Update136: which roles (designations) may view an employee's Work Time log - one row per shared employee, Roles = "Team Lead | Senior Team Lead"
-    "Work Time Access": ["Employee ID", "Employee name", "Roles", "Updated at", "Updated by"],
+    # Update138: which employees' Work Time is shared with the Admin - one row per shared employee (Shared = Yes)
+    "Work Time Share": ["Employee ID", "Employee name", "Shared", "Updated at", "Updated by"],
     "Notifications": ["Notification ID", "Time", "Employee ID", "Employee name", "Event", "Seen",
                       "Section", "Action", "Details"],
     # Audit Log permissions set by Admin: one row per employee. Processes = the ticked process names "A | B | C".
@@ -438,6 +442,7 @@ app.jinja_env.filters["t12"] = t12
 app.jinja_env.filters["cnt"] = lambda x: "{:,.2f}".format(float(x or 0)).rstrip("0").rstrip(".")      # 8000 -> 8,000
 app.jinja_env.filters["g"] = lambda x: "%g" % (float(x) if str(x).strip() else 0)
 app.jinja_env.globals["PERMISSION_MONTHLY_LIMIT"] = PERMISSION_MONTHLY_LIMIT
+app.jinja_env.globals["WT_LOGIN_PROMPT"] = os.getenv("WT_LOGIN_PROMPT", "0") == "1"      # Update138: default OFF - no permission pop-up at employee login
 app.jinja_env.globals["WT_PROMPT_ONCE"] = os.getenv("WT_PROMPT_ONCE", "0") == "1"      # Update130: default OFF - no prompt of any kind for employees
 app.jinja_env.globals["LEAVE_MONTHLY_LIMIT"] = LEAVE_MONTHLY_LIMIT
 
@@ -1431,7 +1436,32 @@ def _wt_report(d):
         out.append(dict(eid=eid, name=name or st["name"], login=_wt_clock(st["first_login"]),
                         logout=_wt_clock(st["last_logout"]) if st["sess_start"] is None else ("(not closed)" if state in ("Not closed", "Left (locked)") else ""),
                         sys_on=_hms(online), brk=_hms(brk), locks=st["locks"], work=_hms(active), status=txt, tone=tone, lt=st["lt"] or "-", state=state, on_s=online, brk_s=brk, work_s=active, n_locks=st["locks"]))
+    shared = wts_ids()                                       # Update138: Admin sees only the employees shared with the Admin (tracking itself covers everyone)
+    out = [r for r in out if _key(r["eid"]) in shared]
     return sorted(out, key=lambda r: (r["state"] == "No login", r["name"].lower()))
+
+# ---------------------------------------------------------------- Update138: which employees' Work Time is shared with the Admin
+WTS_SHEET = "Work Time Share"
+
+def wts_map(fresh=False):
+    """{EMPLOYEE KEY: dict(eid, name, updated)} for every employee whose Work Time is shared with the Admin."""
+    out = {}
+    for r in (_fetch_rows(WTS_SHEET) if fresh else rows(WTS_SHEET)):
+        if str(r.get("Employee ID", "")).strip() and str(r.get("Shared", "")).strip().lower() == "yes":
+            out[_key(r["Employee ID"])] = dict(eid=str(r["Employee ID"]).strip(), name=str(r.get("Employee name", "")), updated=str(r.get("Updated at", "")))
+    return out
+
+def wts_ids(fresh=False):
+    try: return set(wts_map(fresh))
+    except Exception as ex: print("work-time share read error:", repr(ex)); return set()
+
+def wts_write(emps):
+    """Replace the shared list with exactly these employee rows."""
+    ws = ws_of(WTS_SHEET); now = now_local().strftime("%Y-%m-%d %H:%M:%S")
+    _with_retry(ws.batch_clear, ["A2:E5000"])
+    if emps:
+        _with_retry(ws.update, range_name="A2", values=[[str(e["Employee ID"]), str(e.get("Name", "")), "Yes", now, "Admin"] for e in emps], value_input_option="RAW")
+    invalidate_cache(WTS_SHEET)
 
 # ---------------------------------------------------------------- auth helpers
 def need(role=None):
@@ -2384,10 +2414,6 @@ def page(body, title="Productivity Tracker", **ctx):
             if mz_active(session.get("emp_id", "")): items.append(("/employee/mahizhchi", MZ_TITLE))
         except Exception as e:
             print("Mahizhchi menu check failed (are the Mahizhchi sheets created? restart the app once):", e)
-        try:      # Update136: shown only while Admin has shared at least one employee's Work Time log with this employee's role
-            if wt_shared_for(session.get("emp_id", "")): items.append(("/employee/work-time", "Work Time"))
-        except Exception as e:
-            print("Work Time share menu check failed:", e)
     nav = [(h, l, p == h or (h != "/employee" and p.startswith(h + "/")), []) for h, l in items]
     if session.get("role") == "admin":      # Update66: Employee Info expands to Employees / Notifications / Mahizhchi
         view = request.args.get("view", "")
@@ -2440,7 +2466,7 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
 <svg class="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.9 10.9 0 0 1 12 19c-7 0-11-7-11-7a19.8 19.8 0 0 1 5.1-5.9M9.9 4.2A10.6 10.6 0 0 1 12 5c7 0 11 7 11 7a19.7 19.7 0 0 1-3.2 4.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>
 <span class="pw-t">Show</span></button></div>
 <button>Log in</button></form>{% if role!='admin' %}<span class="fgt" title="Please contact your admin to reset your password">Forgot password?</span>{% endif %}</div></div>{% if role!='admin' %}<img class="orb" src="/photo/{{role}}" alt="">{% endif %}</div>
-{% if role=='employee' %}<script>
+{% if role=='employee' and WT_LOGIN_PROMPT %}<script>
 /* Update131: the Log in click is the user gesture the browser needs, so screen-lock tracking permission is requested right there - once per browser.
    After "Allow", every later login starts tracking by itself. Login is never blocked: any error / no support / no answer within 20 s just signs in. */
 (function(){
@@ -3815,7 +3841,7 @@ Events marked <i>Screen lock (type not detected)</i> came from the browser, whic
 def _wt_events(d, emp=""):
     now = time.time(); out = []
     for r in sorted(rows("Lock Events"), key=lambda x: _fl(x.get("Start epoch"))):
-        if str(r.get("Date")) != d or (emp and str(r.get("Employee ID")) != emp): continue
+        if str(r.get("Date")) != d or (emp and str(r.get("Employee ID")) != emp) or _key(r.get("Employee ID", "")) not in wts_ids(): continue
         st0 = _fl(r.get("Start epoch")); end = str(r.get("End time", ""))
         out.append(dict(eid=str(r.get("Employee ID")), name=str(r.get("Employee name", "")), start=str(r.get("Start time", "")), end=end,
                         dur=str(r.get("Duration", "")) if end else (_hms(now - st0) + " (running)" if st0 else ""), reason=str(r.get("Reason", "")), src=str(r.get("Source", "")),
@@ -3851,7 +3877,7 @@ def _wt_period_data(period, d):
                         req_t=_hms(sm["days"] * WT_REQUIRED_SEC), diff_t=("+" if sm["work"] >= sm["days"] * WT_REQUIRED_SEC else "-") + _hms(abs(sm["work"] - sm["days"] * WT_REQUIRED_SEC))))
     return label, sorted(out, key=lambda r: r["name"].lower()), daywise
 
-WT_PERIOD = """<div class="card"><h2 style="margin-top:0">Working Time Report &middot; {{label}}</h2>
+WT_PERIOD = """<div class="card"><h2 style="margin-top:0">Work Time Report &middot; {{label}}</h2>
 <form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
 <label>Report <select name="period" onchange="this.form.submit()"><option value="week" {{'selected' if period=='week'}}>Weekly</option><option value="month" {{'selected' if period=='month'}}>Monthly</option></select></label>
 <label>Date in the period <input type="date" name="date" value="{{d}}" max="{{today}}" onchange="this.form.submit()"></label>
@@ -3877,7 +3903,7 @@ def admin_work_time_report():
     prefetch(WT_SHEET, "Employees")
     period, d = _wt_period_args(); emp = request.args.get("emp", "").strip()
     label, summ, days = _wt_period_data(period, d)
-    return page(WT_PERIOD, title="Working time report", period=period, d=d, today=str(today_local()), label=label, rows=summ, emp=emp,
+    return page(WT_PERIOD, title="Work Time report", period=period, d=d, today=str(today_local()), label=label, rows=summ, emp=emp,
                 days=[r for r in days if r["eid"] == emp], req=_hms(WT_REQUIRED_SEC))
 
 @app.route("/admin/work-time/report/download")
@@ -4012,10 +4038,11 @@ def employee_track():
         except Exception as e: print("work-time event error:", e)
     return ("", 204)
 
-WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Working Time <small class="mut">&middot; computer screen lock / unlock</small></h2>
+WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Work Time <small class="mut">&middot; automatic, silent tracking &middot; showing <b>{{n_shared}}</b> of {{n_total}} employees shared with Admin</small></h2>
+{% if not rows %}<p class="mut">No employee is shared with the Admin yet. <a href="/admin/work-time/access">Choose employees</a>.</p>{% endif %}
 <form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
 <label>Date <input type="date" name="date" value="{{d}}" max="{{today}}" onchange="this.form.submit()"></label>
-<a class="btnl" href="/admin/work-time/export?date={{d}}">Download CSV</a> <a class="btnl" href="/admin/work-time/report?period=week&date={{d}}">Weekly report</a> <a class="btnl" href="/admin/work-time/report?period=month&date={{d}}">Monthly report</a> <a class="btnl" href="/admin/work-time/events?date={{d}}">All lock events</a> <a class="btnl" href="/admin/work-time/agent">Lock-tracking agent</a> <a class="btnl" href="/admin/work-time/access">&#128101; Share Work Time log</a></form>
+<a class="btnl" href="/admin/work-time/export?date={{d}}">Download CSV</a> <a class="btnl" href="/admin/work-time/report?period=week&date={{d}}">Weekly report</a> <a class="btnl" href="/admin/work-time/report?period=month&date={{d}}">Monthly report</a> <a class="btnl" href="/admin/work-time/events?date={{d}}">All lock events</a> <a class="btnl" href="/admin/work-time/agent">Lock-tracking agent</a> <a class="btnl" href="/admin/work-time/access">&#128101; Work Time access</a></form>
 <p class="mut" style="margin:0 0 10px">Required = {{req}} of active (unlocked) time in a 9-hour day; allowed breaks = {{brk_allowed}} (30 min lunch + 30 min other).
 Break time = the time the computer was locked. Total working time = system-on time &minus; break time.</p>
 <p style="margin:0 0 10px"><b>{{n_ok}}</b> completed &middot; <b>{{n_short}}</b> short / in progress &middot; <b>{{n_none}}</b> no login{% if n_notrack %} &middot; <b style="color:#b45309">{{n_notrack}}</b> without lock tracking{% endif %}</p>
@@ -4036,7 +4063,7 @@ def _wt_date_arg():
 def admin_work_time():
     prefetch(WT_SHEET, "Employees")
     d = _wt_date_arg(); data = _wt_report(d)
-    return page(WT_ADMIN, title="Working Time", d=d, today=str(today_local()), rows=data, live=(d == str(today_local())),
+    return page(WT_ADMIN, title="Work Time", n_shared=len(wts_ids()), n_total=len(rows("Employees")), d=d, today=str(today_local()), rows=data, live=(d == str(today_local())),
                 req=_hms(WT_REQUIRED_SEC), brk_allowed=_hms(WT_ALLOWED_BREAK_SEC),
                 n_ok=sum(r["tone"] == "ok" for r in data), n_short=sum(r["tone"] in ("warn", "bad") for r in data),
                 n_none=sum(r["state"] == "No login" for r in data),
@@ -7126,145 +7153,46 @@ def log_missed_section():
     return dict(mdata=data, m_emps=len({r["id"] for r in data}), mmonth=month, mlabel=label)
 
 
-# ================================================================ Update136: share an employee's Work Time log with selected roles (Admin-controlled)
-WTA_SHEET = "Work Time Access"
-WT_SHARE_ROLES = ("Team Lead", "Senior Team Lead", "Associate Manager")        # roles = the viewer's Designation (Employees sheet)
 
-def _wta_roles(raw):
-    ok = {_norm_desig(r): r for r in WT_SHARE_ROLES}
-    return [ok[_norm_desig(x)] for x in str(raw or "").split("|") if _norm_desig(x) in ok]
-
-def wta_map(fresh=False):
-    """{EMPLOYEE KEY: dict(eid, name, roles, updated)} of every employee whose Work Time log is shared with at least one role."""
-    out = {}
-    for r in (_fetch_rows(WTA_SHEET) if fresh else rows(WTA_SHEET)):
-        roles = _wta_roles(r.get("Roles", ""))
-        if str(r.get("Employee ID", "")).strip() and roles:
-            out[_key(r["Employee ID"])] = dict(eid=str(r["Employee ID"]).strip(), name=str(r.get("Employee name", "")), roles=roles, updated=str(r.get("Updated at", "")))
-    return out
-
-def wta_write(emp, roles):
-    """Grant / change (roles ticked) or remove (no roles) the sharing of one employee's Work Time log."""
-    ws = ws_of(WTA_SHEET); ids = ws.col_values(1)
-    at = next((i for i, v in enumerate(ids) if i > 0 and _key(v) == _key(emp["Employee ID"])), None)
-    if not roles:
-        if at is not None: ws.delete_rows(at + 1)
-    else:
-        vals = [str(emp["Employee ID"]), emp["Name"], " | ".join(roles), now_local().strftime("%Y-%m-%d %H:%M:%S"), "Admin"]
-        if at is None: ws.append_row(vals, value_input_option="RAW")
-        else: ws.update(range_name=f"A{at + 1}:E{at + 1}", values=[vals], value_input_option="RAW")
-    invalidate_cache(WTA_SHEET)
-
-def wt_shared_for(viewer_eid, fresh=False):
-    """Employees whose Work Time log is shared with the viewer's role (the viewer's CURRENT Designation). Empty list = no access at all."""
-    role = _norm_desig(desig_map().get(_key(viewer_eid), ""))
-    if role not in {_norm_desig(r) for r in WT_SHARE_ROLES}: return []
-    emps = {_key(e["Employee ID"]): e for e in rows("Employees")}
-    out = []
-    for k, a in wta_map(fresh).items():
-        if role in {_norm_desig(r) for r in a["roles"]} and k in emps:
-            out.append(dict(eid=str(emps[k]["Employee ID"]).strip(), name=str(emps[k].get("Name", "")), desig=str(emps[k].get("Designation", ""))))
-    return sorted(out, key=lambda x: x["name"].lower())
-
-WTA_ADMIN = """<div class="card"><h2 style="margin-top:0">Share Work Time log <small class="mut">&middot; choose who may view an employee's Work Time</small></h2>
-<p class="mut" style="margin:0 0 10px">Pick the employee whose Work Time log you want to share, then tick the roles that may view it. Only employees whose Designation is a ticked role can open that log
-(view only: day / week / month and lock events). Untick everything and save, or press <b>Remove</b>, to stop sharing. Changes apply immediately.</p>
-<form method="post" action="/admin/work-time/access/save" id="share" style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap">
-<label>Employee<select name="eid" required onchange="location.href='/admin/work-time/access?emp='+encodeURIComponent(this.value)+'#share'"><option value="">- select employee -</option>
-{% for e in emps %}<option value="{{e['Employee ID']}}" {{'selected' if sel and sel|string|trim|upper == e['Employee ID']|string|trim|upper else ''}}>{{e['Employee ID']}} &middot; {{e['Name']}}</option>{% endfor %}</select></label>
-<fieldset style="border:1px solid var(--line);border-radius:10px;padding:6px 12px"><legend class="mut">Roles that can view</legend>
-{% for r in roles %}<label style="display:inline-flex;gap:6px;align-items:center;margin-right:12px"><input type="checkbox" name="roles" value="{{r}}" {{'checked' if r in cur else ''}}> {{r}}</label>{% endfor %}</fieldset>
-<button class="primary pbtn" type="submit">{{'Update access' if cur else 'Grant access'}}</button></form></div>
-<div class="card"><h2 style="margin-top:0">Currently shared ({{shares|length}})</h2><div style="overflow-x:auto"><table>
-<tr><th>Employee</th><th>Designation</th><th>Shared with roles</th><th>Who can view now</th><th>Updated</th><th></th></tr>
-{% for a in shares %}<tr><td>{{a.eid}} &middot; {{a.name}}</td><td>{{a.desig or '-'}}</td>
-<td>{% for r in a.roles %}<span style="display:inline-block;padding:2px 9px;margin:1px 3px 1px 0;border-radius:10px;background:#eef0ff;color:#3730a3;font-size:12px">{{r}}</span>{% endfor %}</td>
-<td>{{a.viewers|length}}{% if a.viewers %} <small class="mut" title="{{a.viewers|join(', ')}}">&middot; {{a.viewers[:3]|join(', ')}}{{'...' if a.viewers|length > 3 else ''}}</small>{% endif %}</td><td>{{a.updated}}</td>
-<td style="white-space:nowrap"><a class="btnl" href="/admin/work-time/access?emp={{a.eid|urlencode}}#share">Edit</a>
-<form method="post" action="/admin/work-time/access/remove" style="display:inline" onsubmit="return confirm('Remove all access to {{a.name|e}}\\'s Work Time log?')"><input type="hidden" name="eid" value="{{a.eid}}"><button class="btnl" type="submit" style="background:#dc2626;box-shadow:0 4px 0 #991b1b">Remove</button></form></td></tr>
-{% else %}<tr><td colspan="6">No Work Time log is shared yet.</td></tr>{% endfor %}</table></div>
-<p style="margin:10px 0 0"><a href="/admin/work-time">&larr; Back to Work Time</a></p></div>"""
+# ---------------------------------------------------------------- Update138: Work Time access (Admin chooses whose Work Time is shared with the Admin)
+WTS_PAGE = """<div class="card"><h2 style="margin-top:0">Work Time access <small class="mut">&middot; whose Work Time is shared with the Admin</small></h2>
+<p class="mut" style="margin:0 0 10px">Work Time is tracked automatically and silently for every employee. Tick the employees whose Work Time may be viewed by the Admin: only those employees appear in the
+Work Time log, the weekly / monthly reports, the lock events and the downloads. Unticking an employee hides their Work Time again at once (the recorded data is kept).</p>
+<form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><label>Search <input name="q" value="{{q}}" placeholder="ID or name"></label>
+<button class="primary pbtn" type="submit">Search</button> <a href="/admin/work-time/access">Clear</a></form>
+<form method="post" action="/admin/work-time/access/save">
+<p style="margin:0 0 8px"><b>{{n_shared}}</b> of {{n_total}} employees shared &middot;
+<button type="button" class="btnl" onclick="document.querySelectorAll('.wts').forEach(function(c){c.checked=true})">Tick all shown</button>
+<button type="button" class="btnl" onclick="document.querySelectorAll('.wts').forEach(function(c){c.checked=false})">Untick all shown</button>
+<button class="primary pbtn" type="submit">Save access</button></p>
+<div style="overflow-x:auto"><table><tr><th>Share</th><th>Employee ID</th><th>Name</th><th>Designation</th><th>Status</th><th>Shared since</th></tr>
+{% for e in emps %}<tr><td><input type="hidden" name="shown" value="{{e['Employee ID']}}"><input class="wts" type="checkbox" name="share" value="{{e['Employee ID']}}" {{'checked' if e.shared else ''}}></td>
+<td>{{e['Employee ID']}}</td><td>{{e['Name']}}</td><td>{{e.get('Designation','') or '-'}}</td>
+<td>{% if e.shared %}<span style="padding:2px 8px;border-radius:10px;font-size:12px;background:#dcfce7;color:#166534">Shared with Admin</span>{% else %}<span style="padding:2px 8px;border-radius:10px;font-size:12px;background:#eef0f6;color:#5b6280">Not shared</span>{% endif %}</td><td>{{e.since or '-'}}</td></tr>
+{% else %}<tr><td colspan="6">No employees found.</td></tr>{% endfor %}</table></div>
+<p style="margin:10px 0 0"><button class="primary pbtn" type="submit">Save access</button> <a href="/admin/work-time">&larr; Back to Work Time</a></p></form></div>"""
 
 @app.route("/admin/work-time/access")
 @need("admin")
 def admin_work_time_access():
-    prefetch(WTA_SHEET, "Employees")
-    emps = sorted(rows("Employees"), key=lambda e: str(e.get("Name", "")).lower())
-    dm = desig_map(); amap = wta_map(fresh=True)
-    sel = request.args.get("emp", "").strip()
-    cur = amap.get(_key(sel), {}).get("roles", []) if sel else []
-    shares = []
-    for k, a in sorted(amap.items(), key=lambda kv: kv[1]["name"].lower()):
-        rset = {_norm_desig(r) for r in a["roles"]}
-        viewers = sorted(str(e.get("Name", "")) for e in emps if _norm_desig(e.get("Designation", "")) in rset)
-        shares.append(dict(a, desig=dm.get(k, ""), viewers=viewers))
-    return page(WTA_ADMIN, title="Share Work Time log", emps=emps, roles=WT_SHARE_ROLES, sel=sel, cur=cur, shares=shares)
-
-def _wta_emp(eid):
-    return next((e for e in rows("Employees") if _key(e.get("Employee ID", "")) == _key(eid)), None)
+    prefetch(WTS_SHEET, "Employees")
+    q = request.args.get("q", "").strip(); ql = q.lower(); sm = wts_map(fresh=True)
+    allemps = sorted(rows("Employees"), key=lambda e: str(e.get("Name", "")).lower())
+    emps = [dict(e, shared=_key(e["Employee ID"]) in sm, since=sm.get(_key(e["Employee ID"]), {}).get("updated", ""))
+            for e in allemps if not ql or ql in str(e["Employee ID"]).lower() or ql in str(e.get("Name", "")).lower()]
+    return page(WTS_PAGE, title="Work Time access", emps=emps, q=q, n_shared=len(sm), n_total=len(allemps))
 
 @app.route("/admin/work-time/access/save", methods=["POST"])
 @need("admin")
 def admin_work_time_access_save():
-    e = _wta_emp(request.form.get("eid", ""))
-    if not e: flash("Choose an employee.", "error"); return redirect("/admin/work-time/access")
-    roles = [r for r in WT_SHARE_ROLES if r in request.form.getlist("roles")]
-    had = _key(e["Employee ID"]) in wta_map(fresh=True)
-    wta_write(e, roles)
-    if roles: flash(f"{e['Name']}'s Work Time log is now shared with: {', '.join(roles)}.")
-    else: flash(f"No role ticked - {e['Name']}'s Work Time log is not shared." if not had else f"Access removed - {e['Name']}'s Work Time log is no longer shared.")
-    return redirect("/admin/work-time/access")
-
-@app.route("/admin/work-time/access/remove", methods=["POST"])
-@need("admin")
-def admin_work_time_access_remove():
-    e = _wta_emp(request.form.get("eid", ""))
-    if not e: flash("Employee not found.", "error"); return redirect("/admin/work-time/access")
-    wta_write(e, [])
-    flash(f"Access removed - {e['Name']}'s Work Time log is no longer shared.")
-    return redirect("/admin/work-time/access")
-
-WTA_VIEW = """<div class="card"><h2 style="margin-top:0">Work Time <small class="mut">&middot; view only, shared by Admin</small></h2>
-<form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
-<label>Employee <select name="emp" onchange="this.form.submit()">{% for x in shared %}<option value="{{x.eid}}" {{'selected' if x.eid==eid else ''}}>{{x.eid}} &middot; {{x.name}}</option>{% endfor %}</select></label>
-<label>View <select name="view" onchange="this.form.submit()"><option value="day" {{'selected' if view=='day'}}>Daily</option><option value="week" {{'selected' if view=='week'}}>Weekly</option><option value="month" {{'selected' if view=='month'}}>Monthly</option></select></label>
-<label>Date <input type="date" name="date" value="{{d}}" max="{{today}}" onchange="this.form.submit()"></label>
-<a class="btnl" href="#" onclick="window.print();return false">Print</a></form>
-<p class="mut" style="margin:0 0 10px">Required per worked day = {{req}} of active (unlocked) time. Lock / screen-off = break time.</p>
-{% if view=='day' %}
-<div style="overflow-x:auto"><table><tr><th>Date</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Lock / screen-off time</th><th>Times</th><th>Total working time</th><th>Status</th></tr>
-<tr><td>{{d}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td><b>{{r.work or '-'}}</b></td><td>{{r.status}}</td></tr></table></div>
-<h3>Lock / screen-off events</h3>
-<div style="overflow-x:auto"><table><tr><th>Start</th><th>End</th><th>Duration</th><th>Reason</th></tr>
-{% for v in evs %}<tr><td>{{v.start}}</td><td>{{v.end or 'still locked / off'}}</td><td>{{v.dur}}</td><td>{{v.reason}}</td></tr>
-{% else %}<tr><td colspan="4">No lock or screen-off events recorded.</td></tr>{% endfor %}</table></div>
-{% else %}
-<h3>{{label}}</h3>
-{% if sm %}<div class="totals">Days worked: <b>{{sm.days}}</b> &middot; System-on: <b>{{sm.on_t}}</b> &middot; Lock / screen-off: <b>{{sm.brk_t}}</b> ({{sm.locks}}x) &middot; Working time: <b>{{sm.work_t}}</b> &middot; Avg / day: <b>{{sm.avg_t}}</b> &middot; Required: <b>{{sm.req_t}}</b> &middot; Difference: <b>{{sm.diff_t}}</b> &middot; Days 8h met: <b>{{sm.done}}</b> &middot; Days short: <b>{{sm.short}}</b></div>{% endif %}
-<div style="overflow-x:auto"><table><tr><th>Date</th><th>Login</th><th>Logout</th><th>System-on</th><th>Lock / screen-off</th><th>Times</th><th>Working time</th><th>Status</th></tr>
-{% for x in days %}<tr><td>{{x.date}}</td><td>{{x.login}}</td><td>{{x.logout or '-'}}</td><td>{{x.sys_on}}</td><td>{{x.brk}}</td><td>{{x.locks}}</td><td><b>{{x.work}}</b></td><td>{{x.status}}</td></tr>
-{% else %}<tr><td colspan="8">No working-time records in this period.</td></tr>{% endfor %}</table></div>
-{% endif %}</div>"""
-
-@app.route("/employee/work-time")
-@need("employee")
-def employee_work_time():
-    shared = wt_shared_for(session.get("emp_id", ""), fresh=True)           # live check: a revoke / role change applies on the very next click
-    if not shared: abort(403)
-    eid = request.args.get("emp", "").strip()
-    if not eid: eid = shared[0]["eid"]
-    if _key(eid) not in {_key(x["eid"]) for x in shared}: abort(403)         # only the employees shared with this viewer's role
-    eid = next(x["eid"] for x in shared if _key(x["eid"]) == _key(eid))
-    prefetch(WT_SHEET, "Employees", "Lock Events")
-    view = request.args.get("view", "day"); view = view if view in ("day", "week", "month") else "day"
-    d = _wt_date_arg(); ctx = dict(shared=shared, eid=eid, view=view, d=d, today=str(today_local()), req=_hms(WT_REQUIRED_SEC), label="", sm=None, days=[], evs=[], r={})
-    if view == "day":
-        ctx["r"] = next((x for x in _wt_report(d) if str(x["eid"]) == eid), dict(login="", logout="", sys_on="", brk="", locks="", work="", status="No login", state="No login"))
-        ctx["evs"] = _wt_events(d, eid)
-    else:
-        label, summ, days = _wt_period_data(view, d)
-        ctx.update(label=label, sm=next((x for x in summ if str(x["eid"]) == eid), None), days=[x for x in days if str(x["eid"]) == eid])
-    return page(WTA_VIEW, title="Work Time", **ctx)
+    allemps = rows("Employees"); valid = {_key(e["Employee ID"]) for e in allemps}
+    shown = {_key(x) for x in request.form.getlist("shown")} & valid
+    ticked = {_key(x) for x in request.form.getlist("share")} & shown
+    keep = {k for k in wts_map(fresh=True) if k in valid and k not in shown}          # employees hidden by the search filter keep their current setting
+    final = keep | ticked
+    wts_write([e for e in allemps if _key(e["Employee ID"]) in final])
+    flash(f"Work Time access saved: {len(final)} of {len(valid)} employee(s) shared with the Admin.")
+    return redirect("/admin/work-time/access" + ("?q=" + urllib.parse.quote(request.args.get("q", "")) if request.args.get("q") else ""))
 
 
 if __name__ == "__main__":

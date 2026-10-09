@@ -63,6 +63,11 @@ Access rules (Update59):
     e-mail design (MAIL_NOTE_HTML = preview.html), selects the recipients (All Employees or only the ticked ones) and the DATE & TIME to send; a background job sends it automatically (checked every 30 s),
     or the Admin sends it immediately. A scheduled mail can be edited / cancelled. Sheets: "Mail Notes" and "Mail Notes Log" (employee name, e-mail, subject, e-mail sent date & time, status). Admin only.
   * Update154: one-day screen OFF / ON counts - the daily Work Time table has "Screen OFF count (locks)" and "Screen ON count (unlocks)" per employee, and the event list / events page shows both counts for the day.
+  * Update160: the "My Attendance" heading line is removed from the left-side Calendar (the coloured Present / Absent dates and the counts stay).
+  * Update159: (1) FIX: the name KINDS was defined twice (sheet lookup dict + Activity Log list) - the list overwrote the dict, so Admin add / edit / delete of employees, processes, leave and holidays crashed; the Activity list is now ACT_KINDS.
+    (2) Work Time Log: every count (Screen OFF / ON, Manual / Automatic / Undetected lock + unlock, idle / sleep periods, Login / Logoff, Last OFF / ON) now comes from ONE function (_wt_day_counts) built from the Lock Events (final reason) and Activity Log, so the Admin table,
+    the Activity Log page and the Work Time sheet always agree; the Admin Work Time pages read the sheets live (no stale cache); the 8 new Work Time sheet columns (Screen ON count ... Login / Logoff events) are written automatically every 2 minutes; the lock / unlock de-duplication no longer
+    swallows later locks after a missed unlock. (3) Missed-entry e-mail: every day at the Admin time each employee gets ONE e-mail with ALL dates still missing (read live), repeated daily until submitted / excused; no polling of the log once another worker owns the slot.
   * Update158: the big attendance card is gone - the left-side Calendar on the Employee pages is now "My Attendance": the title "\U0001F4C5 My Attendance \u00b7 <Month Year>", Present / Absent / Leave counts for the shown month, and every date coloured (green Present, red Absent, blue Leave / Half day, grey weekly off / holiday).
     Rebuilt from the Attendance, Productivity log and Leave sheets on every page load, so it updates automatically and is there as soon as the employee logs in. Present = a login or a productivity entry that day.
   * Update157: (1) Employee page: new "My Attendance" calendar (month grid, previous / next month) - Present (green), Absent (red), Leave / Half day (blue), weekly off / holiday (grey); Present = login recorded or entry submitted. (2) Admin > Work Time: clicking an employee (Emp ID or Name) opens
@@ -366,7 +371,8 @@ HEADERS = {
                    "Login time", "Logout time", "Duration", "Logout type"],
     # Update128: one row per employee per day (screen lock / unlock working-time tracking) - Admin report only
     "Work Time": ["Date", "Employee ID", "Employee name", "Login time", "Logout time", "System-on time", "Break time", "Screen locks",
-                  "Total working time", "Required", "Status", "Lock tracking", "Online sec", "Break sec", "Lock start", "Session start", "Last seen"],
+                  "Total working time", "Required", "Status", "Lock tracking", "Online sec", "Break sec", "Lock start", "Session start", "Last seen",
+                  "Screen ON count", "Last screen OFF", "Last screen ON", "Screen OFF / ON events", "Manual lock / unlock", "Automatic lock / unlock", "Undetected lock / unlock", "Login / Logoff events"],
     # Update133: one row per lock / screen-off event (start, end, duration, reason) - Admin report only
     # Update156: one row per single event (Login, Logoff, System Locked, System Unlocked, Screen OFF, Screen ON) - Admin report only
     "Activity Log": ["Date", "Time", "Employee ID", "Employee name", "Event type", "Source", "Details", "Epoch"],
@@ -646,8 +652,15 @@ def ws_of(name):
 _ROWS_CACHE_TTL = float(os.getenv("ROWS_CACHE_TTL", "4"))
 _rows_cache = {}
 _rows_cache_lock = threading.Lock()
+_tl = threading.local()          # Update159: _tl.fresh = True -> rows() reads the sheet live (used by background jobs)
 
 def invalidate_cache(name=None):
+    try:                                                    # Update159: a write inside this request must be visible to later reads of the same request
+        if has_request_context():
+            from flask import g as _g
+            memo = getattr(_g, "_rows_live", None)
+            if memo is not None: memo.pop(name, None) if name else memo.clear()
+    except Exception: pass
     # SAVE FIX: with several server workers each has its own cache, so after a save the redirect could
     # land on another worker still holding the old rows (looked like "not saved"). Mark this user's
     # session so their next reads go straight to the sheet.
@@ -699,6 +712,13 @@ def rows(name):
     now = time.monotonic()
     try: bypass = has_request_context() and (session.get("fresh_all", 0) > time.time() or (session.get("fresh") or {}).get(name, 0) > time.time())
     except Exception: bypass = False
+    if getattr(_tl, "fresh", False): bypass = True                      # Update159: background jobs (e-mail run, Work Time sync) always read the sheet live
+    if bypass and has_request_context():                                 # Update159: live read, but only ONCE per sheet per request (pages read the same sheet several times)
+        from flask import g as _g
+        memo = getattr(_g, "_rows_live", None)
+        if memo is None: memo = _g._rows_live = {}
+        if name not in memo: memo[name] = _fetch_rows(name)
+        return [dict(r) for r in memo[name]]
     with _rows_cache_lock:
         cached = _rows_cache.get(name)
     if cached and not bypass:
@@ -1580,10 +1600,11 @@ def activity_log(eid, name, etype, when=None, source="", details=""):
     with _act_lock:
         if group:
             stt = _act_state.setdefault(eid, {})
-            if stt.get(group[0]) == group[1]: return False        # already in that state (agent resend / browser + agent both reporting)
-            stt[group[0]] = group[1]
+            prev = stt.get(group[0])
+            if prev and prev[0] == group[1] and abs(when - prev[1]) < 90: return False      # Update159: same state reported again within 90 s (agent resend / browser + agent both reporting)
+            stt[group[0]] = (group[1], when)
         elif etype == "Login":                                    # a fresh login: screen is on and the PC is unlocked
-            _act_state[eid] = {"lock": False, "screen": False}
+            _act_state[eid] = {"lock": (False, when), "screen": (False, when)}
         if _act_q is None:
             _act_q = queue_mod.Queue(); threading.Thread(target=_act_worker, daemon=True).start()
         d = dt.datetime.fromtimestamp(when, TZ)
@@ -2373,7 +2394,7 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 <div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
-<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-at" id="cal_at" hidden>&#128197; My Attendance &middot; <span id="cal_my"></span></div><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-lg" id="cal_lg" hidden><span><i class="lp"></i>Present</span><span><i class="la"></i>Absent</span><span><i class="ll"></i>Leave</span><span><i class="lo"></i>Off</span></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
+<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-lg" id="cal_lg" hidden><span><i class="lp"></i>Present</span><span><i class="la"></i>Absent</span><span><i class="ll"></i>Leave</span><span><i class="lo"></i>Off</span></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
 <div class="prof{{' prof-emp' if session.role=='employee' else ''}}"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
@@ -2396,7 +2417,7 @@ for(i=1;i<=n;i++){var t=(i===now.getDate()&&m===now.getMonth()&&y===now.getFullY
 if(st==='P'){c+=t?' sp':' p';np++;tt='Present'}else if(st==='A'){c+=t?' sa':' a';na++;tt='Absent'}else if(st==='L'){c+=t?' sl':' l';nl++;tt='Leave'}else if(st==='H'){c+=t?' sl':' l';nl+=.5;np+=.5;tt='Half day'}else if(st==='O'){c+=t?'':' f';tt='Weekly off / Holiday'}else if(t&&A){tt='Today'}
 h+='<span class="'+c+'"'+(t?' aria-current="date"':'')+(tt?' title="'+i+' '+M[m].slice(0,3)+': '+tt+'"':'')+'>'+i+'</span>'}
 var tail=(7-(first+n)%7)%7;for(i=1;i<=tail;i++)h+='<span class="o">'+i+'</span>';g.innerHTML=h;
-if(A){document.getElementById('cal_my').textContent=FM[m]+' '+y;document.getElementById('cal_at').hidden=false;document.getElementById('cal_lg').hidden=false;
+if(A){document.getElementById('cal_lg').hidden=false;
 var ct=document.getElementById('cal_ct');ct.hidden=false;ct.innerHTML='<span><b class="cp">'+np+'</b> Present</span><span><b class="ca">'+na+'</b> Absent</span><span><b class="cl">'+nl+'</b> Leave</span>'}}
 document.getElementById('cal_p').onclick=function(){m--;if(m<0){m=11;y--}draw()};
 document.getElementById('cal_n').onclick=function(){m++;if(m>11){m=0;y++}draw()};
@@ -4236,7 +4257,7 @@ def _wt_events_totals(evs):
 @app.route("/admin/work-time/events")
 @need("admin")
 def admin_work_time_events():
-    prefetch("Lock Events")
+    _wt_fresh()
     d = _wt_date_arg(); emp = request.args.get("emp", "").strip(); evs = _wt_events_totals(_wt_events(d, emp))
     return page(WT_EVENTS, title="Lock events", d=d, emp=emp, today=str(today_local()), evs=evs, n=len(evs), n_on=sum(1 for e in evs if e["end"]), total=_hms(sum(e["sec"] for e in evs)), live=(d == str(today_local())))
 
@@ -4444,25 +4465,21 @@ def _wt_admin_pages_removed():          # Update144: Work Time / Work Time Acces
 @app.route("/admin/work-time")
 @need("admin")
 def admin_work_time():
-    prefetch(WT_SHEET, "Employees")
+    _wt_fresh()
     d = _wt_date_arg(); data = _wt_report(d)
-    last = {}                                           # Update143: last lock / unlock time of the day per employee (from the Lock Events sheet)
-    for ev in sorted(rows("Lock Events"), key=lambda x: _fl(x.get("Start epoch"))):
-        if str(ev.get("Date")) == d: last[_key(ev.get("Employee ID", ""))] = ev
-    for r_ in data:
-        ev = last.get(_key(r_["eid"]))
-        r_["last_lock"] = str(ev.get("Start time", "")) if ev else ""
-        r_["last_unlock"] = (str(ev.get("End time", "")) or "still locked / off") if ev else ""
-    evs_by = {}                                         # Update152: every lock / screen-off event of the day, per employee, shown inside the Work Time Log row
+    _wt_fresh()
+    dc = _wt_day_counts(d)                                       # Update159: every count, split and last OFF / ON time from ONE place
+    evs_by = {}                                                  # Update152: every lock / screen-off event of the day, per employee, inside the row
     for e_ in _wt_events(d):
         evs_by.setdefault(_key(e_["eid"]), []).append(e_)
-    act_c = _act_counts(d)                                         # Update156: computed once for the whole table
     for r_ in data:
+        c_ = dc.get(_key(r_["eid"]))
         r_["events"] = evs_by.get(_key(r_["eid"]), [])
         r_["lock_total"] = _hms(sum(e_["sec"] for e_ in r_["events"]))
-        c_ = act_c.get(_key(r_["eid"]), {})                  # Update156
-        r_["a_scr"] = f'{c_.get("Screen OFF", 0)} / {c_.get("Screen ON", 0)}'; r_["a_lm"] = f'{c_.get("Manual lock", 0)} / {c_.get("Manual unlock", 0)}'; r_["a_la"] = f'{c_.get("Automatic lock", 0)} / {c_.get("Automatic unlock", 0)}'; r_["a_lu"] = f'{c_.get("Undetected lock", 0)} / {c_.get("Undetected unlock", 0)}'; r_["a_log"] = f'{c_.get("Login", 0)} / {c_.get("Logoff", 0)}'
-        r_["on_n"] = sum(1 for e_ in r_["events"] if e_["end"])          # Update154: times the screen came back ON (unlocked) that day
+        v_ = _wt_sheet_vals(c_)
+        r_["on_n"] = v_[0]; r_["last_lock"] = v_[1]; r_["last_unlock"] = v_[2]
+        r_["a_scr"], r_["a_lm"], r_["a_la"], r_["a_lu"], r_["a_log"] = v_[3], v_[4], v_[5], v_[6], v_[7]
+        if c_ and c_["off"] > (r_["locks"] if r_["locks"] != "" else 0): r_["locks"] = c_["off"]      # the count can never be below the saved events
     return page(WT_ADMIN, title="Work Time", back=request.full_path.rstrip("?"), unshared=[e for e in rows("Employees") if _key(e["Employee ID"]) not in wts_ids()], n_shared=len(wts_ids()), n_total=len(rows("Employees")), d=d, today=str(today_local()), rows=data, live=(d == str(today_local())),
                 req=_hms(WT_REQUIRED_SEC), brk_allowed=_hms(WT_ALLOWED_BREAK_SEC),
                 n_ok=sum(r["tone"] == "ok" for r in data), n_short=sum(r["tone"] in ("warn", "bad") for r in data),
@@ -4505,7 +4522,7 @@ def admin_work_time_employee(eid):
     eid = str(eid).strip()
     if _key(eid) not in wts_ids():
         flash("This employee's Work Time is not shared with the Admin.", "error"); return redirect("/admin/work-time")
-    prefetch(WT_SHEET, "Employees", "Lock Events", "Attendance", ACT_SHEET)
+    _wt_fresh()
     d = _wt_date_arg(); day_d = dt.date.fromisoformat(d); today = today_local()
     mine = lambda r: _key(r.get("eid", "")) == _key(eid)
     day = next((r for r in _wt_report(d) if mine(r)), None) or dict(eid=eid, name=eid, login="", logout="", sys_on="", brk="", locks="", work="", status="No login", tone="mut", lt="", state="No login")
@@ -4547,21 +4564,21 @@ ACT_PAGE = """<div class="card"><h2 style="margin-top:0">Activity Log <small cla
 <div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th>{% for k in kinds %}<th>{{k}}</th>{% endfor %}</tr>
 {% for c in counts %}<tr><td>{{c.eid}}</td><td>{{c.name}}</td>{% for k in kinds %}<td>{{c.k[k]}}</td>{% endfor %}</tr>{% endfor %}
 {% if counts %}<tr><td colspan="2"><b>All employees</b></td>{% for k in kinds %}<td><b>{{gk[k]}}</b></td>{% endfor %}</tr>{% endif %}</table></div>
-<p class="mut" style="margin:6px 0 0">Manual lock = Win+L (user was active just before). Automatic lock = locked by inactivity / policy. Undetected = reported by a browser, which cannot tell the reason (install the agent for exact reasons). Logins: a Login is Manual when the employee typed the password; Logoff is Automatic when the system ended the session.</p>
+<p class="mut" style="margin:6px 0 0">Screen OFF / ON = idle / sleep periods + display power events from the agent; System Locked / Unlocked = Manual + Automatic + Undetected. Lock count on the Work Time Log = System Locked + idle / sleep periods. Manual lock = Win+L (user was active just before). Automatic lock = locked by inactivity / policy. Undetected = reported by a browser, which cannot tell the reason (install the agent for exact reasons). Logins: a Login is Manual when the employee typed the password; Logoff is Automatic when the system ended the session.</p>
 <h3 style="margin:14px 0 8px">All events ({{evs|length}})</h3>
 <div style="overflow-x:auto"><table><tr><th>Employee ID</th><th>Employee Name</th><th>Event Type</th><th>Date</th><th>Time</th><th>Count (Nth of its kind today)</th><th>Source</th><th>Details</th></tr>
 {% for e in evs %}<tr><td>{{e.eid}}</td><td>{{e.name}}</td><td><b>{{e.type}}</b></td><td>{{e.date}}</td><td>{{e.time}}</td><td>{{e.kind}} #{{e.nth}}</td><td>{{e.src}}</td><td>{{e.det}}</td></tr>
 {% else %}<tr><td colspan="8">No events recorded.</td></tr>{% endfor %}</table></div></div>
 {% if live %}<script>setTimeout(function(){location.reload()},30000)</script>{% endif %}"""
 
-KINDS = ["Manual lock", "Manual unlock", "Automatic lock", "Automatic unlock", "Undetected lock", "Undetected unlock", "Screen OFF", "Screen ON", "Manual login", "Automatic login", "Manual logoff", "Automatic logoff"]
+ACT_KINDS = ["Manual lock", "Manual unlock", "Automatic lock", "Automatic unlock", "Undetected lock", "Undetected unlock", "Screen OFF", "Screen ON", "Manual login", "Automatic login", "Manual logoff", "Automatic logoff"]
 
 def _act_events(d, emp="", typ=""):
     out = []
     shared = wts_ids()
     for r in sorted(rows(ACT_SHEET), key=lambda x: _fl(x.get("Epoch"))):
-        if str(r.get("Date")) != d or _key(r.get("Employee ID", "")) not in shared: continue
-        if (emp and str(r.get("Employee ID")) != emp) or (typ and str(r.get("Event type")) != typ): continue
+        if _iso_date(r.get("Date")) != d or _key(r.get("Employee ID", "")) not in shared: continue
+        if (emp and _key(r.get("Employee ID", "")) != _key(emp)) or (typ and str(r.get("Event type")) != typ): continue
         e = dict(eid=str(r.get("Employee ID", "")), name=str(r.get("Employee name", "")), type=str(r.get("Event type", "")), date=str(r.get("Date", "")),
                  time=str(r.get("Time", "")), src=str(r.get("Source", "")), det=str(r.get("Details", "")))
         e["kind"] = _act_kind(e)
@@ -4587,28 +4604,105 @@ def _act_counts(d):
         for k in (e["type"], e["kind"]): o[k] = o.get(k, 0) + 1
     return out
 
+# ---------------------------------------------------------------- Update159: ONE source for every count shown on the Admin Work Time pages and written to the Work Time sheet
+def _wt_day_counts(d):
+    """{EMPLOYEE KEY: counts} for one date. Lock Events (start, end, FINAL reason) is the record of every lock / screen-off period, so Screen OFF / ON counts, the
+    Manual / Automatic / Undetected split and the last OFF / ON times can never disagree. Login / Logoff and agent screen-power events come from the Activity Log.
+    Identity: lock count = manual + automatic + undetected + idle/sleep periods."""
+    out = {}
+    def row(eid, name):
+        c = out.get(_key(eid))
+        if c is None:
+            c = out[_key(eid)] = dict(eid=str(eid), name=str(name or ""), off=0, on=0, man=[0, 0], aut=[0, 0], und=[0, 0], idle=[0, 0], ag=[0, 0], login=0, logoff=0,
+                                      last_off="", last_on="", last_ep=-1.0, k={k: 0 for k in ACT_KINDS})
+        return c
+    for r in rows("Lock Events"):
+        if _iso_date(r.get("Date")) != d or not str(r.get("Employee ID", "")).strip(): continue
+        c = row(r.get("Employee ID"), r.get("Employee name")); rs = str(r.get("Reason", "")); ended = 1 if str(r.get("End time", "")).strip() else 0
+        c["off"] += 1; c["on"] += ended
+        b = c["idle"] if rs.startswith(("Screen-off / idle", "Sleep")) else c["man"] if rs.startswith("Manual") else c["aut"] if rs.startswith("Automatic") else c["und"]
+        b[0] += 1; b[1] += ended
+        ep = _fl(r.get("Start epoch"))
+        if ep >= c["last_ep"]: c["last_ep"], c["last_off"], c["last_on"] = ep, str(r.get("Start time", "")), (str(r.get("End time", "")).strip() or "still locked / off")
+    for r in rows(ACT_SHEET):
+        if _iso_date(r.get("Date")) != d or not str(r.get("Employee ID", "")).strip(): continue
+        t, det = str(r.get("Event type", "")), str(r.get("Details", ""))
+        c = row(r.get("Employee ID"), r.get("Employee name"))
+        if t == "Login": c["login"] += 1; c["k"]["Automatic login" if det.startswith("Automatic") else "Manual login"] += 1
+        elif t == "Logoff": c["logoff"] += 1; c["k"]["Automatic logoff" if det.startswith("Automatic") else "Manual logoff"] += 1
+        elif t == "Screen OFF" and not det.startswith("Sleep"): c["ag"][0] += 1          # a sleep is already a Lock Event - not counted twice
+        elif t == "Screen ON" and not det.startswith("Sleep"): c["ag"][1] += 1
+    for c in out.values():
+        for kind, b in (("Manual", c["man"]), ("Automatic", c["aut"]), ("Undetected", c["und"])): c["k"][kind + " lock"], c["k"][kind + " unlock"] = b
+        c["k"]["Screen OFF"], c["k"]["Screen ON"] = c["idle"][0] + c["ag"][0], c["idle"][1] + c["ag"][1]
+    return out
+
+def _wt_sheet_vals(c):
+    """The 8 summary cells of the Work Time sheet row (same numbers as the Admin table)."""
+    c = c or dict(on=0, man=[0, 0], aut=[0, 0], und=[0, 0], idle=[0, 0], ag=[0, 0], login=0, logoff=0, last_off="", last_on="")
+    return [c["on"], c["last_off"], c["last_on"], f'{c["idle"][0] + c["ag"][0]} / {c["idle"][1] + c["ag"][1]}', f'{c["man"][0]} / {c["man"][1]}', f'{c["aut"][0]} / {c["aut"][1]}',
+            f'{c["und"][0]} / {c["und"][1]}', f'{c["login"]} / {c["logoff"]}']
+
+def _wt_sync_sheet(d):
+    """Write the summary cells into every Work Time row of date d (only rows whose numbers changed)."""
+    heads = HEADERS[WT_SHEET]; c0 = heads.index("Screen ON count"); ws = ws_of(WT_SHEET)
+    recs = [r for r in _fetch_rows(WT_SHEET) if _iso_date(r.get("Date")) == d]
+    if not recs: return 0
+    dc = _wt_day_counts(d); batch = []
+    for r in recs:
+        vals = _wt_sheet_vals(dc.get(_key(r.get("Employee ID", ""))))
+        if [str(r.get(h, "")) for h in heads[c0:c0 + len(vals)]] != [str(v) for v in vals]:
+            from gspread.utils import rowcol_to_a1
+            batch.append({"range": f"{rowcol_to_a1(r['_row'], c0 + 1)}:{rowcol_to_a1(r['_row'], c0 + len(vals))}", "values": [vals]})
+    if batch:
+        with _wt_write_lock: _with_retry(ws.batch_update, batch, value_input_option="RAW")
+        invalidate_cache(WT_SHEET)
+    return len(batch)
+
+def _wt_sync_loop():
+    time.sleep(50); prev_day = None
+    while True:
+        try:
+            _tl.fresh = True; today = today_local(); days = [str(today)]
+            if prev_day != today: days.append(str(today - dt.timedelta(days=1))); prev_day = today        # after midnight: finish yesterday once
+            for ds in days: _wt_sync_sheet(ds)
+        except Exception as ex: print("work-time sheet sync error:", repr(ex))
+        finally: _tl.fresh = False
+        time.sleep(120)
+
+def _wt_fresh(secs=45):
+    """Admin Work Time pages always show the sheet's CURRENT data (a stale cache used to lag behind the real events)."""
+    try:
+        now_ = time.time(); fs = {k: v for k, v in (session.get("fresh") or {}).items() if v > now_}
+        for n_ in (WT_SHEET, "Lock Events", ACT_SHEET, "Attendance", "Employees"): fs[n_] = now_ + secs
+        session["fresh"] = fs
+    except Exception: pass
+
+threading.Thread(target=_wt_sync_loop, daemon=True).start()
+
 @app.route("/admin/work-time/activity")
 @need("admin")
 def admin_work_time_activity():
-    prefetch(ACT_SHEET, "Employees")
     d = _wt_date_arg(); emp = request.args.get("emp", "").strip(); typ = request.args.get("type", "").strip()
     typ = typ if typ in ACT_TYPES else ""
+    _wt_fresh()
     allev = _act_events(d, emp); seen = {}
     for e in allev:                                                # running count: Nth event of its kind for this employee on this day
         k = (e["eid"], e["kind"]); seen[k] = seen.get(k, 0) + 1; e["nth"] = seen[k]
     evs = [e for e in allev if not typ or e["type"] == typ]
-    by = {}
-    for e in allev:
-        c = by.setdefault(e["eid"], dict(eid=e["eid"], name=e["name"], n={t: 0 for t in ACT_TYPES}, k={}, total=0)); c["n"][e["type"]] = c["n"].get(e["type"], 0) + 1; c["k"][e["kind"]] = c["k"].get(e["kind"], 0) + 1; c["total"] += 1
-    counts = sorted(by.values(), key=lambda c: c["eid"])
+    dc = _wt_day_counts(d); shared = wts_ids(); counts = []
+    for k_, c in sorted(dc.items(), key=lambda kv: kv[1]["eid"]):          # Update159: Event count + Manual / Automatic split per employee - same numbers as the Work Time Log
+        if k_ not in shared or (emp and _key(emp) != k_): continue
+        n = {"Screen OFF": c["k"]["Screen OFF"], "Screen ON": c["k"]["Screen ON"], "System Locked": c["man"][0] + c["aut"][0] + c["und"][0], "System Unlocked": c["man"][1] + c["aut"][1] + c["und"][1],
+             "Login": c["login"], "Logoff": c["logoff"]}
+        counts.append(dict(eid=c["eid"], name=c["name"], n=n, k=dict(c["k"]), total=sum(n.values())))
     grand = {t: sum(c["n"][t] for c in counts) for t in ACT_TYPES}
-    for c in counts: c["k"] = {k: c["k"].get(k, 0) for k in KINDS}
-    gk = {k: sum(c["k"][k] for c in counts) for k in KINDS}
+    gk = {k: sum(c["k"][k] for c in counts) for k in ACT_KINDS}
     emps = [dict(eid=str(e["Employee ID"]), name=str(e.get("Name", ""))) for e in rows("Employees") if _key(e["Employee ID"]) in wts_ids()]
     FIX = {"Not allowed yet": "Employee must click Allow on the browser's idle-detection prompt (or install the agent).", "Blocked in browser": "Permission was blocked: reset the site's permissions in the browser, or install the agent.",
            "Unsupported browser": "Use Chrome / Edge, or install the agent.", "HTTPS required": "Open the app over https://, or install the agent.", "Agent needed": "Install the Windows agent (Work Time > Lock-Tracking Agent).", "-": "Install the Windows agent (Work Time > Lock-Tracking Agent)."}
     notrack = [dict(eid=r["eid"], name=r["name"], lt=r["lt"], fix=FIX.get(r["lt"], "Install the Windows agent.")) for r in _wt_report(d) if r["state"] != "No login" and r["lt"] not in ("Active", "Active (agent)")] if d == str(today_local()) else []
-    return page(ACT_PAGE, title="Activity Log", notrack=notrack, d=d, today=str(today_local()), emp=emp, typ=typ, emps=emps, types=ACT_TYPES, evs=evs, counts=counts, grand=grand, grand_total=sum(grand.values()), kinds=KINDS, gk=gk, live=(d == str(today_local())))
+    return page(ACT_PAGE, title="Activity Log", notrack=notrack, d=d, today=str(today_local()), emp=emp, typ=typ, emps=emps, types=ACT_TYPES, evs=evs, counts=counts, grand=grand, grand_total=sum(grand.values()), kinds=ACT_KINDS, gk=gk, live=(d == str(today_local())))
 
 @app.route("/admin/work-time/activity/export")
 @need("admin")
@@ -7517,27 +7611,31 @@ def _auto_claim_run(today):
     return bool(runs) and str(runs[0].get("Employee name", "")) == _WORKER_ID
 
 def run_auto_missed_mail(force=False):
-    """Background job (no request / session). E-mails each employee their NEW missed dates of this month to THEIR OWN Office Email ID.
-    Never raises. Returns (tried, failed) or None when nothing could be attempted (mail not set up / switched off / another worker has this slot)."""
+    """Background job (no request / session). Update159: every day at the Admin's time, e-mails each employee ALL the dates of this month that are STILL missing (no entry, no
+    leave - read live from the sheets, so a date submitted a minute ago is never listed) to THEIR OWN Office Email ID - once per day per employee - until nothing is missing.
+    Never raises. Returns (tried, failed), None when nothing could be attempted (mail not set up / switched off), or "busy" when another worker already has this time slot."""
+    _tl.fresh = True
     try:
         if not force and not auto_mail_on(fresh=True): return None
         if not MAIL_READY or not mail_sender(fresh=True)[1]:
             print("Automatic missed-entry e-mail NOT sent: mail service / sender e-mail not configured (BREVO_API_KEY or SMTP_HOST, MAIL_FROM)."); return None
         today = today_local()
-        if not force and not _auto_claim_run(today): return None
+        if not force and not _auto_claim_run(today): return "busy"
         end = today - dt.timedelta(days=1); start = mail_month_start()
         try: access = _fetch_rows("Productivity Access")
         except Exception: access = []
         subs, leaves = load_subs(), _fetch_rows("Leave")
-        _l, notified = missed_mail_history(fresh=True)
+        t_ = str(today)
+        mailed_today = {_key(r.get("Employee ID", "")) for r in _fetch_rows(MISSED_LOG)          # already reminded today (Sent) - one reminder per day
+                        if str(r.get("Employee ID", "")) != "__RUN__" and str(r.get("Date sent", "")) == t_ and str(r.get("Status", "")) == "Sent" and str(r.get("Mode", "")) in ("Manual", "Auto")}
         items, noaddr = [], []
         for e in _fetch_rows("Employees"):
             eid = str(e.get("Employee ID", "")).strip(); k = _key(eid)
             if not eid or not productivity_access(eid, access): continue
             mail = employee_office_email(e)
             ds = missing_dates(eid, [x for x in subs if _key(x["emp_id"]) == k], [l for l in leaves if _key(l["Employee ID"]) == k], start, end, fmt="%Y-%m-%d")
-            new = sorted(d for d in ds if d not in notified.get(k, set()))
-            if not new: continue
+            new = sorted(ds)                                            # ALL dates still missing - a date submitted / excused since yesterday is simply no longer here
+            if not new or (not force and k in mailed_today): continue
             emp = dict(eid=eid, name=str(e.get("Name", "")), email=mail)
             if not EMAIL_RE.match(mail): noaddr.append((emp, new)); continue
             items.append((emp, missed_message(emp, new), ", ".join(new), len(new)))
@@ -7551,9 +7649,11 @@ def run_auto_missed_mail(force=False):
             out = send_logged(items[i:i + 25], "Auto", "System")      # logged in the Missed Email Log; failed ones stay "not e-mailed" and are retried
             failed += sum(1 for v in out.values() if v != "Sent")
         print(f"Automatic missed-entry e-mail: {len(items)} employee(s), {failed} failed, {len(noaddr)} without a valid e-mail.")
-        return (len(items), failed)
+        return (len(items), failed)                                   # employees without a valid address are listed on the status board (Failed: no valid Office Email ID)
     except Exception as ex:
         print("Automatic missed-entry e-mail error:", ex); return (0, 1)
+    finally:
+        _tl.fresh = False
 
 _auto_done_day, _auto_tries = [None], [0, None]
 def _auto_mail_loop():
@@ -7564,7 +7664,9 @@ def _auto_mail_loop():
             if _auto_tries[1] != now.date(): _auto_tries[0], _auto_tries[1] = 0, now.date()
             if _auto_done_day[0] != now.date() and _auto_tries[0] < 8 and now.time() >= _auto_time() and auto_mail_on():
                 res = run_auto_missed_mail()
-                if res is not None:
+                if res == "busy":                                             # Update159: another worker is running / ran this slot - look again in the next slot, not every minute
+                    time.sleep(1500)
+                elif res is not None:
                     _auto_tries[0] += 1
                     if res[1] == 0: _auto_done_day[0] = now.date()            # everything sent (or nothing to send) - finished for today
         except Exception as ex:
@@ -7576,7 +7678,7 @@ threading.Thread(target=_auto_mail_loop, daemon=True).start()
 @app.route("/admin/email-controls/run-now", methods=["POST"])
 @need("admin")
 def admin_email_controls_run_now():
-    """Update157: Admin-only - run the automatic missed-entry e-mail right now (same job, same rules: only NEW missed dates, to each employee's own Office Email ID)."""
+    """Update157: Admin-only - run the automatic missed-entry e-mail right now (same job, same rules: every still-missing date of this month, to each employee's own Office Email ID)."""
     _admin_only_mail()
     if not MAIL_READY: flash("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST, and MAIL_FROM).", "error"); return redirect("/admin/email-controls")
     res = run_auto_missed_mail(force=True)
@@ -7608,8 +7710,8 @@ EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
 <label style="display:inline-flex;gap:8px;align-items:center"><input type="checkbox" name="auto" value="on" {{'checked' if auto_on else ''}}> Send missed-entry e-mails automatically</label>
 <label>Send time<input type="time" name="auto_time" value="{{auto_time_val}}" required></label>
 <button class="primary sm">Save</button></form>
-<form method="post" action="/admin/email-controls/run-now" style="margin:8px 0" onsubmit="return confirm('Send the missed-entry e-mails to all employees with NEW missed dates now?')"><button class="primary sm">&#9993; Send automatic e-mails now</button></form>
-<p class="mut">Status: <b style="color:{{'#15803d' if auto_on else '#991b1b'}}">{{'ENABLED' if auto_on else 'DISABLED'}}</b>. When enabled, every day at <b>{{auto_time}}</b> (the time set here by the Admin) each employee who has missed a Productivity Entry this month receives an e-mail with their name, the missed date(s) and the Productivity Tracker login link. A date is never e-mailed twice. Last automatic run: <b>{{auto_last or 'never'}}</b>. Only Admin can change this.</p></div>
+<form method="post" action="/admin/email-controls/run-now" style="margin:8px 0" onsubmit="return confirm('Send the missed-entry e-mails to all employees with missingsed dates now?')"><button class="primary sm">&#9993; Send automatic e-mails now</button></form>
+<p class="mut">Status: <b style="color:{{'#15803d' if auto_on else '#991b1b'}}">{{'ENABLED' if auto_on else 'DISABLED'}}</b>. When enabled, every day at <b>{{auto_time}}</b> (the time set here by the Admin) each employee who has missed a Productivity Entry this month receives ONE e-mail that day with their name, every date still missing and the Productivity Tracker login link. The reminder repeats every day until the entry is submitted (or leave is approved) - submitted dates drop out of the next e-mail automatically. Last automatic run: <b>{{auto_last or 'never'}}</b>. Only Admin can change this.</p></div>
 
 <div class="card"><h2>1. Send a reminder manually</h2>
 <form method="post" action="/admin/email-controls/send" id="ec-form" onsubmit="return ecCheck()">

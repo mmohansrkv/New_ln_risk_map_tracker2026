@@ -63,6 +63,12 @@ Access rules (Update59):
     e-mail design (MAIL_NOTE_HTML = preview.html), selects the recipients (All Employees or only the ticked ones) and the DATE & TIME to send; a background job sends it automatically (checked every 30 s),
     or the Admin sends it immediately. A scheduled mail can be edited / cancelled. Sheets: "Mail Notes" and "Mail Notes Log" (employee name, e-mail, subject, e-mail sent date & time, status). Admin only.
   * Update154: one-day screen OFF / ON counts - the daily Work Time table has "Screen OFF count (locks)" and "Screen ON count (unlocks)" per employee, and the event list / events page shows both counts for the day.
+  * Update161: Work Time Log - lock / unlock tracking fixed at the root. (1) With several server workers (gunicorn -w 4) every worker kept its OWN in-memory copy of the day, so a lock handled by one worker and the unlock by another
+    was ignored (Last Screen ON, Break duration, counts and the Lock / Screen-Off Events list stayed wrong or empty). Lock / unlock are now recorded straight in Google Sheets (Lock Events = single source of truth, idempotent, safe with any
+    number of workers). (2) The Windows agent no longer needs the employee to be signed in to the web app (it used to get HTTP 409 and the event waited, blocked the whole queue and was dropped after 2 h). (3) Agent v2: exact Win+L / unlock from the
+    Windows session notification (WTS), manual vs automatic classification fixed, events kept on disk until delivered, one failed event no longer blocks the others. (4) "Lock tracking" now shows Active (agent) / Agent offline / Agent not installed
+    (new sheet "Agent Devices"); the browser's "Not allowed yet" can never be switched on automatically. (5) Automatic activation for ALL employees: Admin > Work Time > Lock-Tracking Agent > deploy_all.ps1 (set WT_ENROLL_KEY) - IT deploys it once
+    per PC and the agent enrols itself from the Windows account (no per-employee setup). (6) Work Time Log break duration / lock state / counts are computed from the saved Lock Events, so they match the sheet for every employee.
   * Update160: the "My Attendance" heading line is removed from the left-side Calendar (the coloured Present / Absent dates and the counts stay).
   * Update159: (1) FIX: the name KINDS was defined twice (sheet lookup dict + Activity Log list) - the list overwrote the dict, so Admin add / edit / delete of employees, processes, leave and holidays crashed; the Activity list is now ACT_KINDS.
     (2) Work Time Log: every count (Screen OFF / ON, Manual / Automatic / Undetected lock + unlock, idle / sleep periods, Login / Logoff, Last OFF / ON) now comes from ONE function (_wt_day_counts) built from the Lock Events (final reason) and Activity Log, so the Admin table,
@@ -377,6 +383,8 @@ HEADERS = {
     # Update156: one row per single event (Login, Logoff, System Locked, System Unlocked, Screen OFF, Screen ON) - Admin report only
     "Activity Log": ["Date", "Time", "Employee ID", "Employee name", "Event type", "Source", "Details", "Epoch"],
     "Lock Events": ["Date", "Employee ID", "Employee name", "Start time", "End time", "Duration", "Reason", "Source", "Start epoch"],
+    # Update161: one row per employee PC that runs the lock agent (last contact) - drives the "Lock tracking" status
+    "Agent Devices": ["Employee ID", "Employee name", "Computer", "Agent version", "First seen", "Last contact", "Last contact epoch"],
     # Update138: which employees' Work Time is shared with the Admin - one row per shared employee (Shared = Yes)
     "Work Time Share": ["Employee ID", "Employee name", "Shared", "Updated at", "Updated by"],
     "Notifications": ["Notification ID", "Time", "Employee ID", "Employee name", "Event", "Seen",
@@ -1385,7 +1393,7 @@ def _wt_get(key, eid, name):
     _wt[key] = st
     return st
 
-def _wt_merge_events(st):
+def _wt_merge_events(st, counts_only=False):
     """Update153: the Lock Events sheet is the record of every screen OFF / ON. Rebuild lock count, break time and any still-open lock from it,
     so the counters can never show 0 while events exist (e.g. after a server restart)."""
     try: evs = [r for r in _fetch_rows("Lock Events") if str(r.get("Date")) == st["date"] and str(r.get("Employee ID")) == str(st["eid"])]
@@ -1394,6 +1402,7 @@ def _wt_merge_events(st):
     done = sum(_secs(r.get("Duration")) for r in evs if str(r.get("End time", "")).strip())
     if len(evs) > st["locks"]: st["locks"] = len(evs)
     if done > st["brk"]: st["brk"] = float(done)
+    if counts_only: return
     opn = [r for r in evs if not str(r.get("End time", "")).strip() and _fl(r.get("Start epoch"))]
     if opn and st["lock_start"] is None:
         o = max(opn, key=lambda r: _fl(r.get("Start epoch"))); t0 = _fl(o.get("Start epoch"))
@@ -1446,6 +1455,7 @@ def _wt_save(key):
     with _wt_lock:
         st = _wt.get(key)
         if not st: return
+        _wt_merge_events(st, counts_only=True)               # Update161: other workers / the agent may have added events since this copy was made
         vals = _wt_vals(st, time.time()); date, eid = st["date"], str(st["eid"])
     with _wt_write_lock:
         ws = ws_of(WT_SHEET); r = _wt_rows.get(key)
@@ -1490,6 +1500,11 @@ def wt_event(kind, value, ago_ms, reason=None):
     """Own lock / unlock / support report from the signed-in employee's browser."""
     eid, name = str(session.get("emp_id", "")), session.get("name", "")
     if not eid: return
+    if kind in ("locked", "unlocked"):                       # Update161: recorded in the sheet, not in one worker's memory
+        try: ago = max(0.0, min(float(ago_ms or 0) / 1000.0, 24 * 3600))
+        except (TypeError, ValueError): ago = 0.0
+        wt_lock_apply(eid, name, kind, time.time() - ago, reason if reason in ("Manual lock", "Automatic lock") else "", "Browser")
+        return
     key = session.get("wt_key")
     if not key:                                              # session that started before this feature: begin tracking now
         key = session["wt_key"] = _wt_key(eid, str(today_local())); wt_login(key, eid, name, time.time())
@@ -1535,7 +1550,7 @@ def _wt_activity(eid, name, kind, when, src, reason):
     if r.startswith("Screen-off / idle"): return
     if r.startswith("Sleep"): activity_log(eid, name, "Screen OFF" if kind == "locked" else "Screen ON", when, src, r); return
     label = "Manual lock (Win+L)" if r.startswith("Manual") else "Automatic lock" if r.startswith("Automatic") else "Lock (type not detected)"
-    activity_log(eid, name, "System Locked" if kind == "locked" else "System Unlocked", when, src, label)
+    activity_log(eid, name, "System Locked" if kind == "locked" else "System Unlocked", when, src, label, dedupe=False)      # Update161
 
 def _wt_ev_queue(ev):
     """Event rows are written by ONE worker thread, in order (a quick lock/unlock must not write its end before its start)."""
@@ -1570,6 +1585,123 @@ def _wt_ev_write(ev):
     invalidate_cache("Lock Events")
 
 
+# ---------------------------------------------------------------- Update161: lock / unlock = Google Sheets is the single source of truth
+# Root cause of the missing / wrong Work Time data: the day's state lived in the memory of ONE worker process (gunicorn -w 4 = four separate copies), so a lock
+# handled by one worker and its unlock by another was ignored, and the agent was refused (HTTP 409) unless that same worker held a signed-in session.
+# Now every lock / unlock / reason report (browser OR Windows agent) is applied to the "Lock Events" sheet itself: the open event of the employee is looked up
+# in the sheet, so the result is the same whichever worker answers, a repeated / late report changes nothing, and no web-app login is needed.
+_LK_LOCK = threading.RLock()
+_IDLE_REASONS = ("Screen-off / idle", "Sleep")
+_UNTYPED = "Screen lock (type not detected)"
+LK_DUP_SEC = 15                    # the same lock reported twice (browser + agent, retry) is one event if the start times are this close
+AGENT_SHEET = "Agent Devices"
+AGENT_ACTIVE_SEC = 90 * 60         # agent contact newer than this = "Active (agent)" (each agent reports every minute; the sheet is updated every 20 min)
+
+def _ev_update(v, row, end=None, reason=None, src=None):
+    """Rewrite one existing Lock Events row (v = its cells, row = sheet row number)."""
+    st0 = _fl(v[8])
+    ev = dict(date=str(v[0]), eid=str(v[1]), name=str(v[2]), start=st0, end=end, reason=reason or str(v[6]), src=src or str(v[7]))
+    _wt_evrow[(ev["eid"], int(st0))] = row
+    _wt_ev_write(ev)
+
+def wt_lock_apply(eid, name, kind, t, reason="", src="Browser"):
+    """Apply ONE report: kind = 'locked' | 'unlocked' | 'reason'; t = epoch seconds of the real event. Returns what happened (for logs / tests).
+    Idempotent: a lock while that employee already has an open event (or a closed one starting within LK_DUP_SEC) is the same lock; an unlock with
+    no open event, or older than the open lock, is ignored; a lock after a MISSED unlock closes the old event first (it never swallows the new lock)."""
+    eid = str(eid).strip(); reason = str(reason or "").strip()[:40]; t = min(float(t), time.time()); out = "ignored"; date = ""
+    with _LK_LOCK:
+        ws = ws_of("Lock Events")
+        vals = _with_retry(ws.get_values, "A2:I")
+        opn, orow, near = None, 0, False
+        for i, v in enumerate(vals, start=2):
+            v = list(v) + [""] * (9 - len(v))
+            if _key(v[1]) != _key(eid) or not _fl(v[8]): continue
+            if not str(v[4]).strip() and (opn is None or _fl(v[8]) > _fl(opn[8])): opn, orow = v, i
+            if abs(_fl(v[8]) - t) < LK_DUP_SEC: near = True
+        real = bool(reason) and not reason.startswith(_IDLE_REASONS)
+        if kind in ("locked", "reason"):
+            if opn is not None:
+                st0, old, osrc = _fl(opn[8]), str(opn[6]), str(opn[7])
+                better = real and (old.startswith(_IDLE_REASONS) or old == _UNTYPED or (osrc != "Agent" and src == "Agent" and old != reason))
+                if better:                                           # the idle period became a real lock / the agent knows more than the browser
+                    _ev_update(opn, orow, None, reason, src); date = str(opn[0]); out = "upgraded"
+                    if old.startswith(_IDLE_REASONS): _wt_activity(eid, name, "locked", st0, src, reason)
+                elif kind == "reason" or t - st0 < LK_DUP_SEC: out = "duplicate"
+                else:                                                # missed unlock: close the old event, then record this lock
+                    end = t if t - st0 <= WT_MAX_BREAK_SEC else st0
+                    _ev_update(opn, orow, end); _wt_activity(eid, name, "unlocked", end, osrc, old); opn = None
+            if kind == "locked" and opn is None and out == "ignored":
+                if near: out = "duplicate"                           # already recorded by the other source
+                else:
+                    ev = dict(date=_ev_date(t), eid=eid, name=name, start=t, end=None, src=src, reason=reason or _UNTYPED)
+                    _wt_ev_write(ev); date = ev["date"]; out = "locked"; _wt_activity(eid, name, "locked", t, src, ev["reason"])
+        elif kind == "unlocked":
+            if opn is not None:
+                st0 = _fl(opn[8])
+                if t + 2 < st0: out = "stale"                        # an old unlock arriving after a newer lock started
+                else:
+                    end = max(t, st0); _ev_update(opn, orow, end); date = str(opn[0]); out = "unlocked"
+                    _wt_activity(eid, name, "unlocked", end, src, str(opn[6]))
+    if out in ("locked", "unlocked", "upgraded") and date: _bg(_wt_row_sync, eid, name, _iso_date(date))
+    return out
+
+def _ev_date(t): return dt.datetime.fromtimestamp(t, TZ).strftime("%Y-%m-%d")
+
+def _wt_row_sync(eid, name, d):
+    """Keep the Work Time sheet row of (date, employee) in step with the saved Lock Events: Break time, Screen locks, Break sec. The row is created when the employee
+    has lock events but never signed in to the web app (agent only), so every employee's lock data is in the sheet under the right Employee ID and date."""
+    evs = [r for r in _fetch_rows("Lock Events") if _iso_date(r.get("Date")) == d and _key(r.get("Employee ID", "")) == _key(eid)]
+    now = time.time(); n = len(evs)
+    done = sum(_secs(r.get("Duration")) for r in evs if str(r.get("End time", "")).strip())
+    run = sum(now - _fl(r.get("Start epoch")) for r in evs if not str(r.get("End time", "")).strip() and _fl(r.get("Start epoch")) and 0 <= now - _fl(r.get("Start epoch")) <= WT_MAX_BREAK_SEC)
+    with _wt_write_lock:
+        ws = ws_of(WT_SHEET); vals = _with_retry(ws.get_values, "A2:B")
+        rr = next((i for i, v in enumerate(vals, start=2) if len(v) >= 2 and _iso_date(v[0]) == d and _key(v[1]) == _key(eid)), None)
+        if rr is None:
+            _with_retry(ws.append_row, [d, str(eid), name, "", "", "0:00:00", _hms(done + run), n, "0:00:00", _hms(WT_REQUIRED_SEC), "No login", "", 0, round(done, 1), "", "", ""], value_input_option="RAW")
+        else:
+            _with_retry(ws.batch_update, [{"range": f"G{rr}:H{rr}", "values": [[_hms(done + run), n]]}, {"range": f"N{rr}", "values": [[round(done, 1)]]}], value_input_option="RAW")
+    invalidate_cache(WT_SHEET)
+
+# ---- agent presence ("Lock tracking" status): one row per employee PC in the "Agent Devices" sheet, refreshed at most every 20 minutes
+_agent_c, _agent_last = {"t": 0.0, "m": {}}, {}
+
+def _agent_map(fresh=False):
+    """{EMPLOYEE KEY: epoch of the agent's last contact} (cached 5 min per worker; fresh=True reads the sheet now)."""
+    if fresh or time.time() - _agent_c["t"] > 300:
+        try:
+            m = {_key(r.get("Employee ID", "")): _fl(r.get("Last contact epoch")) for r in _fetch_rows(AGENT_SHEET)}
+            _agent_c["t"], _agent_c["m"] = time.time(), m
+        except Exception as ex: print("agent list read error:", repr(ex))
+    return _agent_c["m"]
+
+def _agent_touch(eid, name, host="", ver=""):
+    """Called for every authenticated agent request; writes the sheet only when the last saved contact is older than 20 minutes."""
+    now = time.time(); k = _key(eid)
+    if now - _agent_last.get(k, 0) < 1200 or now - _agent_map().get(k, 0) < 1200: return
+    _agent_last[k] = now
+    def w():
+        ws = ws_of(AGENT_SHEET); recs = _with_retry(ws.get_values, "A2:G"); stamp = dt.datetime.fromtimestamp(now, TZ).strftime("%Y-%m-%d %H:%M:%S")
+        for i, v in enumerate(recs, start=2):
+            v = list(v) + [""] * (7 - len(v))
+            if _key(v[0]) != k: continue
+            if now - _fl(v[6]) < 600: _agent_c["m"][k] = _fl(v[6]); return          # another worker has just written it
+            _with_retry(ws.update, range_name=f"B{i}:G{i}", values=[[name, host or v[2], ver or v[3], v[4] or stamp, stamp, int(now)]], value_input_option="RAW"); break
+        else:
+            _with_retry(ws.append_row, [str(eid), name, host, ver, stamp, stamp, int(now)], value_input_option="RAW")
+        _agent_c["m"][k] = now
+    _bg(w)
+
+def _lt_label(raw, agent_epoch, now=None):
+    """The Admin 'Lock tracking' column. The browser's idle-detection permission can never be granted automatically, so without the agent it reads 'Agent not installed'."""
+    now = now or time.time(); raw = str(raw or "")
+    if agent_epoch and now - agent_epoch <= AGENT_ACTIVE_SEC: return "Active (agent)"
+    if raw == "Active": return "Active"                       # browser idle detection was allowed on that PC
+    if agent_epoch or raw == "Agent": return "Agent offline"
+    if raw in ("Unsupported browser", "HTTPS required", "Blocked in browser"): return raw
+    return "Agent not installed"
+
+
 # ---------------------------------------------------------------- Update156: Activity Log (one row per event, every employee separately)
 ACT_SHEET = "Activity Log"
 ACT_TYPES = ["Login", "Logoff", "System Locked", "System Unlocked", "Screen OFF", "Screen ON"]
@@ -1590,7 +1722,7 @@ def _act_worker():
             except Exception as ex:
                 print("activity-log write error (try %d): %s" % (attempt + 1, ex)); time.sleep(min(5 * (attempt + 1), 30))
 
-def activity_log(eid, name, etype, when=None, source="", details=""):
+def activity_log(eid, name, etype, when=None, source="", details="", dedupe=True):
     """Record ONE event. when = epoch seconds (default now). Returns False if skipped as a repeat of the current state."""
     global _act_q
     eid = str(eid or "").strip()
@@ -1601,7 +1733,7 @@ def activity_log(eid, name, etype, when=None, source="", details=""):
         if group:
             stt = _act_state.setdefault(eid, {})
             prev = stt.get(group[0])
-            if prev and prev[0] == group[1] and abs(when - prev[1]) < 90: return False      # Update159: same state reported again within 90 s (agent resend / browser + agent both reporting)
+            if dedupe and prev and prev[0] == group[1] and abs(when - prev[1]) < 90: return False      # Update159: same state reported again within 90 s (agent resend / browser + agent both reporting)
             stt[group[0]] = (group[1], when)
         elif etype == "Login":                                    # a fresh login: screen is on and the PC is unlocked
             _act_state[eid] = {"lock": (False, when), "screen": (False, when)}
@@ -1624,30 +1756,36 @@ def wt_seen():
 
 def _wt_report(d):
     """One dict per employee for date d: live memory first (today), then the sheet."""
-    evagg = {}                                               # Update153: lock count + completed lock time per employee from the saved events
+    evagg = {}                                               # Update161: {KEY: [count, completed lock sec, running lock sec, locked now?]} from the saved events
+    _n = time.time()
     for e_ in rows("Lock Events"):
-        if str(e_.get("Date")) == d:
-            a = evagg.setdefault(str(e_.get("Employee ID")), [0, 0]); a[0] += 1
+        if _iso_date(e_.get("Date")) == d:
+            a = evagg.setdefault(_key(e_.get("Employee ID", "")), [0, 0, 0, False]); a[0] += 1
             if str(e_.get("End time", "")).strip(): a[1] += _secs(e_.get("Duration"))
+            else:
+                s0_ = _fl(e_.get("Start epoch"))
+                if s0_ and 0 <= _n - s0_ <= WT_MAX_BREAK_SEC: a[2] += _n - s0_; a[3] = True
     sheet = {str(r.get("Employee ID")): r for r in rows(WT_SHEET) if str(r.get("Date")) == d}
     with _wt_lock:
         live = {str(x["eid"]): dict(x) for x in _wt.values() if x["date"] == d}
-    now = time.time(); people = [(str(e["Employee ID"]), str(e.get("Name", ""))) for e in rows("Employees")]
+    now = time.time(); agents = _agent_map(); people = [(str(e["Employee ID"]), str(e.get("Name", ""))) for e in rows("Employees")]
     known = {p[0] for p in people}
     people += [(i, str((live.get(i) or {}).get("name") or sheet[i].get("Employee name", ""))) for i in list(live) + list(sheet) if i not in known and not known.add(i)]
     out = []
     for eid, name in people:
         st = live.get(eid) or (_wt_from_row(sheet[eid], eid, name, d) if eid in sheet else None)
-        if not st:
-            out.append(dict(eid=eid, name=name, login="", logout="", sys_on="", brk="", locks="", work="", status="No login", tone="mut", lt="", state="No login", on_s=0, brk_s=0, work_s=0, n_locks=0)); continue
+        n_ev, done, run, opn = evagg.get(_key(eid), (0, 0, 0, False)); lt_ = _lt_label(st["lt"] if st else "", agents.get(_key(eid)), now)
+        if not st or (st["first_login"] is None and st["sess_start"] is None and not st["online"]):      # never signed in to the web app (row exists only for the agent's lock data): lock data is still shown
+            out.append(dict(eid=eid, name=name, login="", logout="", sys_on="", brk=_hms(done + run) if n_ev else "", locks=n_ev if n_ev else "", work="", status="No login", tone="mut", lt=lt_, state="No login",
+                            on_s=0, brk_s=done + run, work_s=0, n_locks=n_ev)); continue
         online, brk, active, state = _wt_calc(st, now)
-        n_ev, done = evagg.get(eid, (0, 0))
         n_locks = max(st["locks"], n_ev)
-        if done > brk: active = max(active - (done - brk), 0); brk = done
+        if done + run > brk: active = max(active - (done + run - brk), 0); brk = done + run
+        if opn and state == "Active": state = "Locked"
         txt, tone = _wt_status(active, state, brk); st = dict(st, locks=n_locks)
         out.append(dict(eid=eid, name=name or st["name"], login=_wt_clock(st["first_login"]),
                         logout=_wt_clock(st["last_logout"]) if st["sess_start"] is None else ("(not closed)" if state in ("Not closed", "Left (locked)") else ""),
-                        sys_on=_hms(online), brk=_hms(brk), locks=st["locks"], work=_hms(active), status=txt, tone=tone, lt=("Active (agent)" if st["lt"] == "Agent" else st["lt"]) or "-", state=state, on_s=online, brk_s=brk, work_s=active, n_locks=st["locks"]))
+                        sys_on=_hms(online), brk=_hms(brk), locks=st["locks"], work=_hms(active), status=txt, tone=tone, lt=lt_, state=state, on_s=online, brk_s=brk, work_s=active, n_locks=st["locks"]))
     shared = wts_ids()                                       # Update138: Admin sees only the employees shared with the Admin (tracking itself covers everyone)
     out = [r for r in out if _key(r["eid"]) in shared]
     return sorted(out, key=lambda r: (r["state"] == "No login", r["name"].lower()))
@@ -4113,28 +4251,79 @@ def employee_ping():
 
 @app.route("/agent/lock", methods=["POST"])
 def agent_lock():
-    """Update132: called by the background agent on the employee's PC (no browser, no session). Authenticated by the employee's own token.
-    Only records lock / unlock for an employee who is logged in today; the response never contains any data."""
+    """Update132 / Update161: called by the Windows agent on the employee's PC (no browser, no web session). Authenticated by the employee's own token.
+    Every lock / unlock is applied to the Lock Events sheet (wt_lock_apply), so it works whichever server worker answers and whether or not the employee is
+    signed in to the web app. The response never contains any data."""
     j = request.get_json(silent=True) or {}
     eid = str(j.get("eid", "")).strip()
-    if not eid or not hmac.compare_digest(str(j.get("token", "")), wt_agent_token(eid)): return ("", 403)
+    try: ok = bool(eid) and hmac.compare_digest(str(j.get("token", "")).encode(), wt_agent_token(eid).encode())
+    except Exception: ok = False
+    if not ok: return ("", 403)
+    name = next((str(r.get("Name", "")) for r in rows("Employees") if _key(r.get("Employee ID", "")) == _key(eid)), None)
+    if name is None: return ("", 403)                                  # unknown / deleted employee: the agent drops the event
     kind = {"start": "locked", "locked": "locked", "end": "unlocked", "unlocked": "unlocked", "reason": "reason", "hello": "support",
             "display_off": "screen_off", "display_on": "screen_on"}.get(j.get("e"))
-    if kind:
-        with _wt_lock:
-            live = [(k, x) for k, x in _wt.items() if str(x["eid"]) == eid and x["sess_start"] is not None]
-        try: ago_s = max(0.0, min(float(j.get("ago", 0) or 0) / 1000.0, 12 * 3600))
-        except (TypeError, ValueError): ago_s = 0.0
-        if not live and kind in ("screen_off", "screen_on", "locked", "unlocked"):      # Update156: the Activity Log never loses an event, even when the employee is not signed in to the app yet
-            when = time.time() - ago_s; rsn = str(j.get("reason", ""))[:40]
-            if kind in ("screen_off", "screen_on"): activity_log(eid, _emp_name_of(eid), "Screen OFF" if kind == "screen_off" else "Screen ON", when, "Agent", rsn)
-            else: _wt_activity(eid, _emp_name_of(eid), kind, when, "Agent", rsn)
-            if kind in ("screen_off", "screen_on"): return ("", 204)
-        if not live: return ("", 409)               # Update155: employee not signed in to the app (yet) - the agent keeps the event and resends, nothing is lost
-        k, x = max(live, key=lambda kv: kv[1]["sess_start"])
-        try: wt_apply(k, eid, x["name"], kind, "agent", j.get("ago", 0), reason=str(j.get("reason", ""))[:40] or None)
-        except Exception as e: print("work-time agent error:", e)
+    try: ago_s = max(0.0, min(float(j.get("ago", 0) or 0) / 1000.0, 24 * 3600))
+    except (TypeError, ValueError): ago_s = 0.0
+    when = time.time() - ago_s; rsn = str(j.get("reason", ""))[:40]
+    try:
+        _agent_touch(eid, name, str(j.get("host", ""))[:60], str(j.get("ver", ""))[:12])
+        if kind in ("locked", "unlocked", "reason"): wt_lock_apply(eid, name, kind, when, rsn, "Agent")
+        elif kind in ("screen_off", "screen_on"): activity_log(eid, name, "Screen OFF" if kind == "screen_off" else "Screen ON", when, "Agent", rsn)
+    except Exception as e:
+        print("work-time agent error:", repr(e)); return ("", 503)           # the agent keeps the event and retries
     return ("", 204)
+
+# ---- Update161: automatic enrolment - IT deploys ONE script to every PC; the agent finds its employee from the Windows account (no per-employee setup)
+WT_ENROLL_KEY = os.getenv("WT_ENROLL_KEY", "").strip()
+
+@app.route("/agent/enroll", methods=["POST"])
+def agent_enroll():
+    """Agent -> server: {key, upn, user, host}. The shared deployment key must match; the Windows account must match EXACTLY ONE active employee
+    (UPN = Office / login / personal e-mail, else Windows user name = Employee ID, else the e-mail's name part). Returns that employee's own agent token."""
+    j = request.get_json(silent=True) or {}
+    try: ok = bool(WT_ENROLL_KEY) and hmac.compare_digest(str(j.get("key", "")).encode(), WT_ENROLL_KEY.encode())
+    except Exception: ok = False
+    if not ok: return ("", 403)
+    upn, user = str(j.get("upn", "")).strip().lower(), str(j.get("user", "")).strip().lower()
+    emps = [e for e in rows("Employees") if str(e.get("Employee ID", "")).strip() and not emp_locked(e)]
+    mails = lambda e: {str(e.get(c, "")).strip().lower() for c in ("Office Email ID", "Email", "Personal Email ID")} - {""}
+    hit = [e for e in emps if upn and "@" in upn and upn in mails(e)]
+    if len(hit) != 1 and user: hit = [e for e in emps if _key(e["Employee ID"]) == user.upper()]
+    if len(hit) != 1 and user: hit = [e for e in emps if user in {m.split("@")[0] for m in mails(e)}]
+    if len(hit) != 1: return jsonify(ok=False), 404
+    eid = str(hit[0]["Employee ID"]).strip()
+    return jsonify(ok=True, eid=eid, token=wt_agent_token(eid))
+
+@app.route("/admin/work-time/agent/deploy_all.ps1")
+@need("admin")
+def admin_work_time_agent_deploy():
+    """Machine-wide installer for IT (GPO startup script / Intune / SCCM, run as administrator or SYSTEM). Installs the agent once per PC; it starts hidden at every
+    user's logon and enrols itself, so lock tracking is on for every employee without anyone enabling it."""
+    if not WT_ENROLL_KEY:
+        flash("Set the WT_ENROLL_KEY environment variable (any long random text) on the server and restart it, then download deploy_all.ps1.", "error"); return redirect("/admin/work-time/agent")
+    base = request.url_root.rstrip("/")
+    ps = f"""$ErrorActionPreference = 'Stop'
+$dir = Join-Path $env:ProgramData 'WorkTimeAgent'
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+$agent = @'
+{WT_AGENT_PY}
+'@
+Set-Content -Path (Join-Path $dir 'lock_agent.py') -Value $agent -Encoding UTF8
+Set-Content -Path (Join-Path $dir 'lock_agent.ini') -Value @('server={base}','enroll_key={WT_ENROLL_KEY}','idle_minutes=5') -Encoding UTF8
+$pw = $null
+foreach ($c in (Get-Command pythonw.exe -All -ErrorAction SilentlyContinue)) {{ if ($c.Source -notmatch 'WindowsApps') {{ $pw = $c.Source; break }} }}
+if (-not $pw) {{ foreach ($p in (Get-ChildItem 'C:\\Program Files\\Python3*\\pythonw.exe','C:\\Program Files (x86)\\Python3*\\pythonw.exe' -ErrorAction SilentlyContinue)) {{ $pw = $p.FullName; break }} }}
+if (-not $pw -or -not (Test-Path $pw)) {{ Write-Error 'Python 3 (pythonw.exe, installed for all users) was not found on this PC. Install Python 3 first, then run this script again.' }}
+$act = New-ScheduledTaskAction -Execute $pw -Argument ('"' + (Join-Path $dir 'lock_agent.py') + '"') -WorkingDirectory $dir
+$trg = New-ScheduledTaskTrigger -AtLogOn
+$pri = New-ScheduledTaskPrincipal -GroupId 'BUILTIN\\Users' -RunLevel Limited
+$set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
+Register-ScheduledTask -TaskName 'WorkTimeAgent' -Action $act -Trigger $trg -Principal $pri -Settings $set -Force | Out-Null
+Write-Output 'Work Time agent installed. It starts at every user logon and enrols itself.'
+"""
+    resp = Response("\ufeff" + ps, mimetype="text/plain"); resp.headers["Content-Disposition"] = "attachment; filename=deploy_all.ps1"
+    return resp
 
 WT_EVENTS = """<div class="card"><h2 style="margin-top:0">Lock / Screen-off events{% if emp %} <small class="mut">&middot; {{emp}}</small>{% endif %}</h2>
 <form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
@@ -4276,7 +4465,7 @@ def admin_work_time_events_export():
 def admin_work_time_agent():
     base = request.url_root.rstrip("/")
     data = [dict(eid=str(e["Employee ID"]), name=str(e.get("Name", "")), token=wt_agent_token(e["Employee ID"])) for e in rows("Employees")]
-    return page(WT_AGENT, title="Lock-tracking agent", data=data, base=base)
+    return page(WT_AGENT, title="Lock-tracking agent", data=data, base=base, enroll_on=bool(WT_ENROLL_KEY))
 
 @app.route("/admin/work-time/agent.py")
 @need("admin")
@@ -4285,9 +4474,13 @@ def admin_work_time_agent_file():
     return resp
 
 WT_AGENT = """<div class="card"><h2 style="margin-top:0">Lock-tracking agent (Windows)</h2>
-<p class="mut">A tiny background program on each employee's PC reports screen lock / unlock to this server - no browser, no permission dialog, nothing shown to the employee.
-Break time is recorded only while the employee is logged in to the Employee page. Each employee has their own token; keep this page Admin-only.</p>
-<p><b>Quickest:</b> a browser can never turn lock tracking on by itself (it always asks the user), so this agent is the no-permission way. Download the employee's <b>install.ps1</b> below and run it once on that PC, signed in as that employee:
+<p class="mut">A tiny background program on each employee's PC reports every screen lock / unlock (Win+L = manual, locked by inactivity = automatic) to this server - no browser, no permission dialog, nothing shown to the employee.
+It does <b>not</b> need the employee to be signed in to this web app; events are saved straight to Google Sheets (Lock Events, Activity Log, Work Time) under the employee's ID and date. A browser alone cannot see Win+L reliably (Idle Detection needs a permission only the employee can grant, only works while the tab is open, and Chrome / Edge only), so the Windows agent is the supported method.</p>
+<div class="card" style="background:#f8f9ff"><b>Automatic for ALL employees (recommended)</b>
+<ol style="margin:6px 0"><li>On the server set the environment variable <code>WT_ENROLL_KEY</code> to any long random text and restart the app{% if not enroll_on %} (<b style="color:#b45309">not set yet</b>){% else %} (<b style="color:#166534">set</b>){% endif %}.</li>
+<li>Download <a class="btnl" href="/admin/work-time/agent/deploy_all.ps1">deploy_all.ps1</a> and let IT run it once on every PC as administrator (GPO startup script / Intune / SCCM). Python 3 must be installed for all users.</li>
+<li>From then on the agent starts hidden at every Windows logon and finds the employee from the Windows account (UPN = employee e-mail, or user name = Employee ID). Nobody enables anything; the status turns <b>Active (agent)</b> within a minute.</li></ol></div>
+<p><b>Single PC / one employee:</b> download the employee's <b>install.ps1</b> below and run it once on that PC, signed in as that employee:
 <code>powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File install.ps1</code>. It needs Python 3 on the PC, no administrator rights; it saves the agent and its settings and starts it hidden at every Windows logon. The Work Time status then shows <b>Active (agent)</b>.</p>
 <p class="mut">Manual alternative:</p>
 <ol><li>Install Python 3 on the PC (or ask IT to wrap <b>lock_agent.py</b> as an .exe / scheduled task).</li>
@@ -4297,18 +4490,33 @@ Break time is recorded only while the employee is logged in to the Employee page
 <div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Token</th><th>One-click installer</th></tr>
 {% for r in data %}<tr><td>{{r.eid}}</td><td>{{r.name}}</td><td><code>{{r.token}}</code></td><td><a class="btnl" href="/admin/work-time/agent/install.ps1?eid={{r.eid|urlencode}}">install.ps1</a></td></tr>{% endfor %}</table></div></div>"""
 
-WT_AGENT_PY = r'''"""Lock agent (Windows). Reports every screen LOCK (Win+L = manual, inactivity = automatic) and SCREEN-OFF / IDLE period to the
-Productivity Tracker, with start and end times. Standard library only.
-lock_agent.ini (same folder):  server=https://your-site   employee=1001   token=xxxxxxxx   idle_minutes=5   (idle_minutes=0 turns idle / screen-off tracking off)
-Run hidden at logon:  pythonw lock_agent.py"""
-import ctypes, json, os, time, urllib.request
+WT_AGENT_PY = r'''"""Work Time lock agent v2 (Windows, standard library only). Reports every screen LOCK / UNLOCK (Win+L = manual, locked by inactivity = automatic),
+screen-off / idle periods and monitor power events to the Productivity Tracker with their real times. Runs hidden at logon: pythonw lock_agent.py
+lock_agent.ini (same folder):
+  server=https://your-site
+  employee=1001  token=xxxx        (one employee per PC)   -OR-   enroll_key=xxxx   (the agent finds the employee from the Windows account itself)
+  idle_minutes=5                   (0 switches idle / screen-off tracking off)"""
+import ctypes, json, os, subprocess, threading, time, urllib.request, urllib.error
+from ctypes import wintypes
+VERSION = "2.0"
 here = os.path.dirname(os.path.abspath(__file__))
+data = os.path.join(os.environ.get("LOCALAPPDATA") or here, "WorkTimeAgent")      # per-user folder: identity, queue, log
+try: os.makedirs(data, exist_ok=True)
+except Exception: data = here
 cfg = {"idle_minutes": "5"}
-for line in open(os.path.join(here, "lock_agent.ini"), encoding="utf-8"):
-    if "=" in line: k, v = line.split("=", 1); cfg[k.strip().lower()] = v.strip()
-URL = cfg["server"].rstrip("/") + "/agent/lock"
-IDLE = float(cfg["idle_minutes"]) * 60            # no keyboard / mouse for this long (and not locked) = screen-off / idle
-MANUAL_MAX = 15                                   # idle seconds just before a lock: below = pressed Win+L (manual), above = locked by itself
+for line in open(os.path.join(here, "lock_agent.ini"), encoding="utf-8-sig"):       # utf-8-sig: Windows PowerShell 5 writes a BOM that broke the first key
+    if "=" in line and not line.strip().startswith("#"): k, v = line.split("=", 1); cfg[k.strip().lower()] = v.strip()
+BASE = cfg["server"].rstrip("/")
+URL = BASE + "/agent/lock"
+HOST = os.environ.get("COMPUTERNAME", "")
+IDLE = float(cfg.get("idle_minutes", "5")) * 60       # no keyboard / mouse for this long (and not locked) = screen-off / idle period
+MANUAL_MAX = 15                                       # input within this many seconds of the lock = the user pressed Win+L (manual)
+LOG, QF, IDF = os.path.join(data, "lock_agent.log"), os.path.join(data, "lock_agent.queue.json"), os.path.join(data, "identity.json")
+def log(msg):
+    try:
+        if os.path.exists(LOG) and os.path.getsize(LOG) > 200000: os.replace(LOG, LOG + ".old")
+        with open(LOG, "a", encoding="utf-8") as f: f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+    except Exception: pass
 user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
 user32.OpenInputDesktop.restype = ctypes.c_void_p
 class LII(ctypes.Structure): _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
@@ -4316,29 +4524,90 @@ def idle_sec():
     i = LII(); i.cbSize = ctypes.sizeof(i)
     if not user32.GetLastInputInfo(ctypes.byref(i)): return 0.0
     return ((kernel32.GetTickCount() - i.dwTime) & 0xFFFFFFFF) / 1000.0
-def locked():
-    h = user32.OpenInputDesktop(0, False, 0x0100)       # fails while the secure (lock-screen) desktop is active
+user32.GetAsyncKeyState.restype = ctypes.c_short
+def win_key_down():                                   # Windows key still held while the lock notification arrives = Win+L
+    try: return bool((user32.GetAsyncKeyState(0x5B) | user32.GetAsyncKeyState(0x5C)) & 0x8000)
+    except Exception: return False
+def locked_poll():                                    # fallback only (used when the session notification could not be registered)
+    h = user32.OpenInputDesktop(0, False, 0x0100)
     if not h: return True
     user32.CloseDesktop(ctypes.c_void_p(h)); return False
-queue = []                                              # (event, reason, time) kept until the server confirms, so nothing is lost offline
-def add(e, t, reason=""): queue.append((e, reason, t))
-LOG = os.path.join(here, "lock_agent.log")
-def log(msg):
-    try: open(LOG, "w", encoding="utf-8").write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
-    except Exception: pass
-def send(e, reason="", t=None):
-    body = json.dumps({"eid": cfg["employee"], "token": cfg["token"], "e": e, "reason": reason, "ago": int((time.time() - (t or time.time())) * 1000)}).encode()
-    urllib.request.urlopen(urllib.request.Request(URL, body, {"Content-Type": "application/json"}), timeout=10).read()
-def flush():
-    while queue:
-        e, reason, t = queue[0]
-        if time.time() - t > 7200: queue.pop(0); continue          # older than 2 h: stale, drop
-        try: send(e, reason, t); log("sent " + e)
-        except Exception as ex: log("waiting to send %s: %s" % (e, ex)); return        # e.g. 409 = employee not signed in to the app yet: retry
-        queue.pop(0)
-def watch_display():                                   # Update156: real monitor power OFF / ON (Windows power-setting notification); failures never stop the agent
+
+# ---- who is this PC's user: ini (employee + token) -> saved identity -> enrol from the Windows account (server matches e-mail / employee ID)
+def identity():
+    if cfg.get("employee") and cfg.get("token"): return cfg["employee"], cfg["token"], "ini"
     try:
-        from ctypes import wintypes
+        with open(IDF, encoding="utf-8") as f: d = json.load(f)
+        if d.get("eid") and d.get("token"): return d["eid"], d["token"], "file"
+    except Exception: pass
+    return None
+def enroll():
+    if not cfg.get("enroll_key"): return None
+    upn = ""
+    try: upn = subprocess.run(["whoami", "/upn"], capture_output=True, text=True, timeout=10, creationflags=0x08000000).stdout.strip()
+    except Exception: pass
+    body = json.dumps({"key": cfg["enroll_key"], "upn": upn, "user": os.environ.get("USERNAME", ""), "host": HOST}).encode()
+    try:
+        d = json.loads(urllib.request.urlopen(urllib.request.Request(BASE + "/agent/enroll", body, {"Content-Type": "application/json"}), timeout=15).read().decode())
+        if d.get("eid") and d.get("token"):
+            with open(IDF, "w", encoding="utf-8") as f: json.dump({"eid": d["eid"], "token": d["token"]}, f)
+            log("enrolled as employee " + str(d["eid"])); return d["eid"], d["token"], "file"
+    except urllib.error.HTTPError as ex: log("enrol refused (HTTP %s): this Windows account does not match exactly one employee" % ex.code)
+    except Exception as ex: log("enrol: %s" % ex)
+    return None
+
+# ---- events are kept on disk until the server confirms them (offline / reboot safe); one hopeless event never blocks the others
+qlock, queue = threading.Lock(), []
+try:
+    with open(QF, encoding="utf-8") as f: queue = [list(x) for x in json.load(f) if time.time() - x[2] < 86400]
+except Exception: queue = []
+def qsave():
+    try:
+        with open(QF, "w", encoding="utf-8") as f: json.dump(queue, f)
+    except Exception: pass
+def add(e, t, reason=""):
+    with qlock: queue.append([e, reason, t]); qsave()
+def send(e, reason="", t=None):
+    body = json.dumps({"eid": ID[0], "token": ID[1], "e": e, "reason": reason, "ago": int((time.time() - (t or time.time())) * 1000), "host": HOST, "ver": VERSION}).encode()
+    urllib.request.urlopen(urllib.request.Request(URL, body, {"Content-Type": "application/json"}), timeout=10).read()
+ID, next_try = identity(), 0.0
+def flush():
+    global ID, next_try
+    if not ID or time.time() < next_try: return
+    while True:
+        with qlock:
+            if not queue: return
+            e, reason, t = queue[0]
+        drop = time.time() - t > 86400
+        if not drop:
+            try: send(e, reason, t); log("sent " + e + (" (" + reason + ")" if reason else ""))
+            except urllib.error.HTTPError as ex:
+                if ex.code in (400, 401, 403, 404, 410, 415):          # will never succeed: drop it (and re-enrol if the saved identity is no longer valid)
+                    log("server refused %s: HTTP %s - dropped" % (e, ex.code)); drop = True
+                    if ex.code == 403 and ID[2] == "file":
+                        try: os.remove(IDF)
+                        except Exception: pass
+                        ID = None; return
+                else: log("will retry %s: HTTP %s" % (e, ex.code)); next_try = time.time() + 20; return
+            except Exception as ex: log("will retry %s: %s" % (e, ex)); next_try = time.time() + 20; return
+        with qlock:
+            if queue and queue[0][0] == e and queue[0][2] == t: queue.pop(0); qsave()
+
+# ---- lock / idle state (shared by the session-notification thread and the main loop; every change is recorded exactly once)
+LK = threading.Lock()
+S = {"locked": False, "idle": False, "wts": False}
+def set_locked(flag, t=None):
+    with LK:
+        if flag == S["locked"]: return
+        S["locked"] = flag; t = t or time.time()
+        if flag:
+            if S["idle"]: add("reason", t, "Automatic lock")                 # an idle period turned into a lock: not started by the user
+            else: add("start", t, "Manual lock" if (idle_sec() < MANUAL_MAX or win_key_down()) else "Automatic lock")
+            S["idle"] = False
+        else: add("end", t)
+def watch_windows():
+    """One hidden window receives (a) the Windows SESSION notifications - exact lock / unlock - and (b) monitor power OFF / ON."""
+    try:
         U = ctypes.windll.user32; LRESULT = ctypes.c_ssize_t
         WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
         class GUID(ctypes.Structure): _fields_ = [("D1", ctypes.c_ulong), ("D2", ctypes.c_ushort), ("D3", ctypes.c_ushort), ("D4", ctypes.c_ubyte * 8)]
@@ -4346,47 +4615,63 @@ def watch_display():                                   # Update156: real monitor
         class WNDCLASS(ctypes.Structure): _fields_ = [("style", wintypes.UINT), ("lpfnWndProc", WNDPROC), ("cbClsExtra", ctypes.c_int), ("cbWndExtra", ctypes.c_int), ("hInstance", wintypes.HINSTANCE), ("hIcon", wintypes.HANDLE), ("hCursor", wintypes.HANDLE), ("hbrBackground", wintypes.HANDLE), ("lpszMenuName", wintypes.LPCWSTR), ("lpszClassName", wintypes.LPCWSTR)]
         U.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]; U.DefWindowProcW.restype = LRESULT
         def proc(h, m, w, l):
-            if m == 0x218 and w == 0x8013:                  # WM_POWERBROADCAST / PBT_POWERSETTINGCHANGE (display state: 0 off, 1 on, 2 dimmed)
-                v = ctypes.cast(l, ctypes.POINTER(PBS)).contents.Data[0]
-                if v == 0: add("display_off", time.time())
-                elif v == 1: add("display_on", time.time())
+            try:
+                if m == 0x2B1:                                              # WM_WTSSESSION_CHANGE
+                    if w == 0x7: set_locked(True)                           # WTS_SESSION_LOCK
+                    elif w == 0x8: set_locked(False)                        # WTS_SESSION_UNLOCK
+                elif m == 0x218 and w == 0x8013:                            # WM_POWERBROADCAST / PBT_POWERSETTINGCHANGE (display state: 0 off, 1 on, 2 dimmed)
+                    v = ctypes.cast(l, ctypes.POINTER(PBS)).contents.Data[0]
+                    if v == 0: add("display_off", time.time())
+                    elif v == 1: add("display_on", time.time())
+            except Exception as ex: log("window proc: %s" % ex)
             return U.DefWindowProcW(h, m, w, l)
-        cb = WNDPROC(proc); hinst = kernel32.GetModuleHandleW(None)
-        wc = WNDCLASS(); wc.lpfnWndProc = cb; wc.hInstance = hinst; wc.lpszClassName = "LockAgentDisplay"
+        cb = WNDPROC(proc)
+        kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]; kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+        hinst = kernel32.GetModuleHandleW(None)
+        wc = WNDCLASS(); wc.lpfnWndProc = cb; wc.hInstance = hinst; wc.lpszClassName = "WorkTimeAgentWnd"
+        U.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASS)]; U.RegisterClassW.restype = wintypes.ATOM
         U.RegisterClassW(ctypes.byref(wc))
+        U.CreateWindowExW.argtypes = [wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID]
         U.CreateWindowExW.restype = wintypes.HWND
-        hwnd = U.CreateWindowExW(0, "LockAgentDisplay", "LockAgentDisplay", 0, 0, 0, 0, 0, None, None, hinst, None)
-        g = GUID(0x6FE69556, 0x704A, 0x47A0, (ctypes.c_ubyte * 8)(0x8F, 0x24, 0xC2, 0x8D, 0x93, 0x6F, 0xDA, 0x47))
-        U.RegisterPowerSettingNotification.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD]
+        hwnd = U.CreateWindowExW(0, "WorkTimeAgentWnd", "WorkTimeAgentWnd", 0, 0, 0, 0, 0, None, None, hinst, None)
+        if not hwnd: raise OSError("CreateWindowEx failed (%s)" % kernel32.GetLastError())
+        W = ctypes.windll.wtsapi32
+        W.WTSRegisterSessionNotification.argtypes = [wintypes.HWND, wintypes.DWORD]; W.WTSRegisterSessionNotification.restype = wintypes.BOOL
+        S["wts"] = bool(W.WTSRegisterSessionNotification(hwnd, 0))             # NOTIFY_FOR_THIS_SESSION
+        log("session notifications " + ("ON (exact lock / unlock)" if S["wts"] else "not available - polling the desktop instead"))
+        g = GUID(0x6FE69556, 0x704A, 0x47A0, (ctypes.c_ubyte * 8)(0x8F, 0x24, 0xC2, 0x8D, 0x93, 0x6F, 0xDA, 0x47))      # GUID_CONSOLE_DISPLAY_STATE
+        U.RegisterPowerSettingNotification.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD]; U.RegisterPowerSettingNotification.restype = wintypes.HANDLE
         U.RegisterPowerSettingNotification(hwnd, ctypes.byref(g), 0)
+        U.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
         msg = wintypes.MSG()
         while U.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
             U.TranslateMessage(ctypes.byref(msg)); U.DispatchMessageW(ctypes.byref(msg))
     except Exception as ex:
-        try: open(os.path.join(here, "display_watch.log"), "w", encoding="utf-8").write(str(ex))
-        except Exception: pass
-import threading
-threading.Thread(target=watch_display, daemon=True).start()
-state, prev_idle, last_tick, last_hello = "active", 0.0, time.time(), 0.0
+        log("window watcher failed (%s) - polling the desktop instead" % ex)
+threading.Thread(target=watch_windows, daemon=True).start()
+log("agent %s started (server %s)" % (VERSION, BASE))
+
+last_tick, last_hello, next_enroll = time.time(), 0.0, 0.0
 while True:
     now = time.time()
-    if now - last_hello > 60:                                      # heartbeat: the Admin sees "Active (agent)" while this runs
+    if ID is None and now >= next_enroll:
+        ID = enroll(); next_enroll = now + 600
+    if ID and now - last_hello > 60:                                 # heartbeat: the Admin sees "Active (agent)" while this runs
         last_hello = now
         try: send("hello"); log("heartbeat OK")
         except Exception as ex: log("heartbeat: %s" % ex)
-    if now - last_tick > 30 and state == "active" and IDLE:      # the PC was asleep / switched off in between
-        add("start", last_tick, "Sleep / screen-off"); add("display_off", last_tick, "Sleep"); state = "idle"
+    with LK:
+        if now - last_tick > 30 and not S["locked"] and not S["idle"] and IDLE:      # the PC was asleep / switched off in between
+            add("start", last_tick, "Sleep / screen-off"); add("display_off", last_tick, "Sleep"); S["idle"] = True
     last_tick = now
-    if locked():
-        if state == "active": add("start", now, "Manual lock" if prev_idle < MANUAL_MAX else "Automatic lock")
-        elif state == "idle": add("reason", now, "Automatic lock")
-        state = "locked"
-    else:
+    if not S["wts"]:                                                 # fallback: no session notifications -> poll the desktop
+        try: set_locked(locked_poll(), now)
+        except Exception: pass
+    if not S["locked"]:
         idle = idle_sec()
-        if state == "locked": add("end", now); state = "active"
-        elif state == "active" and IDLE and idle >= IDLE: add("start", now - idle, "Screen-off / idle"); state = "idle"
-        elif state == "idle" and idle < (IDLE or 1): add("end", now); state = "active"
-        prev_idle = idle
+        with LK:
+            if not S["idle"] and IDLE and idle >= IDLE: add("start", now - idle, "Screen-off / idle"); S["idle"] = True
+            elif S["idle"] and idle < (IDLE or 1): add("end", now); S["idle"] = False
     flush(); time.sleep(1)
 '''
 
@@ -4441,7 +4726,7 @@ WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Work Time <small class=
 <a class="btnl no-print" href="/admin/work-time/activity?date={{d}}">&#128337; Activity Log</a> <a class="btnl no-print" href="/admin/work-time/export?date={{d}}">&#128196; Download CSV</a> <a class="btnl no-print" href="#" onclick="window.print();return false">&#128438; Print</a> <details class="no-print" style="position:relative;display:inline-block"><summary class="btnl" style="list-style:none;cursor:pointer;display:inline-block">&#128202; Reports &#9662;</summary><div class="card" style="position:absolute;z-index:20;margin:6px 0 0;padding:8px;min-width:200px;display:flex;flex-direction:column;gap:6px"><a class="btnl" href="/admin/work-time/report?period=week&date={{d}}">Weekly Report</a><a class="btnl" href="/admin/work-time/report?period=month&date={{d}}">Monthly Report</a><a class="btnl" href="/admin/work-time/activity?date={{d}}">Activity Log (all events)</a><a class="btnl" href="/admin/work-time/events?date={{d}}">All Lock Events</a><a class="btnl" href="/admin/work-time/agent">Lock-Tracking Agent</a></div></details></form>
 <p class="mut" style="margin:0 0 10px">Required = {{req}} of active (unlocked) time in a 9-hour day; allowed breaks = {{brk_allowed}} (30 min lunch + 30 min other).
 Break time = the time the computer was locked. Total working time = system-on time &minus; break time.</p>
-<p style="margin:0 0 10px"><b>{{n_ok}}</b> completed &middot; <b>{{n_short}}</b> short / in progress &middot; <b>{{n_none}}</b> no login{% if n_notrack %} &middot; <b style="color:#b45309">{{n_notrack}}</b> without lock tracking{% endif %}</p>
+<p style="margin:0 0 10px"><b>{{n_ok}}</b> completed &middot; <b>{{n_short}}</b> short / in progress &middot; <b>{{n_none}}</b> no login{% if n_notrack %} &middot; <b style="color:#b45309">{{n_notrack}}</b> without lock tracking (<a href="/admin/work-time/agent">deploy the agent</a>){% endif %}</p>
 <div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last screen OFF (lock)</th><th>Last screen ON (unlock)</th><th>Break duration</th><th>Screen OFF count (locks)</th><th>Screen ON count (unlocks)</th><th>Screen OFF / ON events</th><th>Manual lock / unlock (Win+L)</th><th>Automatic lock / unlock</th><th>Undetected lock / unlock</th><th>Login / Logoff events</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
 {% for r in rows %}<tr><td><a href="/admin/work-time/employee/{{r.eid|urlencode}}?date={{d}}">{{r.eid}}</a></td><td><a href="/admin/work-time/employee/{{r.eid|urlencode}}?date={{d}}" style="color:inherit;text-decoration:none;font-weight:600">{{r.name}}</a></td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.last_lock or '-'}}</td><td>{{r.last_unlock or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td>{{r.on_n}}</td><td>{{r.a_scr}}</td><td>{{r.a_lm}}</td><td>{{r.a_la}}</td><td>{{r.a_lu}}</td><td>{{r.a_log}}</td><td><b>{{r.work or '-'}}</b></td>
 <td><span style="padding:2px 8px;border-radius:10px;font-size:12px;white-space:nowrap;{% if r.tone=='ok' %}background:#dcfce7;color:#166534{% elif r.tone=='warn' %}background:#fef3c7;color:#92400e{% elif r.tone=='bad' %}background:#fee2e2;color:#991b1b{% else %}background:#eef0f6;color:#5b6280{% endif %}">{{r.status}}</span>{% if r.state=='Locked' %} <small class="mut">&#128274; locked now</small>{% endif %}</td>
@@ -4465,7 +4750,7 @@ def _wt_admin_pages_removed():          # Update144: Work Time / Work Time Acces
 @app.route("/admin/work-time")
 @need("admin")
 def admin_work_time():
-    _wt_fresh()
+    _wt_fresh(); _agent_map(fresh=True)
     d = _wt_date_arg(); data = _wt_report(d)
     _wt_fresh()
     dc = _wt_day_counts(d)                                       # Update159: every count, split and last OFF / ON time from ONE place
@@ -4700,7 +4985,9 @@ def admin_work_time_activity():
     gk = {k: sum(c["k"][k] for c in counts) for k in ACT_KINDS}
     emps = [dict(eid=str(e["Employee ID"]), name=str(e.get("Name", ""))) for e in rows("Employees") if _key(e["Employee ID"]) in wts_ids()]
     FIX = {"Not allowed yet": "Employee must click Allow on the browser's idle-detection prompt (or install the agent).", "Blocked in browser": "Permission was blocked: reset the site's permissions in the browser, or install the agent.",
-           "Unsupported browser": "Use Chrome / Edge, or install the agent.", "HTTPS required": "Open the app over https://, or install the agent.", "Agent needed": "Install the Windows agent (Work Time > Lock-Tracking Agent).", "-": "Install the Windows agent (Work Time > Lock-Tracking Agent)."}
+           "Unsupported browser": "Use Chrome / Edge, or install the agent.", "HTTPS required": "Open the app over https://, or install the agent.", "Agent needed": "Install the Windows agent (Work Time > Lock-Tracking Agent).", "-": "Install the Windows agent (Work Time > Lock-Tracking Agent).",
+           "Agent not installed": "Deploy the Windows agent (Work Time > Lock-Tracking Agent > deploy_all.ps1 or install.ps1). Browsers cannot see Win+L without a permission the employee must grant.",
+           "Agent offline": "The agent was installed but has not reported for over 90 minutes: the PC is off / offline, or the agent was stopped."}
     notrack = [dict(eid=r["eid"], name=r["name"], lt=r["lt"], fix=FIX.get(r["lt"], "Install the Windows agent.")) for r in _wt_report(d) if r["state"] != "No login" and r["lt"] not in ("Active", "Active (agent)")] if d == str(today_local()) else []
     return page(ACT_PAGE, title="Activity Log", notrack=notrack, d=d, today=str(today_local()), emp=emp, typ=typ, emps=emps, types=ACT_TYPES, evs=evs, counts=counts, grand=grand, grand_total=sum(grand.values()), kinds=ACT_KINDS, gk=gk, live=(d == str(today_local())))
 

@@ -63,6 +63,8 @@ Access rules (Update59):
     e-mail design (MAIL_NOTE_HTML = preview.html), selects the recipients (All Employees or only the ticked ones) and the DATE & TIME to send; a background job sends it automatically (checked every 30 s),
     or the Admin sends it immediately. A scheduled mail can be edited / cancelled. Sheets: "Mail Notes" and "Mail Notes Log" (employee name, e-mail, subject, e-mail sent date & time, status). Admin only.
   * Update154: one-day screen OFF / ON counts - the daily Work Time table has "Screen OFF count (locks)" and "Screen ON count (unlocks)" per employee, and the event list / events page shows both counts for the day.
+  * Update157: (1) Employee page: new "My Attendance" calendar (month grid, previous / next month) - Present (green), Absent (red), Leave / Half day (blue), weekly off / holiday (grey); Present = login recorded or entry submitted. (2) Admin > Work Time: clicking an employee (Emp ID or Name) opens
+    /admin/work-time/employee/<id> - that day's login / logout, system-on, break, working time, status, every login session, every lock / screen-off event, the activity log and the month day-wise table, with previous / next day.
   * Update156: Activity Log - EVERY screen / system event is now saved as its own row (Employee ID, Name, Event Type, Date, Time, Source, Details) in the new Google Sheet "Activity Log" and listed in
     Admin > Work Time > "Activity Log" (filter by date / employee, per-employee counts of Screen OFF / ON, System Lock / Unlock and Login / Logoff, CSV download; the daily Work Time table shows the same counts).
     Event types: Login, Logoff (manual or automatic), System Locked (Manual - Win+L / Automatic), System Unlocked, Screen OFF, Screen ON. Events are written by one ordered worker with retry (nothing is dropped on a Sheets error),
@@ -258,6 +260,21 @@ _load_dotenv()
 TZ = ZoneInfo(os.getenv("APP_TZ", "Asia/Kolkata"))
 def now_local(): return dt.datetime.now(TZ).replace(tzinfo=None)
 def today_local(): return now_local().date()
+
+def _iso_date(v):
+    """Update157: any date a sheet may hand back (2026-10-08 / 08-10-2026 / 08 Oct 2026 / with a time / a Sheets serial number) -> 'YYYY-MM-DD', so dates compare reliably."""
+    if isinstance(v, dt.datetime): return v.date().isoformat()
+    if isinstance(v, dt.date): return v.isoformat()
+    t = str(v if v is not None else "").strip()
+    if not t: return t
+    if re.fullmatch(r"\d{5}(\.\d+)?", t):
+        try: return (dt.date(1899, 12, 30) + dt.timedelta(days=int(float(t)))).isoformat()
+        except Exception: return t
+    t0 = re.split(r"[ T]", t, 1)[0] if re.match(r"\d{4}-\d{2}-\d{2}[ T]", t) else t
+    for f in ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y", "%d %b %Y", "%d-%b-%Y", "%d %B %Y", "%d.%m.%Y"):
+        try: return dt.datetime.strptime(t0, f).date().isoformat()
+        except ValueError: pass
+    return t
 
 def t12(v):
     """Display a stored timestamp in 12-hour format with AM/PM: '2026-09-29 14:30:05' -> '2026-09-29 02:30:05 PM'.
@@ -4378,7 +4395,7 @@ WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Work Time <small class=
 Break time = the time the computer was locked. Total working time = system-on time &minus; break time.</p>
 <p style="margin:0 0 10px"><b>{{n_ok}}</b> completed &middot; <b>{{n_short}}</b> short / in progress &middot; <b>{{n_none}}</b> no login{% if n_notrack %} &middot; <b style="color:#b45309">{{n_notrack}}</b> without lock tracking{% endif %}</p>
 <div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last screen OFF (lock)</th><th>Last screen ON (unlock)</th><th>Break duration</th><th>Screen OFF count (locks)</th><th>Screen ON count (unlocks)</th><th>Screen OFF / ON events</th><th>Manual lock / unlock (Win+L)</th><th>Automatic lock / unlock</th><th>Undetected lock / unlock</th><th>Login / Logoff events</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
-{% for r in rows %}<tr><td><a href="/admin/work-time/events?date={{d}}&emp={{r.eid|urlencode}}">{{r.eid}}</a></td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.last_lock or '-'}}</td><td>{{r.last_unlock or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td>{{r.on_n}}</td><td>{{r.a_scr}}</td><td>{{r.a_lm}}</td><td>{{r.a_la}}</td><td>{{r.a_lu}}</td><td>{{r.a_log}}</td><td><b>{{r.work or '-'}}</b></td>
+{% for r in rows %}<tr><td><a href="/admin/work-time/employee/{{r.eid|urlencode}}?date={{d}}">{{r.eid}}</a></td><td><a href="/admin/work-time/employee/{{r.eid|urlencode}}?date={{d}}" style="color:inherit;text-decoration:none;font-weight:600">{{r.name}}</a></td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.last_lock or '-'}}</td><td>{{r.last_unlock or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td>{{r.on_n}}</td><td>{{r.a_scr}}</td><td>{{r.a_lm}}</td><td>{{r.a_la}}</td><td>{{r.a_lu}}</td><td>{{r.a_log}}</td><td><b>{{r.work or '-'}}</b></td>
 <td><span style="padding:2px 8px;border-radius:10px;font-size:12px;white-space:nowrap;{% if r.tone=='ok' %}background:#dcfce7;color:#166534{% elif r.tone=='warn' %}background:#fef3c7;color:#92400e{% elif r.tone=='bad' %}background:#fee2e2;color:#991b1b{% else %}background:#eef0f6;color:#5b6280{% endif %}">{{r.status}}</span>{% if r.state=='Locked' %} <small class="mut">&#128274; locked now</small>{% endif %}</td>
 <td>{{r.lt}}</td></tr>
 {% if r.events %}<tr><td colspan="18" style="padding:0 0 8px 28px;background:#f8f9ff"><details><summary class="mut" style="cursor:pointer;padding:6px 0">&#128274; Screen OFF {{r.events|length}} time(s) &middot; Screen ON {{r.on_n}} time(s) &middot; total {{r.lock_total}} &mdash; click to view</summary>
@@ -4424,6 +4441,66 @@ def admin_work_time():
                 n_ok=sum(r["tone"] == "ok" for r in data), n_short=sum(r["tone"] in ("warn", "bad") for r in data),
                 n_none=sum(r["state"] == "No login" for r in data),
                 n_notrack=sum(r["state"] != "No login" and r["lt"] not in ("Active", "Active (agent)") for r in data))
+
+# ---------------------------------------------------------------- Update157: Admin > Work Time > click an employee = that employee's complete work-time details
+WT_EMP = """<div class="card"><h2 style="margin-top:0">{{name}} <small class="mut">&middot; {{eid}} &middot; Work Time details</small></h2>
+<form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+<a class="btnl" href="?date={{prev}}">&larr; Previous day</a>
+<label>Date <input type="date" name="date" value="{{d}}" max="{{today}}" onchange="this.form.submit()"></label>
+{% if nxt %}<a class="btnl" href="?date={{nxt}}">Next day &rarr;</a>{% endif %}
+<a class="btnl" href="/admin/work-time?date={{d}}">&larr; Work Time Log</a>
+<a class="btnl" href="/admin/work-time/activity?date={{d}}&emp={{eid|urlencode}}">&#128337; Activity Log</a>
+<a class="btnl" href="/admin/work-time/events/export?date={{d}}&emp={{eid|urlencode}}">&#128196; Lock events CSV</a></form>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+{% for k, v in stats %}<div style="flex:1 1 140px;min-width:140px;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;background:#f8f9ff"><div class="mut" style="font-size:11px;text-transform:uppercase;letter-spacing:.6px">{{k}}</div><div style="font-size:17px;font-weight:bold;margin-top:3px">{{v or '-'}}</div></div>{% endfor %}</div>
+{% if day.state=='No login' %}<p class="mut" style="margin:8px 0 0">No login recorded for {{d}}.</p>{% endif %}</div>
+
+<div class="card"><h3 style="margin-top:0">Login / Logoff sessions &middot; {{d}}</h3><div style="overflow-x:auto"><table><tr><th>#</th><th>Login</th><th>Logout</th><th>Duration</th><th>Logout type</th></tr>
+{% for x in sess %}<tr><td>{{loop.index}}</td><td>{{x.login}}</td><td>{{x.logout or 'still on'}}</td><td>{{x.dur or '-'}}</td><td>{{x.typ or '-'}}</td></tr>
+{% else %}<tr><td colspan="5">No login sessions recorded.</td></tr>{% endfor %}</table></div></div>
+
+<div class="card"><h3 style="margin-top:0">Lock / screen-off events &middot; {{d}} <small class="mut">&middot; Screen OFF {{evs|length}} time(s) &middot; Screen ON {{n_on}} time(s) &middot; total {{ev_total}}</small></h3><div style="overflow-x:auto"><table><tr><th>Lock #</th><th>Screen OFF (lock) at</th><th>Screen ON (unlock) at</th><th>Lock duration</th><th>Reason</th><th>Source</th></tr>
+{% for e in evs %}<tr><td>{{e.n}}</td><td>{{e.start}}</td><td>{{e.end or 'still locked / off'}}</td><td>{{e.dur}}</td><td>{{e.reason}}</td><td>{{e.src}}</td></tr>
+{% else %}<tr><td colspan="6">No lock or screen-off events recorded.</td></tr>{% endfor %}</table></div></div>
+
+<div class="card"><h3 style="margin-top:0">Activity log &middot; {{d}} <small class="mut">&middot; every login, logoff, lock and screen event</small></h3><div style="overflow-x:auto"><table><tr><th>Time</th><th>Event</th><th>Source</th><th>Details</th></tr>
+{% for a in acts %}<tr><td>{{a.time}}</td><td>{{a.type}}</td><td>{{a.src}}</td><td>{{a.det}}</td></tr>
+{% else %}<tr><td colspan="4">No activity recorded.</td></tr>{% endfor %}</table></div></div>
+
+<div class="card"><h3 style="margin-top:0">{{month_label}} &middot; day-wise <small class="mut">&middot; {{mt.days}} day(s) worked &middot; system-on {{mt.on}} &middot; lock / break {{mt.brk}} &middot; working time {{mt.work}}</small></h3><div style="overflow-x:auto"><table><tr><th>Date</th><th>Login</th><th>Logout</th><th>System-on</th><th>Lock / break</th><th>Locks</th><th>Working time</th><th>Status</th></tr>
+{% for r in month %}<tr {% if r.date==d %}style="background:#eef0ff"{% endif %}><td><a href="?date={{r.date}}">{{r.date}}</a></td><td>{{r.login or '-'}}</td><td>{{r.logout or ('still on' if r.state!='No login' else '-')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td><b>{{r.work or '-'}}</b></td><td>{{r.status}}</td></tr>
+{% else %}<tr><td colspan="8">No working-time records this month.</td></tr>{% endfor %}</table></div></div>
+{% if live %}<script>setTimeout(function(){location.reload()},30000)</script>{% endif %}"""
+
+@app.route("/admin/work-time/employee/<path:eid>")
+@need("admin")
+def admin_work_time_employee(eid):
+    eid = str(eid).strip()
+    if _key(eid) not in wts_ids():
+        flash("This employee's Work Time is not shared with the Admin.", "error"); return redirect("/admin/work-time")
+    prefetch(WT_SHEET, "Employees", "Lock Events", "Attendance", ACT_SHEET)
+    d = _wt_date_arg(); day_d = dt.date.fromisoformat(d); today = today_local()
+    mine = lambda r: _key(r.get("eid", "")) == _key(eid)
+    day = next((r for r in _wt_report(d) if mine(r)), None) or dict(eid=eid, name=eid, login="", logout="", sys_on="", brk="", locks="", work="", status="No login", tone="mut", lt="", state="No login")
+    name = day["name"] or eid
+    sess = []                                                      # login / logoff sessions of the day (Attendance sheet)
+    for r in rows("Attendance"):
+        if _key(r.get("Employee ID", "")) == _key(eid) and _iso_date(r.get("Date")) == d:
+            sess.append(dict(login=str(r.get("Login time", "")), logout=str(r.get("Logout time", "")).strip(), dur=str(r.get("Duration", "")), typ=str(r.get("Logout type", ""))))
+    sess.sort(key=lambda x: _ts(d, x["login"]))
+    evs = _wt_events_totals(_wt_events(d, eid)); acts = _act_events(d, eid)
+    first = day_d.replace(day=1); last = (first.replace(day=28) + dt.timedelta(days=4)); last = min(last - dt.timedelta(days=last.day), today)
+    month, x = [], first
+    while x <= last:
+        r_ = next((r for r in _wt_report(str(x)) if mine(r)), None)
+        if r_ and r_["state"] != "No login": month.append(dict(date=str(x), **{k: v for k, v in r_.items() if k != "date"}))
+        x += dt.timedelta(days=1)
+    mt = dict(days=len(month), on=_hms(sum(r["on_s"] for r in month)), brk=_hms(sum(r["brk_s"] for r in month)), work=_hms(sum(r["work_s"] for r in month)))
+    stats = [("Login", day["login"]), ("Logout", day["logout"] or ("-" if day["state"] == "No login" else "still on")), ("System-on time", day["sys_on"]), ("Break (locked)", day["brk"]),
+             ("Total working time", day["work"]), ("Screen OFF / ON", f"{len(evs)} / {sum(1 for e in evs if e['end'])}"), ("Lock count", day["locks"]), ("Status", day["status"]), ("Lock tracking", day.get("lt", ""))]
+    return page(WT_EMP, title=f"Work Time - {name}", eid=eid, name=name, d=d, today=str(today), prev=str(day_d - dt.timedelta(days=1)), nxt=(str(day_d + dt.timedelta(days=1)) if day_d < today else ""),
+                day=day, stats=stats, sess=sess, evs=evs, n_on=sum(1 for e in evs if e["end"]), ev_total=_hms(sum(e["sec"] for e in evs)), acts=acts,
+                month=month, mt=mt, month_label=first.strftime("%B %Y"), live=(d == str(today)))
 
 ACT_PAGE = """<div class="card"><h2 style="margin-top:0">Activity Log <small class="mut">&middot; every screen, lock and login event</small></h2>
 <form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
@@ -4535,6 +4612,63 @@ def admin_work_time_export():
 def admin_online_poll():
     return jsonify(items=online_list())
 
+# ---------------------------------------------------------------- Update157: Employee page - attendance calendar (Present / Absent per date)
+EMP_CAL = """{% if cal %}<div class="card" id="cal" style="margin-top:14px"><div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+<h2 style="margin:0">&#128197; My Attendance &middot; {{cal.label}}</h2>
+<div><a class="btnl" href="?cal={{cal.prev}}#cal">&larr;</a> {% if cal.cur %}<a class="btnl" href="?#cal">This month</a>{% else %}<a class="btnl" href="?#cal">This month</a>{% endif %} {% if cal.next %}<a class="btnl" href="?cal={{cal.next}}#cal">&rarr;</a>{% endif %}</div></div>
+<div style="display:flex;gap:14px;flex-wrap:wrap;margin:10px 0;font-size:13px">
+<span><b style="color:#15803d">{{cal.n_present}}</b> Present</span><span><b style="color:#b91c1c">{{cal.n_absent}}</b> Absent</span><span><b style="color:#1d4ed8">{{cal.n_leave}}</b> Leave</span></div>
+<table style="width:100%;table-layout:fixed;border-collapse:separate;border-spacing:5px;text-align:center"><tr>{% for w in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}<th style="font-size:12px;padding:2px">{{w}}</th>{% endfor %}</tr>
+{% for wk in cal.weeks %}<tr>{% for c in wk %}{% if c %}<td title="{{c.title}}" style="border-radius:10px;padding:6px 2px;height:54px;vertical-align:top;background:{{c.bg}};color:{{c.fg}};border:{{'2px solid #4f46e5' if c.today else '1px solid ' ~ c.bd}}">
+<div style="font-size:13px;font-weight:bold">{{c.day}}</div><div style="font-size:10px;margin-top:3px;font-weight:600">{{c.icon}} {{c.text}}</div></td>{% else %}<td></td>{% endif %}{% endfor %}</tr>{% endfor %}</table>
+<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:12px">
+<span><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#dcfce7;border:1px solid #16a34a"></i> &#10003; Present</span>
+<span><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#fee2e2;border:1px solid #dc2626"></i> &#10007; Absent</span>
+<span><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#dbeafe;border:1px solid #2563eb"></i> Leave / Half day</span>
+<span><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#f1f5f9;border:1px solid #cbd5e1"></i> Weekly off / Holiday</span></div>
+<p class="mut" style="margin:8px 0 0;font-size:12px">Present = you logged in or submitted a productivity entry that day. Absent = a working day with no login, no entry and no leave.</p></div>{% endif %}"""
+
+_CAL_STY = {"Present": ("#dcfce7", "#166534", "#16a34a", "\u2713"), "Absent": ("#fee2e2", "#991b1b", "#dc2626", "\u2717"), "Leave": ("#dbeafe", "#1e40af", "#2563eb", ""),
+            "Half day": ("#dbeafe", "#1e40af", "#2563eb", "\u00bd"), "Off": ("#f1f5f9", "#64748b", "#cbd5e1", ""), "Holiday": ("#f1f5f9", "#64748b", "#cbd5e1", ""),
+            "Pending": ("#fef9c3", "#854d0e", "#facc15", ""), "": ("transparent", "#94a3b8", "#e2e8f0", "")}
+
+def employee_calendar(eid, ym=""):
+    """Update157: month grid of this employee's attendance. Present = a login recorded in the Attendance sheet OR a productivity entry; Leave / Half day from approved leave;
+    Absent = a past working day with none of these; weekly offs and holidays are marked Off."""
+    today = today_local()
+    try: first = dt.datetime.strptime(ym, "%Y-%m").date().replace(day=1)
+    except ValueError: first = today.replace(day=1)
+    if first > today.replace(day=1): first = today.replace(day=1)
+    last = (first.replace(day=28) + dt.timedelta(days=4)); last = last - dt.timedelta(days=last.day)
+    k = _key(eid); jd = join_date(eid)
+    present = {_iso_date(r.get("Date")) for r in rows("Attendance") if _key(r.get("Employee ID", "")) == k}
+    present |= {_iso_date(r.get("Date")) for r in rows("Productivity log") if _key(r.get("Employee ID", "")) == k}
+    full, half = set(), set()
+    for l in live_leaves([l for l in rows("Leave") if _key(l.get("Employee ID", "")) == k]):
+        (half if leave_is_half(l) else full).add(_iso_date(l.get("Date")))
+    cells, counts = [], dict(Present=0, Absent=0, Leave=0)
+    for i in range((last - first).days + 1):
+        d = first + dt.timedelta(days=i); ds = str(d)
+        if jd and d < jd: st = ""
+        elif d > today: st = ""
+        elif ds in full: st = "Leave"
+        elif ds in half: st = "Half day"
+        elif is_off(ds): st = "Holiday" if is_holiday(ds) else "Off"
+        elif ds in present: st = "Present"
+        elif d == today: st = "Pending"
+        else: st = "Absent"
+        if st in counts: counts[st] += 1
+        elif st in ("Half day",): counts["Leave"] += 0.5; counts["Present"] += 0.5
+        bg, fg, bd, ic = _CAL_STY[st]
+        title = f"{d.strftime('%d %b %Y (%a)')}: {st or '-'}" + (f" - {holiday_name(ds)}" if st == "Holiday" and holiday_name(ds) else "")
+        cells.append(dict(day=d.day, text=st, icon=ic, bg=bg, fg=fg, bd=bd, today=(d == today), title=title))
+    cells = [None] * first.weekday() + cells
+    cells += [None] * (-len(cells) % 7)
+    _n = lambda v: int(v) if v == int(v) else v
+    prev = (first - dt.timedelta(days=1)).strftime("%Y-%m"); nxt = (last + dt.timedelta(days=1)).strftime("%Y-%m") if last < today else ""
+    return dict(label=first.strftime("%B %Y"), weeks=[cells[i:i + 7] for i in range(0, len(cells), 7)], prev=prev, next=nxt, cur=(first == today.replace(day=1)),
+                n_present=_n(counts["Present"]), n_absent=_n(counts["Absent"]), n_leave=_n(counts["Leave"]))
+
 @app.route("/employee/welcome")
 @need("employee")
 def employee_welcome():
@@ -4553,8 +4687,10 @@ def employee_home():
     if desig_view_only(session["designation"]) or is_view_only(session["emp_id"]):      # Update105: View Only - no entry form, no Productivity %
         first_ = today_local().replace(day=1)
         today_perm_ = next((r for r in rows("Permissions") if str(r["Employee ID"]) == session["emp_id"] and r["Date"] == today), None)
-        return page(EMP_TOP + VIEW_ONLY_CARD, title="Daily productivity", today=today, month_label=first_.strftime("%B %Y"),
+        return page(EMP_TOP + EMP_CAL + VIEW_ONLY_CARD, cal=cal_, title="Daily productivity", today=today, month_label=first_.strftime("%B %Y"),
                     lab1="Attendance", lab2="Productivity", a1=None, a2=None, extra=[], today_perm=today_perm_)
+    try: cal_ = employee_calendar(session["emp_id"], request.args.get("cal", ""))        # Update157
+    except Exception as ex: print("calendar error:", repr(ex)); cal_ = None
     sub = dict(date=today, band=session["band"], designation=session["designation"],
                emp_id=session["emp_id"], emp_name=session["name"],
                procs=[{}], notes=[{}])
@@ -4574,8 +4710,8 @@ def employee_home():
     perm_used = permission_hours_used(session["emp_id"], today[:7])
     cut = str(t0 - dt.timedelta(days=6))
     tgt_miss = [m for s_ in all_mine if s_["date"] >= cut for m in sub_misses(s_)][:12]     # newest entries first
-    return page(EMP_MARQUEE + EMP_TOP + EMP_ALERT + EMP_TARGET + body + '<h2>Submitted today</h2>' + LIST + BLOOM + SAVED_ANIM,
-                title="Daily productivity", missed=missed, subs=mine, tgt_miss=tgt_miss, bloom=bool(session.pop("bloom", False)),
+    return page(EMP_MARQUEE + EMP_TOP + EMP_CAL + EMP_ALERT + EMP_TARGET + body + '<h2>Submitted today</h2>' + LIST + BLOOM + SAVED_ANIM,
+                title="Daily productivity", cal=cal_, missed=missed, subs=mine, tgt_miss=tgt_miss, bloom=bool(session.pop("bloom", False)),
                 saved_anim=bool(session.pop("saved_anim", False)),
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
                 a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete, missing_fields=missing_fields,

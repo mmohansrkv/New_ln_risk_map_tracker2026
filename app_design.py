@@ -612,9 +612,14 @@ def book():
                 _book = b
     return _book
 
+_ws_cache = {}
 def ws_of(name):
-    """Get a worksheet, with retry on transient/rate-limit errors."""
-    return _with_retry(book().worksheet, name)
+    """Get a worksheet, with retry on transient/rate-limit errors. Update157: the worksheet object is cached - every call used to cost one extra
+    Google Sheets API read, which under load hit the quota and made saves fail with 'could not be saved'."""
+    w = _ws_cache.get(name)
+    if w is None:
+        w = _with_retry(book().worksheet, name); _ws_cache[name] = w
+    return w
 
 # Short-lived cache for reads: cuts repeated-page-load API calls under
 # concurrent traffic. Any write (see invalidate_cache) clears the relevant
@@ -1004,11 +1009,21 @@ def live_rows_of(sid):
     """Update103: current sheet row numbers of one submission, read live (cached row numbers can be stale after another Add/Delete)."""
     return [r["_row"] for r in _fetch_rows("Productivity log") if str(r["Submission ID"]) == str(sid)]
 
+def norm_date(v):
+    """Update157: one canonical YYYY-MM-DD for any date text found in the sheet (a hand-edited / auto-formatted cell such as 8/10/2026, 08-10-2026 or
+    2026-10-08 00:00:00 used to hide a submitted entry, so the day still showed as missed)."""
+    t = str(v or "").strip()
+    if not t: return ""
+    for f, n in (("%Y-%m-%d", 10), ("%d/%m/%Y", 10), ("%d-%m-%Y", 10), ("%d.%m.%Y", 10), ("%d %b %Y", 11), ("%d %B %Y", 20)):
+        try: return dt.datetime.strptime(t[:n].strip() if f in ("%Y-%m-%d",) else t.split(" 00:00")[0].strip(), f).strftime("%Y-%m-%d")
+        except ValueError: continue
+    return t
+
 def duplicate_entry(emp_id, date, skip_sid=None, fresh=False):
     """Update96: reads just the Productivity log (live from the sheet when fresh=True) instead of building every employee's submissions."""
     recs = _fetch_rows("Productivity log") if fresh else rows("Productivity log")
     k = _key(emp_id)
-    return any(_key(r["Employee ID"]) == k and str(r["Date"]) == str(date) and str(r["Submission ID"]) != str(skip_sid) for r in recs)
+    return any(_key(r["Employee ID"]) == k and norm_date(r["Date"]) == norm_date(date) and str(r["Submission ID"]) != str(skip_sid) for r in recs)
 
 def write_sub(sid, date, emp, procs, notes):
     if is_view_only(emp[1]): raise PermissionError("View Only designation: productivity entry is not allowed")      # Update105
@@ -1019,10 +1034,10 @@ def write_sub(sid, date, emp, procs, notes):
     out = [base + ["Process", n, h, c, now, d, tgts[i], dpct] for i, (n, h, c, d) in enumerate(procs)] + \
           [base + ["Note", t, h, "", now, "", "", dpct] for t, h in notes]
     last = None
-    for attempt in range(3):          # Update96: retry a failed write, but first check the rows did not already land (no duplicates, no loss)
+    for attempt in range(5):          # Update96: retry a failed write (Update157: 5 tries, longer waits - the Sheets quota resets within a minute), but first check the rows did not already land (no duplicates, no loss)
         try:
             if attempt:
-                time.sleep(0.8 * attempt)
+                time.sleep(2.0 * attempt)
                 if any(str(r["Submission ID"]) == str(sid) for r in _fetch_rows("Productivity log")):
                     invalidate_cache("Productivity log"); return
             ws_of("Productivity log").append_rows(out, value_input_option="RAW"); invalidate_cache("Productivity log"); return
@@ -4544,8 +4559,8 @@ def employee_home():
                emp_id=session["emp_id"], emp_name=session["name"],
                procs=[{}], notes=[{}])
     body, ctx = form_page(sub, "/employee/save", "Daily productivity entry")
-    all_mine = [s for s in load_subs(session["emp_id"]) if s["emp_id"] == session["emp_id"]]
-    mine = [s for s in all_mine if s["date"] == today]
+    all_mine = [s for s in load_subs(session["emp_id"]) if _key(s["emp_id"]) == _key(session["emp_id"])]
+    mine = [s for s in all_mine if norm_date(s["date"]) == today]
     first = today_local().replace(day=1)
     lv = rows("Leave"); t0 = today_local()
     k = report([my_emp()], all_mine, lv, first, t0)[0]
@@ -4636,17 +4651,25 @@ def _save_lock(key):
 def employee_save():
     if is_view_only(session.get("emp_id", "")):                  # Update105
         flash(VIEW_ONLY_MSG, "error"); return redirect("/employee")
+    sid_new = None
     try:
         date, procs, notes, err = parse_form(session["emp_id"])
         if err:
             flash(err, "error"); return redirect("/employee")
+        sid_new = uuid.uuid4().hex[:10]
         with _save_lock((session["emp_id"], date)):          # Update96: a double click / second tab cannot save the same day twice
             if duplicate_entry(session["emp_id"], date, fresh=True):
                 flash(f"You have already submitted an entry for {date}. Edit the existing entry instead of submitting the same date again.", "error")
                 return redirect("/employee")
-            write_sub(uuid.uuid4().hex[:10], date, (session["band"], session["emp_id"], session["name"]), procs, notes)
+            write_sub(sid_new, date, (session["band"], session["emp_id"], session["name"]), procs, notes)
     except Exception as ex:
         import traceback; traceback.print_exc()
+        landed = False
+        try: landed = any(str(r["Submission ID"]) == str(sid_new) for r in _fetch_rows("Productivity log"))      # Update157: the rows may have been written even though the reply failed
+        except Exception: pass
+        if landed:
+            invalidate_cache("Productivity log"); session["saved_anim"] = True; flash("Saved.")
+            return redirect("/employee")
         flash("Your entry could not be saved right now (the data service is busy). Nothing was lost - please wait a few seconds and press Save again.", "error")
         return redirect("/employee")
     # ---- the data is saved from here on: nothing below may turn a successful save into an error page ----
@@ -4886,11 +4909,11 @@ def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
     jd = join_date(eid)
     if jd and start < jd: start = jd                  # Update97: dates before the joining date are never "missed" / "pending"
     leaves = live_leaves(leaves)
-    done = {s["date"] for s in subs if str(s["emp_id"]) == eid} | \
-           {l["Date"] for l in leaves if str(l["Employee ID"]) == eid and not leave_is_half(l)}      # a half-day leave still needs an entry (4 hrs)
+    done = {norm_date(s["date"]) for s in subs if _key(s["emp_id"]) == _key(eid)} | \
+           {norm_date(l["Date"]) for l in leaves if _key(l["Employee ID"]) == _key(eid) and not leave_is_half(l)}      # a half-day leave still needs an entry (4 hrs)
     out, d = [], start
     while d <= end:
-        if not is_off(d) and str(d) not in done:
+        if not is_off(d) and str(d) not in done:      # d is a date -> "YYYY-MM-DD"
             out.append(d.strftime(fmt))
         d += dt.timedelta(days=1)
     return out

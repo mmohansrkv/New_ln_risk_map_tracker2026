@@ -2373,9 +2373,16 @@ function poll(){fetch('/employee/mahizhchi/winners',{credentials:'same-origin',c
  try{sessionStorage.setItem(K,JSON.stringify(seen))}catch(e){}}).catch(function(){})}
 poll();setInterval(poll,10000)})();</script>
 <script>(function(){function p(){fetch('/employee/ping',{credentials:'same-origin',cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();</script><script>(function(){if(!window.fetch)return;var W=location.pathname==='/employee/welcome',last=null,D=null;
-function post(e,v,t0,n,r){var body=JSON.stringify({e:e,v:v||'',ago:Date.now()-t0,r:r||''});
- fetch('/employee/track',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:body,keepalive:true})
- .then(function(x){if(!x.ok&&n<40)throw 0}).catch(function(){if(n<40)setTimeout(function(){post(e,v,t0,n+1,r)},5000)})}
+var QK='wtq',busy=0;
+function qget(){try{return JSON.parse(localStorage.getItem(QK)||'[]')}catch(x){return[]}}
+function qset(a){try{localStorage.setItem(QK,JSON.stringify(a.slice(-300)))}catch(x){}}
+function send(it,ok,bad){fetch('/employee/track',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({e:it.e,v:it.v,ago:Date.now()-it.t0,r:it.r}),keepalive:true})
+ .then(function(x){(x.ok&&!x.redirected)?ok():bad()}).catch(bad)}
+/* Update156: an event that could not be delivered (signed out while the PC was locked, offline, server busy) is kept in the browser and resent IN ORDER, still stamped with its real time */
+function post(e,v,t0,n,r){var it={e:e,v:v||'',t0:t0,r:r||''};send(it,function(){},function(){var q=qget();q.push(it);qset(q)})}
+function flush(){var q=qget();if(!q.length||busy)return;busy=1;qset([]);
+ (function nxt(i){if(i>=q.length){busy=0;return}send(q[i],function(){nxt(i+1)},function(){var z=qget();qset(q.slice(i).concat(z));busy=0})})(0)}
+flush();setInterval(flush,20000);
 function begin(){var c;try{D=new IdleDetector();c=new AbortController()}catch(x){post('support','no',Date.now(),0);return}
  var pu=null;function sync(){var s=D.screenState,u=D.userState;if(s&&s!==last){last=s;post(s,'',Date.now(),0,s==='locked'&&pu?(pu==='idle'?'Automatic lock':'Manual lock'):'')}pu=u}
  D.addEventListener('change',sync);
@@ -4355,11 +4362,11 @@ WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Work Time <small class=
 <p class="mut" style="margin:0 0 10px">Required = {{req}} of active (unlocked) time in a 9-hour day; allowed breaks = {{brk_allowed}} (30 min lunch + 30 min other).
 Break time = the time the computer was locked. Total working time = system-on time &minus; break time.</p>
 <p style="margin:0 0 10px"><b>{{n_ok}}</b> completed &middot; <b>{{n_short}}</b> short / in progress &middot; <b>{{n_none}}</b> no login{% if n_notrack %} &middot; <b style="color:#b45309">{{n_notrack}}</b> without lock tracking{% endif %}</p>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last screen OFF (lock)</th><th>Last screen ON (unlock)</th><th>Break duration</th><th>Screen OFF count (locks)</th><th>Screen ON count (unlocks)</th><th>Screen OFF / ON events</th><th>System lock / unlock events</th><th>Login / Logoff events</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
-{% for r in rows %}<tr><td><a href="/admin/work-time/events?date={{d}}&emp={{r.eid|urlencode}}">{{r.eid}}</a></td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.last_lock or '-'}}</td><td>{{r.last_unlock or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td>{{r.on_n}}</td><td>{{r.a_scr}}</td><td>{{r.a_lock}}</td><td>{{r.a_log}}</td><td><b>{{r.work or '-'}}</b></td>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last screen OFF (lock)</th><th>Last screen ON (unlock)</th><th>Break duration</th><th>Screen OFF count (locks)</th><th>Screen ON count (unlocks)</th><th>Screen OFF / ON events</th><th>Manual lock / unlock (Win+L)</th><th>Automatic lock / unlock</th><th>Undetected lock / unlock</th><th>Login / Logoff events</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
+{% for r in rows %}<tr><td><a href="/admin/work-time/events?date={{d}}&emp={{r.eid|urlencode}}">{{r.eid}}</a></td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.last_lock or '-'}}</td><td>{{r.last_unlock or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td>{{r.on_n}}</td><td>{{r.a_scr}}</td><td>{{r.a_lm}}</td><td>{{r.a_la}}</td><td>{{r.a_lu}}</td><td>{{r.a_log}}</td><td><b>{{r.work or '-'}}</b></td>
 <td><span style="padding:2px 8px;border-radius:10px;font-size:12px;white-space:nowrap;{% if r.tone=='ok' %}background:#dcfce7;color:#166534{% elif r.tone=='warn' %}background:#fef3c7;color:#92400e{% elif r.tone=='bad' %}background:#fee2e2;color:#991b1b{% else %}background:#eef0f6;color:#5b6280{% endif %}">{{r.status}}</span>{% if r.state=='Locked' %} <small class="mut">&#128274; locked now</small>{% endif %}</td>
 <td>{{r.lt}}</td></tr>
-{% if r.events %}<tr><td colspan="16" style="padding:0 0 8px 28px;background:#f8f9ff"><details><summary class="mut" style="cursor:pointer;padding:6px 0">&#128274; Screen OFF {{r.events|length}} time(s) &middot; Screen ON {{r.on_n}} time(s) &middot; total {{r.lock_total}} &mdash; click to view</summary>
+{% if r.events %}<tr><td colspan="18" style="padding:0 0 8px 28px;background:#f8f9ff"><details><summary class="mut" style="cursor:pointer;padding:6px 0">&#128274; Screen OFF {{r.events|length}} time(s) &middot; Screen ON {{r.on_n}} time(s) &middot; total {{r.lock_total}} &mdash; click to view</summary>
 <table style="margin:4px 0 6px"><tr><th>Lock #</th><th>Screen OFF (locked) at</th><th>Screen ON (unlocked) at</th><th>Lock duration</th><th>Reason</th><th>Source</th></tr>
 {% for e in r.events %}<tr><td>{{e.n}}</td><td>{{e.start}}</td><td>{{e.end or 'still locked / off'}}</td><td>{{e.dur}}</td><td>{{e.reason}}</td><td>{{e.src}}</td></tr>{% endfor %}</table></details></td></tr>{% endif %}
 {% endfor %}</table></div></div>
@@ -4395,7 +4402,7 @@ def admin_work_time():
         r_["events"] = evs_by.get(_key(r_["eid"]), [])
         r_["lock_total"] = _hms(sum(e_["sec"] for e_ in r_["events"]))
         c_ = act_c.get(_key(r_["eid"]), {})                  # Update156
-        r_["a_scr"] = f'{c_.get("Screen OFF", 0)} / {c_.get("Screen ON", 0)}'; r_["a_lock"] = f'{c_.get("System Locked", 0)} / {c_.get("System Unlocked", 0)}'; r_["a_log"] = f'{c_.get("Login", 0)} / {c_.get("Logoff", 0)}'
+        r_["a_scr"] = f'{c_.get("Screen OFF", 0)} / {c_.get("Screen ON", 0)}'; r_["a_lm"] = f'{c_.get("Manual lock", 0)} / {c_.get("Manual unlock", 0)}'; r_["a_la"] = f'{c_.get("Automatic lock", 0)} / {c_.get("Automatic unlock", 0)}'; r_["a_lu"] = f'{c_.get("Undetected lock", 0)} / {c_.get("Undetected unlock", 0)}'; r_["a_log"] = f'{c_.get("Login", 0)} / {c_.get("Logoff", 0)}'
         r_["on_n"] = sum(1 for e_ in r_["events"] if e_["end"])          # Update154: times the screen came back ON (unlocked) that day
     return page(WT_ADMIN, title="Work Time", back=request.full_path.rstrip("?"), unshared=[e for e in rows("Employees") if _key(e["Employee ID"]) not in wts_ids()], n_shared=len(wts_ids()), n_total=len(rows("Employees")), d=d, today=str(today_local()), rows=data, live=(d == str(today_local())),
                 req=_hms(WT_REQUIRED_SEC), brk_allowed=_hms(WT_ALLOWED_BREAK_SEC),
@@ -4417,11 +4424,18 @@ ACT_PAGE = """<div class="card"><h2 style="margin-top:0">Activity Log <small cla
 {% for c in counts %}<tr><td>{{c.eid}}</td><td>{{c.name}}</td><td>{{c.n['Screen OFF']}}</td><td>{{c.n['Screen ON']}}</td><td>{{c.n['System Locked']}}</td><td>{{c.n['System Unlocked']}}</td><td>{{c.n['Login']}}</td><td>{{c.n['Logoff']}}</td><td><b>{{c.total}}</b></td></tr>
 {% else %}<tr><td colspan="9">No events recorded for this day.</td></tr>{% endfor %}
 {% if counts %}<tr><td colspan="2"><b>All employees</b></td>{% for t in types %}<td><b>{{grand[t]}}</b></td>{% endfor %}<td><b>{{grand_total}}</b></td></tr>{% endif %}</table></div>
+<h3 style="margin:14px 0 8px">Manual / automatic split per employee</h3>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th>{% for k in kinds %}<th>{{k}}</th>{% endfor %}</tr>
+{% for c in counts %}<tr><td>{{c.eid}}</td><td>{{c.name}}</td>{% for k in kinds %}<td>{{c.k[k]}}</td>{% endfor %}</tr>{% endfor %}
+{% if counts %}<tr><td colspan="2"><b>All employees</b></td>{% for k in kinds %}<td><b>{{gk[k]}}</b></td>{% endfor %}</tr>{% endif %}</table></div>
+<p class="mut" style="margin:6px 0 0">Manual lock = Win+L (user was active just before). Automatic lock = locked by inactivity / policy. Undetected = reported by a browser, which cannot tell the reason (install the agent for exact reasons). Logins: a Login is Manual when the employee typed the password; Logoff is Automatic when the system ended the session.</p>
 <h3 style="margin:14px 0 8px">All events ({{evs|length}})</h3>
-<div style="overflow-x:auto"><table><tr><th>Employee ID</th><th>Employee Name</th><th>Event Type</th><th>Date</th><th>Time</th><th>Source</th><th>Details</th></tr>
-{% for e in evs %}<tr><td>{{e.eid}}</td><td>{{e.name}}</td><td><b>{{e.type}}</b></td><td>{{e.date}}</td><td>{{e.time}}</td><td>{{e.src}}</td><td>{{e.det}}</td></tr>
-{% else %}<tr><td colspan="7">No events recorded.</td></tr>{% endfor %}</table></div></div>
+<div style="overflow-x:auto"><table><tr><th>Employee ID</th><th>Employee Name</th><th>Event Type</th><th>Date</th><th>Time</th><th>Count (Nth of its kind today)</th><th>Source</th><th>Details</th></tr>
+{% for e in evs %}<tr><td>{{e.eid}}</td><td>{{e.name}}</td><td><b>{{e.type}}</b></td><td>{{e.date}}</td><td>{{e.time}}</td><td>{{e.kind}} #{{e.nth}}</td><td>{{e.src}}</td><td>{{e.det}}</td></tr>
+{% else %}<tr><td colspan="8">No events recorded.</td></tr>{% endfor %}</table></div></div>
 {% if live %}<script>setTimeout(function(){location.reload()},30000)</script>{% endif %}"""
+
+KINDS = ["Manual lock", "Manual unlock", "Automatic lock", "Automatic unlock", "Undetected lock", "Undetected unlock", "Screen OFF", "Screen ON", "Manual login", "Automatic login", "Manual logoff", "Automatic logoff"]
 
 def _act_events(d, emp="", typ=""):
     out = []
@@ -4429,15 +4443,29 @@ def _act_events(d, emp="", typ=""):
     for r in sorted(rows(ACT_SHEET), key=lambda x: _fl(x.get("Epoch"))):
         if str(r.get("Date")) != d or _key(r.get("Employee ID", "")) not in shared: continue
         if (emp and str(r.get("Employee ID")) != emp) or (typ and str(r.get("Event type")) != typ): continue
-        out.append(dict(eid=str(r.get("Employee ID", "")), name=str(r.get("Employee name", "")), type=str(r.get("Event type", "")), date=str(r.get("Date", "")),
-                        time=str(r.get("Time", "")), src=str(r.get("Source", "")), det=str(r.get("Details", ""))))
+        e = dict(eid=str(r.get("Employee ID", "")), name=str(r.get("Employee name", "")), type=str(r.get("Event type", "")), date=str(r.get("Date", "")),
+                 time=str(r.get("Time", "")), src=str(r.get("Source", "")), det=str(r.get("Details", "")))
+        e["kind"] = _act_kind(e)
+        out.append(e)
     return out
+
+def _act_kind(e):
+    """Counting group: Manual lock / Manual unlock (Win+L), Automatic lock / unlock, Undetected lock / unlock, Screen OFF / ON, Login, Logoff."""
+    t, d = e["type"], e["det"]
+    if t in ("System Locked", "System Unlocked"):
+        w = "Manual" if d.startswith("Manual") else "Automatic" if d.startswith("Automatic") else "Undetected"
+        return f"{w} " + ("lock" if t == "System Locked" else "unlock")
+    if t in ("Login", "Logoff"):
+        w = "Automatic" if d.startswith("Automatic") else "Manual"
+        return f"{w} {t.lower()}"
+    return t
 
 def _act_counts(d):
     """{EMPLOYEE KEY: {event type: count}} for one date (shared employees only)."""
     out = {}
     for e in _act_events(d):
-        out.setdefault(_key(e["eid"]), {}).setdefault(e["type"], 0); out[_key(e["eid"])][e["type"]] += 1
+        o = out.setdefault(_key(e["eid"]), {})
+        for k in (e["type"], e["kind"]): o[k] = o.get(k, 0) + 1
     return out
 
 @app.route("/admin/work-time/activity")
@@ -4446,24 +4474,31 @@ def admin_work_time_activity():
     prefetch(ACT_SHEET, "Employees")
     d = _wt_date_arg(); emp = request.args.get("emp", "").strip(); typ = request.args.get("type", "").strip()
     typ = typ if typ in ACT_TYPES else ""
-    evs = _act_events(d, emp, typ); allev = _act_events(d, emp)
+    allev = _act_events(d, emp); seen = {}
+    for e in allev:                                                # running count: Nth event of its kind for this employee on this day
+        k = (e["eid"], e["kind"]); seen[k] = seen.get(k, 0) + 1; e["nth"] = seen[k]
+    evs = [e for e in allev if not typ or e["type"] == typ]
     by = {}
     for e in allev:
-        c = by.setdefault(e["eid"], dict(eid=e["eid"], name=e["name"], n={t: 0 for t in ACT_TYPES}, total=0)); c["n"][e["type"]] = c["n"].get(e["type"], 0) + 1; c["total"] += 1
+        c = by.setdefault(e["eid"], dict(eid=e["eid"], name=e["name"], n={t: 0 for t in ACT_TYPES}, k={}, total=0)); c["n"][e["type"]] = c["n"].get(e["type"], 0) + 1; c["k"][e["kind"]] = c["k"].get(e["kind"], 0) + 1; c["total"] += 1
     counts = sorted(by.values(), key=lambda c: c["eid"])
     grand = {t: sum(c["n"][t] for c in counts) for t in ACT_TYPES}
+    for c in counts: c["k"] = {k: c["k"].get(k, 0) for k in KINDS}
+    gk = {k: sum(c["k"][k] for c in counts) for k in KINDS}
     emps = [dict(eid=str(e["Employee ID"]), name=str(e.get("Name", ""))) for e in rows("Employees") if _key(e["Employee ID"]) in wts_ids()]
     FIX = {"Not allowed yet": "Employee must click Allow on the browser's idle-detection prompt (or install the agent).", "Blocked in browser": "Permission was blocked: reset the site's permissions in the browser, or install the agent.",
            "Unsupported browser": "Use Chrome / Edge, or install the agent.", "HTTPS required": "Open the app over https://, or install the agent.", "Agent needed": "Install the Windows agent (Work Time > Lock-Tracking Agent).", "-": "Install the Windows agent (Work Time > Lock-Tracking Agent)."}
     notrack = [dict(eid=r["eid"], name=r["name"], lt=r["lt"], fix=FIX.get(r["lt"], "Install the Windows agent.")) for r in _wt_report(d) if r["state"] != "No login" and r["lt"] not in ("Active", "Active (agent)")] if d == str(today_local()) else []
-    return page(ACT_PAGE, title="Activity Log", notrack=notrack, d=d, today=str(today_local()), emp=emp, typ=typ, emps=emps, types=ACT_TYPES, evs=evs, counts=counts, grand=grand, grand_total=sum(grand.values()), live=(d == str(today_local())))
+    return page(ACT_PAGE, title="Activity Log", notrack=notrack, d=d, today=str(today_local()), emp=emp, typ=typ, emps=emps, types=ACT_TYPES, evs=evs, counts=counts, grand=grand, grand_total=sum(grand.values()), kinds=KINDS, gk=gk, live=(d == str(today_local())))
 
 @app.route("/admin/work-time/activity/export")
 @need("admin")
 def admin_work_time_activity_export():
     d = _wt_date_arg(); emp = request.args.get("emp", "").strip(); typ = request.args.get("type", "").strip()
-    buf = io.StringIO(); w = csv.writer(buf); w.writerow(["Employee ID", "Employee Name", "Event Type", "Date", "Time", "Source", "Details"])
-    for e in _act_events(d, emp, typ if typ in ACT_TYPES else ""): w.writerow([e["eid"], e["name"], e["type"], e["date"], e["time"], e["src"], e["det"]])
+    buf = io.StringIO(); w = csv.writer(buf); w.writerow(["Employee ID", "Employee Name", "Event Type", "Date", "Time", "Kind", "Count (Nth of its kind that day)", "Source", "Details"]); seen = {}
+    for e in _act_events(d, emp):
+        k = (e["eid"], e["kind"]); seen[k] = seen.get(k, 0) + 1
+        if not typ or e["type"] == typ: w.writerow([e["eid"], e["name"], e["type"], e["date"], e["time"], e["kind"], seen[k], e["src"], e["det"]])
     resp = Response("\ufeff" + buf.getvalue(), mimetype="text/csv"); resp.headers["Content-Disposition"] = f"attachment; filename=activity_log_{d}.csv"
     return resp
 

@@ -63,6 +63,8 @@ Access rules (Update59):
     e-mail design (MAIL_NOTE_HTML = preview.html), selects the recipients (All Employees or only the ticked ones) and the DATE & TIME to send; a background job sends it automatically (checked every 30 s),
     or the Admin sends it immediately. A scheduled mail can be edited / cancelled. Sheets: "Mail Notes" and "Mail Notes Log" (employee name, e-mail, subject, e-mail sent date & time, status). Admin only.
   * Update154: one-day screen OFF / ON counts - the daily Work Time table has "Screen OFF count (locks)" and "Screen ON count (unlocks)" per employee, and the event list / events page shows both counts for the day.
+  * Update158: the big attendance card is gone - the left-side Calendar on the Employee pages is now "My Attendance": the title "\U0001F4C5 My Attendance \u00b7 <Month Year>", Present / Absent / Leave counts for the shown month, and every date coloured (green Present, red Absent, blue Leave / Half day, grey weekly off / holiday).
+    Rebuilt from the Attendance, Productivity log and Leave sheets on every page load, so it updates automatically and is there as soon as the employee logs in. Present = a login or a productivity entry that day.
   * Update157: (1) Employee page: new "My Attendance" calendar (month grid, previous / next month) - Present (green), Absent (red), Leave / Half day (blue), weekly off / holiday (grey); Present = login recorded or entry submitted. (2) Admin > Work Time: clicking an employee (Emp ID or Name) opens
     /admin/work-time/employee/<id> - that day's login / logout, system-on, break, working time, status, every login session, every lock / screen-off event, the activity log and the month day-wise table, with previous / next day.
   * Update156: Activity Log - EVERY screen / system event is now saved as its own row (Employee ID, Name, Event Type, Date, Time, Source, Details) in the new Google Sheet "Activity Log" and listed in
@@ -2308,6 +2310,17 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .cal-g span{padding:3px 0;border-radius:6px;font-size:10.5px;line-height:1.2}
 .cal-g .w{color:#7f89b8;font-size:9.5px}.cal-g .o{color:#5d6794}.cal-g .e{color:#aab3e0}
 .cal-g .t{background:linear-gradient(180deg,#6d70f5,#4f46e5);color:#fff;font-weight:700;box-shadow:0 2px 0 #3730a3,0 0 10px #6d70f588}
+.cal-at{margin:6px 0 2px;padding:5px 6px;border-radius:7px;background:#4f46e533;color:#fff;font-size:11px;font-weight:700;line-height:1.3;text-align:center}
+.cal-ct{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin:4px 0 2px;font-size:10px;color:#c9d0ee}
+.cal-ct b.cp{color:#4ade80}.cal-ct b.ca{color:#f87171}.cal-ct b.cl{color:#60a5fa}
+.cal-g .p{background:#16a34a40;color:#bbf7d0;box-shadow:inset 0 0 0 1px #22c55e99;font-weight:600}
+.cal-g .a{background:#dc262640;color:#fecaca;box-shadow:inset 0 0 0 1px #f87171aa;font-weight:600}
+.cal-g .l{background:#2563eb40;color:#bfdbfe;box-shadow:inset 0 0 0 1px #60a5facc;font-weight:600}
+.cal-g .f{color:#6b749f;background:#ffffff0d}
+.cal-g .t.sp{box-shadow:0 2px 0 #3730a3,0 0 0 2px #4ade80}.cal-g .t.sa{box-shadow:0 2px 0 #3730a3,0 0 0 2px #f87171}.cal-g .t.sl{box-shadow:0 2px 0 #3730a3,0 0 0 2px #60a5fa}
+.cal-lg{display:flex;justify-content:center;gap:6px;flex-wrap:wrap;margin:6px 0 0;font-size:9.5px;color:#9aa3c7}
+.cal-lg i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:3px;vertical-align:-1px}
+.cal-lg .lp{background:#22c55e}.cal-lg .la{background:#f87171}.cal-lg .ll{background:#60a5fa}.cal-lg .lo{background:#6b749f}
 .cal-today{display:block;width:100%;margin:6px 0 0;padding:3px 0;border:0;border-radius:6px;background:#2b3560;color:#fff;font-size:10.5px;box-shadow:none;cursor:pointer}
 .cal-today:hover{background:#4f46e5;transform:none}
 @media print{.cal{display:none!important}}
@@ -2360,23 +2373,31 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 <div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
-<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
+<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-at" id="cal_at" hidden>&#128197; My Attendance &middot; <span id="cal_my"></span></div><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-lg" id="cal_lg" hidden><span><i class="lp"></i>Present</span><span><i class="la"></i>Absent</span><span><i class="ll"></i>Leave</span><span><i class="lo"></i>Off</span></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
 <div class="prof{{' prof-emp' if session.role=='employee' else ''}}"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
 <main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></main></div>
 {% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}<div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></div>{% endif %}
+{% if att_json %}<script>window.ATT={{att_json|safe}};</script>{% endif %}
 {% if session.role and not bare %}<script>
 (function(){var g=document.getElementById('cal_g');if(!g)return;var d=document.getElementById('cal');
 var M=['January','February','March','April','May','June','July','August','September','October','November','December'],W=['S','M','T','W','T','F','S'];
 var now=new Date(),y=now.getFullYear(),m=now.getMonth();
-if(window.matchMedia&&window.matchMedia('(min-width:801px)').matches)d.open=true;
+var A=window.ATT||null,FM=['January','February','March','April','May','June','July','August','September','October','November','December'];
+if((window.matchMedia&&window.matchMedia('(min-width:801px)').matches)||A)d.open=true;
+function z(n){return(n<10?'0':'')+n}
 function draw(){var h='',i,first=new Date(y,m,1).getDay(),n=new Date(y,m+1,0).getDate(),pn=new Date(y,m,0).getDate();
 document.getElementById('cal_t').textContent=M[m].slice(0,3)+' '+y;
+var np=0,na=0,nl=0;
 for(i=0;i<7;i++)h+='<span class="w">'+W[i]+'</span>';
 for(i=first-1;i>=0;i--)h+='<span class="o">'+(pn-i)+'</span>';
-for(i=1;i<=n;i++){var t=(i===now.getDate()&&m===now.getMonth()&&y===now.getFullYear());h+='<span class="'+(t?'t':'e')+'"'+(t?' aria-current="date"':'')+'>'+i+'</span>'}
-var tail=(7-(first+n)%7)%7;for(i=1;i<=tail;i++)h+='<span class="o">'+i+'</span>';g.innerHTML=h}
+for(i=1;i<=n;i++){var t=(i===now.getDate()&&m===now.getMonth()&&y===now.getFullYear()),k=y+'-'+z(m+1)+'-'+z(i),st=A?A[k]:'',c=t?'t':'e',tt='';
+if(st==='P'){c+=t?' sp':' p';np++;tt='Present'}else if(st==='A'){c+=t?' sa':' a';na++;tt='Absent'}else if(st==='L'){c+=t?' sl':' l';nl++;tt='Leave'}else if(st==='H'){c+=t?' sl':' l';nl+=.5;np+=.5;tt='Half day'}else if(st==='O'){c+=t?'':' f';tt='Weekly off / Holiday'}else if(t&&A){tt='Today'}
+h+='<span class="'+c+'"'+(t?' aria-current="date"':'')+(tt?' title="'+i+' '+M[m].slice(0,3)+': '+tt+'"':'')+'>'+i+'</span>'}
+var tail=(7-(first+n)%7)%7;for(i=1;i<=tail;i++)h+='<span class="o">'+i+'</span>';g.innerHTML=h;
+if(A){document.getElementById('cal_my').textContent=FM[m]+' '+y;document.getElementById('cal_at').hidden=false;document.getElementById('cal_lg').hidden=false;
+var ct=document.getElementById('cal_ct');ct.hidden=false;ct.innerHTML='<span><b class="cp">'+np+'</b> Present</span><span><b class="ca">'+na+'</b> Absent</span><span><b class="cl">'+nl+'</b> Leave</span>'}}
 document.getElementById('cal_p').onclick=function(){m--;if(m<0){m=11;y--}draw()};
 document.getElementById('cal_n').onclick=function(){m++;if(m>11){m=0;y++}draw()};
 document.getElementById('cal_td').onclick=function(){now=new Date();y=now.getFullYear();m=now.getMonth();draw()};
@@ -2689,8 +2710,14 @@ def page(body, title="Productivity Tracker", **ctx):
         except Exception:
             _g = ""
         side_avatar = render_fast(AVATAR3D, gender=_g, initials=initials_of(session.get("name", "")))
+    att_json = ""                                              # Update158: attendance for the sidebar calendar (employees only)
+    if session.get("role") == "employee" and not ctx.get("bare"):
+        try:
+            import json as _json
+            att_json = _json.dumps(employee_att_map(session.get("emp_id", "")), separators=(",", ":"))
+        except Exception as ex: print("attendance calendar error:", repr(ex))
     return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar, bare=bool(ctx.get("bare")))
+                                  side_avatar=side_avatar, bare=bool(ctx.get("bare")), att_json=att_json)
 
 
 LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></div>
@@ -4612,62 +4639,31 @@ def admin_work_time_export():
 def admin_online_poll():
     return jsonify(items=online_list())
 
-# ---------------------------------------------------------------- Update157: Employee page - attendance calendar (Present / Absent per date)
-EMP_CAL = """{% if cal %}<div class="card" id="cal" style="margin-top:14px"><div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-<h2 style="margin:0">&#128197; My Attendance &middot; {{cal.label}}</h2>
-<div><a class="btnl" href="?cal={{cal.prev}}#cal">&larr;</a> {% if cal.cur %}<a class="btnl" href="?#cal">This month</a>{% else %}<a class="btnl" href="?#cal">This month</a>{% endif %} {% if cal.next %}<a class="btnl" href="?cal={{cal.next}}#cal">&rarr;</a>{% endif %}</div></div>
-<div style="display:flex;gap:14px;flex-wrap:wrap;margin:10px 0;font-size:13px">
-<span><b style="color:#15803d">{{cal.n_present}}</b> Present</span><span><b style="color:#b91c1c">{{cal.n_absent}}</b> Absent</span><span><b style="color:#1d4ed8">{{cal.n_leave}}</b> Leave</span></div>
-<table style="width:100%;table-layout:fixed;border-collapse:separate;border-spacing:5px;text-align:center"><tr>{% for w in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}<th style="font-size:12px;padding:2px">{{w}}</th>{% endfor %}</tr>
-{% for wk in cal.weeks %}<tr>{% for c in wk %}{% if c %}<td title="{{c.title}}" style="border-radius:10px;padding:6px 2px;height:54px;vertical-align:top;background:{{c.bg}};color:{{c.fg}};border:{{'2px solid #4f46e5' if c.today else '1px solid ' ~ c.bd}}">
-<div style="font-size:13px;font-weight:bold">{{c.day}}</div><div style="font-size:10px;margin-top:3px;font-weight:600">{{c.icon}} {{c.text}}</div></td>{% else %}<td></td>{% endif %}{% endfor %}</tr>{% endfor %}</table>
-<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:12px">
-<span><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#dcfce7;border:1px solid #16a34a"></i> &#10003; Present</span>
-<span><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#fee2e2;border:1px solid #dc2626"></i> &#10007; Absent</span>
-<span><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#dbeafe;border:1px solid #2563eb"></i> Leave / Half day</span>
-<span><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#f1f5f9;border:1px solid #cbd5e1"></i> Weekly off / Holiday</span></div>
-<p class="mut" style="margin:8px 0 0;font-size:12px">Present = you logged in or submitted a productivity entry that day. Absent = a working day with no login, no entry and no leave.</p></div>{% endif %}"""
-
-_CAL_STY = {"Present": ("#dcfce7", "#166534", "#16a34a", "\u2713"), "Absent": ("#fee2e2", "#991b1b", "#dc2626", "\u2717"), "Leave": ("#dbeafe", "#1e40af", "#2563eb", ""),
-            "Half day": ("#dbeafe", "#1e40af", "#2563eb", "\u00bd"), "Off": ("#f1f5f9", "#64748b", "#cbd5e1", ""), "Holiday": ("#f1f5f9", "#64748b", "#cbd5e1", ""),
-            "Pending": ("#fef9c3", "#854d0e", "#facc15", ""), "": ("transparent", "#94a3b8", "#e2e8f0", "")}
-
-def employee_calendar(eid, ym=""):
-    """Update157: month grid of this employee's attendance. Present = a login recorded in the Attendance sheet OR a productivity entry; Leave / Half day from approved leave;
-    Absent = a past working day with none of these; weekly offs and holidays are marked Off."""
-    today = today_local()
-    try: first = dt.datetime.strptime(ym, "%Y-%m").date().replace(day=1)
-    except ValueError: first = today.replace(day=1)
-    if first > today.replace(day=1): first = today.replace(day=1)
-    last = (first.replace(day=28) + dt.timedelta(days=4)); last = last - dt.timedelta(days=last.day)
-    k = _key(eid); jd = join_date(eid)
+# ---------------------------------------------------------------- Update158: sidebar Calendar = "My Attendance" (Present / Absent per date)
+def employee_att_map(eid, months=13):
+    """{ 'YYYY-MM-DD': 'P' | 'A' | 'L' | 'H' | 'O' } for the last `months` months up to today (re-built on every page load, so it is always current).
+    P = Present (a login in the Attendance sheet OR a productivity entry), A = Absent (past working day with no login / entry / leave),
+    L = full-day leave, H = half-day leave, O = weekly off / holiday. Today without any record yet, future days and dates before joining are left out."""
+    today = today_local(); k = _key(eid); jd = join_date(eid)
+    y, m = today.year, today.month - (months - 1)
+    while m < 1: m += 12; y -= 1
+    start = dt.date(y, m, 1)
+    if jd and jd > start: start = jd
     present = {_iso_date(r.get("Date")) for r in rows("Attendance") if _key(r.get("Employee ID", "")) == k}
     present |= {_iso_date(r.get("Date")) for r in rows("Productivity log") if _key(r.get("Employee ID", "")) == k}
     full, half = set(), set()
     for l in live_leaves([l for l in rows("Leave") if _key(l.get("Employee ID", "")) == k]):
         (half if leave_is_half(l) else full).add(_iso_date(l.get("Date")))
-    cells, counts = [], dict(Present=0, Absent=0, Leave=0)
-    for i in range((last - first).days + 1):
-        d = first + dt.timedelta(days=i); ds = str(d)
-        if jd and d < jd: st = ""
-        elif d > today: st = ""
-        elif ds in full: st = "Leave"
-        elif ds in half: st = "Half day"
-        elif is_off(ds): st = "Holiday" if is_holiday(ds) else "Off"
-        elif ds in present: st = "Present"
-        elif d == today: st = "Pending"
-        else: st = "Absent"
-        if st in counts: counts[st] += 1
-        elif st in ("Half day",): counts["Leave"] += 0.5; counts["Present"] += 0.5
-        bg, fg, bd, ic = _CAL_STY[st]
-        title = f"{d.strftime('%d %b %Y (%a)')}: {st or '-'}" + (f" - {holiday_name(ds)}" if st == "Holiday" and holiday_name(ds) else "")
-        cells.append(dict(day=d.day, text=st, icon=ic, bg=bg, fg=fg, bd=bd, today=(d == today), title=title))
-    cells = [None] * first.weekday() + cells
-    cells += [None] * (-len(cells) % 7)
-    _n = lambda v: int(v) if v == int(v) else v
-    prev = (first - dt.timedelta(days=1)).strftime("%Y-%m"); nxt = (last + dt.timedelta(days=1)).strftime("%Y-%m") if last < today else ""
-    return dict(label=first.strftime("%B %Y"), weeks=[cells[i:i + 7] for i in range(0, len(cells), 7)], prev=prev, next=nxt, cur=(first == today.replace(day=1)),
-                n_present=_n(counts["Present"]), n_absent=_n(counts["Absent"]), n_leave=_n(counts["Leave"]))
+    out, d = {}, start
+    while d <= today:
+        ds = str(d)
+        if ds in full: out[ds] = "L"
+        elif ds in half: out[ds] = "H"
+        elif is_off(ds): out[ds] = "O"
+        elif ds in present: out[ds] = "P"
+        elif d < today: out[ds] = "A"
+        d += dt.timedelta(days=1)
+    return out
 
 @app.route("/employee/welcome")
 @need("employee")
@@ -4687,10 +4683,8 @@ def employee_home():
     if desig_view_only(session["designation"]) or is_view_only(session["emp_id"]):      # Update105: View Only - no entry form, no Productivity %
         first_ = today_local().replace(day=1)
         today_perm_ = next((r for r in rows("Permissions") if str(r["Employee ID"]) == session["emp_id"] and r["Date"] == today), None)
-        return page(EMP_TOP + EMP_CAL + VIEW_ONLY_CARD, cal=cal_, title="Daily productivity", today=today, month_label=first_.strftime("%B %Y"),
+        return page(EMP_TOP + VIEW_ONLY_CARD, title="Daily productivity", today=today, month_label=first_.strftime("%B %Y"),
                     lab1="Attendance", lab2="Productivity", a1=None, a2=None, extra=[], today_perm=today_perm_)
-    try: cal_ = employee_calendar(session["emp_id"], request.args.get("cal", ""))        # Update157
-    except Exception as ex: print("calendar error:", repr(ex)); cal_ = None
     sub = dict(date=today, band=session["band"], designation=session["designation"],
                emp_id=session["emp_id"], emp_name=session["name"],
                procs=[{}], notes=[{}])
@@ -4710,8 +4704,8 @@ def employee_home():
     perm_used = permission_hours_used(session["emp_id"], today[:7])
     cut = str(t0 - dt.timedelta(days=6))
     tgt_miss = [m for s_ in all_mine if s_["date"] >= cut for m in sub_misses(s_)][:12]     # newest entries first
-    return page(EMP_MARQUEE + EMP_TOP + EMP_CAL + EMP_ALERT + EMP_TARGET + body + '<h2>Submitted today</h2>' + LIST + BLOOM + SAVED_ANIM,
-                title="Daily productivity", cal=cal_, missed=missed, subs=mine, tgt_miss=tgt_miss, bloom=bool(session.pop("bloom", False)),
+    return page(EMP_MARQUEE + EMP_TOP + EMP_ALERT + EMP_TARGET + body + '<h2>Submitted today</h2>' + LIST + BLOOM + SAVED_ANIM,
+                title="Daily productivity", missed=missed, subs=mine, tgt_miss=tgt_miss, bloom=bool(session.pop("bloom", False)),
                 saved_anim=bool(session.pop("saved_anim", False)),
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
                 a1=k["att"], a2=k["pct"], extra=extra, profile_incomplete=profile_incomplete, missing_fields=missing_fields,

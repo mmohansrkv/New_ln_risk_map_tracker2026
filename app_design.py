@@ -63,6 +63,10 @@ Access rules (Update59):
     e-mail design (MAIL_NOTE_HTML = preview.html), selects the recipients (All Employees or only the ticked ones) and the DATE & TIME to send; a background job sends it automatically (checked every 30 s),
     or the Admin sends it immediately. A scheduled mail can be edited / cancelled. Sheets: "Mail Notes" and "Mail Notes Log" (employee name, e-mail, subject, e-mail sent date & time, status). Admin only.
   * Update154: one-day screen OFF / ON counts - the daily Work Time table has "Screen OFF count (locks)" and "Screen ON count (unlocks)" per employee, and the event list / events page shows both counts for the day.
+  * Update156: Activity Log - EVERY screen / system event is now saved as its own row (Employee ID, Name, Event Type, Date, Time, Source, Details) in the new Google Sheet "Activity Log" and listed in
+    Admin > Work Time > "Activity Log" (filter by date / employee, per-employee counts of Screen OFF / ON, System Lock / Unlock and Login / Logoff, CSV download; the daily Work Time table shows the same counts).
+    Event types: Login, Logoff (manual or automatic), System Locked (Manual - Win+L / Automatic), System Unlocked, Screen OFF, Screen ON. Events are written by one ordered worker with retry (nothing is dropped on a Sheets error),
+    are never lost when the employee has no open Work Time session, and each is stored under the employee who owns the browser session / agent token. The Windows agent now also reports real display power OFF / ON.
   * Update155: Win+L lock / unlock not showing - hardening of the whole lock path. (1) The "Lock tracking" column now says WHY nothing is recorded: "Not allowed yet" (browser never allowed idle
     detection), "Blocked in browser", "Unsupported browser", "HTTPS required", "Agent needed" or "Active" / "Active (agent)". (2) The Windows agent sends a heartbeat every minute, so "Active (agent)"
     shows as soon as it runs (it used to show only after the first lock), and it writes lock_agent.log next to itself with the last result. (3) A lock / unlock sent while the employee has no open Work Time
@@ -227,7 +231,7 @@ Access rules (Update59):
     text stays readable. If the PNG is missing a soft gradient is used instead.
   * SECRET_KEY must not be the well-known default, otherwise session cookies could be forged.
 """
-import os, io, csv, uuid, hmac, time, random, threading, datetime as dt
+import os, io, csv, uuid, hmac, time, random, threading, queue as queue_mod, datetime as dt
 from functools import wraps
 import urllib.parse, re
 import gspread
@@ -345,6 +349,8 @@ HEADERS = {
     "Work Time": ["Date", "Employee ID", "Employee name", "Login time", "Logout time", "System-on time", "Break time", "Screen locks",
                   "Total working time", "Required", "Status", "Lock tracking", "Online sec", "Break sec", "Lock start", "Session start", "Last seen"],
     # Update133: one row per lock / screen-off event (start, end, duration, reason) - Admin report only
+    # Update156: one row per single event (Login, Logoff, System Locked, System Unlocked, Screen OFF, Screen ON) - Admin report only
+    "Activity Log": ["Date", "Time", "Employee ID", "Employee name", "Event type", "Source", "Details", "Epoch"],
     "Lock Events": ["Date", "Employee ID", "Employee name", "Start time", "End time", "Duration", "Reason", "Source", "Start epoch"],
     # Update138: which employees' Work Time is shared with the Admin - one row per shared employee (Shared = Yes)
     "Work Time Share": ["Employee ID", "Employee name", "Shared", "Updated at", "Updated by"],
@@ -1178,6 +1184,13 @@ def note_text(r):
     if v["kind"] == "change": return v["summary"]
     return f"{r['Employee name']} ({r['Employee ID']}) {str(r['Event']).lower()} at {t12(r['Time'])}"
 
+def _act_q_put_raw(vals):
+    global _act_q
+    with _act_lock:
+        if _act_q is None:
+            _act_q = queue_mod.Queue(); threading.Thread(target=_act_worker, daemon=True).start()
+        _act_q.put(dict(vals=vals))
+
 def _close_stale(emp_id, now):
     """Sessions from earlier days that never logged out (browser/computer closed, etc.)
     are marked so - the system closed these itself, so they're tagged as an automatic logout."""
@@ -1188,6 +1201,10 @@ def _close_stale(emp_id, now):
             r = r + [""] * 9
             if r[2] == emp_id and r[1] < str(now.date()) and not r[6].strip():
                 fixes.append({"range": f"G{i}:I{i}", "values": [["Not recorded", "", "Auto (Session left open)"]]})
+                try:                                           # Update156: that earlier session never logged off - keep a Logoff row for it (time unknown)
+                    d_ = dt.datetime.combine(dt.date.fromisoformat(r[1]), dt.time(23, 59, 59)).replace(tzinfo=TZ)
+                    _act_q_put_raw([r[1], "Not recorded", r[2], r[3], "Logoff", "App", "Automatic logoff (session left open - time not recorded)", int(d_.timestamp())])
+                except Exception as ex: print("stale logoff row error:", ex)
         if fixes: ws.batch_update(fixes, value_input_option="RAW")
 
 def _log_login(sid, emp_id, name, band, now):
@@ -1221,6 +1238,8 @@ def track_login(emp_id, name, band):
     session["last_seen"] = time.time()
     _bg(_log_login, session["att_id"], emp_id, name, band, now_local())
     online_set(session["att_id"], emp_id, name)
+    if session.get("role") == "employee":
+        activity_log(emp_id, name, "Login", None, "App", "Manual login")      # Update156
     if session.get("role") == "employee":                 # Update128: start the day's working-time clock (background; never slows login)
         try: session["wt_key"] = wt_begin(emp_id, name)
         except Exception as e: print("work-time start error:", e)
@@ -1234,6 +1253,8 @@ def track_logout(auto=False, reason=""):
         _bg(_log_logout, session["att_id"], session.get("att_eid", "ADMIN"),
             session.get("att_name", "Admin"), session.get("att_band", "-"), now_local(), logout_type)
         online_drop(session.get("att_id"))
+        if session.get("role") == "employee":              # Update156: Logoff event (Manual, or Automatic with the reason)
+            activity_log(session.get("att_eid"), session.get("att_name", ""), "Logoff", None, "App", "Manual logoff" if not auto else f"Automatic logoff ({reason})")
         if session.get("wt_key"):                          # Update128: close the working-time session (any logout path)
             try: _bg(wt_logout, session["wt_key"], session.get("att_eid", ""), session.get("att_name", ""), time.time())
             except Exception as e: print("work-time stop error:", e)
@@ -1401,6 +1422,7 @@ def wt_login(key, eid, name, now):
             st["brk"] += max(end - ls, 0); st["lock_start"] = None
             ev = st.pop("cur_ev", None)
             if ev: ev["end"] = end; _wt_ev_queue(ev)
+            _wt_activity(eid, name, "unlocked", end, "App", (ev or {}).get("reason", ""))      # Update156
         if st["first_login"] is None: st["first_login"] = now
         st["sess_start"], st["seen"], st["name"] = now, now, name
     _wt_save(key)
@@ -1431,22 +1453,36 @@ def wt_apply(key, eid, name, kind, value, ago_ms, reason=None):
         if kind == "support":
             lt = {"yes": "Active", "no": "Unsupported browser", "insecure": "HTTPS required", "denied": "Blocked in browser", "pending": "Not allowed yet", "agent": "Agent"}.get(str(value), "Agent needed")
             if st["lt"] != "Agent" and st["lt"] != lt: st["lt"], changed = lt, True
+        elif kind in ("screen_off", "screen_on"):                       # Update156: real display power state (agent) - activity record only, never changes break time
+            activity_log(eid, name, "Screen OFF" if kind == "screen_off" else "Screen ON", t, src, reason or "")
         elif kind == "locked" and st["sess_start"] is not None and st["lock_start"] is None:
             st["lock_start"] = max(t, st["sess_start"]); st["locks"] += 1; changed = True
             if st["lt"] not in ("Active", "Agent"): st["lt"] = "Active"
             ev = dict(date=st["date"], eid=str(eid), name=name, start=st["lock_start"], end=None, src=src,
                       reason=reason or "Screen lock (type not detected)")
             st["cur_ev"] = ev; _wt_ev_queue(ev)
+            _wt_activity(eid, name, "locked", t, src, ev["reason"])
         elif kind == "unlocked" and st["lock_start"] is not None:
             end = max(t, st["lock_start"]); st["brk"] += end - st["lock_start"]; st["lock_start"] = None; changed = True
             ev = st.pop("cur_ev", None)
             if ev: ev["end"] = end; _wt_ev_queue(ev)
+            _wt_activity(eid, name, "unlocked", end, src, (ev or {}).get("reason", ""))
         elif kind == "reason" and st.get("cur_ev") and reason and st["cur_ev"]["reason"] != reason:
-            st["cur_ev"]["reason"] = reason; _wt_ev_queue(st["cur_ev"])
+            was = str(st["cur_ev"]["reason"]); st["cur_ev"]["reason"] = reason; _wt_ev_queue(st["cur_ev"])
+            if was.startswith("Screen-off / idle") and not reason.startswith(("Screen-off / idle", "Sleep")):      # Update156: an idle period that turned into a real lock
+                _wt_activity(eid, name, "locked", st["cur_ev"]["start"], src, reason)
         if value == "agent" and st["lt"] != "Agent": st["lt"], changed = "Agent", True
     if changed: _bg(_wt_save, key)
 
 _wt_evrow, _wt_evq = {}, None
+def _wt_activity(eid, name, kind, when, src, reason):
+    """Update156: map a lock / unlock to Activity Log rows. Idle-only periods are not locks; a sleep is Screen OFF / ON."""
+    r = str(reason or "")
+    if r.startswith("Screen-off / idle"): return
+    if r.startswith("Sleep"): activity_log(eid, name, "Screen OFF" if kind == "locked" else "Screen ON", when, src, r); return
+    label = "Manual lock (Win+L)" if r.startswith("Manual") else "Automatic lock" if r.startswith("Automatic") else "Lock (type not detected)"
+    activity_log(eid, name, "System Locked" if kind == "locked" else "System Unlocked", when, src, label)
+
 def _wt_ev_queue(ev):
     """Event rows are written by ONE worker thread, in order (a quick lock/unlock must not write its end before its start)."""
     global _wt_evq
@@ -1478,6 +1514,47 @@ def _wt_ev_write(ev):
             r = int(m.group(1)) if m else None
         if r: _wt_evrow[k] = r
     invalidate_cache("Lock Events")
+
+
+# ---------------------------------------------------------------- Update156: Activity Log (one row per event, every employee separately)
+ACT_SHEET = "Activity Log"
+ACT_TYPES = ["Login", "Logoff", "System Locked", "System Unlocked", "Screen OFF", "Screen ON"]
+_act_q, _act_state, _act_lock = None, {}, threading.Lock()      # _act_state: last known state per employee ({eid: {"lock": bool, "screen": bool}}) so repeats are not double counted
+
+def _emp_name_of(eid):
+    for r in rows("Employees"):
+        if str(r.get("Employee ID", "")).strip() == str(eid).strip(): return str(r.get("Name", ""))
+    return ""
+
+def _act_worker():
+    while True:
+        item = _act_q.get()
+        for attempt in range(8):                                  # retry on quota / network errors so the event is never dropped
+            try:
+                _with_retry(ws_of(ACT_SHEET).append_row, item["vals"], value_input_option="RAW")
+                invalidate_cache(ACT_SHEET); break
+            except Exception as ex:
+                print("activity-log write error (try %d): %s" % (attempt + 1, ex)); time.sleep(min(5 * (attempt + 1), 30))
+
+def activity_log(eid, name, etype, when=None, source="", details=""):
+    """Record ONE event. when = epoch seconds (default now). Returns False if skipped as a repeat of the current state."""
+    global _act_q
+    eid = str(eid or "").strip()
+    if not eid or eid.upper() == "ADMIN" or etype not in ACT_TYPES: return False
+    when = when or time.time()
+    group = {"System Locked": ("lock", True), "System Unlocked": ("lock", False), "Screen OFF": ("screen", True), "Screen ON": ("screen", False)}.get(etype)
+    with _act_lock:
+        if group:
+            stt = _act_state.setdefault(eid, {})
+            if stt.get(group[0]) == group[1]: return False        # already in that state (agent resend / browser + agent both reporting)
+            stt[group[0]] = group[1]
+        elif etype == "Login":                                    # a fresh login: screen is on and the PC is unlocked
+            _act_state[eid] = {"lock": False, "screen": False}
+        if _act_q is None:
+            _act_q = queue_mod.Queue(); threading.Thread(target=_act_worker, daemon=True).start()
+        d = dt.datetime.fromtimestamp(when, TZ)
+        _act_q.put(dict(vals=[d.strftime("%Y-%m-%d"), d.strftime(TIME_FMT), eid, name or _emp_name_of(eid), etype, source, details, int(when)]))
+    return True
 
 # ---- Update132: Windows background agent (no browser permission needed). Per-employee token = HMAC(app secret, employee id).
 def wt_agent_token(eid):
@@ -3954,10 +4031,18 @@ def agent_lock():
     j = request.get_json(silent=True) or {}
     eid = str(j.get("eid", "")).strip()
     if not eid or not hmac.compare_digest(str(j.get("token", "")), wt_agent_token(eid)): return ("", 403)
-    kind = {"start": "locked", "locked": "locked", "end": "unlocked", "unlocked": "unlocked", "reason": "reason", "hello": "support"}.get(j.get("e"))
+    kind = {"start": "locked", "locked": "locked", "end": "unlocked", "unlocked": "unlocked", "reason": "reason", "hello": "support",
+            "display_off": "screen_off", "display_on": "screen_on"}.get(j.get("e"))
     if kind:
         with _wt_lock:
             live = [(k, x) for k, x in _wt.items() if str(x["eid"]) == eid and x["sess_start"] is not None]
+        try: ago_s = max(0.0, min(float(j.get("ago", 0) or 0) / 1000.0, 12 * 3600))
+        except (TypeError, ValueError): ago_s = 0.0
+        if not live and kind in ("screen_off", "screen_on", "locked", "unlocked"):      # Update156: the Activity Log never loses an event, even when the employee is not signed in to the app yet
+            when = time.time() - ago_s; rsn = str(j.get("reason", ""))[:40]
+            if kind in ("screen_off", "screen_on"): activity_log(eid, _emp_name_of(eid), "Screen OFF" if kind == "screen_off" else "Screen ON", when, "Agent", rsn)
+            else: _wt_activity(eid, _emp_name_of(eid), kind, when, "Agent", rsn)
+            if kind in ("screen_off", "screen_on"): return ("", 204)
         if not live: return ("", 409)               # Update155: employee not signed in to the app (yet) - the agent keeps the event and resends, nothing is lost
         k, x = max(live, key=lambda kv: kv[1]["sess_start"])
         try: wt_apply(k, eid, x["name"], kind, "agent", j.get("ago", 0), reason=str(j.get("reason", ""))[:40] or None)
@@ -4164,6 +4249,37 @@ def flush():
         try: send(e, reason, t); log("sent " + e)
         except Exception as ex: log("waiting to send %s: %s" % (e, ex)); return        # e.g. 409 = employee not signed in to the app yet: retry
         queue.pop(0)
+def watch_display():                                   # Update156: real monitor power OFF / ON (Windows power-setting notification); failures never stop the agent
+    try:
+        from ctypes import wintypes
+        U = ctypes.windll.user32; LRESULT = ctypes.c_ssize_t
+        WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+        class GUID(ctypes.Structure): _fields_ = [("D1", ctypes.c_ulong), ("D2", ctypes.c_ushort), ("D3", ctypes.c_ushort), ("D4", ctypes.c_ubyte * 8)]
+        class PBS(ctypes.Structure): _fields_ = [("PowerSetting", GUID), ("DataLength", wintypes.DWORD), ("Data", ctypes.c_ubyte * 4)]
+        class WNDCLASS(ctypes.Structure): _fields_ = [("style", wintypes.UINT), ("lpfnWndProc", WNDPROC), ("cbClsExtra", ctypes.c_int), ("cbWndExtra", ctypes.c_int), ("hInstance", wintypes.HINSTANCE), ("hIcon", wintypes.HANDLE), ("hCursor", wintypes.HANDLE), ("hbrBackground", wintypes.HANDLE), ("lpszMenuName", wintypes.LPCWSTR), ("lpszClassName", wintypes.LPCWSTR)]
+        U.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]; U.DefWindowProcW.restype = LRESULT
+        def proc(h, m, w, l):
+            if m == 0x218 and w == 0x8013:                  # WM_POWERBROADCAST / PBT_POWERSETTINGCHANGE (display state: 0 off, 1 on, 2 dimmed)
+                v = ctypes.cast(l, ctypes.POINTER(PBS)).contents.Data[0]
+                if v == 0: add("display_off", time.time())
+                elif v == 1: add("display_on", time.time())
+            return U.DefWindowProcW(h, m, w, l)
+        cb = WNDPROC(proc); hinst = kernel32.GetModuleHandleW(None)
+        wc = WNDCLASS(); wc.lpfnWndProc = cb; wc.hInstance = hinst; wc.lpszClassName = "LockAgentDisplay"
+        U.RegisterClassW(ctypes.byref(wc))
+        U.CreateWindowExW.restype = wintypes.HWND
+        hwnd = U.CreateWindowExW(0, "LockAgentDisplay", "LockAgentDisplay", 0, 0, 0, 0, 0, None, None, hinst, None)
+        g = GUID(0x6FE69556, 0x704A, 0x47A0, (ctypes.c_ubyte * 8)(0x8F, 0x24, 0xC2, 0x8D, 0x93, 0x6F, 0xDA, 0x47))
+        U.RegisterPowerSettingNotification.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD]
+        U.RegisterPowerSettingNotification(hwnd, ctypes.byref(g), 0)
+        msg = wintypes.MSG()
+        while U.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            U.TranslateMessage(ctypes.byref(msg)); U.DispatchMessageW(ctypes.byref(msg))
+    except Exception as ex:
+        try: open(os.path.join(here, "display_watch.log"), "w", encoding="utf-8").write(str(ex))
+        except Exception: pass
+import threading
+threading.Thread(target=watch_display, daemon=True).start()
 state, prev_idle, last_tick, last_hello = "active", 0.0, time.time(), 0.0
 while True:
     now = time.time()
@@ -4172,7 +4288,7 @@ while True:
         try: send("hello"); log("heartbeat OK")
         except Exception as ex: log("heartbeat: %s" % ex)
     if now - last_tick > 30 and state == "active" and IDLE:      # the PC was asleep / switched off in between
-        add("start", last_tick, "Sleep / screen-off"); state = "idle"
+        add("start", last_tick, "Sleep / screen-off"); add("display_off", last_tick, "Sleep"); state = "idle"
     last_tick = now
     if locked():
         if state == "active": add("start", now, "Manual lock" if prev_idle < MANUAL_MAX else "Automatic lock")
@@ -4235,15 +4351,15 @@ WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Work Time <small class=
 {% if not rows %}<p class="mut">No employees found.</p>{% endif %}
 <form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
 <label>Date <input type="date" name="date" value="{{d}}" max="{{today}}" onchange="this.form.submit()"></label>
-<a class="btnl no-print" href="/admin/work-time/export?date={{d}}">&#128196; Download CSV</a> <a class="btnl no-print" href="#" onclick="window.print();return false">&#128438; Print</a> <details class="no-print" style="position:relative;display:inline-block"><summary class="btnl" style="list-style:none;cursor:pointer;display:inline-block">&#128202; Reports &#9662;</summary><div class="card" style="position:absolute;z-index:20;margin:6px 0 0;padding:8px;min-width:200px;display:flex;flex-direction:column;gap:6px"><a class="btnl" href="/admin/work-time/report?period=week&date={{d}}">Weekly Report</a><a class="btnl" href="/admin/work-time/report?period=month&date={{d}}">Monthly Report</a><a class="btnl" href="/admin/work-time/events?date={{d}}">All Lock Events</a><a class="btnl" href="/admin/work-time/agent">Lock-Tracking Agent</a></div></details></form>
+<a class="btnl no-print" href="/admin/work-time/activity?date={{d}}">&#128337; Activity Log</a> <a class="btnl no-print" href="/admin/work-time/export?date={{d}}">&#128196; Download CSV</a> <a class="btnl no-print" href="#" onclick="window.print();return false">&#128438; Print</a> <details class="no-print" style="position:relative;display:inline-block"><summary class="btnl" style="list-style:none;cursor:pointer;display:inline-block">&#128202; Reports &#9662;</summary><div class="card" style="position:absolute;z-index:20;margin:6px 0 0;padding:8px;min-width:200px;display:flex;flex-direction:column;gap:6px"><a class="btnl" href="/admin/work-time/report?period=week&date={{d}}">Weekly Report</a><a class="btnl" href="/admin/work-time/report?period=month&date={{d}}">Monthly Report</a><a class="btnl" href="/admin/work-time/activity?date={{d}}">Activity Log (all events)</a><a class="btnl" href="/admin/work-time/events?date={{d}}">All Lock Events</a><a class="btnl" href="/admin/work-time/agent">Lock-Tracking Agent</a></div></details></form>
 <p class="mut" style="margin:0 0 10px">Required = {{req}} of active (unlocked) time in a 9-hour day; allowed breaks = {{brk_allowed}} (30 min lunch + 30 min other).
 Break time = the time the computer was locked. Total working time = system-on time &minus; break time.</p>
 <p style="margin:0 0 10px"><b>{{n_ok}}</b> completed &middot; <b>{{n_short}}</b> short / in progress &middot; <b>{{n_none}}</b> no login{% if n_notrack %} &middot; <b style="color:#b45309">{{n_notrack}}</b> without lock tracking{% endif %}</p>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last screen OFF (lock)</th><th>Last screen ON (unlock)</th><th>Break duration</th><th>Screen OFF count (locks)</th><th>Screen ON count (unlocks)</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
-{% for r in rows %}<tr><td><a href="/admin/work-time/events?date={{d}}&emp={{r.eid|urlencode}}">{{r.eid}}</a></td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.last_lock or '-'}}</td><td>{{r.last_unlock or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td>{{r.on_n}}</td><td><b>{{r.work or '-'}}</b></td>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last screen OFF (lock)</th><th>Last screen ON (unlock)</th><th>Break duration</th><th>Screen OFF count (locks)</th><th>Screen ON count (unlocks)</th><th>Screen OFF / ON events</th><th>System lock / unlock events</th><th>Login / Logoff events</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
+{% for r in rows %}<tr><td><a href="/admin/work-time/events?date={{d}}&emp={{r.eid|urlencode}}">{{r.eid}}</a></td><td>{{r.name}}</td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.last_lock or '-'}}</td><td>{{r.last_unlock or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td>{{r.on_n}}</td><td>{{r.a_scr}}</td><td>{{r.a_lock}}</td><td>{{r.a_log}}</td><td><b>{{r.work or '-'}}</b></td>
 <td><span style="padding:2px 8px;border-radius:10px;font-size:12px;white-space:nowrap;{% if r.tone=='ok' %}background:#dcfce7;color:#166534{% elif r.tone=='warn' %}background:#fef3c7;color:#92400e{% elif r.tone=='bad' %}background:#fee2e2;color:#991b1b{% else %}background:#eef0f6;color:#5b6280{% endif %}">{{r.status}}</span>{% if r.state=='Locked' %} <small class="mut">&#128274; locked now</small>{% endif %}</td>
 <td>{{r.lt}}</td></tr>
-{% if r.events %}<tr><td colspan="13" style="padding:0 0 8px 28px;background:#f8f9ff"><details><summary class="mut" style="cursor:pointer;padding:6px 0">&#128274; Screen OFF {{r.events|length}} time(s) &middot; Screen ON {{r.on_n}} time(s) &middot; total {{r.lock_total}} &mdash; click to view</summary>
+{% if r.events %}<tr><td colspan="16" style="padding:0 0 8px 28px;background:#f8f9ff"><details><summary class="mut" style="cursor:pointer;padding:6px 0">&#128274; Screen OFF {{r.events|length}} time(s) &middot; Screen ON {{r.on_n}} time(s) &middot; total {{r.lock_total}} &mdash; click to view</summary>
 <table style="margin:4px 0 6px"><tr><th>Lock #</th><th>Screen OFF (locked) at</th><th>Screen ON (unlocked) at</th><th>Lock duration</th><th>Reason</th><th>Source</th></tr>
 {% for e in r.events %}<tr><td>{{e.n}}</td><td>{{e.start}}</td><td>{{e.end or 'still locked / off'}}</td><td>{{e.dur}}</td><td>{{e.reason}}</td><td>{{e.src}}</td></tr>{% endfor %}</table></details></td></tr>{% endif %}
 {% endfor %}</table></div></div>
@@ -4274,15 +4390,76 @@ def admin_work_time():
     evs_by = {}                                         # Update152: every lock / screen-off event of the day, per employee, shown inside the Work Time Log row
     for e_ in _wt_events(d):
         evs_by.setdefault(_key(e_["eid"]), []).append(e_)
+    act_c = _act_counts(d)                                         # Update156: computed once for the whole table
     for r_ in data:
         r_["events"] = evs_by.get(_key(r_["eid"]), [])
         r_["lock_total"] = _hms(sum(e_["sec"] for e_ in r_["events"]))
+        c_ = act_c.get(_key(r_["eid"]), {})                  # Update156
+        r_["a_scr"] = f'{c_.get("Screen OFF", 0)} / {c_.get("Screen ON", 0)}'; r_["a_lock"] = f'{c_.get("System Locked", 0)} / {c_.get("System Unlocked", 0)}'; r_["a_log"] = f'{c_.get("Login", 0)} / {c_.get("Logoff", 0)}'
         r_["on_n"] = sum(1 for e_ in r_["events"] if e_["end"])          # Update154: times the screen came back ON (unlocked) that day
     return page(WT_ADMIN, title="Work Time", back=request.full_path.rstrip("?"), unshared=[e for e in rows("Employees") if _key(e["Employee ID"]) not in wts_ids()], n_shared=len(wts_ids()), n_total=len(rows("Employees")), d=d, today=str(today_local()), rows=data, live=(d == str(today_local())),
                 req=_hms(WT_REQUIRED_SEC), brk_allowed=_hms(WT_ALLOWED_BREAK_SEC),
                 n_ok=sum(r["tone"] == "ok" for r in data), n_short=sum(r["tone"] in ("warn", "bad") for r in data),
                 n_none=sum(r["state"] == "No login" for r in data),
                 n_notrack=sum(r["state"] != "No login" and r["lt"] not in ("Active", "Active (agent)") for r in data))
+
+ACT_PAGE = """<div class="card"><h2 style="margin-top:0">Activity Log <small class="mut">&middot; every screen, lock and login event</small></h2>
+<form method="get" class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+<label>Date <input type="date" name="date" value="{{d}}" max="{{today}}" onchange="this.form.submit()"></label>
+<label>Employee <select name="emp" onchange="this.form.submit()"><option value="">All employees</option>{% for e in emps %}<option value="{{e.eid}}" {% if e.eid==emp %}selected{% endif %}>{{e.eid}} - {{e.name}}</option>{% endfor %}</select></label>
+<label>Event <select name="type" onchange="this.form.submit()"><option value="">All events</option>{% for t in types %}<option {% if t==typ %}selected{% endif %}>{{t}}</option>{% endfor %}</select></label>
+<a class="btnl" href="/admin/work-time/activity/export?date={{d}}&emp={{emp|urlencode}}&type={{typ|urlencode}}">&#128196; Download CSV</a> <a class="btnl" href="/admin/work-time?date={{d}}">&larr; Work Time Log</a></form>
+<h3 style="margin:8px 0">Event count per employee &middot; {{d}}</h3>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Screen OFF</th><th>Screen ON</th><th>System Locked</th><th>System Unlocked</th><th>Login</th><th>Logoff</th><th>Total</th></tr>
+{% for c in counts %}<tr><td>{{c.eid}}</td><td>{{c.name}}</td><td>{{c.n['Screen OFF']}}</td><td>{{c.n['Screen ON']}}</td><td>{{c.n['System Locked']}}</td><td>{{c.n['System Unlocked']}}</td><td>{{c.n['Login']}}</td><td>{{c.n['Logoff']}}</td><td><b>{{c.total}}</b></td></tr>
+{% else %}<tr><td colspan="9">No events recorded for this day.</td></tr>{% endfor %}
+{% if counts %}<tr><td colspan="2"><b>All employees</b></td>{% for t in types %}<td><b>{{grand[t]}}</b></td>{% endfor %}<td><b>{{grand_total}}</b></td></tr>{% endif %}</table></div>
+<h3 style="margin:14px 0 8px">All events ({{evs|length}})</h3>
+<div style="overflow-x:auto"><table><tr><th>Employee ID</th><th>Employee Name</th><th>Event Type</th><th>Date</th><th>Time</th><th>Source</th><th>Details</th></tr>
+{% for e in evs %}<tr><td>{{e.eid}}</td><td>{{e.name}}</td><td><b>{{e.type}}</b></td><td>{{e.date}}</td><td>{{e.time}}</td><td>{{e.src}}</td><td>{{e.det}}</td></tr>
+{% else %}<tr><td colspan="7">No events recorded.</td></tr>{% endfor %}</table></div></div>
+{% if live %}<script>setTimeout(function(){location.reload()},30000)</script>{% endif %}"""
+
+def _act_events(d, emp="", typ=""):
+    out = []
+    shared = wts_ids()
+    for r in sorted(rows(ACT_SHEET), key=lambda x: _fl(x.get("Epoch"))):
+        if str(r.get("Date")) != d or _key(r.get("Employee ID", "")) not in shared: continue
+        if (emp and str(r.get("Employee ID")) != emp) or (typ and str(r.get("Event type")) != typ): continue
+        out.append(dict(eid=str(r.get("Employee ID", "")), name=str(r.get("Employee name", "")), type=str(r.get("Event type", "")), date=str(r.get("Date", "")),
+                        time=str(r.get("Time", "")), src=str(r.get("Source", "")), det=str(r.get("Details", ""))))
+    return out
+
+def _act_counts(d):
+    """{EMPLOYEE KEY: {event type: count}} for one date (shared employees only)."""
+    out = {}
+    for e in _act_events(d):
+        out.setdefault(_key(e["eid"]), {}).setdefault(e["type"], 0); out[_key(e["eid"])][e["type"]] += 1
+    return out
+
+@app.route("/admin/work-time/activity")
+@need("admin")
+def admin_work_time_activity():
+    prefetch(ACT_SHEET, "Employees")
+    d = _wt_date_arg(); emp = request.args.get("emp", "").strip(); typ = request.args.get("type", "").strip()
+    typ = typ if typ in ACT_TYPES else ""
+    evs = _act_events(d, emp, typ); allev = _act_events(d, emp)
+    by = {}
+    for e in allev:
+        c = by.setdefault(e["eid"], dict(eid=e["eid"], name=e["name"], n={t: 0 for t in ACT_TYPES}, total=0)); c["n"][e["type"]] = c["n"].get(e["type"], 0) + 1; c["total"] += 1
+    counts = sorted(by.values(), key=lambda c: c["eid"])
+    grand = {t: sum(c["n"][t] for c in counts) for t in ACT_TYPES}
+    emps = [dict(eid=str(e["Employee ID"]), name=str(e.get("Name", ""))) for e in rows("Employees") if _key(e["Employee ID"]) in wts_ids()]
+    return page(ACT_PAGE, title="Activity Log", d=d, today=str(today_local()), emp=emp, typ=typ, emps=emps, types=ACT_TYPES, evs=evs, counts=counts, grand=grand, grand_total=sum(grand.values()), live=(d == str(today_local())))
+
+@app.route("/admin/work-time/activity/export")
+@need("admin")
+def admin_work_time_activity_export():
+    d = _wt_date_arg(); emp = request.args.get("emp", "").strip(); typ = request.args.get("type", "").strip()
+    buf = io.StringIO(); w = csv.writer(buf); w.writerow(["Employee ID", "Employee Name", "Event Type", "Date", "Time", "Source", "Details"])
+    for e in _act_events(d, emp, typ if typ in ACT_TYPES else ""): w.writerow([e["eid"], e["name"], e["type"], e["date"], e["time"], e["src"], e["det"]])
+    resp = Response("\ufeff" + buf.getvalue(), mimetype="text/csv"); resp.headers["Content-Disposition"] = f"attachment; filename=activity_log_{d}.csv"
+    return resp
 
 @app.route("/admin/work-time/export")
 @need("admin")

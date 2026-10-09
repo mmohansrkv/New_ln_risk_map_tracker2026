@@ -495,7 +495,7 @@ app.jinja_env.filters["cnt"] = lambda x: "{:,.2f}".format(float(x or 0)).rstrip(
 app.jinja_env.filters["g"] = lambda x: "%g" % (float(x) if str(x).strip() else 0)
 app.jinja_env.globals["PERMISSION_MONTHLY_LIMIT"] = PERMISSION_MONTHLY_LIMIT
 app.jinja_env.globals["WT_LOGIN_PROMPT"] = os.getenv("WT_LOGIN_PROMPT", "1") == "1"      # Update147: default ON (the Update134 browser lock tracking); set WT_LOGIN_PROMPT=0 for no pop-up (Windows agent only)
-app.jinja_env.globals["WT_PROMPT_ONCE"] = os.getenv("WT_PROMPT_ONCE", "0") == "1"      # Update130: default OFF - no prompt of any kind for employees
+app.jinja_env.globals["WT_PROMPT_ONCE"] = os.getenv("WT_PROMPT_ONCE", "1") == "1"      # Update157: default ON - if the login prompt was skipped, the browser asks once on the first click (without it Win+L cannot be seen)
 app.jinja_env.globals["LEAVE_MONTHLY_LIMIT"] = LEAVE_MONTHLY_LIMIT
 
 @app.before_request
@@ -4409,6 +4409,9 @@ ACT_PAGE = """<div class="card"><h2 style="margin-top:0">Activity Log <small cla
 <label>Employee <select name="emp" onchange="this.form.submit()"><option value="">All employees</option>{% for e in emps %}<option value="{{e.eid}}" {% if e.eid==emp %}selected{% endif %}>{{e.eid}} - {{e.name}}</option>{% endfor %}</select></label>
 <label>Event <select name="type" onchange="this.form.submit()"><option value="">All events</option>{% for t in types %}<option {% if t==typ %}selected{% endif %}>{{t}}</option>{% endfor %}</select></label>
 <a class="btnl" href="/admin/work-time/activity/export?date={{d}}&emp={{emp|urlencode}}&type={{typ|urlencode}}">&#128196; Download CSV</a> <a class="btnl" href="/admin/work-time?date={{d}}">&larr; Work Time Log</a></form>
+{% if notrack %}<div class="card" style="background:#fff7ed;border:1px solid #fdba74;margin:0 0 10px"><b>Lock / screen events cannot be recorded for these employees yet:</b>
+<table style="margin-top:6px"><tr><th>Emp ID</th><th>Name</th><th>Lock tracking status</th><th>What to do</th></tr>
+{% for n in notrack %}<tr><td>{{n.eid}}</td><td>{{n.name}}</td><td>{{n.lt}}</td><td>{{n.fix}}</td></tr>{% endfor %}</table></div>{% endif %}
 <h3 style="margin:8px 0">Event count per employee &middot; {{d}}</h3>
 <div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Screen OFF</th><th>Screen ON</th><th>System Locked</th><th>System Unlocked</th><th>Login</th><th>Logoff</th><th>Total</th></tr>
 {% for c in counts %}<tr><td>{{c.eid}}</td><td>{{c.name}}</td><td>{{c.n['Screen OFF']}}</td><td>{{c.n['Screen ON']}}</td><td>{{c.n['System Locked']}}</td><td>{{c.n['System Unlocked']}}</td><td>{{c.n['Login']}}</td><td>{{c.n['Logoff']}}</td><td><b>{{c.total}}</b></td></tr>
@@ -4450,7 +4453,10 @@ def admin_work_time_activity():
     counts = sorted(by.values(), key=lambda c: c["eid"])
     grand = {t: sum(c["n"][t] for c in counts) for t in ACT_TYPES}
     emps = [dict(eid=str(e["Employee ID"]), name=str(e.get("Name", ""))) for e in rows("Employees") if _key(e["Employee ID"]) in wts_ids()]
-    return page(ACT_PAGE, title="Activity Log", d=d, today=str(today_local()), emp=emp, typ=typ, emps=emps, types=ACT_TYPES, evs=evs, counts=counts, grand=grand, grand_total=sum(grand.values()), live=(d == str(today_local())))
+    FIX = {"Not allowed yet": "Employee must click Allow on the browser's idle-detection prompt (or install the agent).", "Blocked in browser": "Permission was blocked: reset the site's permissions in the browser, or install the agent.",
+           "Unsupported browser": "Use Chrome / Edge, or install the agent.", "HTTPS required": "Open the app over https://, or install the agent.", "Agent needed": "Install the Windows agent (Work Time > Lock-Tracking Agent).", "-": "Install the Windows agent (Work Time > Lock-Tracking Agent)."}
+    notrack = [dict(eid=r["eid"], name=r["name"], lt=r["lt"], fix=FIX.get(r["lt"], "Install the Windows agent.")) for r in _wt_report(d) if r["state"] != "No login" and r["lt"] not in ("Active", "Active (agent)")] if d == str(today_local()) else []
+    return page(ACT_PAGE, title="Activity Log", notrack=notrack, d=d, today=str(today_local()), emp=emp, typ=typ, emps=emps, types=ACT_TYPES, evs=evs, counts=counts, grand=grand, grand_total=sum(grand.values()), live=(d == str(today_local())))
 
 @app.route("/admin/work-time/activity/export")
 @need("admin")

@@ -1,7 +1,9 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update161: automatic reminders START on 1 Oct 2026 (AUTO_MAIL_START_DATE, default 2026-10-01): from that date the daily job e-mails EVERY missed Productivity date from 1 Oct 2026 onward - including earlier missed
+    October dates - one separate e-mail per date, at the Admin-configured time, and keeps doing so every working day until each entry is completed (replaces the 45-day look-back of Update160).
   * Update160: AUTOMATIC reminder e-mails reworked. At the Admin-configured time (Email Controls > Automatic Email) every employee gets ONE SEPARATE e-mail for EACH missed Productivity date that is
     still pending (read live - a date submitted since yesterday is dropped, so reminders for it stop automatically); a Monday miss submitted on Tuesday keeps being reminded until it is submitted,
-    also across a month change (look-back AUTO_MAIL_LOOKBACK_DAYS, default 45). NO e-mails on weekly offs / public holidays (job, loop and "send now"). Each (employee, date) e-mail is logged in
+    also across a month change. NO e-mails on weekly offs / public holidays (job, loop and "send now"). Each (employee, date) e-mail is logged in
     "Missed Email Log" and sent at most once per day.
 Admin link:    /admin/login
 Employee link: /employee/login
@@ -7877,7 +7879,10 @@ AUTO_MAIL_KEY = "Auto Missed Email"
 AUTO_MAIL_TIME_KEY = "Auto Missed Email Time"                       # Update123: Admin-selected send time (Settings sheet, HH:MM)
 AUTO_MAIL_TIME = os.getenv("AUTO_MAIL_TIME", "09:30").strip()      # HH:MM, app timezone - default until the Admin saves a time
 
-AUTO_MAIL_LOOKBACK_DAYS = int(os.getenv("AUTO_MAIL_LOOKBACK_DAYS", "45") or 45)      # Update160: a missed date keeps being reminded until it is completed - also across a month change (looks back this many days)
+AUTO_MAIL_START_DATE = os.getenv("AUTO_MAIL_START_DATE", "2026-10-01").strip()      # Update161: automatic reminders cover EVERY missed date from this date onward (1 Oct 2026, incl. earlier missed October dates) and continue until each entry is completed
+def _auto_start_date():
+    try: return dt.date.fromisoformat(AUTO_MAIL_START_DATE)
+    except ValueError: return dt.date(2026, 10, 1)
 
 AUTO_MAIL_DEFAULT = os.getenv("AUTO_MAIL_DEFAULT", "1") == "1"      # Update157: automatic e-mail is ON until the Admin explicitly switches it off (it used to stay OFF and nothing was ever sent)
 def auto_mail_on(fresh=False):
@@ -7919,7 +7924,9 @@ def run_auto_missed_mail(force=False):
         if is_off(today):                                    # Update160: NO reminder e-mails on weekends / public holidays (also for "send now")
             print("Automatic missed-entry e-mail skipped: today is a weekly off / holiday."); return None
         if not force and not _auto_claim_run(today): return "busy"
-        end = today - dt.timedelta(days=1); start = today - dt.timedelta(days=AUTO_MAIL_LOOKBACK_DAYS)
+        start = _auto_start_date()
+        if today < start: print(f"Automatic missed-entry e-mail not started yet: reminders begin on {start}."); return None
+        end = today - dt.timedelta(days=1)                               # every missed date from the start date up to yesterday, until completed
         try: access = _fetch_rows("Productivity Access")
         except Exception: access = []
         subs, leaves = load_subs(), _fetch_rows("Leave")

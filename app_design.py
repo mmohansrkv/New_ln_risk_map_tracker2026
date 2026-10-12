@@ -1,4 +1,8 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update160: AUTOMATIC reminder e-mails reworked. At the Admin-configured time (Email Controls > Automatic Email) every employee gets ONE SEPARATE e-mail for EACH missed Productivity date that is
+    still pending (read live - a date submitted since yesterday is dropped, so reminders for it stop automatically); a Monday miss submitted on Tuesday keeps being reminded until it is submitted,
+    also across a month change (look-back AUTO_MAIL_LOOKBACK_DAYS, default 45). NO e-mails on weekly offs / public holidays (job, loop and "send now"). Each (employee, date) e-mail is logged in
+    "Missed Email Log" and sent at most once per day.
 Admin link:    /admin/login
 Employee link: /employee/login
 
@@ -7873,6 +7877,8 @@ AUTO_MAIL_KEY = "Auto Missed Email"
 AUTO_MAIL_TIME_KEY = "Auto Missed Email Time"                       # Update123: Admin-selected send time (Settings sheet, HH:MM)
 AUTO_MAIL_TIME = os.getenv("AUTO_MAIL_TIME", "09:30").strip()      # HH:MM, app timezone - default until the Admin saves a time
 
+AUTO_MAIL_LOOKBACK_DAYS = int(os.getenv("AUTO_MAIL_LOOKBACK_DAYS", "45") or 45)      # Update160: a missed date keeps being reminded until it is completed - also across a month change (looks back this many days)
+
 AUTO_MAIL_DEFAULT = os.getenv("AUTO_MAIL_DEFAULT", "1") == "1"      # Update157: automatic e-mail is ON until the Admin explicitly switches it off (it used to stay OFF and nothing was ever sent)
 def auto_mail_on(fresh=False):
     v = _setting(AUTO_MAIL_KEY, fresh).lower()
@@ -7910,35 +7916,48 @@ def run_auto_missed_mail(force=False):
         if not MAIL_READY or not mail_sender(fresh=True)[1]:
             print("Automatic missed-entry e-mail NOT sent: mail service / sender e-mail not configured (BREVO_API_KEY or SMTP_HOST, MAIL_FROM)."); return None
         today = today_local()
+        if is_off(today):                                    # Update160: NO reminder e-mails on weekends / public holidays (also for "send now")
+            print("Automatic missed-entry e-mail skipped: today is a weekly off / holiday."); return None
         if not force and not _auto_claim_run(today): return "busy"
-        end = today - dt.timedelta(days=1); start = mail_month_start()
+        end = today - dt.timedelta(days=1); start = today - dt.timedelta(days=AUTO_MAIL_LOOKBACK_DAYS)
         try: access = _fetch_rows("Productivity Access")
         except Exception: access = []
         subs, leaves = load_subs(), _fetch_rows("Leave")
         t_ = str(today)
-        mailed_today = {_key(r.get("Employee ID", "")) for r in _fetch_rows(MISSED_LOG)          # already reminded today (Sent) - one reminder per day
-                        if str(r.get("Employee ID", "")) != "__RUN__" and str(r.get("Date sent", "")) == t_ and str(r.get("Status", "")) == "Sent" and str(r.get("Mode", "")) in ("Manual", "Auto")}
-        items, noaddr = [], []
+        sent_today = set()                                              # (employee, date) pairs already reminded today (Sent) - one reminder per missed date per day
+        for r in _fetch_rows(MISSED_LOG):
+            if str(r.get("Employee ID", "")) != "__RUN__" and str(r.get("Date sent", "")) == t_ and str(r.get("Status", "")) == "Sent" and str(r.get("Mode", "")) in ("Manual", "Auto"):
+                for x in str(r.get("Missed dates", "")).split(","):
+                    if x.strip(): sent_today.add((_key(r.get("Employee ID", "")), x.strip()))
+        per_emp, noaddr = [], []
         for e in _fetch_rows("Employees"):
             eid = str(e.get("Employee ID", "")).strip(); k = _key(eid)
             if not eid or not productivity_access(eid, access): continue
             mail = employee_office_email(e)
             ds = missing_dates(eid, [x for x in subs if _key(x["emp_id"]) == k], [l for l in leaves if _key(l["Employee ID"]) == k], start, end, fmt="%Y-%m-%d")
-            new = sorted(ds)                                            # ALL dates still missing - a date submitted / excused since yesterday is simply no longer here
-            if not new or (not force and k in mailed_today): continue
+            pending = sorted(d for d in ds if force or (k, d) not in sent_today)      # ONLY dates still pending (read live: a date submitted since yesterday is simply gone)
+            if not pending: continue
             emp = dict(eid=eid, name=str(e.get("Name", "")), email=mail)
-            if not EMAIL_RE.match(mail): noaddr.append((emp, new)); continue
-            items.append((emp, missed_message(emp, new), ", ".join(new), len(new)))
+            if not EMAIL_RE.match(mail): noaddr.append((emp, pending)); continue
+            per_emp.append((emp, pending))
+        # ONE separate e-mail per missed date. Mails go out in "waves" (wave n = the n-th missed date of every employee) so each wave has one mail per address
+        waves, items_n = [], 0
+        for emp, pending in per_emp:
+            for i, d in enumerate(pending):
+                while len(waves) <= i: waves.append([])
+                waves[i].append((emp, missed_message(emp, [d]), d, 1)); items_n += 1
+        items = [x for w in waves for x in w]
         if noaddr:                                              # visible on the Email Controls status board (once per day per employee)
             ws = ws_of(MISSED_LOG); t = str(today)
             have = {_key(r.get("Employee ID", "")) for r in _fetch_rows(MISSED_LOG) if str(r.get("Date sent", "")) == t and str(r.get("Mode", "")) == "Auto" and str(r.get("Status", "")).startswith("Failed: no valid")}
             rowsx = [[t, e["eid"], e["name"], e["email"], ", ".join(d), len(d), now_local().strftime("%Y-%m-%d %H:%M:%S"), "Auto", "Failed: no valid Office Email ID", "System"] for e, d in noaddr if _key(e["eid"]) not in have]
             if rowsx: ws.append_rows(rowsx, value_input_option="RAW"); invalidate_cache(MISSED_LOG)
         failed = 0
-        for i in range(0, len(items), 25):
-            out = send_logged(items[i:i + 25], "Auto", "System")      # logged in the Missed Email Log; failed ones stay "not e-mailed" and are retried
-            failed += sum(1 for v in out.values() if v != "Sent")
-        print(f"Automatic missed-entry e-mail: {len(items)} employee(s), {failed} failed, {len(noaddr)} without a valid e-mail.")
+        for w in waves:
+            for i in range(0, len(w), 25):
+                out = send_logged(w[i:i + 25], "Auto", "System")      # one log row per missed date; failed ones stay "not e-mailed" and are retried
+                failed += sum(1 for v in out.values() if v != "Sent")
+        print(f"Automatic missed-entry e-mail: {len(items)} e-mail(s) for {len(per_emp)} employee(s), {failed} failed, {len(noaddr)} without a valid e-mail.")
         return (len(items), failed)                                   # employees without a valid address are listed on the status board (Failed: no valid Office Email ID)
     except Exception as ex:
         print("Automatic missed-entry e-mail error:", ex); return (0, 1)
@@ -7952,7 +7971,7 @@ def _auto_mail_loop():
         try:
             now = now_local()
             if _auto_tries[1] != now.date(): _auto_tries[0], _auto_tries[1] = 0, now.date()
-            if _auto_done_day[0] != now.date() and _auto_tries[0] < 8 and now.time() >= _auto_time() and auto_mail_on():
+            if _auto_done_day[0] != now.date() and _auto_tries[0] < 8 and now.time() >= _auto_time() and not is_off(now.date()) and auto_mail_on():
                 res = run_auto_missed_mail()
                 if res == "busy":                                             # Update159: another worker is running / ran this slot - look again in the next slot, not every minute
                     time.sleep(1500)
@@ -7971,9 +7990,10 @@ def admin_email_controls_run_now():
     """Update157: Admin-only - run the automatic missed-entry e-mail right now (same job, same rules: every still-missing date of this month, to each employee's own Office Email ID)."""
     _admin_only_mail()
     if not MAIL_READY: flash("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST, and MAIL_FROM).", "error"); return redirect("/admin/email-controls")
+    if is_off(today_local()): flash("Nothing was sent: today is a weekly off / holiday - reminder e-mails are not sent on those days.", "error"); return redirect("/admin/email-controls")
     res = run_auto_missed_mail(force=True)
     if res is None: flash("Nothing was sent: e-mail is not fully configured on the server (sender e-mail / BREVO_API_KEY).", "error")
-    else: flash(f"Automatic e-mail run finished: {res[0]} employee(s) e-mailed, {res[1]} failed. See the status board below.")
+    else: flash(f"Automatic e-mail run finished: {res[0]} e-mail(s) sent (one per missed date), {res[1]} failed. See the status board below.")
     return redirect("/admin/email-controls")
 
 @app.route("/admin/email-controls/auto", methods=["POST"])
@@ -8001,7 +8021,7 @@ EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
 <label>Send time<input type="time" name="auto_time" value="{{auto_time_val}}" required></label>
 <button class="primary sm">Save</button></form>
 <form method="post" action="/admin/email-controls/run-now" style="margin:8px 0" onsubmit="return confirm('Send the missed-entry e-mails to all employees with missingsed dates now?')"><button class="primary sm">&#9993; Send automatic e-mails now</button></form>
-<p class="mut">Status: <b style="color:{{'#15803d' if auto_on else '#991b1b'}}">{{'ENABLED' if auto_on else 'DISABLED'}}</b>. When enabled, every day at <b>{{auto_time}}</b> (the time set here by the Admin) each employee who has missed a Productivity Entry this month receives ONE e-mail that day with their name, every date still missing and the Productivity Tracker login link. The reminder repeats every day until the entry is submitted (or leave is approved) - submitted dates drop out of the next e-mail automatically. Last automatic run: <b>{{auto_last or 'never'}}</b>. Only Admin can change this.</p></div>
+<p class="mut">Status: <b style="color:{{'#15803d' if auto_on else '#991b1b'}}">{{'ENABLED' if auto_on else 'DISABLED'}}</b>. When enabled, every day at <b>{{auto_time}}</b> (the time set here by the Admin) each employee with a pending (missed, not yet submitted) Productivity Entry receives ONE SEPARATE e-mail for EACH missed date, with their name, that date and the Productivity Tracker login link. No e-mails are sent on weekly offs or public holidays. A date keeps being reminded every working day until the entry is submitted (or leave is approved) - then its reminders stop automatically. Last automatic run: <b>{{auto_last or 'never'}}</b>. Only Admin can change this.</p></div>
 
 <div class="card"><h2>1. Send a reminder manually</h2>
 <form method="post" action="/admin/email-controls/send" id="ec-form" onsubmit="return ecCheck()">

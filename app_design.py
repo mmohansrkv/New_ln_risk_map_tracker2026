@@ -1,4 +1,8 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update160: AUTOMATIC reminder e-mails reworked. At the Admin-configured time (Email Controls > Automatic Email) every employee gets ONE SEPARATE e-mail for EACH missed Productivity date that is
+    still pending (read live - a date submitted since yesterday is dropped, so reminders for it stop automatically); a Monday miss submitted on Tuesday keeps being reminded until it is submitted,
+    also across a month change (look-back AUTO_MAIL_LOOKBACK_DAYS, default 45). NO e-mails on weekly offs / public holidays (job, loop and "send now"). Each (employee, date) e-mail is logged in
+    "Missed Email Log" and sent at most once per day.
 Admin link:    /admin/login
 Employee link: /employee/login
 
@@ -62,6 +66,9 @@ Access rules (Update59):
   * Update150: NEW Admin > Log > "Mail Notes" (/admin/mail-notes; the old /admin/maintenance-email redirects to it). Admin enters the Email Subject and Message, sees them live inside ONE dedicated HTML
     e-mail design (MAIL_NOTE_HTML = preview.html), selects the recipients (All Employees or only the ticked ones) and the DATE & TIME to send; a background job sends it automatically (checked every 30 s),
     or the Admin sends it immediately. A scheduled mail can be edited / cancelled. Sheets: "Mail Notes" and "Mail Notes Log" (employee name, e-mail, subject, e-mail sent date & time, status). Admin only.
+  * Update162: Admin > Mail Notes - the Email Message box is now a RICH-TEXT editor (standard e-mail-editor toolbar): text colour, font size, Bold, Italic, Underline, text alignment (left / centre / right / justify),
+    bullet and numbered lists, clear formatting. The formatting is saved with the note (Mail Notes sheet, Message column, prefixed <!--rt-->), shown in the live preview and sent in the HTML e-mail to employees (inline styles, so
+    it also works in Outlook / Gmail); the plain-text part of the mail keeps the words and list bullets. Everything is cleaned by a server-side whitelist (no scripts / links / images). Older plain-text notes still work unchanged.
   * Update154: one-day screen OFF / ON counts - the daily Work Time table has "Screen OFF count (locks)" and "Screen ON count (unlocks)" per employee, and the event list / events page shows both counts for the day.
   * Update161: Work Time Log - lock / unlock tracking fixed at the root. (1) With several server workers (gunicorn -w 4) every worker kept its OWN in-memory copy of the day, so a lock handled by one worker and the unlock by another
     was ignored (Last Screen ON, Break duration, counts and the Lock / Screen-Off Events list stayed wrong or empty). Lock / unlock are now recorded straight in Google Sheets (Lock Events = single source of truth, idempotent, safe with any
@@ -2476,10 +2483,11 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .cal-g .a{background:#dc262640;color:#fecaca;box-shadow:inset 0 0 0 1px #f87171aa;font-weight:600}
 .cal-g .l{background:#2563eb40;color:#bfdbfe;box-shadow:inset 0 0 0 1px #60a5facc;font-weight:600}
 .cal-g .f{color:#6b749f;background:#ffffff0d}
-.cal-g .t.sp{box-shadow:0 2px 0 #3730a3,0 0 0 2px #4ade80}.cal-g .t.sa{box-shadow:0 2px 0 #3730a3,0 0 0 2px #f87171}.cal-g .t.sl{box-shadow:0 2px 0 #3730a3,0 0 0 2px #60a5fa}
+.cal-g .ho{background:#f59e0b4d;color:#fde68a;box-shadow:inset 0 0 0 1px #f59e0bcc;font-weight:700}
+.cal-g .t.sp{box-shadow:0 2px 0 #3730a3,0 0 0 2px #4ade80}.cal-g .t.sa{box-shadow:0 2px 0 #3730a3,0 0 0 2px #f87171}.cal-g .t.sl{box-shadow:0 2px 0 #3730a3,0 0 0 2px #60a5fa}.cal-g .t.sho{box-shadow:0 2px 0 #3730a3,0 0 0 2px #f59e0b}
 .cal-lg{display:flex;justify-content:center;gap:6px;flex-wrap:wrap;margin:6px 0 0;font-size:9.5px;color:#9aa3c7}
 .cal-lg i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:3px;vertical-align:-1px}
-.cal-lg .lp{background:#22c55e}.cal-lg .la{background:#f87171}.cal-lg .ll{background:#60a5fa}.cal-lg .lo{background:#6b749f}
+.cal-lg .lp{background:#22c55e}.cal-lg .la{background:#f87171}.cal-lg .ll{background:#60a5fa}.cal-lg .lo{background:#6b749f}.cal-lg .lh{background:#f59e0b}
 .cal-today{display:block;width:100%;margin:6px 0 0;padding:3px 0;border:0;border-radius:6px;background:#2b3560;color:#fff;font-size:10.5px;box-shadow:none;cursor:pointer}
 .cal-today:hover{background:#4f46e5;transform:none}
 @media print{.cal{display:none!important}}
@@ -2532,7 +2540,7 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 <div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
-<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-lg" id="cal_lg" hidden><span><i class="lp"></i>Present</span><span><i class="la"></i>Absent</span><span><i class="ll"></i>Leave</span><span><i class="lo"></i>Off</span></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
+<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-lg" id="cal_lg" hidden><span><i class="lp"></i>Present</span><span><i class="la"></i>Absent</span><span><i class="ll"></i>Leave</span><span><i class="lh"></i>Holiday</span><span><i class="lo"></i>Weekly off</span></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
 <div class="prof{{' prof-emp' if session.role=='employee' else ''}}"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
@@ -2552,7 +2560,7 @@ var np=0,na=0,nl=0;
 for(i=0;i<7;i++)h+='<span class="w">'+W[i]+'</span>';
 for(i=first-1;i>=0;i--)h+='<span class="o">'+(pn-i)+'</span>';
 for(i=1;i<=n;i++){var t=(i===now.getDate()&&m===now.getMonth()&&y===now.getFullYear()),k=y+'-'+z(m+1)+'-'+z(i),st=A?A[k]:'',c=t?'t':'e',tt='';
-if(st==='P'){c+=t?' sp':' p';np++;tt='Present'}else if(st==='A'){c+=t?' sa':' a';na++;tt='Absent'}else if(st==='L'){c+=t?' sl':' l';nl++;tt='Leave'}else if(st==='H'){c+=t?' sl':' l';nl+=.5;np+=.5;tt='Half day'}else if(st==='O'){c+=t?'':' f';tt='Weekly off / Holiday'}else if(t&&A){tt='Today'}
+if(st==='P'){c+=t?' sp':' p';np++;tt='Present'}else if(st==='A'){c+=t?' sa':' a';na++;tt='Absent'}else if(st==='L'){c+=t?' sl':' l';nl++;tt='Leave'}else if(st==='H'){c+=t?' sl':' l';nl+=.5;np+=.5;tt='Half day'}else if(st==='O'){c+=t?' sho':' ho';tt='Holiday'}else if(st==='W'){c+=t?'':' f';tt='Weekly off'}else if(t&&A){tt='Today'}
 h+='<span class="'+c+'"'+(t?' aria-current="date"':'')+(tt?' title="'+i+' '+M[m].slice(0,3)+': '+tt+'"':'')+'>'+i+'</span>'}
 var tail=(7-(first+n)%7)%7;for(i=1;i<=tail;i++)h+='<span class="o">'+i+'</span>';g.innerHTML=h;
 if(A){document.getElementById('cal_lg').hidden=false;
@@ -5022,9 +5030,10 @@ def admin_online_poll():
 
 # ---------------------------------------------------------------- Update158: sidebar Calendar = "My Attendance" (Present / Absent per date)
 def employee_att_map(eid, months=13):
-    """{ 'YYYY-MM-DD': 'P' | 'A' | 'L' | 'H' | 'O' } for the last `months` months up to today (re-built on every page load, so it is always current).
+    """{ 'YYYY-MM-DD': 'P' | 'A' | 'L' | 'H' | 'O' | 'W' } for the last `months` months up to today (re-built on every page load, so it is always current).
     P = Present (a login in the Attendance sheet OR a productivity entry), A = Absent (past working day with no login / entry / leave),
-    L = full-day leave, H = half-day leave, O = weekly off / holiday. Today without any record yet, future days and dates before joining are left out."""
+    L = full-day leave, H = half-day leave, O = declared holiday (its own distinct colour so holidays stand out from a plain weekly off),
+    W = weekly off (not a declared holiday). Today without any record yet, future days and dates before joining are left out."""
     today = today_local(); k = _key(eid); jd = join_date(eid)
     y, m = today.year, today.month - (months - 1)
     while m < 1: m += 12; y -= 1
@@ -5040,7 +5049,8 @@ def employee_att_map(eid, months=13):
         ds = str(d)
         if ds in full: out[ds] = "L"
         elif ds in half: out[ds] = "H"
-        elif is_off(ds): out[ds] = "O"
+        elif is_holiday(ds): out[ds] = "O"      # declared holiday - checked before the generic weekly-off/holiday is_off()
+        elif is_off(ds): out[ds] = "W"          # plain weekly off (not a declared holiday)
         elif ds in present: out[ds] = "P"
         elif d < today: out[ds] = "A"
         d += dt.timedelta(days=1)
@@ -7870,6 +7880,8 @@ AUTO_MAIL_KEY = "Auto Missed Email"
 AUTO_MAIL_TIME_KEY = "Auto Missed Email Time"                       # Update123: Admin-selected send time (Settings sheet, HH:MM)
 AUTO_MAIL_TIME = os.getenv("AUTO_MAIL_TIME", "09:30").strip()      # HH:MM, app timezone - default until the Admin saves a time
 
+AUTO_MAIL_LOOKBACK_DAYS = int(os.getenv("AUTO_MAIL_LOOKBACK_DAYS", "45") or 45)      # Update160: a missed date keeps being reminded until it is completed - also across a month change (looks back this many days)
+
 AUTO_MAIL_DEFAULT = os.getenv("AUTO_MAIL_DEFAULT", "1") == "1"      # Update157: automatic e-mail is ON until the Admin explicitly switches it off (it used to stay OFF and nothing was ever sent)
 def auto_mail_on(fresh=False):
     v = _setting(AUTO_MAIL_KEY, fresh).lower()
@@ -7907,35 +7919,48 @@ def run_auto_missed_mail(force=False):
         if not MAIL_READY or not mail_sender(fresh=True)[1]:
             print("Automatic missed-entry e-mail NOT sent: mail service / sender e-mail not configured (BREVO_API_KEY or SMTP_HOST, MAIL_FROM)."); return None
         today = today_local()
+        if is_off(today):                                    # Update160: NO reminder e-mails on weekends / public holidays (also for "send now")
+            print("Automatic missed-entry e-mail skipped: today is a weekly off / holiday."); return None
         if not force and not _auto_claim_run(today): return "busy"
-        end = today - dt.timedelta(days=1); start = mail_month_start()
+        end = today - dt.timedelta(days=1); start = today - dt.timedelta(days=AUTO_MAIL_LOOKBACK_DAYS)
         try: access = _fetch_rows("Productivity Access")
         except Exception: access = []
         subs, leaves = load_subs(), _fetch_rows("Leave")
         t_ = str(today)
-        mailed_today = {_key(r.get("Employee ID", "")) for r in _fetch_rows(MISSED_LOG)          # already reminded today (Sent) - one reminder per day
-                        if str(r.get("Employee ID", "")) != "__RUN__" and str(r.get("Date sent", "")) == t_ and str(r.get("Status", "")) == "Sent" and str(r.get("Mode", "")) in ("Manual", "Auto")}
-        items, noaddr = [], []
+        sent_today = set()                                              # (employee, date) pairs already reminded today (Sent) - one reminder per missed date per day
+        for r in _fetch_rows(MISSED_LOG):
+            if str(r.get("Employee ID", "")) != "__RUN__" and str(r.get("Date sent", "")) == t_ and str(r.get("Status", "")) == "Sent" and str(r.get("Mode", "")) in ("Manual", "Auto"):
+                for x in str(r.get("Missed dates", "")).split(","):
+                    if x.strip(): sent_today.add((_key(r.get("Employee ID", "")), x.strip()))
+        per_emp, noaddr = [], []
         for e in _fetch_rows("Employees"):
             eid = str(e.get("Employee ID", "")).strip(); k = _key(eid)
             if not eid or not productivity_access(eid, access): continue
             mail = employee_office_email(e)
             ds = missing_dates(eid, [x for x in subs if _key(x["emp_id"]) == k], [l for l in leaves if _key(l["Employee ID"]) == k], start, end, fmt="%Y-%m-%d")
-            new = sorted(ds)                                            # ALL dates still missing - a date submitted / excused since yesterday is simply no longer here
-            if not new or (not force and k in mailed_today): continue
+            pending = sorted(d for d in ds if force or (k, d) not in sent_today)      # ONLY dates still pending (read live: a date submitted since yesterday is simply gone)
+            if not pending: continue
             emp = dict(eid=eid, name=str(e.get("Name", "")), email=mail)
-            if not EMAIL_RE.match(mail): noaddr.append((emp, new)); continue
-            items.append((emp, missed_message(emp, new), ", ".join(new), len(new)))
+            if not EMAIL_RE.match(mail): noaddr.append((emp, pending)); continue
+            per_emp.append((emp, pending))
+        # ONE separate e-mail per missed date. Mails go out in "waves" (wave n = the n-th missed date of every employee) so each wave has one mail per address
+        waves, items_n = [], 0
+        for emp, pending in per_emp:
+            for i, d in enumerate(pending):
+                while len(waves) <= i: waves.append([])
+                waves[i].append((emp, missed_message(emp, [d]), d, 1)); items_n += 1
+        items = [x for w in waves for x in w]
         if noaddr:                                              # visible on the Email Controls status board (once per day per employee)
             ws = ws_of(MISSED_LOG); t = str(today)
             have = {_key(r.get("Employee ID", "")) for r in _fetch_rows(MISSED_LOG) if str(r.get("Date sent", "")) == t and str(r.get("Mode", "")) == "Auto" and str(r.get("Status", "")).startswith("Failed: no valid")}
             rowsx = [[t, e["eid"], e["name"], e["email"], ", ".join(d), len(d), now_local().strftime("%Y-%m-%d %H:%M:%S"), "Auto", "Failed: no valid Office Email ID", "System"] for e, d in noaddr if _key(e["eid"]) not in have]
             if rowsx: ws.append_rows(rowsx, value_input_option="RAW"); invalidate_cache(MISSED_LOG)
         failed = 0
-        for i in range(0, len(items), 25):
-            out = send_logged(items[i:i + 25], "Auto", "System")      # logged in the Missed Email Log; failed ones stay "not e-mailed" and are retried
-            failed += sum(1 for v in out.values() if v != "Sent")
-        print(f"Automatic missed-entry e-mail: {len(items)} employee(s), {failed} failed, {len(noaddr)} without a valid e-mail.")
+        for w in waves:
+            for i in range(0, len(w), 25):
+                out = send_logged(w[i:i + 25], "Auto", "System")      # one log row per missed date; failed ones stay "not e-mailed" and are retried
+                failed += sum(1 for v in out.values() if v != "Sent")
+        print(f"Automatic missed-entry e-mail: {len(items)} e-mail(s) for {len(per_emp)} employee(s), {failed} failed, {len(noaddr)} without a valid e-mail.")
         return (len(items), failed)                                   # employees without a valid address are listed on the status board (Failed: no valid Office Email ID)
     except Exception as ex:
         print("Automatic missed-entry e-mail error:", ex); return (0, 1)
@@ -7949,7 +7974,7 @@ def _auto_mail_loop():
         try:
             now = now_local()
             if _auto_tries[1] != now.date(): _auto_tries[0], _auto_tries[1] = 0, now.date()
-            if _auto_done_day[0] != now.date() and _auto_tries[0] < 8 and now.time() >= _auto_time() and auto_mail_on():
+            if _auto_done_day[0] != now.date() and _auto_tries[0] < 8 and now.time() >= _auto_time() and not is_off(now.date()) and auto_mail_on():
                 res = run_auto_missed_mail()
                 if res == "busy":                                             # Update159: another worker is running / ran this slot - look again in the next slot, not every minute
                     time.sleep(1500)
@@ -7968,9 +7993,10 @@ def admin_email_controls_run_now():
     """Update157: Admin-only - run the automatic missed-entry e-mail right now (same job, same rules: every still-missing date of this month, to each employee's own Office Email ID)."""
     _admin_only_mail()
     if not MAIL_READY: flash("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST, and MAIL_FROM).", "error"); return redirect("/admin/email-controls")
+    if is_off(today_local()): flash("Nothing was sent: today is a weekly off / holiday - reminder e-mails are not sent on those days.", "error"); return redirect("/admin/email-controls")
     res = run_auto_missed_mail(force=True)
     if res is None: flash("Nothing was sent: e-mail is not fully configured on the server (sender e-mail / BREVO_API_KEY).", "error")
-    else: flash(f"Automatic e-mail run finished: {res[0]} employee(s) e-mailed, {res[1]} failed. See the status board below.")
+    else: flash(f"Automatic e-mail run finished: {res[0]} e-mail(s) sent (one per missed date), {res[1]} failed. See the status board below.")
     return redirect("/admin/email-controls")
 
 @app.route("/admin/email-controls/auto", methods=["POST"])
@@ -7998,7 +8024,7 @@ EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
 <label>Send time<input type="time" name="auto_time" value="{{auto_time_val}}" required></label>
 <button class="primary sm">Save</button></form>
 <form method="post" action="/admin/email-controls/run-now" style="margin:8px 0" onsubmit="return confirm('Send the missed-entry e-mails to all employees with missingsed dates now?')"><button class="primary sm">&#9993; Send automatic e-mails now</button></form>
-<p class="mut">Status: <b style="color:{{'#15803d' if auto_on else '#991b1b'}}">{{'ENABLED' if auto_on else 'DISABLED'}}</b>. When enabled, every day at <b>{{auto_time}}</b> (the time set here by the Admin) each employee who has missed a Productivity Entry this month receives ONE e-mail that day with their name, every date still missing and the Productivity Tracker login link. The reminder repeats every day until the entry is submitted (or leave is approved) - submitted dates drop out of the next e-mail automatically. Last automatic run: <b>{{auto_last or 'never'}}</b>. Only Admin can change this.</p></div>
+<p class="mut">Status: <b style="color:{{'#15803d' if auto_on else '#991b1b'}}">{{'ENABLED' if auto_on else 'DISABLED'}}</b>. When enabled, every day at <b>{{auto_time}}</b> (the time set here by the Admin) each employee with a pending (missed, not yet submitted) Productivity Entry receives ONE SEPARATE e-mail for EACH missed date, with their name, that date and the Productivity Tracker login link. No e-mails are sent on weekly offs or public holidays. A date keeps being reminded every working day until the entry is submitted (or leave is approved) - then its reminders stop automatically. Last automatic run: <b>{{auto_last or 'never'}}</b>. Only Admin can change this.</p></div>
 
 <div class="card"><h2>1. Send a reminder manually</h2>
 <form method="post" action="/admin/email-controls/send" id="ec-form" onsubmit="return ecCheck()">
@@ -8190,9 +8216,99 @@ MAIL_NOTE_HTML = r'''<!DOCTYPE html>
 
 def _t12s(t): return t.strftime("%I:%M %p")                     # dt.time -> '09:30 AM'
 
-def _mn_body_html(text):
-    """Plain message -> HTML paragraphs (blank line = new paragraph, line break kept). Always escaped."""
+# ---- Update162: rich-text message. Stored as  "<!--rt-->" + cleaned HTML  (older notes without the marker are plain text and still work).
+from html.parser import HTMLParser as _MnHP
+_MN_MARK = "<!--rt-->"
+_MN_RICH_MAX = 20000
+_MN_COLOR_RE = re.compile(r"^(#[0-9a-f]{3}|#[0-9a-f]{6}|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\))$")
+_MN_FONT_PX = {"1": 10, "2": 13, "3": 16, "4": 18, "5": 24, "6": 32, "7": 48}      # <font size=N> (old browsers) -> px
+_MN_ALIGN = ("left", "center", "right", "justify")
+
+def _mn_style(attrs, tag):
+    """Only these styles survive: color, font-size (8-60 px), text-align, bold, italic, underline."""
+    d = {k.lower(): (v or "") for k, v in attrs}; out = {}
+    for part in d.get("style", "").split(";"):
+        if ":" not in part: continue
+        k, v = part.split(":", 1); k = k.strip().lower(); v = v.strip().lower()
+        if k == "color" and _MN_COLOR_RE.match(v): out["color"] = v
+        elif k == "font-size":
+            m = re.match(r"^(\d{1,2}(?:\.\d+)?)px$", v)
+            if m and 8 <= float(m.group(1)) <= 60: out["font-size"] = m.group(1) + "px"
+        elif k == "text-align" and v in _MN_ALIGN: out["text-align"] = v
+        elif k == "font-weight" and (v == "bold" or (v.isdigit() and int(v) >= 600)): out["font-weight"] = "bold"
+        elif k == "font-style" and v == "italic": out["font-style"] = "italic"
+        elif k == "text-decoration" and "underline" in v: out["text-decoration"] = "underline"
+    if d.get("align", "").strip().lower() in _MN_ALIGN: out.setdefault("text-align", d["align"].strip().lower())
+    if tag == "font":
+        c = d.get("color", "").strip().lower()
+        if _MN_COLOR_RE.match(c): out.setdefault("color", c)
+        z = d.get("size", "").strip()
+        if z in _MN_FONT_PX: out.setdefault("font-size", f"{_MN_FONT_PX[z]}px")
+    return ";".join(f"{k}:{v}" for k, v in out.items())
+
+class _MnClean(_MnHP):
+    """Whitelist cleaner: keeps b / i / u / br / ul / ol / li / div (p) / span (font) with safe inline styles; every other tag is unwrapped, script / style dropped."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True); self.o, self.st, self.skip = [], [], 0
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"): self.skip += 1; return
+        if self.skip: return
+        if tag == "br": self.o.append("<br>"); return
+        css = _mn_style(attrs, tag); out = None
+        if tag in ("p", "div"): out = "div"; self.o.append(f'<div style="margin:0 0 10px 0;{css}">')
+        elif tag in ("b", "strong", "i", "em", "u"):
+            out = {"strong": "b", "em": "i"}.get(tag, tag); self.o.append(f'<{out} style="{css}">' if css else f"<{out}>")
+        elif tag in ("ul", "ol"): out = tag; self.o.append(f'<{tag} style="margin:0 0 14px 0;padding-left:24px;{css}">')
+        elif tag == "li": out = "li"; self.o.append(f'<li style="margin:0 0 4px 0;{css}">')
+        elif tag in ("span", "font"): out = "span"; self.o.append(f'<span style="{css}">' if css else "<span>")
+        self.st.append((tag, out))
+    def handle_endtag(self, tag):
+        if tag in ("script", "style"):
+            if self.skip: self.skip -= 1
+            return
+        if self.skip or tag == "br": return
+        idx = next((i for i in range(len(self.st) - 1, -1, -1) if self.st[i][0] == tag), None)
+        if idx is None: return
+        while len(self.st) > idx:
+            _, out = self.st.pop()
+            if out: self.o.append(f"</{out}>")
+    def handle_data(self, data):
+        if not self.skip: self.o.append(re.sub(r"[<>&]", lambda m: {"<": "&lt;", ">": "&gt;", "&": "&amp;"}[m.group()], data).replace("\xa0", "&nbsp;"))
+
+def _mn_clean(raw):
+    p = _MnClean(); p.feed(str(raw)); p.close()
+    while p.st:
+        _, out = p.st.pop()
+        if out: p.o.append(f"</{out}>")
+    return "".join(p.o).strip()
+
+def _mn_visible_text(h):
     import html as _h
+    t = re.sub(r"<br\s*/?>|</div>|</li>|</ul>|</ol>", "\n", h)
+    t = _h.unescape(re.sub(r"<[^>]+>", "", re.sub(r"<li[^>]*>", "• ", t)))
+    return re.sub(r"\n{3,}", "\n\n", t.replace("\xa0", " ")).strip()
+
+def _mn_posted_message(f):
+    """The Message value of the Admin form: rich HTML (cleaned) when the editor sent it, else plain text."""
+    raw = (f.get("message") or "").replace("\r\n", "\n")
+    if f.get("rich") == "1":
+        h = _mn_clean(raw[:60000])
+        return (_MN_MARK + h) if _mn_visible_text(h) else ""
+    return raw.strip()[:5000]
+
+def _mn_plain(message):
+    m = str(message)
+    return _mn_visible_text(m[len(_MN_MARK):]) if m.startswith(_MN_MARK) else m.strip()
+
+def _mn_editor_html(message):
+    """Saved message -> HTML for the editor (plain notes are converted to paragraphs)."""
+    m = str(message or "")
+    return m[len(_MN_MARK):] if m.startswith(_MN_MARK) else _mn_clean(_mn_body_html(m))
+
+def _mn_body_html(text):
+    """Message -> HTML. Rich note (marker) -> cleaned formatted HTML; plain note -> paragraphs (blank line = new paragraph, line break kept), always escaped."""
+    import html as _h
+    if str(text).startswith(_MN_MARK): return _mn_clean(str(text)[len(_MN_MARK):])
     paras = [p.strip() for p in re.split(r"\n\s*\n", str(text).replace("\r\n", "\n")) if p.strip()]
     return "".join('<p style="margin:0 0 14px 0;">' + _h.escape(p).replace("\n", "<br>") + "</p>" for p in paras)
 
@@ -8206,7 +8322,7 @@ def mail_note_message(emp, rec):
     msg = EmailMessage()
     msg["Subject"] = re.sub(r"[\r\n]+", " ", str(rec["Subject"])).strip()
     msg["From"] = formataddr(mail_sender()); msg["To"] = emp["email"]
-    msg.set_content(f"{str(rec['Message']).strip()}\n\nThis is an automated email. Please do not reply to this email.\n\nThanks,\nProductivity Tracker (LN_Map)")
+    msg.set_content(f"{_mn_plain(rec['Message'])}\n\nThis is an automated email. Please do not reply to this email.\n\nThanks,\nProductivity Tracker (LN_Map)")
     msg.add_alternative(mail_note_html(rec["Subject"], rec["Message"]), subtype="html")
     return msg
 
@@ -8306,7 +8422,7 @@ def _mn_loop():
 threading.Thread(target=_mn_loop, daemon=True).start()
 
 MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
-<p class="mut">Write an e-mail, choose who receives it and when it is sent. Your subject and message are placed in one professional e-mail design (see the live preview). Scheduled mails are sent automatically. All times are {{tz}} time. Only Admin can open this page.</p></div></div>
+<p class="mut">Write an e-mail, choose who receives it and when it is sent. Format the message with the toolbar (colour, size, bold, italic, underline, alignment, lists); your subject and message are placed in one professional e-mail design (see the live preview). Scheduled mails are sent automatically. All times are {{tz}} time. Only Admin can open this page.</p></div></div>
 {% if not mail_ok %}<div class="warn"><b>&#9888; E-mail service is not set up on the server.</b> Add <code>BREVO_API_KEY</code> (or <code>SMTP_HOST</code>) in the Render Environment settings and redeploy. Nothing can be scheduled until then.</div>{% endif %}
 <form method="post" action="/admin/mail-notes/schedule" id="mn-form" onsubmit="return mnCheck()">
 <input type="hidden" name="mid" value="{{form.mid}}">
@@ -8314,9 +8430,51 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
 <div class="card" style="flex:1 1 400px;min-width:0">
 <h2>{{'Edit scheduled mail' if form.mid else 'Compose'}}</h2>
 <label style="display:block">Email Subject<input name="subject" id="mn-subject" maxlength="150" value="{{form.subject}}" placeholder="e.g. Holiday notice" required style="width:100%"></label>
-<label style="display:block;margin-top:10px">Email Message
-<textarea name="message" id="mn-message" rows="10" maxlength="5000" required placeholder="Type your message here. Leave a blank line to start a new paragraph." style="width:100%;font-family:inherit">{{form.message}}</textarea></label>
-<p class="mut" style="margin:4px 0 0">Your message is placed under the subject and followed by the standard footer.</p>
+<style>
+.mn-tb{display:flex;flex-wrap:wrap;gap:6px 4px;align-items:center;padding:6px 8px;border:1px solid #d0d5dd;border-bottom:0;border-radius:10px 10px 0 0;background:#f8fafc}
+.mn-tb .g{display:inline-flex;gap:3px;align-items:center;padding-right:6px;margin-right:2px;border-right:1px solid #e2e8f0}
+.mn-tb .g:last-child{border-right:0;margin-right:0;padding-right:0}
+.mn-tb button.tb{min-width:34px;height:34px;padding:0 8px;border:1px solid transparent;border-radius:8px;background:transparent;color:#1e293b;font:inherit;font-size:15px;cursor:pointer;line-height:1}
+.mn-tb button.tb:hover{background:#e8edf5}
+.mn-tb button.tb.on{background:#dbeafe;border-color:#93c5fd;color:#1e40af}
+.mn-tb button.tb:focus-visible,.mn-tb select:focus-visible,.mn-tb input:focus-visible{outline:2px solid #2563eb;outline-offset:1px}
+.mn-tb select{height:34px;border:1px solid #d0d5dd;border-radius:8px;background:#fff;padding:0 6px;font:inherit;font-size:14px}
+.mn-tb .sw{width:22px;height:22px;min-width:22px;padding:0;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #94a3b8;cursor:pointer}
+.mn-tb .sw:hover{box-shadow:0 0 0 2px #2563eb}
+.mn-tb input[type=color]{width:34px;height:34px;padding:2px;border:1px solid #d0d5dd;border-radius:8px;background:#fff;cursor:pointer}
+.mn-ed{min-height:210px;max-height:440px;overflow:auto;resize:vertical;padding:12px 14px;border:1px solid #d0d5dd;border-radius:0 0 10px 10px;background:#fff;color:#1e293b;font-size:16px;line-height:1.6;outline:0;word-break:break-word}
+.mn-ed:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+.mn-ed:empty:before{content:attr(data-ph);color:#94a3b8;pointer-events:none}
+.mn-ed ul{list-style:disc;margin:0 0 10px 0;padding-left:26px}.mn-ed ol{list-style:decimal;margin:0 0 10px 0;padding-left:26px}.mn-ed li{margin:0 0 4px 0}
+.mn-ed div{margin:0 0 6px 0}
+</style>
+<p style="margin:10px 0 4px;font-weight:600" id="mn-lbl">Email Message</p>
+<div class="mn-tb" id="mn-tb" role="toolbar" aria-label="Text formatting" aria-controls="mn-ed">
+ <span class="g"><button type="button" class="tb" data-c="bold" title="Bold (Ctrl+B)" aria-label="Bold"><b>B</b></button>
+  <button type="button" class="tb" data-c="italic" title="Italic (Ctrl+I)" aria-label="Italic"><i>I</i></button>
+  <button type="button" class="tb" data-c="underline" title="Underline (Ctrl+U)" aria-label="Underline"><u>U</u></button></span>
+ <span class="g"><select id="mn-size" title="Font size" aria-label="Font size"><option value="" selected disabled>Size</option>
+  <option value="12">Small</option><option value="16">Normal</option><option value="20">Large</option><option value="28">Extra large</option><option value="36">Huge</option></select></span>
+ <span class="g" title="Text colour"><button type="button" class="sw" data-color="#000000" style="background:#000000" title="Black" aria-label="Black"></button>
+  <button type="button" class="sw" data-color="#dc2626" style="background:#dc2626" title="Red" aria-label="Red"></button>
+  <button type="button" class="sw" data-color="#ea580c" style="background:#ea580c" title="Orange" aria-label="Orange"></button>
+  <button type="button" class="sw" data-color="#16a34a" style="background:#16a34a" title="Green" aria-label="Green"></button>
+  <button type="button" class="sw" data-color="#2563eb" style="background:#2563eb" title="Blue" aria-label="Blue"></button>
+  <button type="button" class="sw" data-color="#7c3aed" style="background:#7c3aed" title="Purple" aria-label="Purple"></button>
+  <button type="button" class="sw" data-color="#6b7280" style="background:#6b7280" title="Grey" aria-label="Grey"></button>
+  <input type="color" id="mn-color" value="#1e293b" title="More colours" aria-label="More text colours"></span>
+ <span class="g"><button type="button" class="tb" data-c="justifyLeft" title="Align left" aria-label="Align left">&#8676;</button>
+  <button type="button" class="tb" data-c="justifyCenter" title="Align centre" aria-label="Align centre">&#8801;</button>
+  <button type="button" class="tb" data-c="justifyRight" title="Align right" aria-label="Align right">&#8677;</button>
+  <button type="button" class="tb" data-c="justifyFull" title="Justify" aria-label="Justify">&#9776;</button></span>
+ <span class="g"><button type="button" class="tb" data-c="insertUnorderedList" title="Bullet list" aria-label="Bullet list">&#8226;&#8801;</button>
+  <button type="button" class="tb" data-c="insertOrderedList" title="Numbered list" aria-label="Numbered list">1.&#8801;</button></span>
+ <span class="g"><button type="button" class="tb" data-c="removeFormat" title="Clear formatting" aria-label="Clear formatting">T<small>&#215;</small></button></span>
+</div>
+<div class="mn-ed" id="mn-ed" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="mn-lbl" data-ph="Type your message here. Select text, then use the toolbar to format it."></div>
+<textarea name="message" id="mn-message" style="display:none">{{form.message_html}}</textarea>
+<input type="hidden" name="rich" id="mn-rich" value="1">
+<p class="mut" style="margin:4px 0 0">Select text and use the toolbar (colour, size, bold, italic, underline, alignment, lists). Your message is placed under the subject and followed by the standard footer.</p>
 
 <h3 style="margin:18px 0 6px">Employee access &mdash; who receives it?</h3>
 <div style="border:1px solid #d0d5dd;border-radius:10px;padding:10px 14px">
@@ -8376,12 +8534,54 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
      pick=document.getElementById('mn-pick'), sd=document.getElementById('mn-sdate'), stm=document.getElementById('mn-stime'),
      q=document.getElementById('mn-q'), cnt=document.getElementById('mn-count');
  function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
- function body(t){return t.replace(/\r\n/g,'\n').split(/\n\s*\n/).map(function(x){return x.trim();}).filter(Boolean)
-   .map(function(p){return '<p style="margin:0 0 14px 0;">'+esc(p).replace(/\n/g,'<br>')+'</p>';}).join('');}
- function render(){
-  var v={subject:esc(sub.value.trim())||'Your subject appears here',
-         message:body(msg.value)||'<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>'};
+ var ed=document.getElementById('mn-ed'), bar=document.getElementById('mn-tb'), rich=document.getElementById('mn-rich'),
+     sizeSel=document.getElementById('mn-size'), colorIn=document.getElementById('mn-color'), saved=null, pendingPx=16, clean='', tmr=null, seq=0;
+ var PH='<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>';
+ function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
+ function paint(){
+  var v={subject:esc(sub.value.trim())||'Your subject appears here', message:(hasText()&&clean)?clean:PH};
   frame.srcdoc=T.replace(/[{][{](\w+)[}][}]/g,function(m,k){return (k in v)?v[k]:m;});}
+ function inEd(n){return n&&ed.contains(n.nodeType===1?n:n.parentNode);}
+ function saveSel(){var s=window.getSelection();if(s.rangeCount&&inEd(s.anchorNode)){saved=s.getRangeAt(0).cloneRange();active();}}
+ function restore(){
+  var s=window.getSelection();
+  if(document.activeElement===ed&&s.rangeCount&&inEd(s.anchorNode))return;      /* toolbar buttons keep the selection: nothing to restore */
+  ed.focus();if(saved){s.removeAllRanges();s.addRange(saved);}}
+ function fixFonts(){
+  var fs=ed.querySelectorAll('font'),first=null,last=null;
+  Array.prototype.forEach.call(fs,function(f){
+   var sp=document.createElement('span'),z=f.getAttribute('size'),c=f.getAttribute('color');
+   if(z==='7')sp.style.fontSize=pendingPx+'px'; else if(z)sp.style.fontSize=({1:10,2:13,3:16,4:18,5:24,6:32}[z]||16)+'px';
+   if(c)sp.style.color=c;
+   while(f.firstChild)sp.appendChild(f.firstChild);
+   f.parentNode.replaceChild(sp,f);first=first||sp;last=sp;});
+  return first?[first,last]:null;}
+ function sync(){
+  if(ed.innerHTML==='<br>'||ed.innerHTML==='<div><br></div>')ed.innerHTML='';
+  msg.value=ed.innerHTML;clearTimeout(tmr);var my=++seq;
+  tmr=setTimeout(function(){var fd=new FormData();fd.append('message',msg.value);
+   fetch('/admin/mail-notes/rich-preview',{method:'POST',body:fd,credentials:'same-origin'})
+    .then(function(r){return r.json();}).then(function(j){if(my===seq){clean=j.html||'';paint();}}).catch(function(){});},250);
+  paint();}
+ function cmd(c,v,css){
+  restore();document.execCommand('styleWithCSS',false,!!css);document.execCommand(c,false,v||null);saveSel();sync();}
+ function active(){
+  ['bold','italic','underline','insertUnorderedList','insertOrderedList','justifyLeft','justifyCenter','justifyRight','justifyFull'].forEach(function(c){
+   var b=bar.querySelector('[data-c="'+c+'"]');if(!b)return;var on=false;try{on=document.queryCommandState(c);}catch(e){}b.classList.toggle('on',!!on);});}
+ bar.addEventListener('mousedown',function(e){if(!(e.target.closest('select')||e.target.closest('input')))e.preventDefault();});   /* keep the text selection while clicking buttons */
+ bar.querySelectorAll('button[data-c]').forEach(function(b){b.addEventListener('click',function(){
+  var c=b.getAttribute('data-c');cmd(c,null,c.indexOf('justify')===0);});});
+ bar.querySelectorAll('button[data-color]').forEach(function(b){b.addEventListener('click',function(){cmd('foreColor',b.getAttribute('data-color'),true);colorIn.value=b.getAttribute('data-color');});});
+ colorIn.addEventListener('input',function(){cmd('foreColor',colorIn.value,true);});
+ sizeSel.addEventListener('change',function(){
+  var px=parseInt(sizeSel.value,10);sizeSel.selectedIndex=0;if(!px)return;pendingPx=px;
+  restore();document.execCommand('styleWithCSS',false,false);document.execCommand('fontSize',false,'7');
+  var r=fixFonts();if(r){var rg=document.createRange();rg.setStartBefore(r[0]);rg.setEndAfter(r[1]);var s=window.getSelection();s.removeAllRanges();s.addRange(rg);saved=rg.cloneRange();}
+  sync();});
+ ed.addEventListener('input',function(){fixFonts();sync();});
+ ed.addEventListener('keyup',saveSel);ed.addEventListener('mouseup',saveSel);document.addEventListener('selectionchange',function(){if(document.activeElement===ed)saveSel();});
+ ed.addEventListener('paste',function(e){e.preventDefault();var t=(e.clipboardData||window.clipboardData).getData('text/plain');document.execCommand('insertText',false,t);});   /* paste as plain text: no foreign fonts / colours */
+ function init(){ed.innerHTML=msg.value;rich.value='1';sync();}
  function cbs(){return document.querySelectorAll('.mn-cb:not(:disabled)');}
  function shown(){return Array.prototype.filter.call(cbs(),function(c){return c.closest('.mn-emp').style.display!=='none';});}
  function count(){var n=0;cbs().forEach(function(c){if(c.checked)n++;});cnt.textContent=n+' selected';}
@@ -8390,17 +8590,20 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
   sd.disabled=!later;stm.disabled=!later;sd.required=later;stm.required=later;
   pick.style.display=document.querySelector('input[name=rmode]:checked').value==='selected'?'block':'none';}
  document.querySelectorAll('input[name=mode],input[name=rmode]').forEach(function(r){r.addEventListener('change',modes);});
- sub.addEventListener('input',render); msg.addEventListener('input',render);
+ sub.addEventListener('input',paint);
  q.addEventListener('input',function(){var t=q.value.trim().toLowerCase();
   document.querySelectorAll('.mn-emp').forEach(function(l){l.style.display=(!t||l.getAttribute('data-s').indexOf(t)>-1)?'flex':'none';});});
  document.getElementById('mn-all').addEventListener('click',function(){shown().forEach(function(c){c.checked=true;});count();});
  document.getElementById('mn-none').addEventListener('click',function(){shown().forEach(function(c){c.checked=false;});count();});
  document.querySelectorAll('.mn-cb').forEach(function(c){c.addEventListener('change',count);});
  window.mnCheck=function(){
+  fixFonts();msg.value=ed.innerHTML;rich.value='1';
+  if(!hasText()){alert('Enter the email message.');ed.focus();return false;}
+  if(msg.value.length>20000){alert('The message is too long. Shorten it or remove some formatting.');return false;}
   var sel=document.querySelector('input[name=rmode]:checked').value==='selected',n=0;cbs().forEach(function(c){if(c.checked)n++;});
   if(sel&&!n){alert('Tick at least one employee, or choose All employees.');return false;}
   return confirm(sel?('Schedule this e-mail for '+n+' selected employee(s)?'):'Schedule this e-mail for ALL employees?');};
- modes();count();render();
+ modes();count();init();
 })();
 </script>"""
 
@@ -8423,6 +8626,7 @@ def _mn_render(form=None, edit=None):
                 form.update(mid=r["ID"], subject=r["Subject"], message=r["Message"], sdate=sa[:10], stime=sa[11:16] or "09:00",
                             rmode="selected" if r.get("Recipient mode") == "selected" else "all", eids=_mn_ids(r))
             else: flash("Only a Scheduled e-mail can be edited.", "error")
+    form = dict(form); form["message_html"] = _mn_editor_html(form.get("message", ""))
     notices = []
     for r in sorted(rows(MN_SHEET), key=lambda r: str(r.get("Created at", "")), reverse=True)[:30]:
         st = str(r.get("Status", ""))
@@ -8455,13 +8659,14 @@ def admin_mn_schedule():
     _admin_only_mail()
     f = request.form
     form = dict(mid=(f.get("mid") or "").strip(), subject=re.sub(r"[\r\n]+", " ", f.get("subject", "")).strip()[:150],
-                message=(f.get("message") or "").replace("\r\n", "\n").strip()[:5000],
+                message=_mn_posted_message(f),
                 mode="now" if f.get("mode") == "now" else "later", sdate=(f.get("sdate") or "").strip(), stime=(f.get("stime") or "").strip() or "09:00",
                 rmode="selected" if f.get("rmode") == "selected" else "all", eids=[x.strip() for x in f.getlist("eids") if x.strip()])
     def bad(text): flash(text, "error"); return _mn_render(form)
     if not MAIL_READY: return bad("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST).")
     if not form["subject"]: return bad("Enter the email subject.")
     if not form["message"]: return bad("Enter the email message.")
+    if len(form["message"]) > _MN_RICH_MAX: return bad("The message is too long. Shorten it or remove some formatting.")
     now = now_local()
     if form["mode"] == "now": send_at = now.replace(second=0, microsecond=0)
     else:
@@ -8516,6 +8721,12 @@ def admin_mn_send_now(mid):
         threading.Thread(target=run_mail_note, args=(str(mid),), daemon=True).start()
         flash("Sending now. Refresh this page in a minute to see the log.")
     return redirect("/admin/mail-notes")
+
+@app.route("/admin/mail-notes/rich-preview", methods=["POST"])
+@need("admin")
+def admin_mn_rich_preview():
+    _admin_only_mail()
+    return jsonify(html=_mn_clean((request.form.get("message") or "")[:60000]))      # the live preview shows exactly what the e-mail will contain
 
 @app.route("/admin/mail-notes/<mid>/preview")
 @need("admin")

@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update173: Productivity % is NOT calculated for weekends / declared holidays (load_subs gives pct=None; screens show "not counted"); the Employee Calendar marks every holiday (amber) and weekly off (grey) - past and next 12 months, today included - and they win over leave / login / entry / absent.
   * Update170: Admin Overview rebuilt on tolerant Productivity-log reading (see load_subs / report) + /admin/summary/check per-employee audit page.
   * Update169: Overview compared with Update160 - the Overview route, template, design and calculation are identical; the only data-layer difference was the Productivity log COLUMN ORDER (Update166 moved
     "Target Count" / "Productivity %" to J:K). A sheet whose rows were still in the Update160 order (J = Submitted at, K = Description, L = Target Count, M = Productivity %) got new header names over old data
@@ -1073,8 +1074,9 @@ def load_subs(emp_id=None):
         s["earned"] = sum(p["earned"] for p in s["procs"])     # hours' worth of standard output
         s["ded"] = ded.get((_key(s["emp_id"]), str(s["date"])), 0.0)          # approved permission / half-day leave hours that day
         s["avail"] = max(T - s["ded"], 0.0)                                   # working hours left = target hrs less those hours
-        s["pct"] = _day_pct(s["prod"], s["avail"], tph, s["procs"])      # Update137: one shared formula (also stored in the sheet)
-        s["off"] = is_off(s["date"])                            # weekly-off entry: saved, not counted
+        s["off"] = is_off(s["date"])                            # weekly-off / holiday entry: saved, NOT counted
+        # Update173: productivity is NOT calculated for a weekend or a declared holiday (None = "not applicable"), never 0% / 100%
+        s["pct"] = None if s["off"] else _day_pct(s["prod"], s["avail"], tph, s["procs"])      # Update137: one shared formula (also stored in the sheet)
         # Update66: Admin-set Target Count vs. what the employee completed (target pro-rated to the hours booked)
         s["tgt_total"] = round(sum(p["hour"] * tph.get(p["name"], 0) for p in s["procs"]), 2)
         s["cnt_total"] = round(sum(p["count"] for p in s["procs"] if tph.get(p["name"], 0) > 0), 2)
@@ -1948,6 +1950,27 @@ def wt_seen():
         try: session["wt_key"] = wt_begin(session["att_eid"], session.get("att_name", ""))
         except Exception as e: print("work-time late start error:", e)
 
+def _att_sessions(d):
+    """Update173: {EMPLOYEE KEY: [(login epoch, logout epoch or None)]} from the Attendance sheet (one row per login session) for date d - the record of EVERY sign-in of the day."""
+    out = {}
+    for r in rows("Attendance"):
+        if _iso_date(r.get("Date")) != d: continue
+        a = _wt_epoch(d, r.get("Login time", "")); b = _wt_epoch(d, r.get("Logout time", ""))
+        if a is None: continue
+        if b is not None and b < a: b = None
+        out.setdefault(_key(r.get("Employee ID", "")), []).append((a, b))
+    return out
+
+def _before_union(spans, limit):
+    """Total seconds of the (start, end) spans that lie before `limit`, overlaps counted once."""
+    iv = sorted((a, min(b, limit)) for a, b in spans if b > a and a < limit); tot, cur = 0.0, None
+    for a, b in iv:
+        if cur is None or a > cur[1]:
+            if cur: tot += cur[1] - cur[0]
+            cur = [a, b]
+        else: cur[1] = max(cur[1], b)
+    return tot + ((cur[1] - cur[0]) if cur else 0.0)
+
 def _wt_report(d):
     """One dict per employee for date d: live memory first (today), then the sheet."""
     evagg = {}                                               # Update161: {KEY: [count, completed lock sec, running lock sec, locked now?]} from the saved events
@@ -1960,6 +1983,7 @@ def _wt_report(d):
                 s0_ = _fl(e_.get("Start epoch"))
                 if s0_ and 0 <= _n - s0_ <= WT_MAX_BREAK_SEC: a[2] += _n - s0_; a[3] = True
     sheet = {str(r.get("Employee ID")): r for r in rows(WT_SHEET) if str(r.get("Date")) == d}
+    att_ = _att_sessions(d)
     with _wt_lock:
         live = {str(x["eid"]): dict(x) for x in _wt.values() if x["date"] == d}
     now = time.time(); agents = _agent_map(); people = [(str(e["Employee ID"]), str(e.get("Name", ""))) for e in rows("Employees")]
@@ -1973,11 +1997,20 @@ def _wt_report(d):
             out.append(dict(eid=eid, name=name, login="", logout="", sys_on="", brk=_hms(done + run) if n_ev else "", locks=n_ev if n_ev else "", work="", status="No login", tone="mut", lt=lt_, state="No login",
                             on_s=0, brk_s=done + run, work_s=0, n_locks=n_ev)); continue
         online, brk, active, state = _wt_calc(st, now)
+        first_login_ = st["first_login"]
+        sess_ = att_.get(_key(eid))                           # Update173: sign-ins recorded BEFORE this Work Time row started (server restart / row rebuilt at a later login) are added back
+        if sess_ and first_login_:
+            live_now = state in ("Active", "Locked")
+            spans_ = [(a_, (b_ if b_ is not None else (now if live_now else a_))) for a_, b_ in sess_]
+            extra_ = _before_union(spans_, first_login_)
+            if extra_ > 0: online += extra_; active += extra_
+            a0_ = min(a_ for a_, _b in sess_)
+            if a0_ < first_login_: first_login_ = a0_
         n_locks = max(st["locks"], n_ev)
         if done + run > brk: active = max(active - (done + run - brk), 0); brk = done + run
         if opn and state == "Active": state = "Locked"
         txt, tone = _wt_status(active, state, brk); st = dict(st, locks=n_locks)
-        out.append(dict(eid=eid, name=name or st["name"], login=_wt_clock(st["first_login"]),
+        out.append(dict(eid=eid, name=name or st["name"], login=_wt_clock(first_login_),
                         logout=_wt_clock(st["last_logout"]) if st["sess_start"] is None else ("(not closed)" if state in ("Not closed", "Left (locked)") else ""),
                         sys_on=_hms(online), brk=_hms(brk), locks=st["locks"], work=_hms(active), status=txt, tone=tone, lt=lt_, state=state, on_s=online, brk_s=brk, work_s=active, n_locks=st["locks"]))
     shared = wts_ids()                                       # Update138: Admin sees only the employees shared with the Admin (tracking itself covers everyone)
@@ -2671,7 +2704,7 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .cal-g .l{background:#2563eb40;color:#bfdbfe;box-shadow:inset 0 0 0 1px #60a5facc;font-weight:600}
 .cal-g .f{color:#6b749f;background:#ffffff0d}
 .cal-g .ho{background:#f59e0b4d;color:#fde68a;box-shadow:inset 0 0 0 1px #f59e0bcc;font-weight:700}
-.cal-g .t.sp{box-shadow:0 2px 0 #3730a3,0 0 0 2px #4ade80}.cal-g .t.sa{box-shadow:0 2px 0 #3730a3,0 0 0 2px #f87171}.cal-g .t.sl{box-shadow:0 2px 0 #3730a3,0 0 0 2px #60a5fa}.cal-g .t.sho{box-shadow:0 2px 0 #3730a3,0 0 0 2px #f59e0b}
+.cal-g .t.sp{box-shadow:0 2px 0 #3730a3,0 0 0 2px #4ade80}.cal-g .t.sa{box-shadow:0 2px 0 #3730a3,0 0 0 2px #f87171}.cal-g .t.sl{box-shadow:0 2px 0 #3730a3,0 0 0 2px #60a5fa}.cal-g .t.sho{box-shadow:0 2px 0 #3730a3,0 0 0 2px #f59e0b}.cal-g .t.sw{background:#ffffff1f;color:#c7cdf0;box-shadow:0 2px 0 #3730a3,0 0 0 2px #6b749f}
 .cal-lg{display:flex;justify-content:center;gap:6px;flex-wrap:wrap;margin:6px 0 0;font-size:9.5px;color:#9aa3c7}
 .cal-up{margin:8px 0 0;font-size:10.5px;color:#cbd2f0}.cal-up b{display:block;color:#fde68a;font-size:10px;margin-bottom:2px;letter-spacing:.3px}
 .cal-up div{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-top:1px solid #ffffff14;cursor:pointer}.cal-up div span:last-child{color:#fde68a;text-align:right}
@@ -2749,7 +2782,7 @@ var np=0,na=0,nl=0;
 for(i=0;i<7;i++)h+='<span class="w">'+W[i]+'</span>';
 for(i=first-1;i>=0;i--)h+='<span class="o">'+(pn-i)+'</span>';
 for(i=1;i<=n;i++){var t=(i===now.getDate()&&m===now.getMonth()&&y===now.getFullYear()),k=y+'-'+z(m+1)+'-'+z(i),st=A?A[k]:'',c=t?'t':'e',tt='';
-if(st==='P'){c+=t?' sp':' p';np++;tt='Present'}else if(st==='A'){c+=t?' sa':' a';na++;tt='Absent'}else if(st==='L'){c+=t?' sl':' l';nl++;tt='Leave'}else if(st==='H'){c+=t?' sl':' l';nl+=.5;np+=.5;tt='Half day'}else if(st==='O'){c+=t?' sho':' ho';tt='Holiday'+(HL[k]?' - '+HL[k]:'')}else if(st==='W'){c+=t?'':' f';tt='Weekly off'}else if(t&&A){tt='Today'}
+if(st==='P'){c+=t?' sp':' p';np++;tt='Present'}else if(st==='A'){c+=t?' sa':' a';na++;tt='Absent'}else if(st==='L'){c+=t?' sl':' l';nl++;tt='Leave'}else if(st==='H'){c+=t?' sl':' l';nl+=.5;np+=.5;tt='Half day'}else if(st==='O'){c+=t?' sho':' ho';tt='Holiday'+(HL[k]?' - '+HL[k]:'')}else if(st==='W'){c+=t?' sw':' f';tt='Weekly off'}else if(t&&A){tt='Today'}
 h+='<span class="'+c+'"'+(t?' aria-current="date"':'')+(tt?' title="'+i+' '+M[m].slice(0,3)+': '+tt+'"':'')+'>'+i+'</span>'}
 var tail=(7-(first+n)%7)%7;for(i=1;i<=tail;i++)h+='<span class="o">'+i+'</span>';g.innerHTML=h;
 if(A){document.getElementById('cal_lg').hidden=false;
@@ -3221,7 +3254,7 @@ LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th
 <td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
 <td>{{ (s.tgt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td><td>{{ (s.cnt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td>
 <td>{% if s.tgt_state=='met' %}<span class="tg-badge met">&#9989; Achieved</span>{% elif s.tgt_state=='miss' %}<span class="tg-badge miss" title="Below target: {{s.tgt_miss|join(', ')}}">&#10060; Not Achieved</span>{% else %}-{% endif %}</td>
-<td>{{ 'Weekend - not counted' if s.off else (s.pct ~ '%') }}</td>
+<td>{{ 'Weekend / Holiday - not counted' if s.off else (s.pct ~ '%') }}</td>
 <td class="act"><a href="/entry/{{s.id}}/view{{ ('?next=' ~ (nxt|urlencode)) if nxt else '' }}">View</a><a href="/entry/{{s.id}}{{ ('?next=' ~ (nxt|urlencode)) if nxt else '' }}">Edit</a>
 <form method="post" action="/entry/{{s.id}}/delete{{ ('?next=' ~ (nxt|urlencode)) if nxt else '' }}" onsubmit="return confirm('Delete this entry?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="{{ 10 if session.role=='admin' else 8 }}">{{ empty_msg or 'Nothing yet.' }}</td></tr>{% endfor %}</table>"""
@@ -3314,7 +3347,7 @@ VIEW = """<div class="card"><h2>{{s.date}} &middot; {{s.emp_name}} ({{s.emp_id}}
 {% for p in s.procs %}<tr><td>{{p.name}}</td><td>{{p.desc}}</td><td>{{p.hour|g}}</td><td>{{ '-' if p.training else (p.count|g) }}</td><td>{{ '-' if p.training else (p.target|g) }}</td>
 <td>{{ (p.pct ~ '%') if p.pct is not none else '-' }}</td></tr>{% endfor %}</table><br>
 <table><tr><th>Notes</th><th>Hour</th></tr>{% for n in s.notes %}<tr><td>{{n.desc}}</td><td>{{n.hour|g}}</td></tr>{% endfor %}</table>
-<div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day|g}} hrs &middot; {% if s.off %}<b>Weekend entry - not counted</b>{% else %}Productivity: <b>{{s.pct}}%</b> ({{s.avail|g}} hrs = 100%{% if s.ded %} &ndash; {{target|g}}-hr day less {{s.ded|g}} hr permission / half-day leave{% endif %}){% endif %}</div>
+<div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day|g}} hrs &middot; {% if s.off %}<b>Weekend / Holiday entry - not counted</b>{% else %}Productivity: <b>{{s.pct}}%</b> ({{s.avail|g}} hrs = 100%{% if s.ded %} &ndash; {{target|g}}-hr day less {{s.ded|g}} hr permission / half-day leave{% endif %}){% endif %}</div>
 <a href="{{back}}">Back</a></div>"""
 
 # ---------------------------------------------------------------- routes: common
@@ -3559,8 +3592,8 @@ def log_report_data(period, emp_q="", on=None):
     day = lambda d: dt.date.fromisoformat(str(d)).strftime("%a") if str(d)[:4].isdigit() else ""
     summary, detail = [], []
     for s in subs:
-        pct = "Weekend - not counted" if s["off"] else s["pct"]
-        tstat = {"off": "Weekend - not counted", "none": "No target", "met": "Target met"}.get(s["tgt_state"], "Target not met")
+        pct = "Weekend / Holiday - not counted" if s["off"] else s["pct"]
+        tstat = {"off": "Weekend / Holiday - not counted", "none": "No target", "met": "Target met"}.get(s["tgt_state"], "Target not met")
         summary.append([s["date"], day(s["date"]), s["emp_id"], s["emp_name"], s["designation"], s["band"],
                         s["prod"], s["non"], s["total"], pct, s["tgt_total"], s["cnt_total"], tstat])
         base = [s["date"], day(s["date"]), s["emp_id"], s["emp_name"], s["designation"], s["band"]]
@@ -3649,7 +3682,7 @@ def admin_log_add():
             import traceback; traceback.print_exc()
             flash("The entry could not be saved right now (the data service is busy). Nothing was saved - please press Save again.", "error")
             return redirect(action)
-        flash(f"Entry for {date} added for {name}." + (f" Note: {date} is a weekly off, so it is not counted in calculations." if is_off(date) else ""))
+        flash(f"Entry for {date} added for {name}." + (f" Note: {date} is a weekly off / holiday, so it is not counted in calculations." if is_off(date) else ""))
         return redirect("/admin/log?emp=" + urllib.parse.quote(emp_id, safe=""))
     sub = dict(date=(request.args.get("date") or request.args.get("adate") or str(today_local())), band=band, designation=find_designation(emp_id, name, band),
                emp_id=emp_id, emp_name=name, procs=[{}], notes=[{}])
@@ -3684,8 +3717,8 @@ def admin_log_report():
     period = "week" if request.args.get("period") == "week" else "month"
     rep_month, on = report_scope()
     r = log_report_data(period, request.args.get("emp", ""), on)
-    tp = sum(x[6] for x in r["summary"] if x[9] != "Weekend - not counted")
-    tn = sum(x[7] for x in r["summary"] if x[9] != "Weekend - not counted")
+    tp = sum(x[6] for x in r["summary"] if x[9] != "Weekend / Holiday - not counted")
+    tn = sum(x[7] for x in r["summary"] if x[9] != "Weekend / Holiday - not counted")
     return page(LOG_REPORT, title="Productivity report", period=period, label=r["label"], emp=r["emp"],
                 summary=r["summary"], detail=r["detail"], totals=r["totals"], th=TOTAL_HEADS, rep_month=rep_month, sh=SUMMARY_HEADS, dh=DETAIL_HEADS, tp=tp, tn=tn,
                 now=now_local().strftime("%Y-%m-%d %I:%M %p"), autoprint=request.args.get("print") == "1")
@@ -5499,26 +5532,24 @@ def employee_att_map(eid, months=13):
     y, m = today.year, today.month - (months - 1)
     while m < 1: m += 12; y -= 1
     start = dt.date(y, m, 1)
-    if jd and jd > start: start = jd
     present = {_iso_date(r.get("Date")) for r in rows("Attendance") if _key(r.get("Employee ID", "")) == k}
     present |= {_iso_date(r.get("Date")) for r in rows("Productivity log") if _key(r.get("Employee ID", "")) == k}
     full, half = set(), set()
     for l in live_leaves([l for l in rows("Leave") if _key(l.get("Employee ID", "")) == k]):
         (half if leave_is_half(l) else full).add(_iso_date(l.get("Date")))
     out, d = {}, start
-    while d <= today:
+    end_ = today + dt.timedelta(days=366)                  # Update173: holidays / weekly offs are marked for the next 12 months too
+    while d <= end_:
         ds = str(d)
-        if ds in full: out[ds] = "L"
+        # Update173: a holiday / weekend is ALWAYS shown as such - first, before leave / login / entry / absent - and it is never counted as a working day
+        if is_holiday(ds): out[ds] = "O"
+        elif is_off(ds): out[ds] = "W"
+        elif d > today or (jd and d < jd): pass            # future working days and dates before joining are left blank
+        elif ds in full: out[ds] = "L"
         elif ds in half: out[ds] = "H"
-        elif is_holiday(ds): out[ds] = "O"      # declared holiday - checked before the generic weekly-off/holiday is_off()
-        elif is_off(ds): out[ds] = "W"          # plain weekly off (not a declared holiday)
         elif ds in present: out[ds] = "P"
         elif d < today: out[ds] = "A"
         d += dt.timedelta(days=1)
-    for ds in holiday_map():                                  # Update172: UPCOMING holidays the Admin entered in the Holidays sheet show on the calendar too (next 12 months)
-        try: hd = dt.date.fromisoformat(ds)
-        except ValueError: continue
-        if today < hd <= today + dt.timedelta(days=366): out[ds] = "O"
     return out
 
 def employee_holiday_json():
@@ -5666,7 +5697,7 @@ def employee_save():
         return redirect("/employee")
     # ---- the data is saved from here on: nothing below may turn a successful save into an error page ----
     session["saved_anim"] = True       # Update95: 3-second 3D "Saved successfully" animation, shown on the same page after the data is saved
-    flash("Saved." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else ""))
+    flash("Saved." + (f" Note: {date} is a weekly off / holiday, so this entry is not counted in calculations." if is_off(date) else ""))
     try: log_change(SEC_PROD, "Added", entry_added_details(date, procs, notes))
     except Exception as ex: print("log_change failed:", ex)
     try:
@@ -5699,7 +5730,7 @@ def entry_edit(sid):
             delete_rows(old)
             write_sub(sid, date, (s["band"], s["emp_id"], s["emp_name"]), procs, notes)
         if changed: log_change(SEC_PROD, "Updated", changed)
-        flash("Updated." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_off(date) else ""))
+        flash("Updated." + (f" Note: {date} is a weekly off / holiday, so this entry is not counted in calculations." if is_off(date) else ""))
         miss = [] if is_off(date) or session.get("role") != "employee" else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
         if miss: flash(target_alert_text(miss), "error")
         return redirect(next_url() or home())
@@ -6174,7 +6205,7 @@ CHECK_PAGE = """<div class="head"><div><h1>Overview check &middot; {{r.id}} &mid
 <tr><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td><td>{{r.att}}{{'%' if r.att is not none}}</td><td>{{r.prod|g}}</td><td>{{r.non|g}}</td><td>{{r.pct}}{{'%' if r.pct is not none}}</td></tr></table>
 <h2>Productivity log entries</h2>
 <table><tr><th>Date</th><th>Counted?</th><th>Productive hrs</th><th>Non-productive hrs</th><th>Day %</th><th>Log rows (sheet row numbers)</th></tr>
-{% for s in subs %}<tr><td>{{s.date}}</td><td>{{s.why}}</td><td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.pct}}%</td><td>{{s.rows|join(', ')}}</td></tr>
+{% for s in subs %}<tr><td>{{s.date}}</td><td>{{s.why}}</td><td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{ 'Not calculated' if s.pct is none else (s.pct ~ '%') }}</td><td>{{s.rows|join(', ')}}</td></tr>
 {% else %}<tr><td colspan="6">No Productivity log rows found for this employee (matched by Employee ID, then Name + Band).</td></tr>{% endfor %}</table>
 <h2>Leave in this period</h2>
 <table><tr><th>Date</th><th>Type</th><th>Status</th></tr>
@@ -6608,7 +6639,7 @@ AUD_PROD = """<div class="totals">Working days: <b>{{k.wd}}</b> &middot; Present
 <h2>Daily entries</h2>
 <table><tr><th>Date</th><th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Productivity</th></tr>
 {% for s in subs %}<tr><td>{{s.date}}</td><td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
-<td>{{ 'Weekend - not counted' if s.off else (s.pct ~ '%') }}</td></tr>
+<td>{{ 'Weekend / Holiday - not counted' if s.off else (s.pct ~ '%') }}</td></tr>
 {% else %}<tr><td colspan="5">No productivity entries for this period.</td></tr>{% endfor %}</table>"""
 
 AUD_ATT = """<div class="totals">Working days: <b>{{k.wd}}</b> &middot; Present: <b>{{k.present}}</b> &middot; Leave: <b>{{k.leave}}</b>

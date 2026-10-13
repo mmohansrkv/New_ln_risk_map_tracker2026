@@ -2673,6 +2673,8 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .cal-g .ho{background:#f59e0b4d;color:#fde68a;box-shadow:inset 0 0 0 1px #f59e0bcc;font-weight:700}
 .cal-g .t.sp{box-shadow:0 2px 0 #3730a3,0 0 0 2px #4ade80}.cal-g .t.sa{box-shadow:0 2px 0 #3730a3,0 0 0 2px #f87171}.cal-g .t.sl{box-shadow:0 2px 0 #3730a3,0 0 0 2px #60a5fa}.cal-g .t.sho{box-shadow:0 2px 0 #3730a3,0 0 0 2px #f59e0b}
 .cal-lg{display:flex;justify-content:center;gap:6px;flex-wrap:wrap;margin:6px 0 0;font-size:9.5px;color:#9aa3c7}
+.cal-up{margin:8px 0 0;font-size:10.5px;color:#cbd2f0}.cal-up b{display:block;color:#fde68a;font-size:10px;margin-bottom:2px;letter-spacing:.3px}
+.cal-up div{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-top:1px solid #ffffff14;cursor:pointer}.cal-up div span:last-child{color:#fde68a;text-align:right}
 .cal-lg i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:3px;vertical-align:-1px}
 .cal-lg .lp{background:#22c55e}.cal-lg .la{background:#f87171}.cal-lg .ll{background:#60a5fa}.cal-lg .lo{background:#6b749f}.cal-lg .lh{background:#f59e0b}
 .cal-today{display:block;width:100%;margin:6px 0 0;padding:3px 0;border:0;border-radius:6px;background:#2b3560;color:#fff;font-size:10.5px;box-shadow:none;cursor:pointer}
@@ -2727,18 +2729,18 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 <div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
-<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-lg" id="cal_lg" hidden><span><i class="lp"></i>Present</span><span><i class="la"></i>Absent</span><span><i class="ll"></i>Leave</span><span><i class="lh"></i>Holiday</span><span><i class="lo"></i>Weekly off</span></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
+<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-lg" id="cal_lg" hidden><span><i class="lp"></i>Present</span><span><i class="la"></i>Absent</span><span><i class="ll"></i>Leave</span><span><i class="lh"></i>Holiday</span><span><i class="lo"></i>Weekly off</span></div><div class="cal-up" id="cal_up" hidden></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
 <div class="prof{{' prof-emp' if session.role=='employee' else ''}}"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
 <main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></main></div>
 {% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}<div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></div>{% endif %}
-{% if att_json %}<script>window.ATT={{att_json|safe}};</script>{% endif %}
+{% if att_json %}<script>window.ATT={{att_json|safe}};window.HOL={{hol_json|safe}};</script>{% endif %}
 {% if session.role and not bare %}<script>
 (function(){var g=document.getElementById('cal_g');if(!g)return;var d=document.getElementById('cal');
 var M=['January','February','March','April','May','June','July','August','September','October','November','December'],W=['S','M','T','W','T','F','S'];
 var now=new Date(),y=now.getFullYear(),m=now.getMonth();
-var A=window.ATT||null,FM=['January','February','March','April','May','June','July','August','September','October','November','December'];
+var HL=window.HOL||{},A=window.ATT||null,FM=['January','February','March','April','May','June','July','August','September','October','November','December'];
 if((window.matchMedia&&window.matchMedia('(min-width:801px)').matches)||A)d.open=true;
 function z(n){return(n<10?'0':'')+n}
 function draw(){var h='',i,first=new Date(y,m,1).getDay(),n=new Date(y,m+1,0).getDate(),pn=new Date(y,m,0).getDate();
@@ -2747,11 +2749,17 @@ var np=0,na=0,nl=0;
 for(i=0;i<7;i++)h+='<span class="w">'+W[i]+'</span>';
 for(i=first-1;i>=0;i--)h+='<span class="o">'+(pn-i)+'</span>';
 for(i=1;i<=n;i++){var t=(i===now.getDate()&&m===now.getMonth()&&y===now.getFullYear()),k=y+'-'+z(m+1)+'-'+z(i),st=A?A[k]:'',c=t?'t':'e',tt='';
-if(st==='P'){c+=t?' sp':' p';np++;tt='Present'}else if(st==='A'){c+=t?' sa':' a';na++;tt='Absent'}else if(st==='L'){c+=t?' sl':' l';nl++;tt='Leave'}else if(st==='H'){c+=t?' sl':' l';nl+=.5;np+=.5;tt='Half day'}else if(st==='O'){c+=t?' sho':' ho';tt='Holiday'}else if(st==='W'){c+=t?'':' f';tt='Weekly off'}else if(t&&A){tt='Today'}
+if(st==='P'){c+=t?' sp':' p';np++;tt='Present'}else if(st==='A'){c+=t?' sa':' a';na++;tt='Absent'}else if(st==='L'){c+=t?' sl':' l';nl++;tt='Leave'}else if(st==='H'){c+=t?' sl':' l';nl+=.5;np+=.5;tt='Half day'}else if(st==='O'){c+=t?' sho':' ho';tt='Holiday'+(HL[k]?' - '+HL[k]:'')}else if(st==='W'){c+=t?'':' f';tt='Weekly off'}else if(t&&A){tt='Today'}
 h+='<span class="'+c+'"'+(t?' aria-current="date"':'')+(tt?' title="'+i+' '+M[m].slice(0,3)+': '+tt+'"':'')+'>'+i+'</span>'}
 var tail=(7-(first+n)%7)%7;for(i=1;i<=tail;i++)h+='<span class="o">'+i+'</span>';g.innerHTML=h;
 if(A){document.getElementById('cal_lg').hidden=false;
 var ct=document.getElementById('cal_ct');ct.hidden=false;ct.innerHTML='<span><b class="cp">'+np+'</b> Present</span><span><b class="ca">'+na+'</b> Absent</span><span><b class="cl">'+nl+'</b> Leave</span>'}}
+(function(){var u=document.getElementById('cal_up');if(!u||!A)return;var n0=new Date(),tk=n0.getFullYear()+'-'+z(n0.getMonth()+1)+'-'+z(n0.getDate()),ks=Object.keys(HL).filter(function(k){return k>=tk}).sort().slice(0,5);
+u.hidden=false;var b=document.createElement('b');b.textContent='Upcoming holidays';u.appendChild(b);
+if(!ks.length){var e=document.createElement('div');e.textContent='None announced yet';u.appendChild(e)}
+ks.forEach(function(k){var p=k.split('-'),dd=new Date(+p[0],+p[1]-1,+p[2]),r=document.createElement('div'),a=document.createElement('span'),c=document.createElement('span');
+a.textContent=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dd.getDay()]+', '+dd.getDate()+' '+M[dd.getMonth()].slice(0,3);c.textContent=HL[k];r.appendChild(a);r.appendChild(c);
+r.onclick=function(){y=dd.getFullYear();m=dd.getMonth();draw()};u.appendChild(r)})})();
 document.getElementById('cal_p').onclick=function(){m--;if(m<0){m=11;y--}draw()};
 document.getElementById('cal_n').onclick=function(){m++;if(m>11){m=0;y++}draw()};
 document.getElementById('cal_td').onclick=function(){now=new Date();y=now.getFullYear();m=now.getMonth();draw()};
@@ -3064,14 +3072,15 @@ def page(body, title="Productivity Tracker", **ctx):
         except Exception:
             _g = ""
         side_avatar = render_fast(AVATAR3D, gender=_g, initials=initials_of(session.get("name", "")))
-    att_json = ""                                              # Update158: attendance for the sidebar calendar (employees only)
+    att_json, hol_json = "", "{}"                              # Update158: attendance for the sidebar calendar (employees only)
     if session.get("role") == "employee" and not ctx.get("bare"):
         try:
             import json as _json
             att_json = _json.dumps(employee_att_map(session.get("emp_id", "")), separators=(",", ":"))
+            hol_json = employee_holiday_json()
         except Exception as ex: print("attendance calendar error:", repr(ex))
     return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar, bare=bool(ctx.get("bare")), att_json=att_json)
+                                  side_avatar=side_avatar, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json)
 
 
 LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></div>
@@ -5506,7 +5515,17 @@ def employee_att_map(eid, months=13):
         elif ds in present: out[ds] = "P"
         elif d < today: out[ds] = "A"
         d += dt.timedelta(days=1)
+    for ds in holiday_map():                                  # Update172: UPCOMING holidays the Admin entered in the Holidays sheet show on the calendar too (next 12 months)
+        try: hd = dt.date.fromisoformat(ds)
+        except ValueError: continue
+        if today < hd <= today + dt.timedelta(days=366): out[ds] = "O"
     return out
+
+def employee_holiday_json():
+    """Update172: {'YYYY-MM-DD': name} of every holiday from 1 month ago to 12 months ahead, as JSON that is safe inside a <script> tag."""
+    today = today_local(); lo, hi = str(today - dt.timedelta(days=31)), str(today + dt.timedelta(days=366))
+    out = {k: (v or "Holiday") for k, v in holiday_map().items() if lo <= k <= hi}
+    return json.dumps(out, separators=(",", ":")).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 @app.route("/employee/welcome")
 @need("employee")

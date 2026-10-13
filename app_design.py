@@ -370,8 +370,8 @@ HEADERS = {
                   "Account locked", "Joining date"],      # Update96: "Account locked" = Yes / blank; Update97: "Joining date" (YYYY-MM-DD, set by Admin in Employee Info)
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour", "Target count / 8 hrs"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
-                         "Type", "Process / Description", "Hour", "Count", "Submitted at", "Description",
-                         "Target Count", "Productivity %"],      # Update137: calculated and stored automatically
+                         "Type", "Process / Description", "Hour", "Count", "Target Count", "Productivity %",
+                         "Submitted at", "Description"],      # Update166: "Target Count" / "Productivity %" moved to sit right after "Count" (were the last two columns)
     "Leave": ["Date", "Employee ID", "Employee name", "Band", "Reason", "Applied at",
               "Status", "Reviewed at", "Reviewed by", "Day type"],
     "Permissions": ["Permission ID", "Date", "Employee ID", "Employee name", "Band", "Hours", "Reason",
@@ -1085,8 +1085,8 @@ def write_sub(sid, date, emp, procs, notes):
     base = [sid, date, *emp]      # emp = (band, id, name)
     try: tgts, dpct = entry_metrics(date, emp[1], [(n, h, c) for n, h, c, _d in procs])      # Update137: never blocks a save
     except Exception as ex: print("entry metrics error:", repr(ex)); tgts, dpct = [""] * len(procs), ""
-    out = [base + ["Process", n, h, c, now, d, tgts[i], dpct] for i, (n, h, c, d) in enumerate(procs)] + \
-          [base + ["Note", t, h, "", now, "", "", dpct] for t, h in notes]
+    out = [base + ["Process", n, h, c, tgts[i], dpct, now, d] for i, (n, h, c, d) in enumerate(procs)] + \
+          [base + ["Note", t, h, "", "", dpct, now, ""] for t, h in notes]      # Update166: row order follows the new sheet column order (Target Count / Productivity % moved right after Count)
     last = None
     for attempt in range(5):          # Update96: retry a failed write (Update157: 5 tries, longer waits - the Sheets quota resets within a minute), but first check the rows did not already land (no duplicates, no loss)
         try:
@@ -3462,7 +3462,7 @@ def admin_log_add():
 @app.route("/admin/log/recalc", methods=["POST"])
 @need("admin")
 def admin_log_recalc():
-    """Update137: (re)write 'Target Count' and 'Productivity %' (columns L:M) for every row of the Productivity log sheet."""
+    """Update166: (re)write 'Target Count' and 'Productivity %' (columns J:K - moved up from L:M when the two columns were reordered to sit right after 'Count') for every row of the Productivity log sheet."""
     invalidate_cache("Productivity log")
     recs = _fetch_rows("Productivity log")
     if not recs: flash("The Productivity log is empty - nothing to recalculate."); return redirect("/admin/log")
@@ -3476,7 +3476,7 @@ def admin_log_recalc():
         vals[r["_row"] - 2] = [tgt, "" if x["off"] else x["pct"]]
     ws = ws_of("Productivity log")
     for i in range(0, len(vals), 4000):
-        _with_retry(ws.update, range_name=f"L{i + 2}:M{i + 1 + len(vals[i:i + 4000])}", values=vals[i:i + 4000], value_input_option="RAW")
+        _with_retry(ws.update, range_name=f"J{i + 2}:K{i + 1 + len(vals[i:i + 4000])}", values=vals[i:i + 4000], value_input_option="RAW")
     invalidate_cache("Productivity log")
     flash(f"Target Count and Productivity % recalculated for {len(recs)} row(s).")
     return redirect("/admin/log")

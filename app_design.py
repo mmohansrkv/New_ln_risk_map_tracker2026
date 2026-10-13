@@ -275,6 +275,7 @@ import urllib.parse, re
 import gspread
 from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
+import json
 from flask import Flask, request, redirect, session, render_template_string, flash, abort, jsonify, has_request_context, Response, send_file
 
 from zoneinfo import ZoneInfo
@@ -5966,13 +5967,23 @@ function draw(list){while(t.rows.length>1)t.deleteRow(1);n.textContent=list.leng
 function poll(){fetch('/admin/online/poll',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(j){draw(j.items)}).catch(function(){})}
 setInterval(poll,5000);document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()})})();
 </script>
-<table><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
+<p class="mut no-print" style="margin:4px 0">&#9679; Live from the Google Sheet &middot; checked <span id="ov_at">just now</span> &middot; updates automatically when the sheet changes.</p>
+<table id="ovt" data-sig="{{sig}}"><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
 <th>Productive Hours</th><th>Non-productive Hours</th><th>Productivity (%)</th><th class="no-print"></th></tr>
 {% for r in rep %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>
 {% if r.vo %}<td>-</td><td>-</td><td>-</td><td><span class="pill act">View Only</span></td>{% else %}<td>{{r.att}}%<i class="bar {{r.att|tone}}"><u style="width:{{r.att}}%"></u></i></td>
 <td>{{r.prod|g}}</td><td>{{r.non|g}}</td>
 <td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td>{% endif %}<td class="no-print"><a href="/admin/summary/check?emp={{r.id|urlencode}}&month={{month}}">Check</a></td></tr>
-{% else %}<tr><td colspan="11">No employees yet.</td></tr>{% endfor %}</table>"""
+{% else %}<tr><td colspan="11">No employees yet.</td></tr>{% endfor %}</table>
+<script>(function(){var t=document.getElementById('ovt');if(!t)return;var sig=t.getAttribute('data-sig'),busy=false,q=location.search||'';
+function stamp(x){var e=document.getElementById('ov_at');if(e)e.textContent=x}
+function redraw(){fetch(location.pathname+q,{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.text()}).then(function(h){
+ var d=new DOMParser().parseFromString(h,'text/html'),nt=d.getElementById('ovt'),ok=d.querySelector('.kpis'),ck=document.querySelector('.kpis');
+ if(!nt)return;t.innerHTML=nt.innerHTML;sig=nt.getAttribute('data-sig');t.setAttribute('data-sig',sig);if(ok&&ck)ck.innerHTML=ok.innerHTML}).catch(function(){})}
+function poll(){if(busy||document.hidden)return;busy=true;
+ fetch('/admin/summary/poll'+q,{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(j){stamp(j.at);if(j.sig!==sig)redraw()}).catch(function(){}).then(function(){busy=false})}
+setInterval(poll,30000);document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()})})();
+</script>"""
 
 LEAVE_EMP = """<style>
 .lp{font-size:12px}
@@ -6068,12 +6079,9 @@ def admin_personal_edit(row):
         return redirect("/admin/personal")
     return page(PERSONAL_EDIT, title="Personal details", emp=emp, fields=EDITABLE_PERSONAL)
 
-@app.route("/admin/summary")
-@need("admin")
-@live_data(*LIVE_REPORT_SHEETS)
-def admin_summary():
+def _overview_ctx(month):
+    """Update171: everything the Overview shows, read LIVE from the Productivity log / Leave / Permissions / Employees sheets."""
     today = today_local()
-    month = request.args.get("month") or today.strftime("%Y-%m")
     subs, leaves = load_subs(), rows("Leave")
     if month == "all":
         ds = [s["date"] for s in subs] + [l["Date"] for l in leaves]
@@ -6086,11 +6094,25 @@ def admin_summary():
     n = len(std) or 1
     a1, a2 = round(sum(r["att"] for r in std) / n), round(sum(r["pct"] for r in std) / n)
     extra = [("Employees", len(rep)), ("Total leave days", sum(r["leave"] for r in rep))]
-    # Missed-entries list is intentionally NOT shown on the Overview page any more;
-    # it lives only on the dedicated "Missed entries" page (/admin/missed).
-    return page(SUMMARY, title="Overview", rep=rep, month=month, label=label, wd=workdays(start, end),
-                lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra, target=target_hours(),
-                online=online_list())
+    sig = _ih.md5(json.dumps([rep, a1, a2, label], sort_keys=True, default=str).encode()).hexdigest()
+    return dict(rep=rep, month=month, label=label, wd=workdays(start, end), lab1="Average attendance", lab2="Average productivity",
+                a1=a1, a2=a2, extra=extra, target=target_hours(), sig=sig)
+
+@app.route("/admin/summary")
+@need("admin")
+@live_data(*LIVE_REPORT_SHEETS)
+def admin_summary():
+    month = request.args.get("month") or today_local().strftime("%Y-%m")
+    ctx = _overview_ctx(month)
+    return page(SUMMARY, title="Overview", online=online_list(), **ctx)
+
+@app.route("/admin/summary/poll")
+@need("admin")
+@live_data(*LIVE_REPORT_SHEETS)
+def admin_summary_poll():
+    """Update171: tiny change-detector the Overview calls every 30 s; the page re-draws only when the Google Sheet data changed."""
+    month = request.args.get("month") or today_local().strftime("%Y-%m")
+    return jsonify(sig=_overview_ctx(month)["sig"], at=now_local().strftime("%I:%M:%S %p"))
 
 CHECK_PAGE = """<div class="head"><div><h1>Overview check &middot; {{r.id}} &middot; {{r.name}}</h1>
 <p class="mut">{{label}} &middot; every Productivity log row of this employee and how the Overview counts it. <a href="/admin/summary?month={{month}}">Back to Overview</a></p></div></div>

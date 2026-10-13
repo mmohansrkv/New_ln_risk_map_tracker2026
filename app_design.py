@@ -1,4 +1,7 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update169: Overview compared with Update160 - the Overview route, template, design and calculation are identical; the only data-layer difference was the Productivity log COLUMN ORDER (Update166 moved
+    "Target Count" / "Productivity %" to J:K). A sheet whose rows were still in the Update160 order (J = Submitted at, K = Description, L = Target Count, M = Productivity %) got new header names over old data
+    (wrong Description / target values, and "Recalculate" would have overwritten Submitted at / Description). On start-up every old-order row is now moved to the new order automatically (idempotent, per row).
   * Update168: Admin Overview / Productivity log showed OLD figures (Present, Leave, Absent, Attendance, Productive / Non-productive hrs, Productivity %). Causes fixed: (1) every Render worker kept its own
     sheet cache (served up to ~90 s old, and an employee's save only cleared the cache of the worker that handled it) - the Overview and Productivity log now read Productivity log / Leave / Permissions /
     Employees / Settings / Holidays LIVE from Google Sheets (once per request); (2) entries, leave and permissions were matched to employees by exact text and date text - an Employee ID with a stray space / different
@@ -661,10 +664,27 @@ def book():
                         _with_retry(b.add_worksheet, title=name, rows=1000, cols=max(12, len(h)))
                     ws = _with_retry(b.worksheet, name)
                     if ws.col_count < len(h): _with_retry(ws.add_cols, len(h) - ws.col_count)
+                    if name == "Productivity log": _migrate_log_columns(ws)      # Update169: move rows still in the Update160 column order BEFORE the header is renamed
                     if _with_retry(ws.row_values, 1) != h:
                         _with_retry(ws.update, range_name="A1", values=[h])
                 _book = b
     return _book
+
+_LOG_TS = re.compile(r"^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}")
+def _log_row_is_old(r):
+    """Update160 order: J = Submitted at (timestamp), K = Description (text), L = Target Count, M = Productivity %.  New order: J = Target Count, K = Productivity %, L = Submitted at, M = Description."""
+    r = list(r) + [""] * (13 - len(r)); j, k = str(r[9]).strip(), str(r[10]).strip()
+    return bool(_LOG_TS.match(j)) or (k != "" and re.fullmatch(r"-?\d+(\.\d+)?%?", k) is None)
+def _migrate_log_columns(ws):
+    """Idempotent: rewrites J:M of every row that is still in the old column order. Rows already in the new order are not touched."""
+    try:
+        vals = _with_retry(ws.get_values, "A2:M"); fix = []
+        for i, r in enumerate(vals, start=2):
+            if not _log_row_is_old(r): continue
+            r = list(r) + [""] * (13 - len(r)); fix.append({"range": "J%d:M%d" % (i, i), "values": [[r[11], r[12], r[9], r[10]]]})
+        for c in range(0, len(fix), 500): _with_retry(ws.batch_update, fix[c:c + 500], value_input_option="RAW")
+        if fix: print("Productivity log: %d rows moved to the new column order" % len(fix))
+    except Exception as ex: print("productivity-log column migration skipped:", repr(ex))
 
 _ws_cache = {}
 def ws_of(name):

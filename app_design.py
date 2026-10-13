@@ -1,4 +1,11 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update166: ADMIN-ONLY Windows agent installation. Admin > Work Time > Lock-Tracking Agent (/admin/work-time/agent) is now "Install Windows Tracking Agent": one row per employee (Emp ID, Name,
+    Office Email ID, Agent Installation Status, Last Activity, Install / Reinstall Agent, Disable / Enable Agent) with the statuses Not Installed / Pending Installation / Active (agent) / Offline /
+    Error / Disabled. Install Agent = secure per-employee token (retrieved, or re-issued to revoke the old one) -> Admin downloads install_<id>.ps1 (existing install.ps1 mechanism, now with a
+    server registration check at the end) or copies the install command. "Install for All Employees" = approval tick-box -> deploy_all.ps1 (GPO / Intune / SCCM). Nobody becomes Active until the server
+    receives a valid agent heartbeat / event. Tokens are no longer shown anywhere; they are HMAC(app secret, employee id, token version) and are revoked by raising the version (new sheet
+    "Agent Enrollments": status, token version, installer prepared at, last error). Disabled / revoked agents are refused (HTTP 403) and the reason is shown as Error. Installer / deploy downloads
+    need a fresh Admin approval step (10 min) and are Admin-session only. WT_ENROLL_KEY stays a Render environment variable and is never displayed. Lock Events / Activity Log / Work Time writes are unchanged.
   * Update160: AUTOMATIC reminder e-mails reworked. At the Admin-configured time (Email Controls > Automatic Email) every employee gets ONE SEPARATE e-mail for EACH missed Productivity date that is
     still pending (read live - a date submitted since yesterday is dropped, so reminders for it stop automatically); a Monday miss submitted on Tuesday keeps being reminded until it is submitted,
     also across a month change (look-back AUTO_MAIL_LOOKBACK_DAYS, default 45). NO e-mails on weekly offs / public holidays (job, loop and "send now"). Each (employee, date) e-mail is logged in
@@ -392,6 +399,8 @@ HEADERS = {
     "Lock Events": ["Date", "Employee ID", "Employee name", "Start time", "End time", "Duration", "Reason", "Source", "Start epoch"],
     # Update161: one row per employee PC that runs the lock agent (last contact) - drives the "Lock tracking" status
     "Agent Devices": ["Employee ID", "Employee name", "Computer", "Agent version", "First seen", "Last contact", "Last contact epoch"],
+    # Update166: one row per employee whose agent the Admin installs / disables (never holds a token); "UNMATCHED: ..." rows = registration attempts no employee matched
+    "Agent Enrollments": ["Employee ID", "Employee name", "Status", "Token version", "Installer prepared at", "Generated epoch", "Prepared by", "Disabled at", "Last error", "Last error epoch"],
     # Update138: which employees' Work Time is shared with the Admin - one row per shared employee (Shared = Yes)
     "Work Time Share": ["Employee ID", "Employee name", "Shared", "Updated at", "Updated by"],
     "Notifications": ["Notification ID", "Time", "Employee ID", "Employee name", "Event", "Seen",
@@ -1685,7 +1694,9 @@ def _agent_map(fresh=False):
 def _agent_touch(eid, name, host="", ver=""):
     """Called for every authenticated agent request; writes the sheet only when the last saved contact is older than 20 minutes."""
     now = time.time(); k = _key(eid)
-    if now - _agent_last.get(k, 0) < 1200 or now - _agent_map().get(k, 0) < 1200: return
+    try: _en = _enr_get(eid); _wait = max(_fl((_en or {}).get("Generated epoch")), _fl((_en or {}).get("Last error epoch"))) > _agent_map().get(k, 0)      # Update166: first heartbeat after an install / error is saved at once
+    except Exception: _wait = False
+    if not _wait and (now - _agent_last.get(k, 0) < 1200 or now - _agent_map().get(k, 0) < 1200): return
     _agent_last[k] = now
     def w():
         ws = ws_of(AGENT_SHEET); recs = _with_retry(ws.get_values, "A2:G"); stamp = dt.datetime.fromtimestamp(now, TZ).strftime("%Y-%m-%d %H:%M:%S")
@@ -1751,8 +1762,69 @@ def activity_log(eid, name, etype, when=None, source="", details="", dedupe=True
     return True
 
 # ---- Update132: Windows background agent (no browser permission needed). Per-employee token = HMAC(app secret, employee id).
-def wt_agent_token(eid):
-    return hmac.new(app.secret_key if isinstance(app.secret_key, bytes) else str(app.secret_key).encode(), ("wt-agent|" + str(eid)).encode(), "sha256").hexdigest()[:32]
+# Update166: per-employee, REVOCABLE credentials. Token = HMAC(app secret, employee id, token version). Version 0 is the original token (agents installed before Update166 keep working);
+# Install with "new credentials" / Disable raise the version, which instantly invalidates every older token. Nothing secret is stored in the sheet and tokens are never listed in any report.
+ENR_SHEET = "Agent Enrollments"
+ENR_COLS = ["Employee ID", "Employee name", "Status", "Token version", "Installer prepared at", "Generated epoch", "Prepared by", "Disabled at", "Last error", "Last error epoch"]
+_enr_lock, _enr_err_seen = threading.Lock(), {}
+
+def _enr_get(eid, fresh=False):
+    k = _key(eid)
+    for r in (_fetch_rows(ENR_SHEET) if fresh else rows(ENR_SHEET)):
+        if _key(r.get("Employee ID", "")) == k: return r
+    return None
+
+def _enr_ver(r):
+    try: return max(0, int(float((r or {}).get("Token version") or 0)))
+    except (TypeError, ValueError): return 0
+
+def _token_for(eid, ver):
+    seed = "wt-agent|" + str(eid).strip() + (("|v%d" % ver) if ver else "")
+    return hmac.new(app.secret_key if isinstance(app.secret_key, bytes) else str(app.secret_key).encode(), seed.encode(), "sha256").hexdigest()[:32]
+
+def wt_agent_token(eid, enr=None):
+    return _token_for(eid, _enr_ver(enr if enr is not None else _enr_get(eid)))
+
+def _token_was_revoked(eid, tok, enr):
+    """True only if tok is one of this employee's OLDER tokens - proof that a real, formerly valid agent is still running (random guesses never match)."""
+    try: return any(hmac.compare_digest(str(tok).encode(), _token_for(eid, v).encode()) for v in range(_enr_ver(enr)))
+    except Exception: return False
+
+def _enr_save(changes):
+    """Upsert rows of the Agent Enrollments sheet in ONE write. changes = {employee key: {column: value}}."""
+    try:
+        with _enr_lock:
+            ws = ws_of(ENR_SHEET); cur = _with_retry(ws.get_values, "A2:J"); n = len(ENR_COLS)
+            table = [(list(r) + [""] * n)[:n] for r in cur]
+            idx = {_key(r[0]): i for i, r in enumerate(table) if str(r[0]).strip()}
+            for k, ch in changes.items():
+                i = idx.get(k)
+                if i is None:
+                    table.append([""] * n); i = len(table) - 1; idx[k] = i; table[i][0] = str(ch.get("Employee ID", k))
+                for col, v in ch.items(): table[i][ENR_COLS.index(col)] = v
+            _with_retry(ws.update, range_name="A2", values=table, value_input_option="RAW")
+            invalidate_cache(ENR_SHEET)
+        return True
+    except Exception as ex:
+        print("agent enrolment save error:", repr(ex)); return False
+
+def _enr_err(key, name, msg):
+    """Remember why an agent could not register / connect (shown as 'Error' to the Admin). Throttled: the same message is written at most every 10 minutes."""
+    now = time.time(); ck = (_key(key), msg)
+    if now - _enr_err_seen.get(ck, 0) < 600: return
+    _enr_err_seen[ck] = now
+    _bg(_enr_save, {_key(key): {"Employee ID": str(key), "Employee name": name, "Last error": msg[:200], "Last error epoch": int(now)}})
+
+def agent_status(enr, contact, now=None):
+    """Not Installed / Pending Installation / Active (agent) / Offline / Error / Disabled. Active only ever comes from a heartbeat or event the server really received."""
+    now = now or time.time(); enr = enr or {}; contact = contact or 0.0
+    gen, err = _fl(enr.get("Generated epoch")), _fl(enr.get("Last error epoch"))
+    if str(enr.get("Status", "")).strip() == "Disabled": return "Disabled"
+    if err and err > max(contact, gen): return "Error"
+    if gen and gen > contact: return "Pending Installation"
+    if contact and now - contact <= AGENT_ACTIVE_SEC: return "Active (agent)"
+    if contact: return "Offline"
+    return "Not Installed"
 
 def wt_seen():
     st = _wt.get(session.get("wt_key", ""))
@@ -4264,11 +4336,17 @@ def agent_lock():
     signed in to the web app. The response never contains any data."""
     j = request.get_json(silent=True) or {}
     eid = str(j.get("eid", "")).strip()
-    try: ok = bool(eid) and hmac.compare_digest(str(j.get("token", "")).encode(), wt_agent_token(eid).encode())
+    enr = _enr_get(eid) if eid else None
+    try: ok = bool(eid) and hmac.compare_digest(str(j.get("token", "")).encode(), wt_agent_token(eid, enr).encode())
     except Exception: ok = False
-    if not ok: return ("", 403)
-    name = next((str(r.get("Name", "")) for r in rows("Employees") if _key(r.get("Employee ID", "")) == _key(eid)), None)
+    name = next((str(r.get("Name", "")) for r in rows("Employees") if _key(r.get("Employee ID", "")) == _key(eid)), None) if eid else None
+    if not ok:
+        if name is not None and _token_was_revoked(eid, j.get("token", ""), enr):      # Update166: a formerly valid agent is still running -> the Admin sees why (Error)
+            _enr_err(eid, name, "Agent credentials were revoked - computer %s must be reinstalled" % (str(j.get("host", ""))[:40] or "?"))
+        return ("", 403)
     if name is None: return ("", 403)                                  # unknown / deleted employee: the agent drops the event
+    if str((enr or {}).get("Status", "")).strip() == "Disabled": return ("", 403)      # Update166: Admin disabled this agent
+    if j.get("e") == "check": return ("", 204)                         # Update166: the installer's registration check - validates the credentials but is NOT a heartbeat
     kind = {"start": "locked", "locked": "locked", "end": "unlocked", "unlocked": "unlocked", "reason": "reason", "hello": "support",
             "display_off": "screen_off", "display_on": "screen_on"}.get(j.get("e"))
     try: ago_s = max(0.0, min(float(j.get("ago", 0) or 0) / 1000.0, 24 * 3600))
@@ -4292,24 +4370,32 @@ def agent_enroll():
     j = request.get_json(silent=True) or {}
     try: ok = bool(WT_ENROLL_KEY) and hmac.compare_digest(str(j.get("key", "")).encode(), WT_ENROLL_KEY.encode())
     except Exception: ok = False
-    if not ok: return ("", 403)
+    if not ok:
+        print("agent enrol refused: wrong enrolment key"); return ("", 403)       # never attributable to an employee, so nothing is written to the sheet
     upn, user = str(j.get("upn", "")).strip().lower(), str(j.get("user", "")).strip().lower()
     emps = [e for e in rows("Employees") if str(e.get("Employee ID", "")).strip() and not emp_locked(e)]
     mails = lambda e: {str(e.get(c, "")).strip().lower() for c in ("Office Email ID", "Email", "Personal Email ID")} - {""}
     hit = [e for e in emps if upn and "@" in upn and upn in mails(e)]
     if len(hit) != 1 and user: hit = [e for e in emps if _key(e["Employee ID"]) == user.upper()]
     if len(hit) != 1 and user: hit = [e for e in emps if user in {m.split("@")[0] for m in mails(e)}]
-    if len(hit) != 1: return jsonify(ok=False), 404
-    eid = str(hit[0]["Employee ID"]).strip()
-    return jsonify(ok=True, eid=eid, token=wt_agent_token(eid))
+    if len(hit) != 1:
+        who = (upn or user or "?")[:60]; _enr_err("UNMATCHED: %s on %s" % (who, str(j.get("host", ""))[:40]), who,
+                                                  "Windows account matches %d employees (it must match exactly one e-mail / Employee ID)" % len(hit))
+        return jsonify(ok=False), 404
+    eid = str(hit[0]["Employee ID"]).strip(); enr = _enr_get(eid)
+    if str((enr or {}).get("Status", "")).strip() == "Disabled": return jsonify(ok=False), 403      # Update166: a disabled agent cannot re-register
+    return jsonify(ok=True, eid=eid, token=wt_agent_token(eid, enr))
 
 @app.route("/admin/work-time/agent/deploy_all.ps1")
 @need("admin")
 def admin_work_time_agent_deploy():
     """Machine-wide installer for IT (GPO startup script / Intune / SCCM, run as administrator or SYSTEM). Installs the agent once per PC; it starts hidden at every
     user's logon and enrols itself, so lock tracking is on for every employee without anyone enabling it."""
+    if not _wt_approved("ALL"):                                   # Update166: download only after the Admin / IT approval step (Install for All Employees)
+        flash("Approve the deployment first (Install for All Employees), then download deploy_all.ps1.", "error"); return redirect("/admin/work-time/agent")
     if not WT_ENROLL_KEY:
-        flash("Set the WT_ENROLL_KEY environment variable (any long random text) on the server and restart it, then download deploy_all.ps1.", "error"); return redirect("/admin/work-time/agent")
+        flash("Set the WT_ENROLL_KEY environment variable on Render (any long random text) and redeploy, then download deploy_all.ps1.", "error"); return redirect("/admin/work-time/agent")
+    print("work-time agent: deploy_all.ps1 downloaded by Admin")
     base = request.url_root.rstrip("/")
     ps = f"""$ErrorActionPreference = 'Stop'
 $dir = Join-Path $env:ProgramData 'WorkTimeAgent'
@@ -4330,7 +4416,7 @@ $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnB
 Register-ScheduledTask -TaskName 'WorkTimeAgent' -Action $act -Trigger $trg -Principal $pri -Settings $set -Force | Out-Null
 Write-Output 'Work Time agent installed. It starts at every user logon and enrols itself.'
 """
-    resp = Response("\ufeff" + ps, mimetype="text/plain"); resp.headers["Content-Disposition"] = "attachment; filename=deploy_all.ps1"
+    resp = Response("\ufeff" + ps, mimetype="text/plain"); resp.headers["Content-Disposition"] = "attachment; filename=deploy_all.ps1"; resp.headers["Cache-Control"] = "no-store"
     return resp
 
 WT_EVENTS = """<div class="card"><h2 style="margin-top:0">Lock / Screen-off events{% if emp %} <small class="mut">&middot; {{emp}}</small>{% endif %}</h2>
@@ -4468,12 +4554,105 @@ def admin_work_time_events_export():
     resp.headers["Content-Disposition"] = f"attachment; filename=lock_events_{d}.csv"
     return resp
 
+# ---- Update166: Admin-only agent installation / management (every endpoint below is @need("admin") - checked on the server, employees get no page, button, token or key)
+WT_APPROVAL_SEC = 600
+def _wt_approve(kind): session["wt_ok"] = [str(kind), int(time.time())]
+def _wt_approved(kind):
+    v = session.get("wt_ok")
+    return bool(v) and v[0] == str(kind) and 0 <= time.time() - v[1] <= WT_APPROVAL_SEC
+def _same_origin():
+    o = request.headers.get("Origin") or request.headers.get("Referer") or ""
+    return (not o) or urllib.parse.urlparse(o).netloc == request.host
+def _emp_by_id(eid):
+    return next((x for x in rows("Employees") if _key(x.get("Employee ID", "")) == _key(eid)), None)
+def _fname(eid): return "install_%s.ps1" % re.sub(r"[^A-Za-z0-9_-]+", "_", str(eid))
+def _stamp(ep): return dt.datetime.fromtimestamp(ep, TZ).strftime("%Y-%m-%d %H:%M") if ep else ""
+AGENT_TONE = {"Active (agent)": "#166534", "Offline": "#b45309", "Error": "#b91c1c", "Pending Installation": "#1d4ed8", "Disabled": "#6b7280", "Not Installed": "#6b7280"}
+
+def _agent_rows():
+    now = time.time()
+    enr = {_key(r.get("Employee ID", "")): r for r in _fetch_rows(ENR_SHEET)}
+    dev = {_key(r.get("Employee ID", "")): r for r in _fetch_rows(AGENT_SHEET)}
+    out = []
+    for e in rows("Employees"):
+        eid = str(e.get("Employee ID", "")).strip()
+        if not eid: continue
+        k = _key(eid); er = enr.get(k) or {}; dv = dev.get(k) or {}; contact = _fl(dv.get("Last contact epoch"))
+        st = agent_status(er, contact, now)
+        out.append(dict(eid=eid, name=str(e.get("Name", "")), email=str(e.get("Office Email ID") or e.get("Email") or ""), status=st, tone=AGENT_TONE[st],
+                        last=_stamp(contact), host=str(dv.get("Computer", "")), err=str(er.get("Last error", "")) if st == "Error" else "",
+                        prepared=_stamp(_fl(er.get("Generated epoch"))), disabled=(st == "Disabled"), installed=(st in ("Active (agent)", "Offline", "Error"))))
+    bad = [dict(who=str(r.get("Employee name", "")), err=str(r.get("Last error", "")), at=_stamp(_fl(r.get("Last error epoch")))) for r in enr.values()
+           if str(r.get("Employee ID", "")).startswith("UNMATCHED")]
+    return out, bad
+
 @app.route("/admin/work-time/agent")
 @need("admin")
 def admin_work_time_agent():
-    base = request.url_root.rstrip("/")
-    data = [dict(eid=str(e["Employee ID"]), name=str(e.get("Name", "")), token=wt_agent_token(e["Employee ID"])) for e in rows("Employees")]
-    return page(WT_AGENT, title="Lock-tracking agent", data=data, base=base, enroll_on=bool(WT_ENROLL_KEY))
+    data, bad = _agent_rows(); cnt = {}
+    for r in data: cnt[r["status"]] = cnt.get(r["status"], 0) + 1
+    ready = None; q = request.args.get("ready", "").strip()
+    if q == "ALL" and _wt_approved("ALL"): ready = dict(all=True)
+    elif q:
+        e = _emp_by_id(q)
+        if e and _wt_approved(str(e["Employee ID"]).strip()):
+            eid = str(e["Employee ID"]).strip(); ready = dict(all=False, eid=eid, name=str(e.get("Name", "")), fname=_fname(eid),
+                                                               cmd="powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File .\\" + _fname(eid))
+    return page(WT_AGENT, title="Install Windows Tracking Agent", data=data, bad=bad, cnt=cnt, ready=ready, enroll_on=bool(WT_ENROLL_KEY),
+                tones=AGENT_TONE, states=list(AGENT_TONE))
+
+@app.route("/admin/work-time/agent/install", methods=["POST"])
+@need("admin")
+def admin_work_time_agent_install():
+    """Install / Reinstall Agent: gets (or re-issues) the employee's token, marks the employee Pending Installation and unlocks the installer download for 10 minutes."""
+    if not _same_origin(): abort(403)
+    e = _emp_by_id(request.form.get("eid", "").strip())
+    if not e: abort(404)
+    eid = str(e["Employee ID"]).strip(); name = str(e.get("Name", "")); er = _enr_get(eid, fresh=True)
+    if str((er or {}).get("Status", "")).strip() == "Disabled":
+        flash("This employee's agent is disabled. Use Enable first, then install again.", "error"); return redirect("/admin/work-time/agent")
+    ver = _enr_ver(er) + (1 if request.form.get("rotate") == "1" else 0); now = time.time()
+    if not _enr_save({_key(eid): {"Employee ID": eid, "Employee name": name, "Status": "Enabled", "Token version": ver, "Installer prepared at": _stamp(now),
+                                  "Generated epoch": int(now), "Prepared by": "Admin", "Last error": "", "Last error epoch": ""}}):
+        flash("The installer could not be prepared (Google Sheets did not answer). Please try again.", "error"); return redirect("/admin/work-time/agent")
+    print("work-time agent: installer prepared for", eid, "(new credentials)" if request.form.get("rotate") == "1" else "")
+    _wt_approve(eid)
+    return redirect("/admin/work-time/agent?ready=" + urllib.parse.quote(eid))
+
+@app.route("/admin/work-time/agent/install-all", methods=["POST"])
+@need("admin")
+def admin_work_time_agent_install_all():
+    """Install for All Employees: requires the Admin / IT approval tick-box, marks every enabled employee that has no running agent as Pending Installation."""
+    if not _same_origin(): abort(403)
+    if request.form.get("approved") != "1":
+        flash("Tick the approval box: deployment to employee computers needs authorized Admin / IT approval.", "error"); return redirect("/admin/work-time/agent")
+    if not WT_ENROLL_KEY:
+        flash("Set the WT_ENROLL_KEY environment variable on Render (any long random text) and redeploy, then try again.", "error"); return redirect("/admin/work-time/agent")
+    data, _bad = _agent_rows(); now = time.time()
+    ch = {_key(r["eid"]): {"Employee ID": r["eid"], "Employee name": r["name"], "Status": "Enabled", "Installer prepared at": _stamp(now), "Generated epoch": int(now),
+                           "Prepared by": "Admin (deploy_all)"} for r in data if r["status"] in ("Not Installed", "Pending Installation")}
+    if ch and not _enr_save(ch):
+        flash("Google Sheets did not answer. Please try again.", "error"); return redirect("/admin/work-time/agent")
+    print("work-time agent: deploy_all approved,", len(ch), "employees set to Pending Installation")
+    _wt_approve("ALL")
+    return redirect("/admin/work-time/agent?ready=ALL")
+
+@app.route("/admin/work-time/agent/disable", methods=["POST"])
+@need("admin")
+def admin_work_time_agent_disable():
+    """Disable Agent: revokes the employee's token at once (the agent is refused and cannot re-enrol). Enable allows it again - the agent must then be installed again."""
+    if not _same_origin(): abort(403)
+    e = _emp_by_id(request.form.get("eid", "").strip())
+    if not e: abort(404)
+    eid = str(e["Employee ID"]).strip(); name = str(e.get("Name", "")); er = _enr_get(eid, fresh=True)
+    if request.form.get("action") == "enable":
+        ch = {"Status": "Enabled", "Disabled at": "", "Generated epoch": "", "Installer prepared at": "", "Last error": "", "Last error epoch": ""}; msg = "enabled - install the agent again"
+    else:
+        ch = {"Status": "Disabled", "Token version": _enr_ver(er) + 1, "Disabled at": _stamp(time.time()), "Generated epoch": "", "Last error": "", "Last error epoch": ""}; msg = "disabled and its credentials revoked"
+    ch.update({"Employee ID": eid, "Employee name": name})
+    ok_ = _enr_save({_key(eid): ch})
+    flash(("Agent for %s %s." % (name or eid, msg)) if ok_ else "Google Sheets did not answer. Please try again.", "" if ok_ else "error")
+    return redirect("/admin/work-time/agent")
 
 @app.route("/admin/work-time/agent.py")
 @need("admin")
@@ -4481,22 +4660,52 @@ def admin_work_time_agent_file():
     resp = Response(WT_AGENT_PY, mimetype="text/x-python"); resp.headers["Content-Disposition"] = "attachment; filename=lock_agent.py"
     return resp
 
-WT_AGENT = """<div class="card"><h2 style="margin-top:0">Lock-tracking agent (Windows)</h2>
-<p class="mut">A tiny background program on each employee's PC reports every screen lock / unlock (Win+L = manual, locked by inactivity = automatic) to this server - no browser, no permission dialog, nothing shown to the employee.
-It does <b>not</b> need the employee to be signed in to this web app; events are saved straight to Google Sheets (Lock Events, Activity Log, Work Time) under the employee's ID and date. A browser alone cannot see Win+L reliably (Idle Detection needs a permission only the employee can grant, only works while the tab is open, and Chrome / Edge only), so the Windows agent is the supported method.</p>
-<div class="card" style="background:#f8f9ff"><b>Automatic for ALL employees (recommended)</b>
-<ol style="margin:6px 0"><li>On the server set the environment variable <code>WT_ENROLL_KEY</code> to any long random text and restart the app{% if not enroll_on %} (<b style="color:#b45309">not set yet</b>){% else %} (<b style="color:#166534">set</b>){% endif %}.</li>
-<li>Download <a class="btnl" href="/admin/work-time/agent/deploy_all.ps1">deploy_all.ps1</a> and let IT run it once on every PC as administrator (GPO startup script / Intune / SCCM). Python 3 must be installed for all users.</li>
-<li>From then on the agent starts hidden at every Windows logon and finds the employee from the Windows account (UPN = employee e-mail, or user name = Employee ID). Nobody enables anything; the status turns <b>Active (agent)</b> within a minute.</li></ol></div>
-<p><b>Single PC / one employee:</b> download the employee's <b>install.ps1</b> below and run it once on that PC, signed in as that employee:
-<code>powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File install.ps1</code>. It needs Python 3 on the PC, no administrator rights; it saves the agent and its settings and starts it hidden at every Windows logon. The Work Time status then shows <b>Active (agent)</b>.</p>
-<p class="mut">Manual alternative:</p>
-<ol><li>Install Python 3 on the PC (or ask IT to wrap <b>lock_agent.py</b> as an .exe / scheduled task).</li>
-<li>Download <a class="btnl" href="/admin/work-time/agent.py">lock_agent.py</a>.</li>
-<li>Create <code>lock_agent.ini</code> next to it: <code>server=<b>{{base}}</b></code>, <code>employee=&lt;ID&gt;</code>, <code>token=&lt;token below&gt;</code> (one per line; optional <code>idle_minutes=5</code> = screen-off / idle limit, <code>0</code> switches it off).</li>
-<li>Run it at Windows logon (Task Scheduler &rarr; "At log on", <code>pythonw lock_agent.py</code>), hidden.</li></ol>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Token</th><th>One-click installer</th></tr>
-{% for r in data %}<tr><td>{{r.eid}}</td><td>{{r.name}}</td><td><code>{{r.token}}</code></td><td><a class="btnl" href="/admin/work-time/agent/install.ps1?eid={{r.eid|urlencode}}">install.ps1</a></td></tr>{% endfor %}</table></div></div>"""
+WT_AGENT = """<div class="card"><h2 style="margin-top:0">Install Windows Tracking Agent</h2>
+<p class="mut">A small background program on each employee's PC reports every screen lock / unlock to this server and starts by itself at Windows logon - no browser needed. Events are saved to Google Sheets
+(Lock Events, Activity Log, Work Time) under the employee's ID and date. <b>This web app cannot install software on a PC by itself:</b> download the installer and run it on that PC, or let IT deploy it
+(GPO / Intune / SCCM). An employee is shown as <b>Active (agent)</b> only after the server receives a valid heartbeat or event from the agent.</p>
+<p style="margin:6px 0">{% for s_ in states %}{% if cnt.get(s_) %}<span style="display:inline-block;margin:0 10px 4px 0"><b style="color:{{tones[s_]}}">{{cnt[s_]}}</b> {{s_}}</span>{% endif %}{% endfor %}</p>
+
+{% if ready %}<div class="card" style="background:#f0fdf4;border:1px solid #86efac">
+{% if ready.all %}<b>Deployment script ready &middot; all employees</b>
+<p style="margin:6px 0"><a class="btnl" href="/admin/work-time/agent/deploy_all.ps1">&#11015; Download deploy_all.ps1</a></p>
+<p style="margin:6px 0">Hand it to the authorized IT team. Run it once per PC as administrator / SYSTEM (Python 3 installed for all users), through <b>Group Policy</b> (Computer Configuration &rarr; Windows Settings &rarr; Scripts &rarr; Startup),
+<b>Intune</b> (Devices &rarr; Scripts &rarr; PowerShell, run as System) or <b>SCCM</b> (script / package run as System). The agent then starts hidden at every logon and finds its employee from the Windows account.
+Employees stay <b>Pending Installation</b> until their first heartbeat arrives. The script contains the deployment key - keep it private, do not e-mail or publish it.</p>
+{% else %}<b>Installer ready &middot; {{ready.eid}} &middot; {{ready.name}}</b>
+<p style="margin:6px 0"><a class="btnl" href="/admin/work-time/agent/install.ps1?eid={{ready.eid|urlencode}}">&#11015; Download {{ready.fname}}</a></p>
+<p style="margin:6px 0">Install command (run on the employee's PC, signed in as that employee; needs Python 3, no administrator rights):</p>
+<p style="margin:6px 0"><code id="wtcmd" style="user-select:all">{{ready.cmd}}</code> <button type="button" class="btnl" onclick="wtCopy()">Copy command</button> <span id="wtcopied" class="mut"></span></p>
+<p class="mut" style="margin:6px 0">The installer is personal to this employee and contains a private credential: give it only to the employee's PC / the authorized IT team. It checks the connection at the end and shows an error if the agent cannot register.</p>
+{% endif %}<p class="mut" style="margin:6px 0">These download links work for about 10 minutes after approval and only while you are signed in as Admin.</p></div>{% endif %}
+
+<div class="card" style="background:#f8f9ff"><b>Install for All Employees</b>
+<form method="post" action="/admin/work-time/agent/install-all" style="margin:6px 0">
+<label style="display:block;margin-bottom:6px"><input type="checkbox" name="approved" value="1" required> I confirm that authorized Admin / IT approval exists to deploy the tracking agent to employee computers.</label>
+<button class="primary pbtn" type="submit"{% if not enroll_on %} disabled{% endif %}>Prepare deploy_all.ps1</button>
+{% if not enroll_on %}<span style="color:#b45309"> &mdash; WT_ENROLL_KEY is not set. Add it as an environment variable in Render (any long random text) and redeploy.</span>{% else %}<span class="mut"> Enrolment key: set in Render (never shown here).</span>{% endif %}</form></div>
+
+{% if bad %}<div class="card" style="border:1px solid #fca5a5"><b style="color:#b91c1c">Registration problems</b>
+<div style="overflow-x:auto"><table><tr><th>Windows account</th><th>Problem</th><th>When</th></tr>
+{% for b in bad %}<tr><td>{{b.who}}</td><td>{{b.err}}</td><td>{{b.at}}</td></tr>{% endfor %}</table></div></div>{% endif %}
+
+<div class="no-print" style="display:flex;gap:10px;flex-wrap:wrap;margin:8px 0">
+<input id="wtq" type="search" placeholder="Search Emp ID / name / e-mail" oninput="wtFilter()" style="min-width:220px">
+<select id="wts" onchange="wtFilter()"><option value="">All statuses</option>{% for s_ in states %}<option>{{s_}}</option>{% endfor %}</select></div>
+<div style="overflow-x:auto"><table id="wtt"><tr><th>Emp ID</th><th>Employee Name</th><th>Office Email ID</th><th>Agent Installation Status</th><th>Last Activity</th><th>Install / Reinstall Agent</th><th>Disable Agent</th></tr>
+{% for r in data %}<tr data-s="{{r.status}}" data-t="{{(r.eid ~ ' ' ~ r.name ~ ' ' ~ r.email)|lower}}"><td>{{r.eid}}</td><td>{{r.name}}</td><td>{{r.email or '-'}}</td>
+<td><b style="color:{{r.tone}}">{{r.status}}</b>{% if r.err %}<br><small style="color:#b91c1c">{{r.err}}</small>{% elif r.status=='Pending Installation' and r.prepared %}<br><small class="mut">installer prepared {{r.prepared}}</small>{% endif %}{% if r.host and r.installed %}<br><small class="mut">{{r.host}}</small>{% endif %}</td>
+<td>{{r.last or '-'}}</td>
+<td>{% if r.disabled %}<span class="mut">Enable first</span>{% else %}<form method="post" action="/admin/work-time/agent/install" style="margin:0" onsubmit="return confirm('Prepare the installer for {{r.name|e}}? Deploy it only with authorized Admin / IT approval.')">
+<input type="hidden" name="eid" value="{{r.eid}}"><button class="btnl" type="submit">{{'Reinstall Agent' if r.status!='Not Installed' else 'Install Agent'}}</button>
+{% if r.status!='Not Installed' %}<label class="mut" style="display:block;font-size:12px"><input type="checkbox" name="rotate" value="1"> new credentials (revoke old)</label>{% endif %}</form>{% endif %}</td>
+<td><form method="post" action="/admin/work-time/agent/disable" style="margin:0" onsubmit="return confirm('{{'Enable' if r.disabled else 'Disable'}} the agent for {{r.name|e}}?{{'' if r.disabled else ' Its credentials are revoked immediately.'}}')">
+<input type="hidden" name="eid" value="{{r.eid}}"><input type="hidden" name="action" value="{{'enable' if r.disabled else 'disable'}}"><button class="btnl" type="submit">{{'Enable Agent' if r.disabled else 'Disable Agent'}}</button></form></td></tr>{% endfor %}</table></div>
+<p class="mut" style="margin-top:8px">Last Activity = the last heartbeat or event the server received from that agent (saved at most every 20 minutes). Offline = no contact for over 90 minutes.</p></div>
+<script>function wtFilter(){var q=document.getElementById('wtq').value.toLowerCase(),s=document.getElementById('wts').value;document.querySelectorAll('#wtt tr[data-s]').forEach(function(r){r.style.display=((!s||r.dataset.s===s)&&(!q||r.dataset.t.indexOf(q)>-1))?'':'none'})}
+function wtCopy(){var t=document.getElementById('wtcmd').textContent,m=document.getElementById('wtcopied');function ok(){m.textContent='Copied'}
+if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(ok,function(){m.textContent='Select the command and copy it manually'})}
+else{var a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();try{document.execCommand('copy');ok()}catch(x){m.textContent='Select the command and copy it manually'}document.body.removeChild(a)}}</script>"""
 
 WT_AGENT_PY = r'''"""Work Time lock agent v2 (Windows, standard library only). Reports every screen LOCK / UNLOCK (Win+L = manual, locked by inactivity = automatic),
 screen-off / idle periods and monitor power events to the Productivity Tracker with their real times. Runs hidden at logon: pythonw lock_agent.py
@@ -4691,6 +4900,13 @@ def admin_work_time_agent_installer():
     e = next((x for x in rows("Employees") if _key(x.get("Employee ID", "")) == _key(eid)), None)
     if not e: abort(404)
     eid = str(e["Employee ID"]).strip(); base = request.url_root.rstrip("/")
+    er = _enr_get(eid, fresh=True)
+    if str((er or {}).get("Status", "")).strip() == "Disabled":
+        flash("This employee's agent is disabled. Use Enable first.", "error"); return redirect("/admin/work-time/agent")
+    if not _wt_approved(eid):                                     # Update166: Install Agent (with Admin / IT approval) must come first; the link is not usable on its own
+        flash("Click Install Agent for this employee first (the download is released for 10 minutes).", "error"); return redirect("/admin/work-time/agent")
+    print("work-time agent: installer downloaded for", eid)
+    tok, peid = wt_agent_token(eid, er), eid.replace("'", "''")
     ps = f"""$ErrorActionPreference = 'Stop'
 $dir = Join-Path $env:LOCALAPPDATA 'WorkTimeAgent'
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
@@ -4698,7 +4914,7 @@ $agent = @'
 {WT_AGENT_PY}
 '@
 Set-Content -Path (Join-Path $dir 'lock_agent.py') -Value $agent -Encoding UTF8
-Set-Content -Path (Join-Path $dir 'lock_agent.ini') -Value @('server={base}','employee={eid}','token={wt_agent_token(eid)}','idle_minutes=5') -Encoding UTF8
+Set-Content -Path (Join-Path $dir 'lock_agent.ini') -Value @('server={base}','employee={peid}','token={tok}','idle_minutes=5') -Encoding UTF8
 $pw = $null
 foreach ($c in (Get-Command pythonw.exe -All -ErrorAction SilentlyContinue)) {{ if ($c.Source -notmatch 'WindowsApps') {{ $pw = $c.Source; break }} }}
 if (-not $pw) {{
@@ -4713,8 +4929,17 @@ Register-ScheduledTask -TaskName 'WorkTimeAgent' -Action $act -Trigger $trg -Set
 Start-ScheduledTask -TaskName 'WorkTimeAgent'
 Start-Sleep -Seconds 4
 if (-not (Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object {{ $_.CommandLine -like '*lock_agent.py*' }})) {{ Write-Error ('The lock agent did not start. See ' + (Join-Path $dir 'lock_agent.log')) }}
+try {{
+  $body = @{{ eid = '{peid}'; token = '{tok}'; e = 'check'; host = $env:COMPUTERNAME; ver = 'installer' }} | ConvertTo-Json
+  Invoke-RestMethod -Uri '{base}/agent/lock' -Method Post -Body $body -ContentType 'application/json' -TimeoutSec 20 | Out-Null
+  Write-Output 'Work Time agent installed and the server accepted it. The Admin page shows Active (agent) after the first heartbeat (about a minute).'
+}} catch {{
+  $code = 0; if ($_.Exception.Response) {{ $code = [int]$_.Exception.Response.StatusCode }}
+  if ($code -eq 403) {{ Write-Error 'Installed, but the server REJECTED this agent (credentials revoked, agent disabled or employee unknown). Ask the Admin to prepare a new installer.' }}
+  else {{ Write-Error ('Installed, but this PC could not reach the server {base} : ' + $_.Exception.Message) }}
+}}
 """
-    resp = Response("\ufeff" + ps, mimetype="text/plain"); resp.headers["Content-Disposition"] = f"attachment; filename=install_{re.sub(r'[^A-Za-z0-9_-]+', '_', eid)}.ps1"
+    resp = Response("\ufeff" + ps, mimetype="text/plain"); resp.headers["Content-Disposition"] = f"attachment; filename=install_{re.sub(r'[^A-Za-z0-9_-]+', '_', eid)}.ps1"; resp.headers["Cache-Control"] = "no-store"
     return resp
 
 @app.route("/employee/track", methods=["POST"])

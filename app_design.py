@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update167: Admin > /admin/log/import - upload a CSV / XLSX of Productivity log rows (preview, then save; duplicates skipped, dates normalised, targets filled) and /admin/log/fix-dates (repairs non-YYYY-MM-DD Date cells that made the Overview show 0).
   * Update166: ADMIN-ONLY Windows agent installation. Admin > Work Time > Lock-Tracking Agent (/admin/work-time/agent) is now "Install Windows Tracking Agent": one row per employee (Emp ID, Name,
     Office Email ID, Agent Installation Status, Last Activity, Install / Reinstall Agent, Disable / Enable Agent) with the statuses Not Installed / Pending Installation / Active (agent) / Offline /
     Error / Disabled. Install Agent = secure per-employee token (retrieved, or re-issued to revoke the old one) -> Admin downloads install_<id>.ps1 (existing install.ps1 mechanism, now with a
@@ -4941,6 +4942,117 @@ try {{
 """
     resp = Response("\ufeff" + ps, mimetype="text/plain"); resp.headers["Content-Disposition"] = f"attachment; filename=install_{re.sub(r'[^A-Za-z0-9_-]+', '_', eid)}.ps1"; resp.headers["Cache-Control"] = "no-store"
     return resp
+
+# ---------------------------------------------------------------- Update167: Admin import of Productivity log rows (CSV / XLSX) + date repair
+# /admin/log/import       upload a CSV / XLSX -> "Preview" first, tick "Save" to write. Duplicates are skipped, dates are normalised to YYYY-MM-DD,
+#                         Target Count / Productivity % are filled with the app's own formula (entry_metrics) when the file has none.
+# /admin/log/fix-dates    one click: rewrites any Date cell of the Productivity log that is not YYYY-MM-DD (the Overview / reports read Date as text, so
+#                         "8/10/2026" or "2026-10-08 00:00:00" rows were invisible to the October figures).
+import hashlib as _ih
+
+_IMP_ALIAS = {
+    "submission id": "Submission ID", "date": "Date", "band": "Band", "employee id": "Employee ID", "emp id": "Employee ID", "empid": "Employee ID",
+    "employee name": "Employee name", "name": "Employee name", "type": "Type", "process / description": "Process / Description", "process": "Process / Description",
+    "process name": "Process / Description", "description": "Description", "hour": "Hour", "hours": "Hour", "count": "Count", "completed count": "Count",
+    "target count": "Target Count", "productivity %": "Productivity %", "productivity": "Productivity %", "submitted at": "Submitted at"}
+
+def _imp_read(f):
+    """-> list of dicts keyed by the app's column names (CSV or XLSX)."""
+    name = (f.filename or "").lower(); raw = f.read()
+    if name.endswith((".xlsx", ".xlsm")):
+        import openpyxl
+        ws = openpyxl.load_workbook(io.BytesIO(raw), data_only=True, read_only=True).active
+        table = [list(r) for r in ws.iter_rows(values_only=True)]
+    else:
+        table = list(csv.reader(io.StringIO(raw.decode("utf-8-sig", errors="replace"))))
+    table = [r for r in table if any(str(c or "").strip() for c in r)]
+    if not table: return []
+    heads = [_IMP_ALIAS.get(re.sub(r"\s+", " ", str(h or "").strip().lower()), "") for h in table[0]]
+    out = []
+    for r in table[1:]:
+        d = {}
+        for h, v in zip(heads, r):
+            if not h: continue
+            if isinstance(v, (dt.datetime, dt.date)): v = v.strftime("%Y-%m-%d")
+            d[h] = "" if v is None else str(v).strip()
+        out.append(d)
+    return out
+
+def _imp_plan(items):
+    """Validate / complete the rows. Returns (rows to append, counters, problems)."""
+    emps = {_key(e.get("Employee ID", "")): e for e in rows("Employees")}
+    seen = set()
+    for r in _fetch_rows("Productivity log"):
+        seen.add((norm_date(r.get("Date")), _key(r.get("Employee ID", "")), str(r.get("Type", "")), str(r.get("Process / Description", "")).strip().lower(),
+                  round(num(r.get("Hour")), 2), round(num(r.get("Count")), 2)))
+    cnt = dict(read=len(items), new=0, duplicate=0, bad=0); bad, groups = [], {}
+    for n, it in enumerate(items, start=2):
+        d = norm_date(it.get("Date")); eid = it.get("Employee ID", "").strip(); e = emps.get(_key(eid))
+        typ = (it.get("Type") or "Process").strip().title(); desc = it.get("Process / Description", "").strip()
+        why = ("date not recognised" if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) else "unknown Employee ID" if e is None else
+               "View Only designation" if is_view_only(eid) else "Type must be Process or Note" if typ not in ("Process", "Note") else "no process / description" if not desc else "")
+        if why: cnt["bad"] += 1; bad.append("row %d: %s" % (n, why)); continue
+        h, c = num(it.get("Hour")), num(it.get("Count"))
+        k = (d, _key(eid), typ, desc.lower(), round(h, 2), round(c, 2))
+        if k in seen: cnt["duplicate"] += 1; continue
+        seen.add(k); cnt["new"] += 1
+        groups.setdefault((d, _key(eid)), []).append(dict(it, **{"Date": d, "Employee ID": str(e["Employee ID"]).strip(), "Employee name": str(e.get("Name", "")),
+                                                                    "Band": it.get("Band") or str(e.get("Band", "")), "Type": typ, "Process / Description": desc, "_h": h, "_c": c}))
+    out, now = [], now_local().strftime("%Y-%m-%d %H:%M:%S")
+    for (d, ek), g in groups.items():
+        procs = [(x["Process / Description"], x["_h"], x["_c"]) for x in g if x["Type"] == "Process"]
+        try: tgts, dpct = entry_metrics(d, g[0]["Employee ID"], procs)
+        except Exception as ex: print("import metrics error:", repr(ex)); tgts, dpct = [""] * len(procs), ""
+        sid = next((x["Submission ID"] for x in g if x.get("Submission ID")), "") or "IMP-" + _ih.sha1(("%s|%s" % (d, ek)).encode()).hexdigest()[:10]
+        pi = 0
+        for x in g:
+            tg = pct = ""
+            if x["Type"] == "Process": tg = x.get("Target Count") or (tgts[pi] if pi < len(tgts) else ""); pi += 1
+            pct = x.get("Productivity %") or dpct
+            out.append([sid, d, x["Band"], x["Employee ID"], x["Employee name"], x["Type"], x["Process / Description"], x["_h"], x["_c"] if x["Type"] == "Process" else "",
+                        tg, pct, x.get("Submitted at") or now, x.get("Description", "")])
+    return out, cnt, bad
+
+IMPORT_PAGE = """<div class="card"><h2 style="margin-top:0">Import Productivity log</h2>
+<p class="mut">Upload a CSV or XLSX with a header row. Recognised columns: Date, Employee ID, Employee name, Band, Type (Process / Note, default Process), Process / Description, Hour, Count,
+Target Count, Productivity %, Description, Submission ID. Dates may be 2026-10-08, 08/10/2026, 08-10-2026, 08.10.2026 or 08 Oct 2026. Rows already in the log are skipped.</p>
+<form method="post" enctype="multipart/form-data"><input type="file" name="file" accept=".csv,.xlsx,.xlsm" required>
+<label style="display:block;margin:8px 0"><input type="checkbox" name="save" value="1"> Save to the Productivity log (leave unticked to preview only)</label>
+<button class="primary pbtn" type="submit">Check / Import</button> <a class="btnl" href="/admin/log">&larr; Productivity log</a></form></div>
+{% if res %}<div class="card"><b>{{res.read}}</b> rows read &middot; <b style="color:#166534">{{res.new}}</b> {{'imported' if res.saved else 'new (not saved yet)'}} &middot; {{res.duplicate}} duplicates skipped &middot; <b style="color:#b91c1c">{{res.bad}}</b> rejected
+{% if bad %}<ul>{% for b in bad[:50] %}<li>{{b}}</li>{% endfor %}</ul>{% endif %}</div>{% endif %}
+<div class="card"><b>Repair dates already in the sheet</b><p class="mut">Use this if the Overview shows 0 although the Productivity log tab has rows.</p>
+<form method="post" action="/admin/log/fix-dates"><button class="btnl" type="submit">Normalise Date column to YYYY-MM-DD</button></form></div>"""
+
+@app.route("/admin/log/import", methods=["GET", "POST"])
+@need("admin")
+def admin_log_import():
+    res = bad = None
+    if request.method == "POST":
+        f = request.files.get("file")
+        if not f or not f.filename: flash("Choose a CSV or XLSX file.", "error"); return redirect("/admin/log/import")
+        try: out, cnt, bad = _imp_plan(_imp_read(f))
+        except Exception as ex: flash("The file could not be read: %s" % ex, "error"); return redirect("/admin/log/import")
+        cnt["saved"] = False
+        if request.form.get("save") == "1" and out:
+            ws = ws_of("Productivity log")
+            for i in range(0, len(out), 500): _with_retry(ws.append_rows, out[i:i + 500], value_input_option="RAW")
+            invalidate_cache("Productivity log"); cnt["saved"] = True
+        res = cnt
+    return page(IMPORT_PAGE, title="Import Productivity log", res=res, bad=bad)
+
+@app.route("/admin/log/fix-dates", methods=["POST"])
+@need("admin")
+def admin_log_fix_dates():
+    ws = ws_of("Productivity log"); col = list(HEADERS["Productivity log"]).index("Date") + 1
+    vals = _with_retry(ws.col_values, col); fixed = []
+    for i, v in enumerate(vals[1:], start=2):
+        n = norm_date(v)
+        if n and n != str(v).strip() and re.fullmatch(r"\d{4}-\d{2}-\d{2}", n): fixed.append({"range": gspread.utils.rowcol_to_a1(i, col), "values": [[n]]})
+    for i in range(0, len(fixed), 500): _with_retry(ws.batch_update, fixed[i:i + 500], value_input_option="RAW")
+    invalidate_cache("Productivity log")
+    flash("%d Date cells were converted to YYYY-MM-DD." % len(fixed)); return redirect("/admin/log/import")
+
 
 @app.route("/employee/track", methods=["POST"])
 @need("employee")

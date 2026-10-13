@@ -1,4 +1,9 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update174: (1) Admin > Mail Notes - FIX: scheduled mails stuck on "Sending" (0 sent / 0 failed, nothing in the log) are now recovered. A mail was marked "Sending" before the
+    first e-mail left; if the server worker was restarted / recycled meanwhile (Render deploy, gunicorn timeout) nothing ever finished it and the 30-second job ignored every row that was not "Scheduled".
+    Now the claim carries a time stamp (refreshed after every batch); a "Sending" mail with no progress for 5 minutes is taken over automatically, and employees already logged "Sent"
+    for that mail are skipped (no duplicates). (2) Admin > Work Time: every employee row now has "Logins" and "Logouts" counts for the day and a click-to-open list of EVERY login and
+    logout with its date and time (and logout type), plus both counts in the CSV download.
   * Update173: Productivity % is NOT calculated for weekends / declared holidays (load_subs gives pct=None; screens show "not counted"); the Employee Calendar marks every holiday (amber) and weekly off (grey) - past and next 12 months, today included - and they win over leave / login / entry / absent.
   * Update170: Admin Overview rebuilt on tolerant Productivity-log reading (see load_subs / report) + /admin/summary/check per-employee audit page.
   * Update169: Overview compared with Update160 - the Overview route, template, design and calculation are identical; the only data-layer difference was the Productivity log COLUMN ORDER (Update166 moved
@@ -5229,11 +5234,14 @@ WT_ADMIN = """<div class="card"><h2 style="margin-top:0">Work Time <small class=
 <p class="mut" style="margin:0 0 10px">Required = {{req}} of active (unlocked) time in a 9-hour day; allowed breaks = {{brk_allowed}} (30 min lunch + 30 min other).
 Break time = the time the computer was locked. Total working time = system-on time &minus; break time.</p>
 <p style="margin:0 0 10px"><b>{{n_ok}}</b> completed &middot; <b>{{n_short}}</b> short / in progress &middot; <b>{{n_none}}</b> no login{% if n_notrack %} &middot; <b style="color:#b45309">{{n_notrack}}</b> without lock tracking (<a href="/admin/work-time/agent">deploy the agent</a>){% endif %}</p>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last screen OFF (lock)</th><th>Last screen ON (unlock)</th><th>Break duration</th><th>Screen OFF count (locks)</th><th>Screen ON count (unlocks)</th><th>Screen OFF / ON events</th><th>Manual lock / unlock (Win+L)</th><th>Automatic lock / unlock</th><th>Undetected lock / unlock</th><th>Login / Logoff events</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
-{% for r in rows %}<tr><td><a href="/admin/work-time/employee/{{r.eid|urlencode}}?date={{d}}">{{r.eid}}</a></td><td><a href="/admin/work-time/employee/{{r.eid|urlencode}}?date={{d}}" style="color:inherit;text-decoration:none;font-weight:600">{{r.name}}</a></td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.last_lock or '-'}}</td><td>{{r.last_unlock or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td>{{r.on_n}}</td><td>{{r.a_scr}}</td><td>{{r.a_lm}}</td><td>{{r.a_la}}</td><td>{{r.a_lu}}</td><td>{{r.a_log}}</td><td><b>{{r.work or '-'}}</b></td>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Login</th><th>Logout</th><th>System-on time</th><th>Last screen OFF (lock)</th><th>Last screen ON (unlock)</th><th>Break duration</th><th>Screen OFF count (locks)</th><th>Screen ON count (unlocks)</th><th>Screen OFF / ON events</th><th>Manual lock / unlock (Win+L)</th><th>Automatic lock / unlock</th><th>Undetected lock / unlock</th><th>Login / Logoff events</th><th>Logins (count)</th><th>Logouts (count)</th><th>Total working time</th><th>Status</th><th>Lock tracking</th></tr>
+{% for r in rows %}<tr><td><a href="/admin/work-time/employee/{{r.eid|urlencode}}?date={{d}}">{{r.eid}}</a></td><td><a href="/admin/work-time/employee/{{r.eid|urlencode}}?date={{d}}" style="color:inherit;text-decoration:none;font-weight:600">{{r.name}}</a></td><td>{{r.login or '-'}}</td><td>{{r.logout or ('-' if r.state=='No login' else 'still on')}}</td><td>{{r.sys_on or '-'}}</td><td>{{r.last_lock or '-'}}</td><td>{{r.last_unlock or '-'}}</td><td>{{r.brk or '-'}}</td><td>{{r.locks if r.locks!='' else '-'}}</td><td>{{r.on_n}}</td><td>{{r.a_scr}}</td><td>{{r.a_lm}}</td><td>{{r.a_la}}</td><td>{{r.a_lu}}</td><td>{{r.a_log}}</td><td><b>{{r.n_in}}</b></td><td><b>{{r.n_out}}</b></td><td><b>{{r.work or '-'}}</b></td>
 <td><span style="padding:2px 8px;border-radius:10px;font-size:12px;white-space:nowrap;{% if r.tone=='ok' %}background:#dcfce7;color:#166534{% elif r.tone=='warn' %}background:#fef3c7;color:#92400e{% elif r.tone=='bad' %}background:#fee2e2;color:#991b1b{% else %}background:#eef0f6;color:#5b6280{% endif %}">{{r.status}}</span>{% if r.state=='Locked' %} <small class="mut">&#128274; locked now</small>{% endif %}</td>
 <td>{{r.lt}}</td></tr>
-{% if r.events %}<tr><td colspan="18" style="padding:0 0 8px 28px;background:#f8f9ff"><details><summary class="mut" style="cursor:pointer;padding:6px 0">&#128274; Screen OFF {{r.events|length}} time(s) &middot; Screen ON {{r.on_n}} time(s) &middot; total {{r.lock_total}} &mdash; click to view</summary>
+{% if r.sessions %}<tr><td colspan="20" style="padding:0 0 8px 28px;background:#f8f9ff"><details><summary class="mut" style="cursor:pointer;padding:6px 0">&#128275; Logged in {{r.n_in}} time(s) &middot; logged out {{r.n_out}} time(s) on {{d}} &mdash; click to view every login / logout</summary>
+<table style="margin:4px 0 6px"><tr><th>#</th><th>Login date &amp; time</th><th>Logout date &amp; time</th><th>Session duration</th><th>Logout type</th></tr>
+{% for x in r.sessions %}<tr><td>{{loop.index}}</td><td>{{x.date}} {{x.login or '-'}}</td><td>{% if x.logout %}{{x.date}} {{x.logout}}{% else %}still logged in{% endif %}</td><td>{{x.dur or '-'}}</td><td>{{x.typ or '-'}}</td></tr>{% endfor %}</table></details></td></tr>{% endif %}
+{% if r.events %}<tr><td colspan="20" style="padding:0 0 8px 28px;background:#f8f9ff"><details><summary class="mut" style="cursor:pointer;padding:6px 0">&#128274; Screen OFF {{r.events|length}} time(s) &middot; Screen ON {{r.on_n}} time(s) &middot; total {{r.lock_total}} &mdash; click to view</summary>
 <table style="margin:4px 0 6px"><tr><th>Lock #</th><th>Screen OFF (locked) at</th><th>Screen ON (unlocked) at</th><th>Lock duration</th><th>Reason</th><th>Source</th></tr>
 {% for e in r.events %}<tr><td>{{e.n}}</td><td>{{e.start}}</td><td>{{e.end or 'still locked / off'}}</td><td>{{e.dur}}</td><td>{{e.reason}}</td><td>{{e.src}}</td></tr>{% endfor %}</table></details></td></tr>{% endif %}
 {% endfor %}</table></div></div>
@@ -5259,7 +5267,14 @@ def admin_work_time():
     evs_by = {}                                                  # Update152: every lock / screen-off event of the day, per employee, inside the row
     for e_ in _wt_events(d):
         evs_by.setdefault(_key(e_["eid"]), []).append(e_)
+    sess_by = {}                                                 # Update174: every login / logout of the day (Attendance sheet) with date + time
+    for a_ in rows("Attendance"):
+        if _iso_date(a_.get("Date")) != d or not str(a_.get("Employee ID", "")).strip(): continue
+        lo_ = str(a_.get("Logout time", "")).strip()
+        sess_by.setdefault(_key(a_.get("Employee ID", "")), []).append(dict(date=d, login=str(a_.get("Login time", "")).strip(), logout=lo_, typ=str(a_.get("Logout type", "")).strip(), dur=str(a_.get("Duration", "")).strip()))
     for r_ in data:
+        ss_ = sorted(sess_by.get(_key(r_["eid"]), []), key=lambda x: _ts(d, x["login"]) if x["login"] else 0)
+        r_["sessions"] = ss_; r_["n_in"] = sum(1 for x in ss_ if x["login"]); r_["n_out"] = sum(1 for x in ss_ if x["logout"])
         c_ = dc.get(_key(r_["eid"]))
         r_["events"] = evs_by.get(_key(r_["eid"]), [])
         r_["lock_total"] = _hms(sum(e_["sec"] for e_ in r_["events"]))
@@ -5510,9 +5525,15 @@ def admin_work_time_export():
     import csv, io
     d = _wt_date_arg(); buf = io.StringIO(); w = csv.writer(buf)
     w.writerow(["Date", "Employee ID", "Employee name", "Login time", "Logout time", "System-on time", "Break time (locked)", "Screen locks",
-                "Total working time", "Required", "Status", "Lock tracking"])
+                "Total working time", "Required", "Status", "Lock tracking", "Logins (count)", "Logouts (count)", "All logins (date time)", "All logouts (date time)"])
+    sess = {}                                                    # Update174: every login / logout of the day
+    for a in rows("Attendance"):
+        if _iso_date(a.get("Date")) == d: sess.setdefault(_key(a.get("Employee ID", "")), []).append(a)
     for r in _wt_report(d):
-        w.writerow([d, r["eid"], r["name"], r["login"], r["logout"], r["sys_on"], r["brk"], r["locks"], r["work"], _hms(WT_REQUIRED_SEC), r["status"], r["lt"]])
+        ss = sorted(sess.get(_key(r["eid"]), []), key=lambda a: _ts(d, str(a.get("Login time", ""))) if str(a.get("Login time", "")).strip() else 0)
+        ins = [f'{d} {str(a.get("Login time", "")).strip()}' for a in ss if str(a.get("Login time", "")).strip()]
+        outs = [f'{d} {str(a.get("Logout time", "")).strip()}' for a in ss if str(a.get("Logout time", "")).strip()]
+        w.writerow([d, r["eid"], r["name"], r["login"], r["logout"], r["sys_on"], r["brk"], r["locks"], r["work"], _hms(WT_REQUIRED_SEC), r["status"], r["lt"], len(ins), len(outs), " | ".join(ins), " | ".join(outs)])
     resp = Response("\ufeff" + buf.getvalue(), mimetype="text/csv")
     resp.headers["Content-Disposition"] = f"attachment; filename=work_time_{d}.csv"
     return resp
@@ -8918,16 +8939,34 @@ def _mn_save(rec):
 def _mn_get(mid, fresh=True):
     return next((r for r in (_fetch_rows(MN_SHEET) if fresh else rows(MN_SHEET)) if str(r.get("ID", "")) == str(mid)), None)
 
+_MN_STALE_SEC = 300          # Update174: a "Sending" mail with no progress for this long is taken over (its sender thread died)
+
+def _mn_claim_age(rec):
+    """Seconds since the 'Sending' claim was made / last refreshed (token = worker-random-epoch). Old tokens without a time stamp count as stale."""
+    try: return time.time() - float(str(rec.get("Claimed by", "")).rsplit("-", 1)[1])
+    except Exception: return 10 ** 9
+
+def _mn_is_stale(rec):
+    return str(rec.get("Status")) == "Sending" and _mn_claim_age(rec) > _MN_STALE_SEC
+
 def _mn_claim(mid):
-    """Scheduled -> Sending for ONE sender only (workers / threads each write a unique token; the last write wins; only that one continues)."""
+    """Scheduled (or a stale 'Sending') -> Sending for ONE sender only (workers / threads each write a unique token; the last write wins; only that one continues)."""
     rec = _mn_get(mid)
-    if not rec or str(rec.get("Status")) != "Scheduled": return None
-    token = f"{_WORKER_ID}-{uuid.uuid4().hex[:6]}"
+    if not rec or not (str(rec.get("Status")) == "Scheduled" or _mn_is_stale(rec)): return None
+    token = f"{_WORKER_ID}-{uuid.uuid4().hex[:6]}-{int(time.time())}"
     rec["Status"], rec["Claimed by"] = "Sending", token
+    if not str(rec.get("Detail", "")).startswith("Retrying"): rec["Detail"] = ""
     _mn_save(rec)
     time.sleep(2)
     cur = _mn_get(mid)
     return cur if cur and cur.get("Status") == "Sending" and cur.get("Claimed by") == token else None
+
+def _mn_heartbeat(rec):
+    """Refresh the claim time stamp so another worker does not take over a long, healthy send."""
+    try:
+        rec["Claimed by"] = f"{str(rec.get('Claimed by', '')).rsplit('-', 1)[0]}-{int(time.time())}"
+        _mn_save(rec)
+    except Exception as ex: print("mail note heartbeat error:", ex)
 
 def run_mail_note(mid):
     """Send ONE scheduled mail note to its recipients (All Employees, or only the selected ones) and log every employee in 'Mail Notes Log'.
@@ -8948,6 +8987,10 @@ def run_mail_note(mid):
         sender = mail_sender(fresh=True)[1]
         ws = ws_of(MN_LOG)
         sent = failed = 0; why = ""; ready = []; out_rows = []
+        done_before = {(str(r.get("Notice ID", "")), _key(r.get("Employee ID", ""))) for r in _fetch_rows(MN_LOG) if str(r.get("Email Status", "")) == "Sent"}      # Update174: a retried mail never mails anyone twice
+        all_n = len(emps)
+        emps = [e for e in emps if (str(rec["ID"]), _key(e.get("Employee ID", ""))) not in done_before]
+        sent = all_n - len(emps)
         def logrow(emp, status, detail=""):
             return [str(rec["ID"]), emp["eid"], emp["name"], emp["email"], str(rec["Subject"]), stamp(), status, detail[:200]]
         for e in emps:
@@ -8957,6 +9000,7 @@ def run_mail_note(mid):
         if out_rows: ws.append_rows(out_rows, value_input_option="RAW")
         for i in range(0, len(ready), 25):
             batch = ready[i:i + 25]
+            _mn_heartbeat(rec)
             if not sender: res = {emp["email"]: "Failed: no sender e-mail configured (Admin > Email Controls)" for emp, _m in batch}
             else:
                 try: res = _smtp_send([m for _e, m in batch])
@@ -8969,8 +9013,8 @@ def run_mail_note(mid):
             ws.append_rows(part, value_input_option="RAW")
             invalidate_cache(MN_LOG)
         invalidate_cache(MN_LOG)
-        detail = ("No recipients: no employee matched the selection." if not emps else "") + (("First failure: " + why[:150]) if why else "")
-        rec.update({"Status": "Sent" if (sent and not failed) else ("Partly sent" if sent else "Failed"), "Recipients": len(emps), "Sent": sent,
+        detail = ("No recipients: no employee matched the selection." if not all_n else "") + (("First failure: " + why[:150]) if why else "")
+        rec.update({"Status": "Sent" if (sent and not failed) else ("Partly sent" if sent else "Failed"), "Recipients": all_n, "Sent": sent,
                     "Failed": failed, "Completed at": stamp(), "Detail": detail.strip()})
         _mn_save(rec)
         print(f"Mail note {mid}: {sent} sent, {failed} failed.")
@@ -8990,7 +9034,7 @@ def _mn_loop():
             if MAIL_READY:
                 now = now_local()
                 for r in _fetch_rows(MN_SHEET):
-                    if str(r.get("Status")) != "Scheduled": continue
+                    if str(r.get("Status")) != "Scheduled" and not _mn_is_stale(r): continue      # Update174: also finish a mail whose sender died
                     try: due = dt.datetime.strptime(str(r.get("Send at", "")).strip(), _MN_FMT) <= now
                     except ValueError: continue
                     if due: run_mail_note(str(r["ID"]))

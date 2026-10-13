@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update170: Admin Overview rebuilt on tolerant Productivity-log reading (see load_subs / report) + /admin/summary/check per-employee audit page.
   * Update169: Overview compared with Update160 - the Overview route, template, design and calculation are identical; the only data-layer difference was the Productivity log COLUMN ORDER (Update166 moved
     "Target Count" / "Productivity %" to J:K). A sheet whose rows were still in the Update160 order (J = Submitted at, K = Description, L = Target Count, M = Productivity %) got new header names over old data
     (wrong Description / target values, and "Recalculate" would have overwritten Submitted at / Description). On start-up every old-order row is now moved to the new order automatically (idempotent, per row).
@@ -831,8 +832,18 @@ def _safe_fetch(name):
     except Exception as e: print("prefetch error:", e)
 
 def num(x):
-    try: return float(x)
-    except (TypeError, ValueError): return 0.0
+    """Update170: tolerant number read - '2', '2.5', '2,5', '1,250', '2 hrs', '1:30' (= 1.5) and '85%' all give a number; blank / text gives 0."""
+    if isinstance(x, (int, float)) and not isinstance(x, bool): return float(x)
+    t = str(x if x is not None else "").strip().replace("\u00a0", " ")
+    if not t: return 0.0
+    try: return float(t)
+    except ValueError: pass
+    m = re.fullmatch(r"(\d+):(\d{1,2})(?::\d{1,2})?", t)
+    if m: return int(m.group(1)) + int(m.group(2)) / 60.0
+    if re.fullmatch(r"-?\d{1,3}(,\d{3})+(\.\d+)?", t): t = t.replace(",", "")
+    else: t = t.replace(",", ".")
+    m = re.search(r"-?\d+(?:\.\d+)?", t)
+    return float(m.group(0)) if m else 0.0
 
 def parse_rate(x):
     """Update94: Target count / hour may be typed as 1000, 1,000 or '1000 / 1' (count / hours) - returns the count PER HOUR."""
@@ -921,7 +932,7 @@ def delete_rows(idx):
     else:
         for r in reversed(idx): ws.delete_rows(r)
 
-def _key(x): return str(x).strip().upper()
+def _key(x): return re.sub(r"[\s\u200b\u200c\u200d\ufeff]+", "", str(x if x is not None else "")).upper()      # Update170: ignores stray spaces / hidden characters inside an Employee ID
 
 def desig_map():
     """{EMPLOYEE ID (normalised): Designation} read live from the Employees sheet."""
@@ -978,24 +989,44 @@ def load_subs(emp_id=None):
     ded = deduction_map(emp_id)
     subs = {}
     want = _key(emp_id) if emp_id is not None else None
-    for r in rows("Productivity log"):
-        if want is not None and _key(r["Employee ID"]) != want: continue
-        s = subs.setdefault(r["Submission ID"], dict(
-            id=r["Submission ID"], date=norm_date(r["Date"]), band=r["Band"], emp_id=str(r["Employee ID"]).strip(),
-            emp_name=r["Employee name"], designation=dm.get(_key(r["Employee ID"]), ""),
+    emps_ = rows("Employees")                                              # Update170: every log row is tied to a REAL employee (ID first, then Name + Band)
+    known = {_key(e.get("Employee ID", "")): str(e.get("Employee ID", "")).strip() for e in emps_}
+    by_name = {}
+    for e in emps_: by_name.setdefault((_key(e.get("Name", "")), _key(e.get("Band", ""))), []).append(str(e.get("Employee ID", "")).strip())
+    by_name1 = {}
+    for e in emps_: by_name1.setdefault(_key(e.get("Name", "")), []).append(str(e.get("Employee ID", "")).strip())
+    for r0 in rows("Productivity log"):
+        n_ = {re.sub(r"[^a-z0-9]", "", str(k).lower()): v for k, v in r0.items() if k != "_row"}      # header lookup ignores case / spaces / punctuation
+        g_ = lambda *ks: next((n_[k] for k in ks if k in n_), "")
+        raw_id = str(g_("employeeid")).strip()
+        eid_ = known.get(_key(raw_id))
+        if eid_ is None:
+            c_ = by_name.get((_key(g_("employeename")), _key(g_("band")))) or by_name1.get(_key(g_("employeename"))) or []
+            eid_ = c_[0] if len(c_) == 1 else raw_id
+        if want is not None and _key(eid_) != want: continue
+        date_ = norm_date(g_("date"))
+        sid_ = str(g_("submissionid")).strip() or ("%s|%s" % (_key(eid_), date_))
+        s = subs.setdefault((sid_, _key(eid_)), dict(
+            id=sid_, date=date_, band=g_("band"), emp_id=eid_,
+            emp_name=g_("employeename"), designation=dm.get(_key(eid_), ""),
             procs=[], notes=[], rows=[]))
-        s["rows"].append(r["_row"])
-        h = num(r["Hour"])
-        if r["Type"] == "Process":
-            h = eff_hours(r["Process / Description"], h)          # Update90: "Other" always shows / counts as 8 hrs
-            rate = tph.get(r["Process / Description"], 0)
-            c = num(r["Count"]); t = h * rate
-            s["procs"].append(dict(name=r["Process / Description"], hour=h, count=c, training=no_count(r["Process / Description"]),
-                                   desc=str(r.get("Description", "")),
+        s["rows"].append(r0["_row"])
+        h = num(g_("hour", "hours"))
+        typ_ = str(g_("type")).strip().lower()
+        name_ = g_("processdescription", "process")
+        cnt_ = g_("count")
+        is_proc = typ_.startswith("process") or typ_ == "productive" or (typ_ == "" and str(cnt_).strip() != "")
+        if is_proc:
+            h = eff_hours(name_, h)          # Update90: "Other" always shows / counts as 8 hrs
+            rate = tph.get(name_, 0)
+            c = num(cnt_); t = h * rate
+            s["procs"].append(dict(name=name_, hour=h, count=c, training=no_count(name_),
+                                   desc=str(g_("description")),
                                    target=round(t, 1), pct=round(c / t * 100) if t else None,
                                    earned=(c / rate) if rate else 0.0))
         else:
-            s["notes"].append(dict(desc=r["Process / Description"], hour=h))
+            s["notes"].append(dict(desc=name_, hour=h))
+    subs = {v["id"] + "\x00" + _key(v["emp_id"]): v for v in subs.values()}
     for s in subs.values():
         s["prod"] = sum(p["hour"] for p in s["procs"])
         s["non"] = sum(n["hour"] for n in s["notes"])
@@ -1124,7 +1155,11 @@ def norm_date(v):
     for f, n in (("%Y-%m-%d", 10), ("%d/%m/%Y", 10), ("%d-%m-%Y", 10), ("%d.%m.%Y", 10), ("%d %b %Y", 11), ("%d %B %Y", 20)):
         try: return dt.datetime.strptime(t[:n].strip() if f in ("%Y-%m-%d",) else t.split(" 00:00")[0].strip(), f).strftime("%Y-%m-%d")
         except ValueError: continue
-    return t
+    m = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})", t)           # Update170: 2026-10-8 / 2026/10/08 (not zero padded)
+    if m:
+        try: return dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
+        except ValueError: pass
+    return _iso_date(t)                                                # serial numbers, 08-Oct-2026, timestamps ...
 
 def duplicate_entry(emp_id, date, skip_sid=None, fresh=False):
     """Update96: reads just the Productivity log (live from the sheet when fresh=True) instead of building every employee's submissions."""
@@ -5665,14 +5700,23 @@ def report(employees, subs, leaves, start, end):
         mine = [s for s in subs if _key(s["emp_id"]) == ek and ea <= s["date"] <= b and not s["off"]]
         days = {s["date"] for s in mine}
         mylv = [l for l in leaves if _key(l["Employee ID"]) == ek and ea <= l["Date"] <= b and not is_off(l["Date"])]
-        lv = {l["Date"] for l in mylv if not leave_is_half(l)}          # full-day leave: the whole day is excused
+        lv = {l["Date"] for l in mylv if not leave_is_half(l)} - days   # Update170: a full-day leave date that also has a productivity entry is a day WORKED - counted once (Present), not twice
         half = {l["Date"] for l in mylv if leave_is_half(l)}            # half-day leave: 4 hrs still have to be worked
         perm_hrs = sum(num(r.get("Hours")) for r in perms
                        if _key(r["Employee ID"]) == ek and a <= norm_date(r["Date"]) <= b
                        and str(r.get("Status", "")).strip() == "Approved")
-        prod_hrs = sum(s["prod"] for s in mine)                       # hours really worked
+        # Update170: one figure per DATE straight from the Productivity log rows (an extra entry on the same date is added in, never dropped)
+        tph_ = process_rates(); by_day = {}
+        for s_ in mine:
+            d_ = by_day.setdefault(s_["date"], dict(prod=0.0, non=0.0, procs=[]))
+            d_["prod"] += s_["prod"]; d_["non"] += s_["non"]; d_["procs"] += s_["procs"]
+        prod_hrs = sum(d_["prod"] for d_ in by_day.values())            # hours really worked
+        non_hrs = sum(d_["non"] for d_ in by_day.values())
         # 100% = the hours AVAILABLE on each day worked: target (8) less approved permission / half-day leave (2-hr permission = 6, half day = 4)
-        base = sum(max(T - dmap.get((_key(eid), str(d)), 0.0), 0.0) for d in days)
+        base, earned_ = 0.0, 0.0
+        for d_, v_ in by_day.items():
+            avail_ = max(T - dmap.get((ek, str(d_)), 0.0), 0.0)
+            base += avail_; earned_ += _day_pct(v_["prod"], avail_, tph_, v_["procs"]) / 100.0 * avail_    # same daily % the Productivity log shows
         # ---- ATTENDANCE from each working day's real status:  Present = 1 day (100%) | Half day = 0.5 (50%) | Absent = 0 (0%)
         full = days - half                                              # worked days that are not half-day-leave days
         today_s = str(today_local())
@@ -5687,8 +5731,8 @@ def report(employees, subs, leaves, start, end):
         out.append(dict(id=eid, name=e["Name"], band=e["Band"], designation=e.get("Designation", ""), present=_n(present_n),
                         leave=_n(leave_n), absent=_n(absent_n), wd=wd_i, counted=wd_e,
                         att=min(round(credit / wd_e * 100), 100) if wd_e else 0,
-                        pct=min(round(prod_hrs / base * 100), 100) if base else 0,
-                        prod=prod_hrs, non=sum(s["non"] for s in mine), perm=perm_hrs))
+                        pct=min(round(earned_ / base * 100), 100) if base else (100 if prod_hrs > 0 else 0),
+                        prod=round(prod_hrs, 2), non=round(non_hrs, 2), perm=perm_hrs))
     for r_, e_ in zip(out, employees):      # Update105: Senior Team Lead / Team Lead / Associate Manager -> View Only, no Productivity %
         if desig_view_only(e_.get("Designation", "")) or is_view_only(r_["id"]):
             r_.update(vo=True, pct=None, att=None, present="-", absent="-", prod=0, non=0)
@@ -5923,12 +5967,12 @@ function poll(){fetch('/admin/online/poll',{credentials:'same-origin',cache:'no-
 setInterval(poll,5000);document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()})})();
 </script>
 <table><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
-<th>Productive hrs</th><th>Non-productive hrs</th><th>Productivity</th></tr>
+<th>Productive Hours</th><th>Non-productive Hours</th><th>Productivity (%)</th><th class="no-print"></th></tr>
 {% for r in rep %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>
-{% if r.vo %}<td>-</td><td>-</td><td>-</td><td><span class="pill act">View Only</span></td></tr>{% else %}<td>{{r.att}}%<i class="bar {{r.att|tone}}"><u style="width:{{r.att}}%"></u></i></td>
+{% if r.vo %}<td>-</td><td>-</td><td>-</td><td><span class="pill act">View Only</span></td>{% else %}<td>{{r.att}}%<i class="bar {{r.att|tone}}"><u style="width:{{r.att}}%"></u></i></td>
 <td>{{r.prod|g}}</td><td>{{r.non|g}}</td>
-<td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td></tr>{% endif %}
-{% else %}<tr><td colspan="9">No employees yet.</td></tr>{% endfor %}</table>"""
+<td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td>{% endif %}<td class="no-print"><a href="/admin/summary/check?emp={{r.id|urlencode}}&month={{month}}">Check</a></td></tr>
+{% else %}<tr><td colspan="11">No employees yet.</td></tr>{% endfor %}</table>"""
 
 LEAVE_EMP = """<style>
 .lp{font-size:12px}
@@ -6047,6 +6091,42 @@ def admin_summary():
     return page(SUMMARY, title="Overview", rep=rep, month=month, label=label, wd=workdays(start, end),
                 lab1="Average attendance", lab2="Average productivity", a1=a1, a2=a2, extra=extra, target=target_hours(),
                 online=online_list())
+
+CHECK_PAGE = """<div class="head"><div><h1>Overview check &middot; {{r.id}} &middot; {{r.name}}</h1>
+<p class="mut">{{label}} &middot; every Productivity log row of this employee and how the Overview counts it. <a href="/admin/summary?month={{month}}">Back to Overview</a></p></div></div>
+<table><tr><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th><th>Productive Hours</th><th>Non-productive Hours</th><th>Productivity (%)</th></tr>
+<tr><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td><td>{{r.att}}{{'%' if r.att is not none}}</td><td>{{r.prod|g}}</td><td>{{r.non|g}}</td><td>{{r.pct}}{{'%' if r.pct is not none}}</td></tr></table>
+<h2>Productivity log entries</h2>
+<table><tr><th>Date</th><th>Counted?</th><th>Productive hrs</th><th>Non-productive hrs</th><th>Day %</th><th>Log rows (sheet row numbers)</th></tr>
+{% for s in subs %}<tr><td>{{s.date}}</td><td>{{s.why}}</td><td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.pct}}%</td><td>{{s.rows|join(', ')}}</td></tr>
+{% else %}<tr><td colspan="6">No Productivity log rows found for this employee (matched by Employee ID, then Name + Band).</td></tr>{% endfor %}</table>
+<h2>Leave in this period</h2>
+<table><tr><th>Date</th><th>Type</th><th>Status</th></tr>
+{% for l in leaves %}<tr><td>{{l.Date}}</td><td>{{'Half day' if l|lhalf else 'Full day'}}</td><td>{{l|lstatus}}</td></tr>{% else %}<tr><td colspan="3">None.</td></tr>{% endfor %}</table>"""
+
+@app.route("/admin/summary/check")
+@need("admin")
+@live_data(*LIVE_REPORT_SHEETS)
+def admin_summary_check():
+    """Update170: shows exactly which Productivity log rows feed one employee's Overview line (so a wrong figure can be traced to its sheet row)."""
+    today = today_local(); eid = request.args.get("emp", "").strip()
+    month = request.args.get("month") or today.strftime("%Y-%m")
+    emp = next((e for e in rows("Employees") if _key(e["Employee ID"]) == _key(eid)), None)
+    if not emp: abort(404)
+    subs_all, leaves = load_subs(emp["Employee ID"]), rows("Leave")
+    if month == "all":
+        ds = [s["date"] for s in subs_all] + [l["Date"] for l in leaves]
+        start, end, label = (dt.date.fromisoformat(min(ds)) if ds else today), today, "All time"
+    else:
+        start, end = month_range(month); label = start.strftime("%B %Y")
+    r = report([emp], subs_all, leaves, start, end)[0]
+    a, b = str(start), str(end); view = []
+    for s in sorted(subs_all, key=lambda x: x["date"]):
+        if not (a <= s["date"] <= b): continue
+        why = "No - weekly off / holiday" if s["off"] else ("No - before joining date" if (join_date(s["emp_id"]) and s["date"] < str(join_date(s["emp_id"]))) else "Yes")
+        view.append(dict(s, why=why))
+    lv = [l for l in live_leaves(leaves) if _key(l["Employee ID"]) == _key(eid) and a <= l["Date"] <= b]
+    return page(CHECK_PAGE, title="Overview check", r=r, subs=view, leaves=lv, label=label, month=month)
 
 @app.route("/admin/settings/target", methods=["POST"])
 @need("admin")

@@ -1,4 +1,8 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update168: Admin Overview / Productivity log showed OLD figures (Present, Leave, Absent, Attendance, Productive / Non-productive hrs, Productivity %). Causes fixed: (1) every Render worker kept its own
+    sheet cache (served up to ~90 s old, and an employee's save only cleared the cache of the worker that handled it) - the Overview and Productivity log now read Productivity log / Leave / Permissions /
+    Employees / Settings / Holidays LIVE from Google Sheets (once per request); (2) entries, leave and permissions were matched to employees by exact text and date text - an Employee ID with a stray space / different
+    case, or a Date such as 8/10/2026, silently dropped the row from every total. IDs are now matched normalised (_key) and dates are normalised (norm_date) in load_subs, live_leaves, deduction_map and report.
   * Update167: Admin > /admin/log/import - upload a CSV / XLSX of Productivity log rows (preview, then save; duplicates skipped, dates normalised, targets filled) and /admin/log/fix-dates (repairs non-YYYY-MM-DD Date cells that made the Overview show 0).
   * Update166: ADMIN-ONLY Windows agent installation. Admin > Work Time > Lock-Tracking Agent (/admin/work-time/agent) is now "Install Windows Tracking Agent": one row per employee (Emp ID, Name,
     Office Email ID, Agent Installation Status, Last Activity, Install / Reinstall Agent, Disable / Enable Agent) with the statuses Not Installed / Pending Installation / Active (agent) / Offline /
@@ -738,6 +742,7 @@ def rows(name):
     try: bypass = has_request_context() and (session.get("fresh_all", 0) > time.time() or (session.get("fresh") or {}).get(name, 0) > time.time())
     except Exception: bypass = False
     if getattr(_tl, "fresh", False): bypass = True                      # Update159: background jobs (e-mail run, Work Time sync) always read the sheet live
+    if name in (getattr(_tl, "live", None) or ()): bypass = True        # Update168: pages wrapped in @live_data read these sheets live (no per-worker stale cache)
     if bypass and has_request_context():                                 # Update159: live read, but only ONCE per sheet per request (pages read the same sheet several times)
         from flask import g as _g
         memo = getattr(_g, "_rows_live", None)
@@ -754,6 +759,24 @@ def rows(name):
             _refresh_bg(name)
             return [dict(r) for r in cached[1]]
     return [dict(r) for r in _fetch_rows(name)]
+
+class live_sheets:
+    """Update168: inside this block rows(name) for the given sheets reads Google Sheets live (once per sheet per request)."""
+    def __init__(self, *names): self.n = set(names)
+    def __enter__(self):
+        global _holidays_cache
+        self.old = getattr(_tl, "live", None); _tl.live = self.n | (self.old or set())
+        if "Holidays" in self.n: _holidays_cache = None
+    def __exit__(self, *a): _tl.live = self.old
+
+def live_data(*names):
+    def deco(f):
+        @wraps(f)
+        def w(*a, **k):
+            with live_sheets(*names): return f(*a, **k)
+        return w
+    return deco
+LIVE_REPORT_SHEETS = ("Productivity log", "Leave", "Permissions", "Employees", "Settings", "Holidays", "Processes")
 
 EMP_PAGE_SHEETS = ("Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays", "Mahizhchi Access")
 
@@ -938,7 +961,7 @@ def load_subs(emp_id=None):
     for r in rows("Productivity log"):
         if want is not None and _key(r["Employee ID"]) != want: continue
         s = subs.setdefault(r["Submission ID"], dict(
-            id=r["Submission ID"], date=r["Date"], band=r["Band"], emp_id=r["Employee ID"],
+            id=r["Submission ID"], date=norm_date(r["Date"]), band=r["Band"], emp_id=str(r["Employee ID"]).strip(),
             emp_name=r["Employee name"], designation=dm.get(_key(r["Employee ID"]), ""),
             procs=[], notes=[], rows=[]))
         s["rows"].append(r["_row"])
@@ -997,7 +1020,7 @@ def eff_hours(name, hours):
 def approved_perm_hours(emp_id, date):
     """Approved permission hours for one employee on one date (they reduce the hours that must be logged)."""
     return sum(num(r.get("Hours")) for r in rows("Permissions")
-               if str(r.get("Employee ID")) == str(emp_id) and str(r.get("Date")) == str(date)
+               if _key(r.get("Employee ID", "")) == _key(emp_id) and norm_date(r.get("Date")) == norm_date(date)
                and str(r.get("Status", "")).strip() == "Approved")
 
 HALF_DAY_HOURS = DAY_HOURS / 2.0          # a Half-Day Leave removes half of the 8-hour working day (4 hrs)
@@ -1015,13 +1038,13 @@ def deduction_map(emp_id=None):
         if str(r.get("Status", "")).strip() != "Approved": continue
         k = _key(r.get("Employee ID", ""))
         if want is not None and k != want: continue
-        key = (k, str(r.get("Date", "")))
+        key = (k, norm_date(r.get("Date", "")))
         out[key] = out.get(key, 0.0) + num(r.get("Hours"))
     for l in rows("Leave"):
         if leave_status(l) != "Approved" or not leave_is_half(l): continue
         k = _key(l.get("Employee ID", ""))
         if want is not None and k != want: continue
-        key = (k, str(l.get("Date", "")))
+        key = (k, norm_date(l.get("Date", "")))
         out[key] = out.get(key, 0.0) + HALF_DAY_HOURS
     return {k: min(v, float(DAY_HOURS)) for k, v in out.items()}
 
@@ -3487,6 +3510,7 @@ LOG_REPORT = """<div class="rep-tools no-print"><button type="button" class="btn
 
 @app.route("/admin/log")
 @need("admin")
+@live_data(*LIVE_REPORT_SHEETS)
 def admin_log():
     d, e = request.args.get("date", ""), request.args.get("emp", "").strip().lower()
     rep_month, _on = report_scope()
@@ -5614,17 +5638,17 @@ def report(employees, subs, leaves, start, end):
     dmap = deduction_map()          # approved permission / half-day leave hours per employee and date
     leaves = live_leaves(leaves)    # rejected leave does not count
     for e in employees:
-        eid = str(e["Employee ID"])
+        eid = str(e["Employee ID"]).strip(); ek = _key(eid)
         jd_ = join_date(eid)                                            # Update97: working days count only from the joining date
         ea = str(jd_) if (jd_ and str(jd_) > a) else a
         wd_i = 0 if ea > b else (workdays(dt.date.fromisoformat(ea), end) if ea != a else wd)
-        mine = [s for s in subs if str(s["emp_id"]) == eid and ea <= s["date"] <= b and not s["off"]]
+        mine = [s for s in subs if _key(s["emp_id"]) == ek and ea <= s["date"] <= b and not s["off"]]
         days = {s["date"] for s in mine}
-        mylv = [l for l in leaves if str(l["Employee ID"]) == eid and ea <= l["Date"] <= b and not is_off(l["Date"])]
+        mylv = [l for l in leaves if _key(l["Employee ID"]) == ek and ea <= l["Date"] <= b and not is_off(l["Date"])]
         lv = {l["Date"] for l in mylv if not leave_is_half(l)}          # full-day leave: the whole day is excused
         half = {l["Date"] for l in mylv if leave_is_half(l)}            # half-day leave: 4 hrs still have to be worked
         perm_hrs = sum(num(r.get("Hours")) for r in perms
-                       if str(r["Employee ID"]) == eid and a <= str(r["Date"]) <= b
+                       if _key(r["Employee ID"]) == ek and a <= norm_date(r["Date"]) <= b
                        and str(r.get("Status", "")).strip() == "Approved")
         prod_hrs = sum(s["prod"] for s in mine)                       # hours really worked
         # 100% = the hours AVAILABLE on each day worked: target (8) less approved permission / half-day leave (2-hr permission = 6, half day = 4)
@@ -5658,7 +5682,7 @@ def leave_status(l):
 
 def live_leaves(leaves):
     """Leave rows that count in attendance / missed-entry calculations (Rejected leave does not)."""
-    return [l for l in leaves if leave_status(l) != "Rejected"]
+    return [dict(l, Date=norm_date(l.get("Date", ""))) for l in leaves if leave_status(l) != "Rejected"]      # Update168: dates in any accepted format count
 app.jinja_env.filters["lstatus"] = leave_status
 
 def leave_days_used(eid, month):
@@ -5982,6 +6006,7 @@ def admin_personal_edit(row):
 
 @app.route("/admin/summary")
 @need("admin")
+@live_data(*LIVE_REPORT_SHEETS)
 def admin_summary():
     today = today_local()
     month = request.args.get("month") or today.strftime("%Y-%m")

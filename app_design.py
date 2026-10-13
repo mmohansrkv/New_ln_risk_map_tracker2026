@@ -8026,14 +8026,21 @@ EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
 <form method="post" action="/admin/email-controls/run-now" style="margin:8px 0" onsubmit="return confirm('Send the missed-entry e-mails to all employees with missingsed dates now?')"><button class="primary sm">&#9993; Send automatic e-mails now</button></form>
 <p class="mut">Status: <b style="color:{{'#15803d' if auto_on else '#991b1b'}}">{{'ENABLED' if auto_on else 'DISABLED'}}</b>. When enabled, every day at <b>{{auto_time}}</b> (the time set here by the Admin) each employee with a pending (missed, not yet submitted) Productivity Entry receives ONE SEPARATE e-mail for EACH missed date, with their name, that date and the Productivity Tracker login link. No e-mails are sent on weekly offs or public holidays. A date keeps being reminded every working day until the entry is submitted (or leave is approved) - then its reminders stop automatically. Last automatic run: <b>{{auto_last or 'never'}}</b>. Only Admin can change this.</p></div>
 
-<div class="card"><h2>1. Send a reminder manually</h2>
+<details class="card" id="ec-send-win" open><summary style="cursor:pointer"><h2 style="display:inline">1. Send a reminder manually</h2></summary>
 <form method="post" action="/admin/email-controls/send" id="ec-form" onsubmit="return ecCheck()">
 <label>Employee<select name="eid" id="ec-emp"><option value="">- choose an employee -</option>
 {% for e in emps %}<option value="{{e.id}}"{{' disabled' if not e.email else ''}}>{{e.id}} &middot; {{e.name}} &middot; {{e.email or 'no Office Email ID'}} ({{e.n}} missed)</option>{% endfor %}</select></label>
 <p class="mut" style="margin:10px 0 4px">Missed date(s) to include (current month - {{month_label}}):</p>
 <div id="ec-dates" style="max-height:220px;overflow:auto;border:1px solid #d0d5dd;border-radius:8px;padding:8px 12px">Choose an employee first.</div>
 <p style="margin:10px 0"><label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="ec-all"> Select all dates</label></p>
-<button class="primary" id="ec-send" disabled>&#9993; Send reminder e-mail</button></form></div>
+<button class="primary" id="ec-send" disabled>&#9993; Send reminder e-mail</button></form></details>
+<script>
+(function(){
+ var win=document.getElementById('ec-send-win'); if(!win) return;
+ var ok=document.querySelector('.flash:not(.err)');                 // Update164: a successful "Reminder sent ..." redirect closes the send window automatically
+ if(ok && /reminder sent/i.test(ok.textContent||'')) win.open=false;
+})();
+</script>
 
 <div class="card"><h2>2. Sender e-mail / account</h2>
 <form method="post" action="/admin/email-controls/sender" class="grid" style="align-items:end">

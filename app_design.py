@@ -298,12 +298,45 @@ TZ = ZoneInfo(os.getenv("APP_TZ", "Asia/Kolkata"))
 def now_local(): return dt.datetime.now(TZ).replace(tzinfo=None)
 def today_local(): return now_local().date()
 
+_DATE_ORDER_RETRY = [0.0]
+_DATE_ORDER = [None]          # "MDY" (US sheet: 10/01/2026 = 1 Oct) or "DMY" (India / UK sheet: 10/01/2026 = 10 Jan)
+def _date_order():
+    """Update171: day/month order of slash dates, taken from the Google Sheet's own locale (File > Settings). en_US sheets show 1 Oct 2026 as 10/01/2026."""
+    if _DATE_ORDER[0] is None and os.getenv("SHEET_DATE_ORDER", "").strip().upper() in ("MDY", "DMY"): _DATE_ORDER[0] = os.getenv("SHEET_DATE_ORDER").strip().upper()      # manual override
+    if _DATE_ORDER[0] is None and time.monotonic() >= _DATE_ORDER_RETRY[0]:
+        try:
+            loc = str(_with_retry(book().fetch_sheet_metadata, {"fields": "properties.locale"}).get("properties", {}).get("locale", ""))
+            _DATE_ORDER[0] = "MDY" if loc.upper().startswith(("EN_US", "ES_US", "EN_PH")) or loc.upper() == "EN" else "DMY"
+            print("Sheet locale:", loc, "-> slash dates read as", _DATE_ORDER[0])
+        except Exception as ex:
+            print("sheet locale lookup failed:", repr(ex))
+            if time.monotonic() > _DATE_ORDER_RETRY[0]: _DATE_ORDER_RETRY[0] = time.monotonic() + 60
+            return "DMY"
+    return _DATE_ORDER[0] or "DMY"
+def _learn_order(vals):
+    """Fallback proof from the data itself: a slash date such as 10/25/2026 (second part > 12) can only be month/day."""
+    for v in vals:
+        m = re.match(r"^\s*(\d{1,2})[/.-](\d{1,2})[/.-]\d{4}", str(v or ""))
+        if m and int(m.group(2)) > 12 >= int(m.group(1)): return "MDY"
+        if m and int(m.group(1)) > 12 >= int(m.group(2)): return "DMY"
+    return None
+def _slash_to_iso(t):
+    m = re.match(r"^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:$|[ T,])", str(t).strip())
+    if not m: return None
+    a, b, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    order = "DMY" if a > 12 else "MDY" if b > 12 else _date_order()
+    d, mo = (a, b) if order == "DMY" else (b, a)
+    try: return dt.date(y, mo, d).isoformat()
+    except ValueError: return None
+
 def _iso_date(v):
     """Update157: any date a sheet may hand back (2026-10-08 / 08-10-2026 / 08 Oct 2026 / with a time / a Sheets serial number) -> 'YYYY-MM-DD', so dates compare reliably."""
     if isinstance(v, dt.datetime): return v.date().isoformat()
     if isinstance(v, dt.date): return v.isoformat()
     t = str(v if v is not None else "").strip()
     if not t: return t
+    z = _slash_to_iso(t)
+    if z: return z
     if re.fullmatch(r"\d{5}(\.\d+)?", t):
         try: return (dt.date(1899, 12, 30) + dt.timedelta(days=int(float(t)))).isoformat()
         except Exception: return t
@@ -739,6 +772,11 @@ def _fetch_rows(name):
     recs = _with_retry(ws_of(name).get_all_records, numericise_ignore=["all"])
     for i, r in enumerate(recs, start=2):
         r["_row"] = i
+    if name in ("Productivity log", "Leave", "Permissions", "Holidays"):        # Update171: every consumer sees ONE date format (YYYY-MM-DD), whatever the sheet cell displays
+        if _DATE_ORDER[0] is None and name == "Productivity log":
+            _DATE_ORDER[0] = _learn_order([r.get("Date") for r in recs]) or None
+        for r in recs:
+            if r.get("Date") not in (None, ""): r["Date"] = norm_date(r["Date"])
     with _rows_cache_lock:
         _rows_cache[name] = (time.monotonic(), recs)
         _refreshing.discard(name)
@@ -1149,18 +1187,15 @@ def live_rows_of(sid):
     return [r["_row"] for r in _fetch_rows("Productivity log") if str(r["Submission ID"]) == str(sid)]
 
 def norm_date(v):
-    """Update157: one canonical YYYY-MM-DD for any date text found in the sheet (a hand-edited / auto-formatted cell such as 8/10/2026, 08-10-2026 or
-    2026-10-08 00:00:00 used to hide a submitted entry, so the day still showed as missed)."""
-    t = str(v or "").strip()
+    """Update171: ONE canonical YYYY-MM-DD for any date text found in the sheet. Slash dates follow the sheet's locale (10/01/2026 = 1 Oct on a US sheet),
+    so an entry the sheet shows on 10/01/2026 is the 1 October entry - it is no longer read as 10 January and reported as missing."""
+    t = str(v if v is not None else "").strip()
     if not t: return ""
-    for f, n in (("%Y-%m-%d", 10), ("%d/%m/%Y", 10), ("%d-%m-%Y", 10), ("%d.%m.%Y", 10), ("%d %b %Y", 11), ("%d %B %Y", 20)):
-        try: return dt.datetime.strptime(t[:n].strip() if f in ("%Y-%m-%d",) else t.split(" 00:00")[0].strip(), f).strftime("%Y-%m-%d")
-        except ValueError: continue
-    m = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})", t)           # Update170: 2026-10-8 / 2026/10/08 (not zero padded)
+    m = re.match(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:$|[ T])", t)
     if m:
         try: return dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
         except ValueError: pass
-    return _iso_date(t)                                                # serial numbers, 08-Oct-2026, timestamps ...
+    return _iso_date(re.sub(r"[ T]\d{1,2}:\d{2}.*$", "", t))
 
 def duplicate_entry(emp_id, date, skip_sid=None, fresh=False):
     """Update96: reads just the Productivity log (live from the sheet when fresh=True) instead of building every employee's submissions."""
@@ -2043,7 +2078,7 @@ def join_date(emp_id):
     k = _key(emp_id)
     for e in rows("Employees"):
         if _key(e["Employee ID"]) == k:
-            try: return dt.date.fromisoformat(str(e.get("Joining date", "")).strip())
+            try: return dt.date.fromisoformat(norm_date(e.get("Joining date", "")))
             except ValueError: return None
     return None
 

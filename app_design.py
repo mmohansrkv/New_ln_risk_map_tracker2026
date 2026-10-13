@@ -1,4 +1,8 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update175: Mail Notes - the REAL cause of mails stuck on "Sending": the Google Sheets connection had NO network timeout, so one stalled request hung the sender thread (and the 30-second
+    checker that ran it inline) forever. Fixed: (1) Sheets calls time out after 60 s and are retried; (2) every due mail runs in its OWN thread, so one stuck mail can never block the others;
+    (3) e-mails are written to the log in small batches of 5 with a live "Sending x of y" progress and a heartbeat (stalled sends are taken over after 3 minutes, never duplicated);
+    (4) a hung in-flight guard expires after 10 minutes; (5) new "Retry" button on any Sending / Failed / Partly sent mail (already-sent employees are skipped); (6) progress is printed to the server log.
   * Update174: (1) Admin > Mail Notes - FIX: scheduled mails stuck on "Sending" (0 sent / 0 failed, nothing in the log) are now recovered. A mail was marked "Sending" before the
     first e-mail left; if the server worker was restarted / recycled meanwhile (Render deploy, gunicorn timeout) nothing ever finished it and the 30-second job ignored every row that was not "Scheduled".
     Now the claim carries a time stamp (refreshed after every batch); a "Sending" mail with no progress for 5 minutes is taken over automatically, and employees already logged "Sent"
@@ -279,6 +283,7 @@ import os, io, csv, uuid, hmac, time, random, threading, queue as queue_mod, dat
 from functools import wraps
 import urllib.parse, re
 import gspread
+import requests
 from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
 import json
@@ -675,6 +680,9 @@ def _with_retry(fn, *args, **kwargs):
     for attempt in range(6):
         try:
             return fn(*args, **kwargs)
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:      # Update175: stalled / dropped connection -> retry instead of hanging or failing
+            if attempt < 5: time.sleep(delay + random.uniform(0, 0.3)); delay = min(delay * 2, 8); continue
+            raise
         except APIError as e:
             code = None
             try:
@@ -698,6 +706,10 @@ def book():
                 creds = Credentials.from_service_account_file(
                     CREDS_FILE, scopes=["https://www.googleapis.com/auth/spreadsheets"])
                 client = gspread.authorize(creds)
+                try: client.set_timeout(60)                              # Update175: without a timeout one stalled request to Google hangs a thread forever
+                except Exception:
+                    try: client.http_client.timeout = 60
+                    except Exception: pass
                 b = _with_retry(client.open_by_key, SHEET_ID)
                 have = {w.title for w in _with_retry(b.worksheets)}
                 for name, h in HEADERS.items():
@@ -8756,7 +8768,7 @@ def admin_email_controls_send():
 MN_SHEET = "Mail Notes"
 MN_LOG = "Mail Notes Log"
 _MN_FMT = "%Y-%m-%d %H:%M"
-_mn_inflight, _mn_inflight_lock = set(), threading.Lock()
+_mn_inflight, _mn_inflight_lock = {}, threading.Lock()          # Update175: {mail id: started at}
 
 # The dedicated e-mail design. Placeholders: {{subject}}  {{message}}
 MAIL_NOTE_HTML = r'''<!DOCTYPE html>
@@ -8939,7 +8951,7 @@ def _mn_save(rec):
 def _mn_get(mid, fresh=True):
     return next((r for r in (_fetch_rows(MN_SHEET) if fresh else rows(MN_SHEET)) if str(r.get("ID", "")) == str(mid)), None)
 
-_MN_STALE_SEC = 300          # Update174: a "Sending" mail with no progress for this long is taken over (its sender thread died)
+_MN_STALE_SEC = 180          # Update174: a "Sending" mail with no progress for this long is taken over (its sender thread died)
 
 def _mn_claim_age(rec):
     """Seconds since the 'Sending' claim was made / last refreshed (token = worker-random-epoch). Old tokens without a time stamp count as stale."""
@@ -8972,8 +8984,8 @@ def run_mail_note(mid):
     """Send ONE scheduled mail note to its recipients (All Employees, or only the selected ones) and log every employee in 'Mail Notes Log'.
     Background-safe (no request / session). Never raises."""
     with _mn_inflight_lock:
-        if mid in _mn_inflight: return
-        _mn_inflight.add(mid)
+        if mid in _mn_inflight and time.time() - _mn_inflight[mid] < 600: return      # Update175: a guard older than 10 min belongs to a hung thread - ignore it
+        _mn_inflight[mid] = time.time()
     rec = None
     try:
         if not MAIL_READY: return
@@ -8998,9 +9010,11 @@ def run_mail_note(mid):
             if not EMAIL_RE.match(emp["email"]): out_rows.append(logrow(emp, "Failed", "No valid Office Email ID")); failed += 1; continue
             ready.append((emp, mail_note_message(emp, rec)))
         if out_rows: ws.append_rows(out_rows, value_input_option="RAW")
-        for i in range(0, len(ready), 25):
-            batch = ready[i:i + 25]
+        for i in range(0, len(ready), 5):
+            batch = ready[i:i + 5]
+            rec["Sent"], rec["Failed"], rec["Detail"] = sent, failed, f"Sending {sent + failed} of {len(ready) + failed} ..."
             _mn_heartbeat(rec)
+            print(f"Mail note {mid}: sending {i + 1}-{i + len(batch)} of {len(ready)}")
             if not sender: res = {emp["email"]: "Failed: no sender e-mail configured (Admin > Email Controls)" for emp, _m in batch}
             else:
                 try: res = _smtp_send([m for _e, m in batch])
@@ -9024,7 +9038,7 @@ def run_mail_note(mid):
             if rec: rec.update({"Status": "Failed", "Detail": ("Error: " + str(ex))[:200]}); _mn_save(rec)
         except Exception: pass
     finally:
-        with _mn_inflight_lock: _mn_inflight.discard(mid)
+        with _mn_inflight_lock: _mn_inflight.pop(mid, None)
 
 def _mn_loop():
     """Every 30 s: send every 'Scheduled' note whose send time has arrived (also catches up after a restart)."""
@@ -9037,7 +9051,7 @@ def _mn_loop():
                     if str(r.get("Status")) != "Scheduled" and not _mn_is_stale(r): continue      # Update174: also finish a mail whose sender died
                     try: due = dt.datetime.strptime(str(r.get("Send at", "")).strip(), _MN_FMT) <= now
                     except ValueError: continue
-                    if due: run_mail_note(str(r["ID"]))
+                    if due: threading.Thread(target=run_mail_note, args=(str(r["ID"]),), daemon=True).start()      # Update175: own thread - a stuck mail cannot block the others
         except Exception as ex:
             print("mail notes loop error:", ex)
         time.sleep(30)
@@ -9136,7 +9150,8 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
 <td class="act no-print"><a href="/admin/mail-notes/{{n.id}}/preview" target="_blank">Preview</a>
 {% if n.status=='Scheduled' %}<a href="/admin/mail-notes?edit={{n.id}}">Edit</a>
 <form method="post" action="/admin/mail-notes/{{n.id}}/send-now" style="display:inline" onsubmit="return confirm('Send this e-mail to its recipients right now?')"><button class="primary sm">Send now</button></form>
-<form method="post" action="/admin/mail-notes/{{n.id}}/cancel" style="display:inline" onsubmit="return confirm('Cancel this scheduled e-mail?')"><button class="sm">Cancel</button></form>{% endif %}</td></tr>
+<form method="post" action="/admin/mail-notes/{{n.id}}/cancel" style="display:inline" onsubmit="return confirm('Cancel this scheduled e-mail?')"><button class="sm">Cancel</button></form>
+{% elif n.status in ('Sending','Failed','Partly sent') %}<form method="post" action="/admin/mail-notes/{{n.id}}/retry" style="display:inline" onsubmit="return confirm('Retry sending this e-mail? Employees who already received it are skipped.')"><button class="primary sm">Retry</button></form>{% endif %}</td></tr>
 {% else %}<tr><td colspan="7">No mail has been scheduled yet.</td></tr>{% endfor %}</table>
 <p class="mut">The server checks for due mails every 30 seconds.</p></div>
 
@@ -9343,6 +9358,19 @@ def admin_mn_send_now(mid):
     else:
         threading.Thread(target=run_mail_note, args=(str(mid),), daemon=True).start()
         flash("Sending now. Refresh this page in a minute to see the log.")
+    return redirect("/admin/mail-notes")
+
+@app.route("/admin/mail-notes/<mid>/retry", methods=["POST"])
+@need("admin")
+def admin_mn_retry(mid):
+    _admin_only_mail()
+    rec = _mn_get(mid)
+    if not MAIL_READY: flash("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST).", "error")
+    elif not rec or str(rec.get("Status")) not in ("Sending", "Failed", "Partly sent"): flash("Only a Sending, Failed or Partly sent e-mail can be retried.", "error")
+    else:
+        rec.update({"Status": "Scheduled", "Claimed by": "", "Detail": "Retrying (already-sent employees are skipped)."}); _mn_save(rec)
+        threading.Thread(target=run_mail_note, args=(str(mid),), daemon=True).start()
+        flash("Retrying now. Employees who already received it are skipped. Refresh in a minute.")
     return redirect("/admin/mail-notes")
 
 @app.route("/admin/mail-notes/rich-preview", methods=["POST"])

@@ -5423,10 +5423,13 @@ def permission_pill(status):
     return "in" if status == "Approved" else ("out" if status == "Rejected" else "act")
 app.jinja_env.filters["ppill"] = permission_pill
 
+PROD_TRACKING_START = dt.date(2026, 10, 1)              # Update165: Productivity tracking began in October 2026 - no date before this is ever "missed" (log, dashboard, reports, reminder e-mails)
+
 def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
     """Working days (weekly offs and holidays excluded) in start..end with no entry and no leave."""
     eid = str(eid)
     if is_view_only(eid): return []                    # Update105: no Missed Productivity Entry for View-Only designations
+    if start < PROD_TRACKING_START: start = PROD_TRACKING_START      # Update165: never flag September 2026 or earlier as missing
     jd = join_date(eid)
     if jd and start < jd: start = jd                  # Update97: dates before the joining date are never "missed" / "pending"
     leaves = live_leaves(leaves)

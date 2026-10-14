@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update178: Automatic missed-entry e-mail checks ONLY the current month (1st of this month to yesterday) and re-verifies the live Productivity log / Leave / Holidays before every batch of 5 e-mails.
   * Update177: Automatic missed-entry e-mail - e-mails are now sent ONLY for dates that are STILL missing at the moment of sending. The job used to work out the missing dates once and then
     send in batches with no re-check, so a date submitted (or covered by leave / a holiday) after that list was built - or one whose date the sheet displayed in another format - still got a
     reminder. Now, immediately before EVERY batch, the Productivity log, Leave and Holidays sheets are re-read live and each (employee, date) is re-checked with a strict "when in doubt, do NOT
@@ -8569,7 +8570,8 @@ def run_auto_missed_mail(force=False):
         if is_off(today):                                    # Update160: NO reminder e-mails on weekends / public holidays (also for "send now")
             print("Automatic missed-entry e-mail skipped: today is a weekly off / holiday."); return None
         if not force and not _auto_claim_run(today): return "busy"
-        end = today - dt.timedelta(days=1); start = today - dt.timedelta(days=AUTO_MAIL_LOOKBACK_DAYS)
+        end = today - dt.timedelta(days=1); start = today.replace(day=1)      # Update178: ONLY the CURRENT month is checked (never a previous month)
+        if end < start: print("Automatic missed-entry e-mail: nothing to check yet (first day of the month)."); return (0, 0)
         try: access = _fetch_rows("Productivity Access")
         except Exception: access = []
         subs, leaves = load_subs(), _fetch_rows("Leave")
@@ -8605,8 +8607,8 @@ def run_auto_missed_mail(force=False):
         failed = 0
         skipped = 0
         for w in waves:
-            for i in range(0, len(w), 25):
-                chunk = w[i:i + 25]
+            for i in range(0, len(w), 5):
+                chunk = w[i:i + 5]      # Update178: the live Productivity-log check runs before every small batch of 5 e-mails
                 try:                                                        # Update177: re-check LIVE right before sending - only dates that are STILL missing are mailed
                     covered, hol = _live_covered()
                 except Exception as ex:

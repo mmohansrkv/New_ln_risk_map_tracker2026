@@ -1,4 +1,10 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update177: Automatic missed-entry e-mail - e-mails are now sent ONLY for dates that are STILL missing at the moment of sending. The job used to work out the missing dates once and then
+    send in batches with no re-check, so a date submitted (or covered by leave / a holiday) after that list was built - or one whose date the sheet displayed in another format - still got a
+    reminder. Now, immediately before EVERY batch, the Productivity log, Leave and Holidays sheets are re-read live and each (employee, date) is re-checked with a strict "when in doubt, do NOT
+    mail" matcher: a submission / leave counts for a date if the sheet's text can mean that date in EITHER day/month order, and an entry whose Employee ID is unknown is matched by name. Dates
+    that are covered are skipped (logged in the server log); if the live check itself cannot run, that batch is not sent and is retried in the next slot.
+  * Update176: Mail Notes > Retry now explains the mail's real status (already Sent / still Scheduled) instead of one generic error.
   * Update175: Mail Notes - the REAL cause of mails stuck on "Sending": the Google Sheets connection had NO network timeout, so one stalled request hung the sender thread (and the 30-second
     checker that ran it inline) forever. Fixed: (1) Sheets calls time out after 60 s and are retried; (2) every due mail runs in its OWN thread, so one stuck mail can never block the others;
     (3) e-mails are written to the log in small batches of 5 with a live "Sending x of y" progress and a heartbeat (stalled sends are taken over after 3 minutes, never duplicated);
@@ -8514,6 +8520,40 @@ def _auto_claim_run(today):
     runs = mine()
     return bool(runs) and str(runs[0].get("Employee name", "")) == _WORKER_ID
 
+def _date_candidates(raw):
+    """Update177: every ISO date a sheet cell could mean. 'YYYY-MM-DD' -> itself; an ambiguous slash date such as 09/10/2026 -> BOTH 2026-10-09 and 2026-09-10 (never mail when in doubt)."""
+    t = str(raw if raw is not None else "").strip()
+    out = {norm_date(t)} - {""}
+    m = re.match(r"^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:$|[ T,])", t)
+    if m:
+        a, b, y = (int(x) for x in m.groups())
+        for d_, mo in ((a, b), (b, a)):
+            try: out.add(dt.date(y, mo, d_).isoformat())
+            except ValueError: pass
+    return out
+
+def _live_covered():
+    """Update177: read Productivity log + Leave + Holidays LIVE and return ({employee key: set of covered ISO dates}, {holiday ISO dates}). Strict: used to veto a reminder just before it is sent."""
+    global _holidays_cache
+    _holidays_cache = None
+    emps = _fetch_rows("Employees")
+    known = {_key(e.get("Employee ID", "")) for e in emps}
+    by_name = {}
+    for e in emps: by_name.setdefault(_key(e.get("Name", "")), set()).add(_key(e.get("Employee ID", "")))
+    covered = {}
+    for r in _with_retry(ws_of("Productivity log").get_all_records, numericise_ignore=["all"]):          # RAW cell text - nothing normalised away
+        n_ = {re.sub(r"[^a-z0-9]", "", str(k).lower()): v for k, v in r.items()}
+        raw = n_.get("date", "")
+        if not str(raw).strip(): continue
+        k = _key(n_.get("employeeid", ""))
+        owners = {k} if k in known else (by_name.get(_key(n_.get("employeename", ""))) or {k})            # unknown ID -> match by name
+        for o in owners: covered.setdefault(o, set()).update(_date_candidates(raw))
+    for l in _with_retry(ws_of("Leave").get_all_records, numericise_ignore=["all"]):
+        if leave_status(l) == "Rejected" or leave_is_half(l): continue                                      # a half-day leave still needs an entry
+        covered.setdefault(_key(l.get("Employee ID", "")), set()).update(_date_candidates(l.get("Date", "")))
+    hol = {d for h in _fetch_rows("Holidays") for d in _date_candidates(h.get("Date", ""))}
+    return covered, hol
+
 def run_auto_missed_mail(force=False):
     """Background job (no request / session). Update159: every day at the Admin's time, e-mails each employee ALL the dates of this month that are STILL missing (no entry, no
     leave - read live from the sheets, so a date submitted a minute ago is never listed) to THEIR OWN Office Email ID - once per day per employee - until nothing is missing.
@@ -8523,6 +8563,8 @@ def run_auto_missed_mail(force=False):
         if not force and not auto_mail_on(fresh=True): return None
         if not MAIL_READY or not mail_sender(fresh=True)[1]:
             print("Automatic missed-entry e-mail NOT sent: mail service / sender e-mail not configured (BREVO_API_KEY or SMTP_HOST, MAIL_FROM)."); return None
+        global _holidays_cache
+        _holidays_cache = None                               # Update177: never judge a working day from a stale holiday list
         today = today_local()
         if is_off(today):                                    # Update160: NO reminder e-mails on weekends / public holidays (also for "send now")
             print("Automatic missed-entry e-mail skipped: today is a weekly off / holiday."); return None
@@ -8561,11 +8603,22 @@ def run_auto_missed_mail(force=False):
             rowsx = [[t, e["eid"], e["name"], e["email"], ", ".join(d), len(d), now_local().strftime("%Y-%m-%d %H:%M:%S"), "Auto", "Failed: no valid Office Email ID", "System"] for e, d in noaddr if _key(e["eid"]) not in have]
             if rowsx: ws.append_rows(rowsx, value_input_option="RAW"); invalidate_cache(MISSED_LOG)
         failed = 0
+        skipped = 0
         for w in waves:
             for i in range(0, len(w), 25):
-                out = send_logged(w[i:i + 25], "Auto", "System")      # one log row per missed date; failed ones stay "not e-mailed" and are retried
+                chunk = w[i:i + 25]
+                try:                                                        # Update177: re-check LIVE right before sending - only dates that are STILL missing are mailed
+                    covered, hol = _live_covered()
+                except Exception as ex:
+                    print("Automatic missed-entry e-mail: live re-check failed - this batch is NOT sent, it is retried in the next slot:", repr(ex)); failed += len(chunk); continue
+                keep = [x for x in chunk if x[2] not in covered.get(_key(x[0]["eid"]), set()) and x[2] not in hol and not is_off(x[2])]
+                for x in chunk:
+                    if x not in keep: print(f"Automatic missed-entry e-mail: SKIPPED {x[0]['eid']} {x[2]} - entry / leave / holiday found at send time")
+                skipped += len(chunk) - len(keep)
+                if not keep: continue
+                out = send_logged(keep, "Auto", "System")      # one log row per missed date; failed ones stay "not e-mailed" and are retried
                 failed += sum(1 for v in out.values() if v != "Sent")
-        print(f"Automatic missed-entry e-mail: {len(items)} e-mail(s) for {len(per_emp)} employee(s), {failed} failed, {len(noaddr)} without a valid e-mail.")
+        print(f"Automatic missed-entry e-mail: {len(items) - skipped} e-mail(s) sent/tried for {len(per_emp)} employee(s), {skipped} skipped (no longer missing), {failed} failed, {len(noaddr)} without a valid e-mail.")
         return (len(items), failed)                                   # employees without a valid address are listed on the status board (Failed: no valid Office Email ID)
     except Exception as ex:
         print("Automatic missed-entry e-mail error:", ex); return (0, 1)
@@ -9366,7 +9419,10 @@ def admin_mn_retry(mid):
     _admin_only_mail()
     rec = _mn_get(mid)
     if not MAIL_READY: flash("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST).", "error")
-    elif not rec or str(rec.get("Status")) not in ("Sending", "Failed", "Partly sent"): flash("Only a Sending, Failed or Partly sent e-mail can be retried.", "error")
+    elif not rec: flash("Mail not found.", "error")
+    elif str(rec.get("Status", "")).strip().lower() == "scheduled": flash("This e-mail is still Scheduled - the server is already sending it. Refresh in a minute.")      # Update176
+    elif str(rec.get("Status", "")).strip().lower() == "sent": flash("This e-mail was already sent to everyone (status Sent) - nothing to retry. Check the Mail to Employees Log below.")
+    elif str(rec.get("Status", "")).strip().lower() not in ("sending", "failed", "partly sent"): flash(f"This e-mail is {str(rec.get('Status', '')).strip() or 'in an unknown state'} and cannot be retried.", "error")
     else:
         rec.update({"Status": "Scheduled", "Claimed by": "", "Detail": "Retrying (already-sent employees are skipped)."}); _mn_save(rec)
         threading.Thread(target=run_mail_note, args=(str(mid),), daemon=True).start()

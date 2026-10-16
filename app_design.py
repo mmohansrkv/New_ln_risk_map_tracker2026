@@ -3271,7 +3271,7 @@ SAVED_ANIM = """{% if saved_anim %}<style>
 #svcard::after{content:"";position:absolute;inset:0;border-radius:16px;background:linear-gradient(100deg,transparent 30%,#ffffff66 50%,transparent 70%);transform:translateX(-120%);animation:svshine 1.1s .5s ease forwards;pointer-events:none}
 @keyframes svshine{to{transform:translateX(120%)}}
 @media (prefers-reduced-motion:reduce){ #svcard,#svcoin,#svcard::after{animation-duration:3s} }
-</style><div id="svwrap" role="status" aria-live="polite"><div id="svcard"><div id="svcoin">&#10003;</div><div><b>Saved successfully!</b><small>Your daily productivity entry is saved.</small></div></div></div>
+</style><div id="svwrap" role="status" aria-live="polite"><div id="svcard"><div id="svcoin">&#10003;</div><div><b>{{ session.name }} &ndash; Saved Successfully &#128522;</b><small>Your daily productivity entry is saved.</small></div></div></div>
 <script>setTimeout(function(){var w=document.getElementById('svwrap');if(w&&w.parentNode)w.parentNode.removeChild(w)},3000);</script>{% endif %}"""
 
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th><th>Designation</th>{% endif %}
@@ -3354,8 +3354,8 @@ function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e
 document.querySelector('[name=date]').addEventListener('change',calc);
 function showErr(m){formerr.textContent=m;formerr.style.display='block';formerr.scrollIntoView({behavior:'smooth',block:'center'})}
 function saveBanner(ok,lines){var b=document.getElementById('savebanner');if(!b){b=document.createElement('div');b.id='savebanner';b.setAttribute('role','status');b.setAttribute('aria-live','polite');
- b.style.cssText='position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:100001;max-width:92vw;padding:14px 22px;border-radius:12px;color:#fff;font-weight:600;box-shadow:0 10px 30px #0004;text-align:center';document.body.appendChild(b)}
- b.style.background=ok?'#16a34a':'#b91c1c';b.innerHTML='';const h=document.createElement('div');h.textContent=ok?'\u2713 Saved Successfully':'\u26A0 Not saved';h.style.fontSize='17px';b.appendChild(h);
+ b.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:100001;max-width:92vw;padding:22px 34px;border-radius:16px;color:#fff;font-weight:600;box-shadow:0 14px 40px #0006;text-align:center';document.body.appendChild(b)}
+ b.style.background=ok?'#16a34a':'#b91c1c';b.innerHTML='';const h=document.createElement('div');h.textContent=ok?({{sub.emp_name|tojson}}+' \u2013 Saved Successfully \U0001F60A'):'\u26A0 Not saved';h.style.fontSize='20px';b.appendChild(h);
  (lines||[]).forEach(function(t){const p=document.createElement('div');p.style.cssText='font-size:13px;font-weight:400;margin-top:4px';p.textContent=t;b.appendChild(p)});b.style.display='block'}
 document.querySelector('form[action="{{action}}"]').addEventListener('submit',function(e){
  formerr.style.display='none';

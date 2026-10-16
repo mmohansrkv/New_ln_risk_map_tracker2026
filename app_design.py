@@ -561,7 +561,9 @@ def _server_error(e):
             return redirect(request.referrer or ("/employee" if session.get("role") == "employee" else "/admin/summary"))
     except Exception:
         pass
-    return ("<h2>Something went wrong</h2><p>Please wait a few seconds and <a href='/'>try again</a>.</p>"), 500
+    _home = "/employee" if session.get("role") == "employee" else ("/admin/summary" if session.get("role") == "admin" else "/")
+    return ("<h2>Something went wrong</h2><p>Please wait a few seconds and <a href='" + _home + "'>try again</a>. "
+            "If you just pressed Save, check <b>Submitted today</b> before saving again - your entry may already be saved.</p>"), 500
 
 @app.errorhandler(APIError)
 def _handle_sheets_api_error(e):
@@ -3351,6 +3353,10 @@ function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e
  tgtMsg.textContent=low.length?('⚠ Target not achieved (count per hour × hours worked) – '+low.join(' | ')):'';tgtMsg.style.display=low.length?'block':'none'}
 document.querySelector('[name=date]').addEventListener('change',calc);
 function showErr(m){formerr.textContent=m;formerr.style.display='block';formerr.scrollIntoView({behavior:'smooth',block:'center'})}
+function saveBanner(ok,lines){var b=document.getElementById('savebanner');if(!b){b=document.createElement('div');b.id='savebanner';b.setAttribute('role','status');b.setAttribute('aria-live','polite');
+ b.style.cssText='position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:100001;max-width:92vw;padding:14px 22px;border-radius:12px;color:#fff;font-weight:600;box-shadow:0 10px 30px #0004;text-align:center';document.body.appendChild(b)}
+ b.style.background=ok?'#16a34a':'#b91c1c';b.innerHTML='';const h=document.createElement('div');h.textContent=ok?'\u2713 Saved Successfully':'\u26A0 Not saved';h.style.fontSize='17px';b.appendChild(h);
+ (lines||[]).forEach(function(t){const p=document.createElement('div');p.style.cssText='font-size:13px;font-weight:400;margin-top:4px';p.textContent=t;b.appendChild(p)});b.style.display='block'}
 document.querySelector('form[action="{{action}}"]').addEventListener('submit',function(e){
  formerr.style.display='none';
  const d=document.querySelector('[name=date]').value;
@@ -3360,7 +3366,13 @@ document.querySelector('form[action="{{action}}"]').addEventListener('submit',fu
  if(bad){e.preventDefault();return showErr('All Process Entry fields are mandatory - fill every field before saving.')}
  const t=[...document.querySelectorAll('#procs .r')].reduce((a,r2)=>a+rowH(r2),0)+[...document.querySelectorAll('[name=nh]')].reduce((a,x)=>a+(+x.value||0),0),r=reqHrs();
  if(t+1e-9<r){e.preventDefault();showErr('Entry incomplete: '+t+' of the required '+r+' working hours logged. Complete all '+r+' hours before saving.')}
- if(!e.defaultPrevented){const b=e.target.querySelector('button.primary');if(b){setTimeout(function(){b.disabled=true;b.textContent='Saving...'},0)}}      /* Update96: one click = one save (no double submit) */
+ if(!e.defaultPrevented){const f=e.target,b=f.querySelector('button.primary');if(b){setTimeout(function(){b.disabled=true;b.textContent='Saving...'},0)}      /* Update96: one click = one save (no double submit) */
+  if(f.getAttribute('action')==='/employee/save'&&window.fetch){e.preventDefault();      /* Update179: save via fetch and show the result at once */
+   fetch(f.action,{method:'POST',body:new FormData(f),credentials:'same-origin',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json()}).then(function(j){
+    const lines=(j.messages||[]).filter(function(m){return !(j.ok&&/^Saved\\.?$/.test(m.text))}).map(function(m){return m.text});
+    saveBanner(!!j.ok,lines);
+    if(j.ok){setTimeout(function(){location.href='/employee'},lines.length?3500:1800)}else if(b){b.disabled=false;b.textContent='Save'}
+   }).catch(function(){saveBanner(false,['Could not reach the server. Check Submitted today before pressing Save again.']);if(b){b.disabled=false;b.textContent='Save'}})}}
 });
 window.addEventListener('pageshow',function(){const b=document.querySelector('form button.primary[disabled]');if(b){b.disabled=false;b.textContent='Save'}});
 {{sub.procs|tojson}}.forEach(addProc);{{sub.notes|tojson}}.forEach(addNote);
@@ -5712,6 +5724,21 @@ def _save_lock(key):
 @app.route("/employee/save", methods=["POST"])
 @need("employee")
 def employee_save():
+    """Save fix: the browser posts with fetch (X-Requested-With: fetch) and gets the RESULT as JSON straight away, so the
+    "Saved Successfully" message no longer depends on the Employee page re-rendering after the redirect (that render is what
+    failed and showed the bare "Something went wrong" page). Plain form posts still work exactly as before."""
+    if request.headers.get("X-Requested-With") != "fetch":
+        return _employee_save_impl()
+    try:
+        _employee_save_impl()
+        msgs = [(c, m) for c, m in session.pop("_flashes", [])]
+        ok = bool(session.pop("saved_anim", False))
+        return jsonify(ok=ok, messages=[dict(kind=c, text=m) for c, m in msgs])
+    except Exception as ex:
+        import traceback; traceback.print_exc()
+        return jsonify(ok=False, messages=[dict(kind="error", text="Your entry could not be saved right now. Please wait a few seconds and press Save again.")]), 200
+
+def _employee_save_impl():
     if is_view_only(session.get("emp_id", "")):                  # Update105
         flash(VIEW_ONLY_MSG, "error"); return redirect("/employee")
     sid_new = None

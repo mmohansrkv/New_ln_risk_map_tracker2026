@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update185: Employee AND Admin pages (and the login page) now share ONE cartoon-style 3D animated message box for everything: success (green, confetti), error (red), notice (amber), info (blue) and working (indigo). It is shown for every Save / Edit / Delete / Send result (all flash messages), instantly when a user clicks Access / Download / View / Print / Edit, while a form is being processed ("Saving... / Deleting... / Sending..."), for Admin notifications and for page notices (shown once per session). Every browser confirm() ("Delete?", "Send ...?") is now a cartoon 3D Yes / No box. Click closes a box; hover pauses it; reduced-motion users get a plain fade. The Update183 Admin box and the Update184 stand-alone Save box are replaced by this one system. Display only - no route, sheet, e-mail or tracking code changed.
   * Update184: Productivity Entry page - clicking Save now shows a cartoon-style 3D animated confirmation in the middle of the page ("<name> - Saved Successfully!"): bouncy squash-and-stretch 3D pop-in, spinning coin badge, confetti-star burst, light sweep, flip-out. A failed save shows the same box in red ("Oops! Not saved") with the reason. Click closes it; the page opens the Employee page after the animation. Display only - no route, sheet, e-mail or tracking code changed.
   * Update183: Admin pages now use the SAME 3D animated message box as the Employee page ("Saved Successfully" box: 3D flip-in, spinning coin, light sweep, flip-out). Every Admin action result (Send mail, Retry, Save, Delete, Lock, Import ... - all the flash messages) is shown in this box: green = success, red = failed, amber = notice; long messages stay longer, hover pauses it, click closes it. When an Admin clicks a button that submits a form, a blue "Working..." 3D box appears at once with the button name until the result page opens. Display only - no route, sheet, e-mail or tracking code changed.
   * Update182: EVERY Employee page now has a full-page flying 3D animation: a fixed, click-through background layer (#fly3d, pure CSS, no script) with 16 coloured 3D cubes, rings and tiles flying across the whole screen at different depths and speeds, behind the sidebar and page content. Employee pages only (Admin, login and Welcome are unchanged); cards are slightly more transparent so the objects show through; half of the objects are hidden on small screens; nothing is shown for reduced-motion users or when printing. No route, sheet, tracking or e-mail code changed.
@@ -2878,66 +2879,164 @@ draw()})();
 </script>{% endif %}
 {% if session.role=='admin' %}<div id="toasts"></div><script>
 (function(){var since="0",first=1;
-function toast(t){var d=document.createElement('div');d.className='toast';d.textContent=t;
+function toast(t){if(window.cartoon){window.cartoon('info','New notification 🔔',t,8);return}var d=document.createElement('div');d.className='toast';d.textContent=t;
  document.getElementById('toasts').appendChild(d);setTimeout(function(){d.remove()},10000)}
 function poll(){fetch('/admin/notify/poll?since='+since+'&first='+first,{credentials:'same-origin'})
  .then(function(r){return r.json()}).then(function(j){
  j.items.forEach(function(i){toast(i.text)});since=j.last;first=0}).catch(function(){})}
 poll();setInterval(poll,15000)})();
 </script>{% endif %}
-{% if session.role=='admin' %}<style>
-/* Update183: Admin 3D animated status box - same look and motion as the Employee "Saved Successfully" box */
-#a3wrap{position:fixed;inset:0;z-index:100000;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:12px;padding-top:12vh;perspective:900px}
-#a3wrap .a3card{position:relative;pointer-events:auto;cursor:pointer;transform-style:preserve-3d;display:flex;align-items:center;gap:14px;max-width:min(560px,92vw);padding:16px 26px 16px 18px;border-radius:16px;color:#fff;
- background:linear-gradient(135deg,#16a34a,#22c55e 55%,#4ade80);box-shadow:0 1px 0 #ffffff66 inset,0 8px 0 #166534,0 26px 40px -10px #14532d99;will-change:transform;
- animation:a3in .8s cubic-bezier(.22,1,.36,1) var(--dl,0s) both,a3out .7s ease-in calc(var(--dl,0s) + var(--du,4s) - .7s) forwards}
-#a3wrap .a3card.err{background:linear-gradient(135deg,#dc2626,#ef4444 55%,#f87171);box-shadow:0 1px 0 #ffffff66 inset,0 8px 0 #991b1b,0 26px 40px -10px #7f1d1d99}
-#a3wrap .a3card.warn{background:linear-gradient(135deg,#d97706,#f59e0b 55%,#fbbf24);box-shadow:0 1px 0 #ffffff66 inset,0 8px 0 #92400e,0 26px 40px -10px #78350f99}
-#a3wrap .a3card.work{background:linear-gradient(135deg,#4f46e5,#6366f1 55%,#818cf8);box-shadow:0 1px 0 #ffffff66 inset,0 8px 0 #3730a3,0 26px 40px -10px #312e8199;animation:a3in .8s cubic-bezier(.22,1,.36,1) both}
-#a3wrap .a3card.bye{animation:a3out .5s ease-in forwards!important}
-#a3wrap .a3card:hover{animation-play-state:paused}
-#a3wrap .a3coin{flex:none;width:48px;height:48px;border-radius:50%;background:#fff;color:#16a34a;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;box-shadow:0 4px 0 #bbf7d0,0 8px 14px #0003;transform-style:preserve-3d;animation:a3spin 1.2s .25s ease-in-out 2 both}
-#a3wrap .a3card.err .a3coin{color:#dc2626;box-shadow:0 4px 0 #fecaca,0 8px 14px #0003}
-#a3wrap .a3card.warn .a3coin{color:#d97706;box-shadow:0 4px 0 #fde68a,0 8px 14px #0003}
-#a3wrap .a3card.work .a3coin{color:#4f46e5;box-shadow:0 4px 0 #c7d2fe,0 8px 14px #0003;animation:a3spin 1.1s linear infinite}
-#a3wrap .a3card b{display:block;font-size:17px;letter-spacing:.2px;text-shadow:0 2px 0 #14532d66}
-#a3wrap .a3card.err b{text-shadow:0 2px 0 #7f1d1d66}#a3wrap .a3card.warn b{text-shadow:0 2px 0 #78350f66}#a3wrap .a3card.work b{text-shadow:0 2px 0 #31298166}
-#a3wrap .a3card small{display:block;font-size:12.5px;opacity:.95;margin-top:2px;line-height:1.35;word-break:break-word}
-#a3wrap .a3card::after{content:"";position:absolute;inset:0;border-radius:16px;background:linear-gradient(100deg,transparent 30%,#ffffff66 50%,transparent 70%);transform:translateX(-120%);animation:a3shine 1.1s .5s ease forwards;pointer-events:none}
-@keyframes a3in{0%{transform:rotateX(-70deg) rotateY(-90deg) translateZ(-300px) scale(.4);opacity:0}60%{transform:rotateX(12deg) rotateY(10deg) translateZ(40px) scale(1.04);opacity:1}100%{transform:rotateX(0) rotateY(0) translateZ(0) scale(1);opacity:1}}
-@keyframes a3out{0%{transform:rotateX(0) rotateY(0) translateZ(0) scale(1);opacity:1}100%{transform:rotateX(60deg) rotateY(90deg) translateZ(-260px) scale(.5);opacity:0}}
-@keyframes a3spin{from{transform:rotateY(0)}to{transform:rotateY(360deg)}}
-@keyframes a3shine{to{transform:translateX(120%)}}
-@media print{ #a3wrap{display:none} }
-</style><div id="a3wrap" role="status" aria-live="polite"></div><script>
-(function(){var W=document.getElementById('a3wrap');if(!W)return;
+{% if not bare %}<style>
+/* Update185: ONE cartoon-style 3D message system for Employee + Admin (+ login): success / error / notice / info / working / confirm */
+.cmroot{font-family:"Comic Sans MS","Chalkboard SE","Marker Felt","Trebuchet MS",sans-serif}
+#cmwrap{position:fixed;inset:0;z-index:100000;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:18px;padding:11vh 12px 0;perspective:1000px}
+#cmask{position:fixed;inset:0;z-index:100002;display:flex;align-items:center;justify-content:center;padding:12px;background:rgba(15,23,42,.45);perspective:1000px;animation:cmFadeIn .2s both}
+.cmroot .cm{--c1:#bbf7d0;--c2:#4ade80;--ink:#14301f;--k1:#fff7b0;--k2:#facc15;--k3:#f59e0b;position:relative;pointer-events:auto;cursor:pointer;max-width:min(560px,92vw);transform-style:preserve-3d;will-change:transform;animation:cmIn .85s ease-out var(--dl,0s) both,cmWob 2.4s ease-in-out calc(var(--dl,0s) + .85s) 1,cmOut .65s ease-in calc(var(--dl,0s) + var(--du,4s) - .65s) forwards}
+.cmroot .cm.err{--c1:#fecaca;--c2:#f87171;--ink:#450a0a;--k1:#fff;--k2:#fca5a5;--k3:#ef4444}
+.cmroot .cm.warn{--c1:#fef3c7;--c2:#fbbf24;--ink:#451a03;--k1:#fff;--k2:#fde68a;--k3:#f59e0b}
+.cmroot .cm.info{--c1:#dbeafe;--c2:#60a5fa;--ink:#0b2447;--k1:#fff;--k2:#93c5fd;--k3:#3b82f6}
+.cmroot .cm.work{--c1:#e0e7ff;--c2:#818cf8;--ink:#1e1b4b;--k1:#fff;--k2:#c7d2fe;--k3:#6366f1;animation:cmIn .85s ease-out both,cmBob 1.6s ease-in-out .85s infinite}
+.cmroot .cm.dlg{cursor:default;animation:cmIn .85s ease-out both}
+.cmroot .cm.bye{animation:cmOut .5s ease-in forwards!important}
+.cmroot .cm:hover{animation-play-state:paused}
+.cmroot .cmc{position:relative;display:flex;align-items:center;gap:14px;padding:16px 26px 16px 18px;border:4px solid #1f2937;border-radius:26px;overflow:hidden;color:var(--ink);background:linear-gradient(180deg,var(--c1) 0%,var(--c2) 100%);box-shadow:0 8px 0 #1f2937,0 24px 32px -8px rgba(0,0,0,.45),inset 0 5px 0 rgba(255,255,255,.6),inset 0 -6px 0 rgba(0,0,0,.08)}
+.cmroot .cmc::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.65) 50%,transparent 70%);transform:translateX(-130%);animation:cmShine 1s calc(var(--dl,0s) + .6s) ease-in-out forwards;pointer-events:none}
+.cmroot .cmk{flex:none;width:52px;height:52px;border-radius:50%;border:4px solid #1f2937;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:900;line-height:1;color:#1f2937;background:radial-gradient(circle at 32% 28%,var(--k1),var(--k2) 60%,var(--k3));box-shadow:0 4px 0 #1f2937;transform-style:preserve-3d;animation:cmSpin 1s calc(var(--dl,0s) + .35s) ease-in-out 2 both}
+.cmroot .cm.work .cmk{animation:cmSpinC 1.1s linear infinite}
+.cmroot .cmt{min-width:0}
+.cmroot .cmt b{display:block;font-size:clamp(16px,4.4vw,21px);line-height:1.15;text-shadow:2px 2px 0 rgba(255,255,255,.75)}
+.cmroot .cmt small{display:block;margin-top:3px;font-size:clamp(12px,3.3vw,14px);font-weight:700;opacity:.88;line-height:1.35;word-break:break-word}
+.cmroot .cms{position:absolute;left:50%;top:50%;width:var(--sz);height:var(--sz);margin:calc(var(--sz) / -2) 0 0 calc(var(--sz) / -2);font-size:var(--sz);line-height:1;text-align:center;opacity:0;-webkit-text-stroke:1.5px #1f2937;pointer-events:none;animation:cmStar 1.15s calc(var(--dl,0s) + .25s) ease-out forwards}
+.cmroot .cmbtn{display:flex;gap:12px;margin-top:12px;flex-wrap:wrap}
+.cmroot .cmb{font:inherit;font-weight:900;font-size:15px;padding:8px 20px;border:3px solid #1f2937;border-radius:16px;box-shadow:0 5px 0 #1f2937;cursor:pointer;color:#1f2937;background:#fff;transition:transform .08s,box-shadow .08s}
+.cmroot .cmb:active{transform:translateY(4px);box-shadow:0 1px 0 #1f2937}
+.cmroot .cmb:focus-visible{outline:3px solid #1f2937;outline-offset:2px}
+.cmroot .cmb.yes{background:#4ade80}
+.cmroot .cmb.yes.danger{background:#f87171}
+@keyframes cmIn{0%{transform:translateY(60px) scale(.1) rotateX(70deg) rotateZ(-14deg);opacity:0}30%{transform:translateY(-26px) scale(1.2,.82) rotateX(-8deg) rotateZ(5deg);opacity:1}48%{transform:translateY(6px) scale(.9,1.14) rotateX(4deg) rotateZ(-3deg)}68%{transform:translateY(-8px) scale(1.06,.96) rotateX(-3deg) rotateZ(2deg)}100%{transform:none;opacity:1}}
+@keyframes cmWob{0%,100%{transform:none}25%{transform:translateY(-5px) rotateY(-8deg) rotateZ(-1.2deg)}50%{transform:none}75%{transform:translateY(-4px) rotateY(8deg) rotateZ(1.2deg)}}
+@keyframes cmBob{0%,100%{transform:none}50%{transform:translateY(-5px)}}
+@keyframes cmOut{0%{transform:none;opacity:1}100%{transform:translateY(-44px) scale(.2) rotateX(-70deg) rotateZ(10deg);opacity:0}}
+@keyframes cmFadeIn{from{opacity:0}to{opacity:1}}
+@keyframes cmFadeOut{to{opacity:0}}
+@keyframes cmSpin{0%{transform:rotateY(0) scale(1)}50%{transform:rotateY(180deg) scale(1.18)}100%{transform:rotateY(360deg) scale(1)}}
+@keyframes cmSpinC{to{transform:rotateY(360deg)}}
+@keyframes cmShine{to{transform:translateX(130%)}}
+@keyframes cmStar{0%{transform:translate(0,0) scale(.2) rotate(0);opacity:0}15%{opacity:1}100%{transform:translate(var(--dx),var(--dy)) scale(1.1) rotate(var(--r));opacity:0}}
+@media (prefers-reduced-motion:reduce){ .cmroot .cm{animation:cmFadeIn .2s both,cmFadeOut .4s ease calc(var(--dl,0s) + var(--du,4s) - .4s) forwards} .cmroot .cm.work,.cmroot .cm.dlg{animation:cmFadeIn .2s both} .cmroot .cmk,.cmroot .cmc::after,.cmroot .cms{animation:none} }
+@media print{ #cmwrap,#cmask{display:none!important} }
+</style><div id="cmwrap" class="cmroot" role="status" aria-live="polite"></div><script>
+(function(){var W=document.getElementById('cmwrap');if(!W)return;
 var NEG=/(fail|could not|couldn|cannot|can't|not (sent|saved|found|allowed|available|possible|configured|deleted)|invalid|denied|unable|error|already|nothing|missing|required|wrong|incorrect|expired|no (employee|mail|recipient|record|data))/i;
+var ICON={ok:'✓',err:'✕',warn:'!',info:'i',work:'⟳'};
+var TITLE={ok:'Success! 😊',err:'Oops! 😟',warn:'Please note ⚠️',info:'Heads up 💡'};
+var COLS=['#facc15','#fb7185','#38bdf8','#a78bfa','#fb923c','#ffffff'],SYM=['★','✦','●'];
 var RM=window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)').matches;
 function kill(c){if(c&&c.parentNode)c.parentNode.removeChild(c)}
-function bye(c){if(!c||c.className.indexOf('bye')>-1)return;c.className+=' bye';setTimeout(function(){kill(c)},700)}
-function card(kind,title,msg,delay,secs){var c=document.createElement('div'),co=document.createElement('div'),t=document.createElement('div'),b=document.createElement('b'),sm=document.createElement('small');
- c.className='a3card '+kind;co.className='a3coin';co.textContent=kind==='err'?'\\u2715':(kind==='warn'?'!':(kind==='work'?'\\u27F3':'\\u2713'));
- b.textContent=title;sm.textContent=msg;t.appendChild(b);t.appendChild(sm);c.appendChild(co);c.appendChild(t);
+function bye(c){if(!c||c.className.indexOf(' bye')>-1)return;c.className+=' bye';setTimeout(function(){kill(c)},600)}
+function burst(c,n){for(var i=0;i<n;i++){var st=document.createElement('span');st.className='cms';st.textContent=SYM[i%3];
+ var a=(i/n)*Math.PI*2+Math.random()*.3,d=110+Math.random()*80;
+ st.style.cssText='--dx:'+Math.round(Math.cos(a)*d*1.3)+'px;--dy:'+Math.round(Math.sin(a)*d)+'px;--r:'+Math.round(Math.random()*540-270)+'deg;--sz:'+Math.round(14+Math.random()*14)+'px;color:'+COLS[i%COLS.length];c.appendChild(st)}}
+function make(kind,title,msg,delay,secs){
+ var c=document.createElement('div'),f=document.createElement('div'),k=document.createElement('div'),t=document.createElement('div'),b=document.createElement('b');
+ c.className='cm '+kind;f.className='cmc';k.className='cmk';k.textContent=ICON[kind]||'✓';t.className='cmt';
+ b.textContent=title;t.appendChild(b);
+ if(msg){var sm=document.createElement('small');sm.textContent=msg;t.appendChild(sm)}
+ f.appendChild(k);f.appendChild(t);c.appendChild(f);
  if(kind!=='work'){c.style.setProperty('--dl',delay+'s');c.style.setProperty('--du',secs+'s')}
+ if(kind==='ok')burst(c,12);
  c.onclick=function(){bye(c)};
- c.addEventListener('animationend',function(e){if(e.animationName==='a3out'&&c.className.indexOf('bye')<0)kill(c)});
+ c.addEventListener('animationend',function(e){if(e.animationName==='cmOut'||e.animationName==='cmFadeOut')kill(c)});
+ while(W.children.length>=5)kill(W.firstChild);
  W.appendChild(c);
- if(kind!=='work'&&RM)setTimeout(function(){kill(c)},(delay+secs)*1000);
+ if(RM&&kind!=='work')setTimeout(function(){kill(c)},(delay+secs)*1000+800);
  return c}
-var fl=document.querySelectorAll('.app main > p.flash'),d=0;
-Array.prototype.forEach.call(fl,function(p){var t=(p.textContent||'').replace(/\\s+/g,' ').trim();if(!t)return;
- var k=p.className.indexOf('err')>-1?'err':(NEG.test(t)?'warn':'ok');
- var ti=k==='err'?'Action failed \\uD83D\\uDE1F':(k==='warn'?'Please note \\u26A0':'Action completed \\uD83D\\uDE0A');
- var secs=Math.min(12,Math.max(4,3.4+t.length/35));
- card(k,ti,t,d,secs);d+=0.5;p.style.display='none'});
+/* public API: window.cartoon(kind, title, message, seconds, delaySeconds)   kind = ok | err | warn | info | work */
+window.cartoon=function(kind,title,msg,secs,delay){kind=ICON[kind]?kind:'info';if(!title)title=TITLE[kind]||'';
+ return make(kind,title,msg,delay||0,secs||Math.min(12,Math.max(3.4,3.2+String(msg||'').length/35)))};
+window.cartoonClose=bye;
+
+/* ---- server messages (flash): every success / error / notice uses the same box ---- */
+var saved=window.__cmSaved,d=0;
+Array.prototype.forEach.call(document.querySelectorAll('.app main > p.flash,.lg > p.flash'),function(p){
+ var t=(p.textContent||'').replace(/\\s+/g,' ').trim();p.style.display='none';if(!t)return;
+ var k=p.className.indexOf('err')>-1?'err':(NEG.test(t)?'warn':'ok'),ti=TITLE[k],m=t;
+ if(saved&&k!=='err'&&/^Saved\\./.test(t)){ti=saved+' – Saved Successfully! 🎉';m=t.replace(/^Saved\\.\\s*/,'')||'Your daily productivity entry is saved.';k='ok';saved=null}
+ window.cartoon(k,ti,m,Math.min(12,Math.max(3.6,3.4+m.length/35)),d);d+=0.5});
+if(saved)window.cartoon('ok',saved+' – Saved Successfully! 🎉','Your daily productivity entry is saved.',3.4,0);
+
+/* ---- notifications: page notices (.warn) pop up once per session as a notification box ---- */
+setTimeout(function(){var n=0;Array.prototype.forEach.call(document.querySelectorAll('.app main .warn'),function(w){
+ if(n>=2||!w.offsetParent)return;var t=(w.textContent||'').replace(/\\s+/g,' ').trim();if(!t)return;
+ var key='cmw:'+t.slice(0,80);try{if(sessionStorage.getItem(key))return;sessionStorage.setItem(key,'1')}catch(e){}
+ window.cartoon('warn','Notification 🔔',t.length>170?t.slice(0,167)+'…':t,6.5,1.2+n*.5);n++})},400);
+
+/* ---- confirmations: the browser's grey confirm() box is replaced by a cartoon 3D box ---- */
+var nat=window.confirm,pass=false,mask=null;
+function ask(msg,yes){
+ if(mask)kill(mask);
+ var m=document.createElement('div'),c=document.createElement('div'),f=document.createElement('div'),k=document.createElement('div'),t=document.createElement('div'),b=document.createElement('b'),sm=document.createElement('small'),row=document.createElement('div'),y=document.createElement('button'),n=document.createElement('button');
+ var danger=/delete|remove|disable|reject|cancel|revoke|permanently/i.test(msg);
+ m.id='cmask';m.className='cmroot';m.setAttribute('role','alertdialog');m.setAttribute('aria-modal','true');
+ c.className='cm dlg '+(danger?'err':'info');f.className='cmc';k.className='cmk';k.textContent='?';t.className='cmt';
+ b.textContent=danger?'Are you sure? 🤔':'Please confirm 🤔';sm.textContent=msg;row.className='cmbtn';
+ y.type='button';y.className='cmb yes'+(danger?' danger':'');y.textContent='Yes, go ahead';
+ n.type='button';n.className='cmb no';n.textContent='No, cancel';
+ row.appendChild(y);row.appendChild(n);t.appendChild(b);t.appendChild(sm);t.appendChild(row);f.appendChild(k);f.appendChild(t);c.appendChild(f);m.appendChild(c);
+ function close(){kill(m);mask=null;document.removeEventListener('keydown',kd,true)}
+ function kd(e){if(e.key==='Escape'){e.preventDefault();close()}}
+ y.onclick=function(){close();yes()};n.onclick=close;m.onclick=function(e){if(e.target===m)close()};
+ document.addEventListener('keydown',kd,true);document.body.appendChild(m);mask=m;(danger?n:y).focus()}
+window.cartoonConfirm=ask;
+window.confirm=function(msg){
+ if(pass){pass=false;return true}
+ var ev=window.event;if(!ev||!ev.target||(ev.type!=='submit'&&ev.type!=='click'))return nat.call(window,msg);
+ var tg=ev.target,sub=ev.submitter||null,form=ev.type==='submit'?tg:(tg.closest?tg.closest('form'):null),el=ev.type==='click'&&tg.closest?tg.closest('a,button,input'):null;
+ ask(String(msg),function(){pass=true;
+  try{if(ev.type==='submit'&&form){try{if(form.requestSubmit)form.requestSubmit(sub||undefined);else form.submit()}catch(x){form.submit()}}else if(el){el.click()}}
+  finally{pass=false}});
+ return false};
+
+/* ---- actions: Save / Edit / Delete / Send ... show a "working" box until the result page opens ---- */
 var work=null;
+function verb(l){var s=l.toLowerCase();
+ if(/delete|remove/.test(s))return['Deleting… 🗑️','Removing it – please wait.'];
+ if(/cancel/.test(s))return['Cancelling… ❌','Cancelling – please wait.'];
+ if(/download|export/.test(s))return['Preparing download… ⬇️','Your file is being prepared.'];
+ if(/print/.test(s))return['Preparing print… 🖨️','Opening the print preview.'];
+ if(/send|retry|mail|remind/.test(s))return['Sending… ✉️','Sending – please wait.'];
+ if(/access|enable|disable|grant|revoke|login/.test(s))return['Updating access… 🔑','Applying the access change.'];
+ if(/edit|update|modify|change|extend|reject|approve/.test(s))return['Updating… ✏️','Updating – please wait.'];
+ if(/save|submit|add|create|schedule|apply|import|upload|set/.test(s))return['Saving… 💾','Saving – please wait.'];
+ return['Working… ⏳','Your request is being processed – please wait.']}
 document.addEventListener('submit',function(e){var f=e.target;if(e.defaultPrevented||!f||f.tagName!=='FORM')return;
- if((f.method||'get').toLowerCase()!=='post'||f.target==='_blank'||f.hasAttribute('data-no-a3')||W.contains(f))return;
- var sb=e.submitter,lbl=sb?(sb.textContent||sb.value||'').replace(/\\s+/g,' ').trim():'';
- if(work)kill(work);
- work=card('work','Working\\u2026',lbl?('"'+lbl+'" is in progress - please wait.'):'Your request is being processed - please wait.',0,0);
- var w=work;setTimeout(function(){bye(w)},15000)});
+ var sb=e.submitter,mt=((sb&&sb.getAttribute&&sb.getAttribute('formmethod'))||f.method||'get').toLowerCase(),tg=(sb&&sb.getAttribute&&sb.getAttribute('formtarget'))||f.target;
+ if(mt!=='post'||tg==='_blank'||f.hasAttribute('data-no-a3')||(f.closest&&f.closest('.cmroot')))return;
+ var lbl=sb?(sb.textContent||sb.value||'').replace(/\\s+/g,' ').trim():'',v=verb(lbl);
+ if(work)kill(work);work=window.cartoon('work',v[0],v[1]);var w=work;setTimeout(function(){bye(w)},/download|export/i.test(lbl)?5000:15000)});
 window.addEventListener('pageshow',function(e){if(e.persisted&&work){kill(work);work=null}});
+
+/* ---- Access / Download / View / Print / Edit links and buttons: instant box ---- */
+var CLS=[[/download|export/i,'Download started ⬇️','Your file is being prepared – check your downloads.',3.6],
+ [/print/i,'Printing 🖨️','Opening the print preview…',3.2],
+ [/^(view|open|show|details?|see)( |$)/i,'Opening view 👀','Loading the details…',2.6],
+ [/access/i,'Access 🔑','Opening access settings…',2.6],
+ [/^(edit|update|modify)( |$)/i,'Edit mode ✏️','Opening the editor…',2.6]],lastL='',lastT=0;
+document.addEventListener('click',function(e){if(e.button>0)return;var tg=e.target;if(!tg||!tg.closest)return;
+ var el=tg.closest('a[href],button,input[type=submit],input[type=button]');if(!el||el.closest('.cmroot')||el.disabled)return;
+ var oc=el.getAttribute('onclick')||'';
+ if(e.defaultPrevented&&!/print\\(/.test(oc))return;
+ var isSub=(el.tagName==='BUTTON'&&(el.getAttribute('type')||'submit')==='submit')||(el.tagName==='INPUT'&&el.type==='submit');
+ if(isSub&&el.form){var mm=(el.getAttribute('formmethod')||el.form.method||'get').toLowerCase(),tt=el.getAttribute('formtarget')||el.form.target;if(mm==='post'&&tt!=='_blank'&&!el.form.hasAttribute('data-no-a3'))return}
+ var lbl=(el.getAttribute('aria-label')||el.textContent||el.value||'').replace(/\\s+/g,' ').trim().replace(/^[^A-Za-z0-9]+/,''),h=el.getAttribute('href')||'';
+ if(!lbl||lbl.length>70)return;
+ var hit=null;
+ if(/download|export/i.test(lbl)||/\\/export|download|\\.(csv|xlsx|ps1)(\\?|$)/i.test(h))hit=CLS[0];
+ else if(/print/i.test(lbl)||/print=1/.test(h)||/print\\(/.test(oc))hit=CLS[1];
+ else for(var i=2;i<CLS.length;i++){if(CLS[i][0].test(lbl)){hit=CLS[i];break}}
+ if(!hit)return;
+ var now=Date.now();if(lbl===lastL&&now-lastT<700)return;lastL=lbl;lastT=now;
+ window.cartoon('info',hit[1],hit[2],hit[3])});
 })();
 </script>{% endif %}
 {% if session.role=='employee' %}<div id="toasts"></div><script>(function(){var K='mzSeen',seen=null;
@@ -3366,20 +3465,7 @@ BLOOM = """{% if bloom %}<style>
 for(var i=0;i<46;i++){var p=document.createElement('span');p.textContent=e[i%e.length];p.style.left=(Math.random()*96)+'%';p.style.fontSize=(22+Math.random()*26)+'px';p.style.animationDelay=(Math.random()*0.9)+'s';p.style.animationDuration=(1.9+Math.random()*1.0)+'s';b.appendChild(p)}
 setTimeout(function(){if(b.parentNode)b.parentNode.removeChild(b)},3000)})();</script>{% endif %}"""
 
-SAVED_ANIM = """{% if saved_anim %}<style>
-#svwrap{position:fixed;inset:0;z-index:100000;pointer-events:none;display:flex;justify-content:center;align-items:flex-start;padding-top:12vh;perspective:900px;animation:svwrap 3s linear forwards}
-@keyframes svwrap{0%,88%{opacity:1}100%{opacity:0}}
-#svcard{position:relative;transform-style:preserve-3d;display:flex;align-items:center;gap:14px;padding:16px 26px 16px 18px;border-radius:16px;color:#fff;background:linear-gradient(135deg,#16a34a,#22c55e 55%,#4ade80);box-shadow:0 1px 0 #ffffff66 inset,0 8px 0 #166534,0 26px 40px -10px #14532d99;animation:svcard 3s cubic-bezier(.22,1,.36,1) forwards;will-change:transform}
-@keyframes svcard{0%{transform:rotateX(-70deg) rotateY(-90deg) translateZ(-300px) scale(.4);opacity:0}18%{transform:rotateX(12deg) rotateY(10deg) translateZ(40px) scale(1.04);opacity:1}30%{transform:rotateX(0) rotateY(0) translateZ(0) scale(1)}55%{transform:rotateX(4deg) rotateY(-6deg) translateZ(10px) scale(1)}80%{transform:rotateX(0) rotateY(0) translateZ(0) scale(1);opacity:1}100%{transform:rotateX(60deg) rotateY(90deg) translateZ(-260px) scale(.5);opacity:0}}
-#svcoin{width:48px;height:48px;border-radius:50%;background:#fff;color:#16a34a;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;box-shadow:0 4px 0 #bbf7d0,0 8px 14px #0003;transform-style:preserve-3d;animation:svspin 1.2s .25s ease-in-out 2 both}
-@keyframes svspin{from{transform:rotateY(0)}to{transform:rotateY(360deg)}}
-#svcard b{display:block;font-size:17px;letter-spacing:.2px;text-shadow:0 2px 0 #14532d66}
-#svcard small{display:block;font-size:12.5px;opacity:.92;margin-top:2px}
-#svcard::after{content:"";position:absolute;inset:0;border-radius:16px;background:linear-gradient(100deg,transparent 30%,#ffffff66 50%,transparent 70%);transform:translateX(-120%);animation:svshine 1.1s .5s ease forwards;pointer-events:none}
-@keyframes svshine{to{transform:translateX(120%)}}
-@media (prefers-reduced-motion:reduce){ #svcard,#svcoin,#svcard::after{animation-duration:3s} }
-</style><div id="svwrap" role="status" aria-live="polite"><div id="svcard"><div id="svcoin">&#10003;</div><div><b>{{ session.name }} &ndash; Saved Successfully &#128522;</b><small>Your daily productivity entry is saved.</small></div></div></div>
-<script>setTimeout(function(){var w=document.getElementById('svwrap');if(w&&w.parentNode)w.parentNode.removeChild(w)},3000);</script>{% endif %}"""
+SAVED_ANIM = """{% if saved_anim %}<script>window.__cmSaved={{ session.name|tojson }};</script>{% endif %}"""
 
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th><th>Designation</th>{% endif %}
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Target count</th><th>Completed</th><th>Target status</th><th>Productivity</th><th></th></tr>
@@ -3410,35 +3496,6 @@ Productivity: <b id="tpct">0</b>% &middot; <b id="tstat"></b> <span class="mut">
 <div id="tgtMsg" class="flash err" style="display:none" role="alert"></div>
 <div id="formerr" class="flash err" style="display:none" role="alert"></div>
 <button class="primary sm">Save</button> {% if heading == 'Daily productivity entry' %}<button type="button" class="back sm" onclick="event.preventDefault();window.scrollTo({top:0,behavior:'smooth'});var d=document.querySelector('#entryCard [name=date]');if(d)d.focus({preventScroll:true});return false">Back</button>{% else %}<button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='{{ '/admin/summary' if session.role=='admin' else '/employee' }}'">Back</button>{% endif %}</form></div>
-<style id="cartoonSaveCss">
-#cartoonSave{position:fixed;inset:0;z-index:100001;display:flex;align-items:center;justify-content:center;perspective:1000px;background:rgba(15,23,42,.28);cursor:pointer;font-family:"Comic Sans MS","Chalkboard SE","Marker Felt","Trebuchet MS",sans-serif;animation:csFade var(--cs-dur,2.8s) linear forwards}
-@keyframes csFade{0%{opacity:0}6%{opacity:1}90%{opacity:1}100%{opacity:0}}
-#cartoonSave .cs-stage{position:relative;transform-style:preserve-3d;max-width:92vw}
-#cartoonSave .cs-card{position:relative;display:flex;align-items:center;gap:16px;padding:20px 30px 20px 22px;border:5px solid #1f2937;border-radius:30px;overflow:hidden;color:#14301f;background:linear-gradient(180deg,#bbf7d0 0%,#4ade80 100%);box-shadow:0 10px 0 #1f2937,0 28px 36px -8px rgba(0,0,0,.45),inset 0 -8px 0 rgba(0,0,0,.08),inset 0 6px 0 rgba(255,255,255,.6);transform-style:preserve-3d;will-change:transform;animation:csPop var(--cs-dur,2.8s) ease-in-out forwards}
-@keyframes csPop{
-0%{transform:translateY(70px) scale(.1) rotateX(70deg) rotateZ(-14deg);opacity:0}
-14%{transform:translateY(-28px) scale(1.2,.82) rotateX(-8deg) rotateZ(5deg);opacity:1}
-22%{transform:translateY(6px) scale(.9,1.14) rotateX(4deg) rotateZ(-3deg)}
-30%{transform:translateY(-8px) scale(1.06,.96) rotateX(-3deg) rotateZ(2deg)}
-38%{transform:translateY(0) scale(1) rotateX(0) rotateZ(0)}
-52%{transform:translateY(-6px) scale(1) rotateY(-9deg) rotateZ(-1.5deg)}
-66%{transform:translateY(0) scale(1) rotateY(9deg) rotateZ(1.5deg)}
-80%{transform:translateY(-4px) scale(1) rotateY(0) rotateZ(0)}
-90%{transform:translateY(0) scale(1);opacity:1}
-100%{transform:translateY(-44px) scale(.2) rotateX(-70deg) rotateZ(10deg);opacity:0}}
-#cartoonSave .cs-card::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.65) 50%,transparent 70%);transform:translateX(-130%);animation:csShine 1s .6s ease-in-out forwards;pointer-events:none}
-@keyframes csShine{to{transform:translateX(130%)}}
-#cartoonSave .cs-badge{flex:none;width:64px;height:64px;border-radius:50%;border:4px solid #1f2937;display:flex;align-items:center;justify-content:center;font-size:36px;font-weight:900;color:#1f2937;background:radial-gradient(circle at 32% 28%,#fff7b0,#facc15 60%,#f59e0b);box-shadow:0 5px 0 #1f2937;transform-style:preserve-3d;animation:csSpin 1s .35s ease-in-out 2 both}
-@keyframes csSpin{0%{transform:rotateY(0) scale(1)}50%{transform:rotateY(180deg) scale(1.18)}100%{transform:rotateY(360deg) scale(1)}}
-#cartoonSave .cs-txt b{display:block;font-size:clamp(17px,4.6vw,24px);line-height:1.15;text-shadow:2px 2px 0 rgba(255,255,255,.75)}
-#cartoonSave .cs-txt small{display:block;margin-top:4px;font-size:clamp(12px,3.4vw,14px);font-weight:700;opacity:.85}
-#cartoonSave .cs-line{margin-top:4px;font-size:clamp(11px,3.2vw,13px);font-weight:700;max-width:420px}
-#cartoonSave .cs-star{position:absolute;left:50%;top:50%;width:var(--sz);height:var(--sz);margin:calc(var(--sz) / -2) 0 0 calc(var(--sz) / -2);font-size:var(--sz);line-height:1;text-align:center;opacity:0;-webkit-text-stroke:1.5px #1f2937;pointer-events:none;animation:csStar 1.15s .25s ease-out forwards}
-@keyframes csStar{0%{transform:translate(0,0) scale(.2) rotate(0);opacity:0}15%{opacity:1}100%{transform:translate(var(--dx),var(--dy)) scale(1.1) rotate(var(--r));opacity:0}}
-#cartoonSave.bad .cs-card{color:#450a0a;background:linear-gradient(180deg,#fecaca 0%,#f87171 100%)}
-#cartoonSave.bad .cs-badge{color:#7f1d1d;background:radial-gradient(circle at 32% 28%,#fff,#fca5a5 60%,#ef4444)}
-@media (prefers-reduced-motion:reduce){ #cartoonSave .cs-card,#cartoonSave .cs-badge,#cartoonSave .cs-star,#cartoonSave .cs-card::after{animation:none}}
-</style>
 <script>
 const WORK={{workday|g}}, PERM={{perm|tojson}}, MAXD={{maxdate|tojson}};
 const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}}, OTHER_H={{other_hours|g}};
@@ -3489,28 +3546,9 @@ function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e
  tgtMsg.textContent=low.length?('⚠ Target not achieved (count per hour × hours worked) – '+low.join(' | ')):'';tgtMsg.style.display=low.length?'block':'none'}
 document.querySelector('[name=date]').addEventListener('change',calc);
 function showErr(m){formerr.textContent=m;formerr.style.display='block';formerr.scrollIntoView({behavior:'smooth',block:'center'})}
-function saveBanner(ok,lines){
- var old=document.getElementById('cartoonSave');if(old&&old.parentNode)old.parentNode.removeChild(old);
- lines=lines||[];
- var dur=ok?(lines.length?3.8:2.8):4.5;
- var w=document.createElement('div');w.id='cartoonSave';w.className=ok?'ok':'bad';w.setAttribute('role','status');w.setAttribute('aria-live','polite');w.style.setProperty('--cs-dur',dur+'s');
- var stage=document.createElement('div');stage.className='cs-stage';
- if(ok){var cols=['#facc15','#fb7185','#38bdf8','#a78bfa','#fb923c','#ffffff'],sym=['★','✦','●'];      /* cartoon confetti burst */
-  for(var i=0;i<16;i++){var st=document.createElement('span');st.className='cs-star';st.textContent=sym[i%3];
-   var a=(i/16)*Math.PI*2+Math.random()*.3,d=130+Math.random()*90;
-   st.style.cssText='--dx:'+Math.round(Math.cos(a)*d*1.4)+'px;--dy:'+Math.round(Math.sin(a)*d)+'px;--r:'+Math.round(Math.random()*540-270)+'deg;--sz:'+Math.round(16+Math.random()*16)+'px;color:'+cols[i%cols.length];
-   stage.appendChild(st)}}
- var card=document.createElement('div');card.className='cs-card';
- var badge=document.createElement('div');badge.className='cs-badge';badge.textContent=ok?'✓':'!';
- var txt=document.createElement('div');txt.className='cs-txt';
- var h=document.createElement('b');h.textContent=ok?({{sub.emp_name|tojson}}+' – Saved Successfully! 🎉'):'Oops! Not saved 😟';
- var sm=document.createElement('small');sm.textContent=ok?'Your daily productivity entry is saved.':'Please read the message below and try again.';
- txt.appendChild(h);txt.appendChild(sm);
- lines.forEach(function(t){var p=document.createElement('div');p.className='cs-line';p.textContent=t;txt.appendChild(p)});
- card.appendChild(badge);card.appendChild(txt);stage.appendChild(card);w.appendChild(stage);
- w.addEventListener('click',function(){if(w.parentNode)w.parentNode.removeChild(w)});
- document.body.appendChild(w);
- setTimeout(function(){if(w.parentNode)w.parentNode.removeChild(w)},Math.round(dur*1000)+150)}
+function saveBanner(ok,lines){lines=(lines||[]).map(function(x){return String(x).replace(/^Saved\\.\\s*/,'')}).filter(Boolean);
+ if(ok)window.cartoon('ok',{{sub.emp_name|tojson}}+' – Saved Successfully! 🎉',lines.join(' ')||'Your daily productivity entry is saved.',lines.length?3.9:2.9);
+ else window.cartoon('err','Oops! Not saved 😟',lines.join(' ')||'Please try again.',6)}
 document.querySelector('form[action="{{action}}"]').addEventListener('submit',function(e){
  formerr.style.display='none';
  const d=document.querySelector('[name=date]').value;

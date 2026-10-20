@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update181: Admin + Employee pages - every button is now smaller (compact padding / 11px text) with a modern 3D look: coloured bottom edge, soft shadow, smooth hover lift, press-down motion, a light sweep on primary buttons and a short fade-in. CSS only (one block at the end of the main stylesheet); colours, labels, links, forms and every route / handler are unchanged. Login pages, sidebar, calendar, group chat and the editor toolbar are not affected. Disabled buttons look flat, and reduced-motion users get no animation.
   * Update178: Automatic missed-entry e-mail checks ONLY the current month (1st of this month to yesterday) and re-verifies the live Productivity log / Leave / Holidays before every batch of 5 e-mails.
   * Update177: Automatic missed-entry e-mail - e-mails are now sent ONLY for dates that are STILL missing at the moment of sending. The job used to work out the missing dates once and then
     send in batches with no re-check, so a date submitted (or covered by leave / a holiday) after that list was built - or one whose date the sheet displayed in another format - still got a
@@ -2780,6 +2781,34 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .app ::-webkit-scrollbar{height:8px;width:8px}.app ::-webkit-scrollbar-thumb{background:#c9d0e6;border-radius:8px}
 @media(max-width:800px){.app aside{position:static;height:auto;width:auto;padding:10px 12px;box-shadow:none;overflow:visible}.app main{padding:16px 14px}.app .card{padding:16px}}
 @media print{.app{background:#fff}.app .card,.app .kpi,.app table{box-shadow:none;border-radius:0}}
+
+/* ================= Update181: small modern 3D animated buttons (Admin + Employee pages) =================
+   Only size, edge shadow, hover / press motion and a light sweep are changed. Colours, labels, links,
+   forms and click handlers are untouched. Login pages, sidebar, calendar, group chat and the editor
+   toolbar keep their own styles. */
+@keyframes btnIn181{from{opacity:0;transform:translate3d(0,4px,0) scale(.94)}to{opacity:1;transform:translate3d(0,0,0) scale(1)}}
+body .app main :is(button,input[type=submit],input[type=button],.primary,.btnl,.back,.pbtn,.danger,.tabs a):not(.tb):not(.sw):not(.pw-toggle){--bedge:#cfd5e6;padding:3px 10px!important;font-size:11px!important;line-height:1.3!important;font-weight:500;border-radius:6px!important;
+ height:auto;min-height:0;vertical-align:middle;
+ box-shadow:0 2px 0 var(--bedge),0 4px 8px -3px #1e235047,inset 0 1px 0 #ffffff8c;
+ transition:transform .16s cubic-bezier(.34,1.56,.64,1),box-shadow .2s ease,filter .2s ease,background .2s ease,color .2s ease,border-color .2s ease;
+ animation:btnIn181 .35s ease backwards}
+body .app main :is(button,input[type=submit],input[type=button],.primary,.btnl,.back,.pbtn,.danger,.tabs a):not(.tb):not(.sw):not(.pw-toggle):is(.primary,.btnl){--bedge:#3730a3}
+body .app main :is(button,input[type=submit],input[type=button],.primary,.btnl,.back,.pbtn,.danger,.tabs a):not(.tb):not(.sw):not(.pw-toggle).danger{--bedge:#f1b4b4}
+body .app main :is(button,input[type=submit],input[type=button],.primary,.btnl,.back,.pbtn,.danger,.tabs a):not(.tb):not(.sw):not(.pw-toggle).back{--bedge:#c7c4fb}
+body .app main :is(button,input[type=submit],input[type=button],.primary,.btnl,.back,.pbtn,.danger,.tabs a):not(.tb):not(.sw):not(.pw-toggle).pbtn{height:26px!important;padding:0 11px!important;margin:2px!important;gap:4px}
+body .app main :is(button,input[type=submit],input[type=button],.primary,.btnl,.back,.pbtn,.danger,.tabs a):not(.tb):not(.sw):not(.pw-toggle):hover{transform:translateY(-1px);filter:brightness(1.06) saturate(1.05);
+ box-shadow:0 3px 0 var(--bedge),0 7px 12px -4px #1e235059,inset 0 1px 0 #ffffff8c}
+body .app main :is(button,input[type=submit],input[type=button],.primary,.btnl,.back,.pbtn,.danger,.tabs a):not(.tb):not(.sw):not(.pw-toggle):active{transform:translateY(2px) scale(.97);filter:none;transition-duration:.07s;
+ box-shadow:0 0 0 var(--bedge),0 1px 3px #1e23503a,inset 0 1px 2px #00000020}
+body .app main :is(button,input[type=submit],input[type=button],.primary,.btnl,.back,.pbtn,.danger,.tabs a):not(.tb):not(.sw):not(.pw-toggle):focus-visible{outline:2px solid var(--pri);outline-offset:2px}
+body .app main :is(button,input[type=submit],input[type=button],.primary,.btnl,.back,.pbtn,.danger,.tabs a):not(.tb):not(.sw):not(.pw-toggle):disabled,body .app main :is(button,input[type=submit],input[type=button],.primary,.btnl,.back,.pbtn,.danger,.tabs a):not(.tb):not(.sw):not(.pw-toggle)[disabled]{opacity:.55;cursor:not-allowed;transform:none;filter:none;box-shadow:0 1px 0 var(--bedge),inset 0 1px 0 #ffffff8c}
+body .app main .tabs a{padding:3px 11px!important;font-size:11.5px!important}
+body .app main :is(.primary,.btnl,.pbtn):not(.tb):not(.sw):not(.pw-toggle){position:relative;overflow:hidden}
+body .app main :is(.primary,.btnl,.pbtn):not(.tb):not(.sw):not(.pw-toggle)::after{content:"";position:absolute;top:0;left:0;width:40%;height:100%;pointer-events:none;
+ background:linear-gradient(100deg,transparent,#ffffff73,transparent);transform:translate3d(-140%,0,0) skewX(-20deg)}
+body .app main :is(.primary,.btnl,.pbtn):not(.tb):not(.sw):not(.pw-toggle):hover::after{transform:translate3d(340%,0,0) skewX(-20deg);transition:transform .6s ease}
+@media(prefers-reduced-motion:reduce){body .app main :is(button,input[type=submit],input[type=button],.primary,.btnl,.back,.pbtn,.danger,.tabs a):not(.tb):not(.sw):not(.pw-toggle){animation:none!important;transition:none!important}body .app main :is(.primary,.btnl,.pbtn):not(.tb):not(.sw):not(.pw-toggle)::after{display:none}}
+@media print{body .app main :is(button,input[type=submit],input[type=button],.primary,.btnl,.back,.pbtn,.danger,.tabs a):not(.tb):not(.sw):not(.pw-toggle){box-shadow:none!important;animation:none!important}}
 </style></head><body>
 {% if bare %}{{body|safe}}
 {% elif session.role %}<div class="app"><aside class="emp">

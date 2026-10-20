@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update183: Admin pages now use the SAME 3D animated message box as the Employee page ("Saved Successfully" box: 3D flip-in, spinning coin, light sweep, flip-out). Every Admin action result (Send mail, Retry, Save, Delete, Lock, Import ... - all the flash messages) is shown in this box: green = success, red = failed, amber = notice; long messages stay longer, hover pauses it, click closes it. When an Admin clicks a button that submits a form, a blue "Working..." 3D box appears at once with the button name until the result page opens. Display only - no route, sheet, e-mail or tracking code changed.
   * Update182: EVERY Employee page now has a full-page flying 3D animation: a fixed, click-through background layer (#fly3d, pure CSS, no script) with 16 coloured 3D cubes, rings and tiles flying across the whole screen at different depths and speeds, behind the sidebar and page content. Employee pages only (Admin, login and Welcome are unchanged); cards are slightly more transparent so the objects show through; half of the objects are hidden on small screens; nothing is shown for reduced-motion users or when printing. No route, sheet, tracking or e-mail code changed.
   * Update181: Admin + Employee pages - every button is now smaller (compact padding / 11px text) with a modern 3D look: coloured bottom edge, soft shadow, smooth hover lift, press-down motion, a light sweep on primary buttons and a short fade-in. CSS only (one block at the end of the main stylesheet); colours, labels, links, forms and every route / handler are unchanged. Login pages, sidebar, calendar, group chat and the editor toolbar are not affected. Disabled buttons look flat, and reduced-motion users get no animation.
   * Update178: Automatic missed-entry e-mail checks ONLY the current month (1st of this month to yesterday) and re-verifies the live Productivity log / Leave / Holidays before every batch of 5 e-mails.
@@ -2882,6 +2883,61 @@ function poll(){fetch('/admin/notify/poll?since='+since+'&first='+first,{credent
  .then(function(r){return r.json()}).then(function(j){
  j.items.forEach(function(i){toast(i.text)});since=j.last;first=0}).catch(function(){})}
 poll();setInterval(poll,15000)})();
+</script>{% endif %}
+{% if session.role=='admin' %}<style>
+/* Update183: Admin 3D animated status box - same look and motion as the Employee "Saved Successfully" box */
+#a3wrap{position:fixed;inset:0;z-index:100000;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:12px;padding-top:12vh;perspective:900px}
+#a3wrap .a3card{position:relative;pointer-events:auto;cursor:pointer;transform-style:preserve-3d;display:flex;align-items:center;gap:14px;max-width:min(560px,92vw);padding:16px 26px 16px 18px;border-radius:16px;color:#fff;
+ background:linear-gradient(135deg,#16a34a,#22c55e 55%,#4ade80);box-shadow:0 1px 0 #ffffff66 inset,0 8px 0 #166534,0 26px 40px -10px #14532d99;will-change:transform;
+ animation:a3in .8s cubic-bezier(.22,1,.36,1) var(--dl,0s) both,a3out .7s ease-in calc(var(--dl,0s) + var(--du,4s) - .7s) forwards}
+#a3wrap .a3card.err{background:linear-gradient(135deg,#dc2626,#ef4444 55%,#f87171);box-shadow:0 1px 0 #ffffff66 inset,0 8px 0 #991b1b,0 26px 40px -10px #7f1d1d99}
+#a3wrap .a3card.warn{background:linear-gradient(135deg,#d97706,#f59e0b 55%,#fbbf24);box-shadow:0 1px 0 #ffffff66 inset,0 8px 0 #92400e,0 26px 40px -10px #78350f99}
+#a3wrap .a3card.work{background:linear-gradient(135deg,#4f46e5,#6366f1 55%,#818cf8);box-shadow:0 1px 0 #ffffff66 inset,0 8px 0 #3730a3,0 26px 40px -10px #312e8199;animation:a3in .8s cubic-bezier(.22,1,.36,1) both}
+#a3wrap .a3card.bye{animation:a3out .5s ease-in forwards!important}
+#a3wrap .a3card:hover{animation-play-state:paused}
+#a3wrap .a3coin{flex:none;width:48px;height:48px;border-radius:50%;background:#fff;color:#16a34a;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;box-shadow:0 4px 0 #bbf7d0,0 8px 14px #0003;transform-style:preserve-3d;animation:a3spin 1.2s .25s ease-in-out 2 both}
+#a3wrap .a3card.err .a3coin{color:#dc2626;box-shadow:0 4px 0 #fecaca,0 8px 14px #0003}
+#a3wrap .a3card.warn .a3coin{color:#d97706;box-shadow:0 4px 0 #fde68a,0 8px 14px #0003}
+#a3wrap .a3card.work .a3coin{color:#4f46e5;box-shadow:0 4px 0 #c7d2fe,0 8px 14px #0003;animation:a3spin 1.1s linear infinite}
+#a3wrap .a3card b{display:block;font-size:17px;letter-spacing:.2px;text-shadow:0 2px 0 #14532d66}
+#a3wrap .a3card.err b{text-shadow:0 2px 0 #7f1d1d66}#a3wrap .a3card.warn b{text-shadow:0 2px 0 #78350f66}#a3wrap .a3card.work b{text-shadow:0 2px 0 #31298166}
+#a3wrap .a3card small{display:block;font-size:12.5px;opacity:.95;margin-top:2px;line-height:1.35;word-break:break-word}
+#a3wrap .a3card::after{content:"";position:absolute;inset:0;border-radius:16px;background:linear-gradient(100deg,transparent 30%,#ffffff66 50%,transparent 70%);transform:translateX(-120%);animation:a3shine 1.1s .5s ease forwards;pointer-events:none}
+@keyframes a3in{0%{transform:rotateX(-70deg) rotateY(-90deg) translateZ(-300px) scale(.4);opacity:0}60%{transform:rotateX(12deg) rotateY(10deg) translateZ(40px) scale(1.04);opacity:1}100%{transform:rotateX(0) rotateY(0) translateZ(0) scale(1);opacity:1}}
+@keyframes a3out{0%{transform:rotateX(0) rotateY(0) translateZ(0) scale(1);opacity:1}100%{transform:rotateX(60deg) rotateY(90deg) translateZ(-260px) scale(.5);opacity:0}}
+@keyframes a3spin{from{transform:rotateY(0)}to{transform:rotateY(360deg)}}
+@keyframes a3shine{to{transform:translateX(120%)}}
+@media print{ #a3wrap{display:none} }
+</style><div id="a3wrap" role="status" aria-live="polite"></div><script>
+(function(){var W=document.getElementById('a3wrap');if(!W)return;
+var NEG=/(fail|could not|couldn|cannot|can't|not (sent|saved|found|allowed|available|possible|configured|deleted)|invalid|denied|unable|error|already|nothing|missing|required|wrong|incorrect|expired|no (employee|mail|recipient|record|data))/i;
+var RM=window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+function kill(c){if(c&&c.parentNode)c.parentNode.removeChild(c)}
+function bye(c){if(!c||c.className.indexOf('bye')>-1)return;c.className+=' bye';setTimeout(function(){kill(c)},700)}
+function card(kind,title,msg,delay,secs){var c=document.createElement('div'),co=document.createElement('div'),t=document.createElement('div'),b=document.createElement('b'),sm=document.createElement('small');
+ c.className='a3card '+kind;co.className='a3coin';co.textContent=kind==='err'?'\\u2715':(kind==='warn'?'!':(kind==='work'?'\\u27F3':'\\u2713'));
+ b.textContent=title;sm.textContent=msg;t.appendChild(b);t.appendChild(sm);c.appendChild(co);c.appendChild(t);
+ if(kind!=='work'){c.style.setProperty('--dl',delay+'s');c.style.setProperty('--du',secs+'s')}
+ c.onclick=function(){bye(c)};
+ c.addEventListener('animationend',function(e){if(e.animationName==='a3out'&&c.className.indexOf('bye')<0)kill(c)});
+ W.appendChild(c);
+ if(kind!=='work'&&RM)setTimeout(function(){kill(c)},(delay+secs)*1000);
+ return c}
+var fl=document.querySelectorAll('.app main > p.flash'),d=0;
+Array.prototype.forEach.call(fl,function(p){var t=(p.textContent||'').replace(/\\s+/g,' ').trim();if(!t)return;
+ var k=p.className.indexOf('err')>-1?'err':(NEG.test(t)?'warn':'ok');
+ var ti=k==='err'?'Action failed \\uD83D\\uDE1F':(k==='warn'?'Please note \\u26A0':'Action completed \\uD83D\\uDE0A');
+ var secs=Math.min(12,Math.max(4,3.4+t.length/35));
+ card(k,ti,t,d,secs);d+=0.5;p.style.display='none'});
+var work=null;
+document.addEventListener('submit',function(e){var f=e.target;if(e.defaultPrevented||!f||f.tagName!=='FORM')return;
+ if((f.method||'get').toLowerCase()!=='post'||f.target==='_blank'||f.hasAttribute('data-no-a3')||W.contains(f))return;
+ var sb=e.submitter,lbl=sb?(sb.textContent||sb.value||'').replace(/\\s+/g,' ').trim():'';
+ if(work)kill(work);
+ work=card('work','Working\\u2026',lbl?('"'+lbl+'" is in progress - please wait.'):'Your request is being processed - please wait.',0,0);
+ var w=work;setTimeout(function(){bye(w)},15000)});
+window.addEventListener('pageshow',function(e){if(e.persisted&&work){kill(work);work=null}});
+})();
 </script>{% endif %}
 {% if session.role=='employee' %}<div id="toasts"></div><script>(function(){var K='mzSeen',seen=null;
 try{var raw=sessionStorage.getItem(K);seen=raw?JSON.parse(raw):null}catch(e){seen=null}

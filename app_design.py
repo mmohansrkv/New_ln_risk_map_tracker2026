@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update188: every EMPLOYEE page (Daily entry, Leave & Permission, Personal details, Productivity Info, ...) now fits completely inside the browser window with NO page scrolling: the left panel (menu + calendar + profile + Logout) and the page content are measured live and scaled to the available screen, and re-fitted whenever the content changes (rows added, calendar month changed, window resized). Buttons, cards and forms stay aligned and fully visible. Desktop / tablet-landscape only (>= 801 px); phones keep their normal stacked layout. Display only (CSS + one script in the main template) - no route, sheet, e-mail or tracking code changed.
   * Update187: every 3D animated message box (Employee + Admin) now appears COMPACT in the TOP-RIGHT corner of the page (slides in from the right edge, flips back out to the right); the Yes/No confirm box sits there too. New: a Logout message ("Logging out - see you soon!"). Links that open a page (View / Edit / Access / Logout) wait a moment (0.5 s, Logout 0.9 s) so the box can be seen before the page changes. Display only - nothing else changed.
   * Update186: all 3D animated message boxes (Employee + Admin) are now COMPACT: smaller card, coin, text and Yes/No buttons, a lighter outline and shadow, a smaller confetti burst, and a gentler, smoother pop-in / flip-out (no big swings). Text colours are darker for clear reading. Display only - nothing else changed.
   * Update185: Employee AND Admin pages (and the login page) now share ONE cartoon-style 3D animated message box for everything: success (green, confetti), error (red), notice (amber), info (blue) and working (indigo). It is shown for every Save / Edit / Delete / Send result (all flash messages), instantly when a user clicks Access / Download / View / Print / Edit, while a form is being processed ("Saving... / Deleting... / Sending..."), for Admin notifications and for page notices (shown once per session). Every browser confirm() ("Delete?", "Send ...?") is now a cartoon 3D Yes / No box. Click closes a box; hover pauses it; reduced-motion users get a plain fade. The Update183 Admin box and the Update184 stand-alone Save box are replaced by this one system. Display only - no route, sheet, e-mail or tracking code changed.
@@ -2835,9 +2836,33 @@ body .app.emp3d .card,body .app.emp3d .kpi{background:#ffffffd9}
 @media(max-width:800px){ #fly3d .fo:nth-child(n+9){display:none}}
 @media(prefers-reduced-motion:reduce){ #fly3d{display:none}}
 @media print{ #fly3d{display:none}}
+
+/* ================= Update188: Employee pages fit the screen - no page scrolling =================
+   A small script (end of this template) wraps the left-panel content (.sbin) and the page content (.fitin),
+   measures them and sets a zoom so everything is visible at once. Desktop / tablet only (>= 801px). */
+.sbin,.fitin{display:contents}
+@media(min-width:801px){
+html.fit188,html.fit188 body{height:100%;overflow:hidden}
+html.fit188 .app.emp3d{height:100vh;height:100dvh;min-height:0;overflow:hidden}
+html.fit188 .app.emp3d aside.emp{height:100vh;height:100dvh;padding:12px 12px 10px;gap:0;overflow:hidden}
+html.fit188 .app.emp3d aside.emp .sbin{display:flex;flex-direction:column;gap:3px;min-height:0;transform-origin:0 0}
+html.fit188 .app.emp3d main{height:100vh;height:100dvh;min-height:0;padding:14px 22px 0;overflow:hidden}
+html.fit188 .app.emp3d .mbody{flex:1 1 0;min-height:0;overflow:hidden;position:relative}
+html.fit188 .app.emp3d .mbody.fit-scroll{overflow:auto}
+html.fit188 .app.emp3d .fitin{display:flow-root;padding:3px 3px 2px;transform-origin:0 0}
+html.fit188 .app.emp3d .site-foot{margin:0 auto;padding:3px 12px 5px}
+html.fit188 .app.emp3d h1{font-size:21px}
+html.fit188 .app.emp3d .head{margin-bottom:10px}
+html.fit188 .app.emp3d .card{margin-bottom:10px;padding:14px 18px}
+html.fit188 .app.emp3d h2{margin:12px 0 8px}
+html.fit188 .app.emp3d main>p.flash{margin:0 0 8px;padding:6px 12px}
+}
+@media print{html.fit188,html.fit188 body{height:auto!important;overflow:visible!important}
+html.fit188 .app.emp3d,html.fit188 .app.emp3d main,html.fit188 .app.emp3d .mbody{height:auto!important;overflow:visible!important}
+.sbin,.fitin{zoom:1!important;width:auto!important;height:auto!important}}
 </style></head><body>
 {% if bare %}{{body|safe}}
-{% elif session.role %}<div class="app{{' emp3d' if session.role=='employee' else ''}}">{% if session.role=='employee' %}<div id="fly3d" aria-hidden="true"><div class="fo" style="--s:64px;--x0:-12vw;--y0:78vh;--x1:112vw;--y1:-14vh;--z0:-380px;--z1:160px;--d:46s;--dl:0s;--c1:#6366f1;--c2:#a78bfa;--t:24s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:44px;--x0:110vw;--y0:64vh;--x1:-14vw;--y1:20vh;--z0:-120px;--z1:220px;--d:38s;--dl:-9s;--c1:#ec4899;--c2:#f9a8d4;--t:21s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:86px;--x0:-10vw;--y0:22vh;--x1:112vw;--y1:88vh;--z0:-420px;--z1:-60px;--d:58s;--dl:-21s;--c1:#06b6d4;--c2:#67e8f9;--t:28s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:52px;--x0:30vw;--y0:112vh;--x1:70vw;--y1:-16vh;--z0:-200px;--z1:240px;--d:34s;--dl:-14s;--c1:#f59e0b;--c2:#fcd34d;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:72px;--x0:112vw;--y0:92vh;--x1:-12vw;--y1:40vh;--z0:-340px;--z1:120px;--d:52s;--dl:-30s;--c1:#8b5cf6;--c2:#c4b5fd;--t:26s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:38px;--x0:-10vw;--y0:48vh;--x1:110vw;--y1:6vh;--z0:-60px;--z1:260px;--d:30s;--dl:-4s;--c1:#10b981;--c2:#6ee7b7;--t:20s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:58px;--x0:60vw;--y0:-14vh;--x1:16vw;--y1:114vh;--z0:-260px;--z1:180px;--d:44s;--dl:-26s;--c1:#3b82f6;--c2:#93c5fd;--t:23s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:48px;--x0:88vw;--y0:112vh;--x1:40vw;--y1:-14vh;--z0:-160px;--z1:200px;--d:36s;--dl:-17s;--c1:#f43f5e;--c2:#fda4af;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:90px;--x0:-14vw;--y0:60vh;--x1:112vw;--y1:20vh;--z0:-300px;--z1:140px;--d:50s;--dl:-6s;--c1:#6366f1;--c2:#6366f1;--t:29s"><div class="fr"></div></div><div class="fo" style="--s:64px;--x0:112vw;--y0:18vh;--x1:-14vw;--y1:80vh;--z0:-180px;--z1:200px;--d:42s;--dl:-19s;--c1:#ec4899;--c2:#ec4899;--t:24s"><div class="fr"></div></div><div class="fo" style="--s:110px;--x0:20vw;--y0:114vh;--x1:84vw;--y1:-18vh;--z0:-400px;--z1:60px;--d:60s;--dl:-33s;--c1:#06b6d4;--c2:#06b6d4;--t:32s"><div class="fr"></div></div><div class="fo" style="--s:56px;--x0:80vw;--y0:-14vh;--x1:6vw;--y1:100vh;--z0:-100px;--z1:240px;--d:40s;--dl:-12s;--c1:#f59e0b;--c2:#f59e0b;--t:23s"><div class="fr"></div></div><div class="fo" style="--s:54px;--x0:-12vw;--y0:34vh;--x1:112vw;--y1:70vh;--z0:-240px;--z1:180px;--d:48s;--dl:-2s;--c1:#6366f1;--c2:#22d3ee;--t:23s"><div class="ft"></div></div><div class="fo" style="--s:40px;--x0:112vw;--y0:50vh;--x1:-12vw;--y1:8vh;--z0:-80px;--z1:240px;--d:34s;--dl:-23s;--c1:#ec4899;--c2:#f59e0b;--t:20s"><div class="ft"></div></div><div class="fo" style="--s:70px;--x0:46vw;--y0:-14vh;--x1:92vw;--y1:114vh;--z0:-320px;--z1:100px;--d:54s;--dl:-36s;--c1:#8b5cf6;--c2:#06b6d4;--t:25s"><div class="ft"></div></div><div class="fo" style="--s:46px;--x0:-12vw;--y0:104vh;--x1:114vw;--y1:30vh;--z0:-140px;--z1:220px;--d:40s;--dl:-28s;--c1:#10b981;--c2:#3b82f6;--t:21s"><div class="ft"></div></div></div>{% endif %}<aside class="emp">
+{% elif session.role %}<div class="app{{' emp3d' if session.role=='employee' else ''}}">{% if session.role=='employee' %}<script>document.documentElement.classList.add('fit188')</script><div id="fly3d" aria-hidden="true"><div class="fo" style="--s:64px;--x0:-12vw;--y0:78vh;--x1:112vw;--y1:-14vh;--z0:-380px;--z1:160px;--d:46s;--dl:0s;--c1:#6366f1;--c2:#a78bfa;--t:24s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:44px;--x0:110vw;--y0:64vh;--x1:-14vw;--y1:20vh;--z0:-120px;--z1:220px;--d:38s;--dl:-9s;--c1:#ec4899;--c2:#f9a8d4;--t:21s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:86px;--x0:-10vw;--y0:22vh;--x1:112vw;--y1:88vh;--z0:-420px;--z1:-60px;--d:58s;--dl:-21s;--c1:#06b6d4;--c2:#67e8f9;--t:28s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:52px;--x0:30vw;--y0:112vh;--x1:70vw;--y1:-16vh;--z0:-200px;--z1:240px;--d:34s;--dl:-14s;--c1:#f59e0b;--c2:#fcd34d;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:72px;--x0:112vw;--y0:92vh;--x1:-12vw;--y1:40vh;--z0:-340px;--z1:120px;--d:52s;--dl:-30s;--c1:#8b5cf6;--c2:#c4b5fd;--t:26s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:38px;--x0:-10vw;--y0:48vh;--x1:110vw;--y1:6vh;--z0:-60px;--z1:260px;--d:30s;--dl:-4s;--c1:#10b981;--c2:#6ee7b7;--t:20s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:58px;--x0:60vw;--y0:-14vh;--x1:16vw;--y1:114vh;--z0:-260px;--z1:180px;--d:44s;--dl:-26s;--c1:#3b82f6;--c2:#93c5fd;--t:23s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:48px;--x0:88vw;--y0:112vh;--x1:40vw;--y1:-14vh;--z0:-160px;--z1:200px;--d:36s;--dl:-17s;--c1:#f43f5e;--c2:#fda4af;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:90px;--x0:-14vw;--y0:60vh;--x1:112vw;--y1:20vh;--z0:-300px;--z1:140px;--d:50s;--dl:-6s;--c1:#6366f1;--c2:#6366f1;--t:29s"><div class="fr"></div></div><div class="fo" style="--s:64px;--x0:112vw;--y0:18vh;--x1:-14vw;--y1:80vh;--z0:-180px;--z1:200px;--d:42s;--dl:-19s;--c1:#ec4899;--c2:#ec4899;--t:24s"><div class="fr"></div></div><div class="fo" style="--s:110px;--x0:20vw;--y0:114vh;--x1:84vw;--y1:-18vh;--z0:-400px;--z1:60px;--d:60s;--dl:-33s;--c1:#06b6d4;--c2:#06b6d4;--t:32s"><div class="fr"></div></div><div class="fo" style="--s:56px;--x0:80vw;--y0:-14vh;--x1:6vw;--y1:100vh;--z0:-100px;--z1:240px;--d:40s;--dl:-12s;--c1:#f59e0b;--c2:#f59e0b;--t:23s"><div class="fr"></div></div><div class="fo" style="--s:54px;--x0:-12vw;--y0:34vh;--x1:112vw;--y1:70vh;--z0:-240px;--z1:180px;--d:48s;--dl:-2s;--c1:#6366f1;--c2:#22d3ee;--t:23s"><div class="ft"></div></div><div class="fo" style="--s:40px;--x0:112vw;--y0:50vh;--x1:-12vw;--y1:8vh;--z0:-80px;--z1:240px;--d:34s;--dl:-23s;--c1:#ec4899;--c2:#f59e0b;--t:20s"><div class="ft"></div></div><div class="fo" style="--s:70px;--x0:46vw;--y0:-14vh;--x1:92vw;--y1:114vh;--z0:-320px;--z1:100px;--d:54s;--dl:-36s;--c1:#8b5cf6;--c2:#06b6d4;--t:25s"><div class="ft"></div></div><div class="fo" style="--s:46px;--x0:-12vw;--y0:104vh;--x1:114vw;--y1:30vh;--z0:-140px;--z1:220px;--d:40s;--dl:-28s;--c1:#10b981;--c2:#3b82f6;--t:21s"><div class="ft"></div></div></div>{% endif %}<aside class="emp">
 <div class="panel-ttl">{{ 'Admin Panel' if session.role=='admin' else 'Employee Panel' }}</div>
 {% for h,l,on,kids in nav %}{% if kids %}<div class="ng{{' open' if on else ''}}"><a class="ng-h" href="{{h}}" role="button" aria-expanded="{{'true' if on else 'false'}}" onclick="var g=this.parentNode;var o=g.classList.toggle('open');this.setAttribute('aria-expanded',o);return false">{{l}}<span class="chev">&#9650;</span></a>
 <div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
@@ -2878,6 +2903,67 @@ document.getElementById('cal_p').onclick=function(){m--;if(m<0){m=11;y--}draw()}
 document.getElementById('cal_n').onclick=function(){m++;if(m>11){m=0;y++}draw()};
 document.getElementById('cal_td').onclick=function(){now=new Date();y=now.getFullYear();m=now.getMonth();draw()};
 draw()})();
+</script>{% endif %}
+{% if session.role=='employee' and not bare %}<script>
+/* Update188: fit the Employee panel + page content to the screen (no page scrolling) */
+(function(){
+var root=document.querySelector('.app.emp3d');if(!root)return;
+var aside=root.querySelector('aside.emp'),main=root.querySelector('main'),mb=root.querySelector('.mbody');
+if(!aside||!main||!mb)return;
+var mq=window.matchMedia('(min-width:801px)'),FLOOR=0.55,STEP=0.025,sbin=null,fin=null,tm=null;
+function wrap(){
+ if(!sbin){sbin=document.createElement('div');sbin.className='sbin';while(aside.firstChild)sbin.appendChild(aside.firstChild);aside.appendChild(sbin)}
+ if(!fin){fin=document.createElement('div');fin.className='fitin';while(mb.firstChild)fin.appendChild(mb.firstChild);mb.appendChild(fin)}
+}
+function reset(){
+ [sbin,fin].forEach(function(e){if(e){e.style.zoom='';e.style.width='';e.style.height=''}});
+ aside.style.overflowY='';mb.classList.remove('fit-scroll')
+}
+function px(v){return parseFloat(v)||0}
+function fitSide(){
+ var cs=getComputedStyle(aside),W=aside.clientWidth-px(cs.paddingLeft)-px(cs.paddingRight),H=aside.clientHeight-px(cs.paddingTop)-px(cs.paddingBottom);
+ if(W<=0||H<=0)return;
+ var z=1,h=0;
+ for(;;){
+  sbin.style.zoom=z;sbin.style.width=(W/z)+'px';sbin.style.height='auto';
+  h=sbin.getBoundingClientRect().height;
+  if(h<=H+1||z<=FLOOR+0.0001)break;
+  z=Math.max(FLOOR,z-STEP)
+ }
+ sbin.style.height=(H/z)+'px';
+ aside.style.overflowY=(h>H+1)?'auto':'hidden'
+}
+function fitMain(){
+ var W=mb.clientWidth,H=mb.clientHeight;
+ if(W<=0||H<=0)return;
+ var z=1,h=0,wide=false;
+ for(;;){
+  fin.style.zoom=z;fin.style.width=(W/z)+'px';
+  h=fin.getBoundingClientRect().height;
+  wide=fin.scrollWidth>(W/z)+2;
+  if((h<=H+1&&!wide)||z<=FLOOR+0.0001)break;
+  z=Math.max(FLOOR,z-STEP)
+ }
+ mb.classList.toggle('fit-scroll',(h>H+1||wide));
+ if(!mb.classList.contains('fit-scroll')){mb.scrollTop=0;mb.scrollLeft=0}
+}
+function fit(){
+ if(!mq.matches){reset();return}
+ wrap();fitSide();fitMain()
+}
+function sched(){clearTimeout(tm);tm=setTimeout(fit,60)}
+mb.addEventListener('scroll',function(){if(!mb.classList.contains('fit-scroll')&&(mb.scrollTop||mb.scrollLeft)){mb.scrollTop=0;mb.scrollLeft=0}});
+window.addEventListener('resize',sched);
+window.addEventListener('load',sched);
+if(mq.addEventListener)mq.addEventListener('change',sched);
+['click','input','change','toggle','load','transitionend'].forEach(function(ev){root.addEventListener(ev,sched,true)});
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(sched);
+if(window.MutationObserver){
+ var mo=new MutationObserver(sched),o={childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['class','hidden','open']};
+ wrap();mo.observe(sbin,o);mo.observe(fin,o)
+}
+fit();setTimeout(fit,400);setTimeout(fit,1500)
+})();
 </script>{% endif %}
 {% if session.role=='admin' %}<div id="toasts"></div><script>
 (function(){var since="0",first=1;

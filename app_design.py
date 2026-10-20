@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update186: all 3D animated message boxes (Employee + Admin) are now COMPACT: smaller card, coin, text and Yes/No buttons, a lighter outline and shadow, a smaller confetti burst, and a gentler, smoother pop-in / flip-out (no big swings). Text colours are darker for clear reading. Display only - nothing else changed.
   * Update185: Employee AND Admin pages (and the login page) now share ONE cartoon-style 3D animated message box for everything: success (green, confetti), error (red), notice (amber), info (blue) and working (indigo). It is shown for every Save / Edit / Delete / Send result (all flash messages), instantly when a user clicks Access / Download / View / Print / Edit, while a form is being processed ("Saving... / Deleting... / Sending..."), for Admin notifications and for page notices (shown once per session). Every browser confirm() ("Delete?", "Send ...?") is now a cartoon 3D Yes / No box. Click closes a box; hover pauses it; reduced-motion users get a plain fade. The Update183 Admin box and the Update184 stand-alone Save box are replaced by this one system. Display only - no route, sheet, e-mail or tracking code changed.
   * Update184: Productivity Entry page - clicking Save now shows a cartoon-style 3D animated confirmation in the middle of the page ("<name> - Saved Successfully!"): bouncy squash-and-stretch 3D pop-in, spinning coin badge, confetti-star burst, light sweep, flip-out. A failed save shows the same box in red ("Oops! Not saved") with the reason. Click closes it; the page opens the Employee page after the animation. Display only - no route, sheet, e-mail or tracking code changed.
   * Update183: Admin pages now use the SAME 3D animated message box as the Employee page ("Saved Successfully" box: 3D flip-in, spinning coin, light sweep, flip-out). Every Admin action result (Send mail, Retry, Save, Delete, Lock, Import ... - all the flash messages) is shown in this box: green = success, red = failed, amber = notice; long messages stay longer, hover pauses it, click closes it. When an Admin clicks a button that submits a form, a blue "Working..." 3D box appears at once with the button name until the result page opens. Display only - no route, sheet, e-mail or tracking code changed.
@@ -2887,42 +2888,42 @@ function poll(){fetch('/admin/notify/poll?since='+since+'&first='+first,{credent
 poll();setInterval(poll,15000)})();
 </script>{% endif %}
 {% if not bare %}<style>
-/* Update185: ONE cartoon-style 3D message system for Employee + Admin (+ login): success / error / notice / info / working / confirm */
+/* Update186: compact cartoon 3D message boxes (Employee + Admin + login) - success / error / notice / info / working / confirm */
 .cmroot{font-family:"Comic Sans MS","Chalkboard SE","Marker Felt","Trebuchet MS",sans-serif}
-#cmwrap{position:fixed;inset:0;z-index:100000;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:18px;padding:11vh 12px 0;perspective:1000px}
-#cmask{position:fixed;inset:0;z-index:100002;display:flex;align-items:center;justify-content:center;padding:12px;background:rgba(15,23,42,.45);perspective:1000px;animation:cmFadeIn .2s both}
-.cmroot .cm{--c1:#bbf7d0;--c2:#4ade80;--ink:#14301f;--k1:#fff7b0;--k2:#facc15;--k3:#f59e0b;position:relative;pointer-events:auto;cursor:pointer;max-width:min(560px,92vw);transform-style:preserve-3d;will-change:transform;animation:cmIn .85s ease-out var(--dl,0s) both,cmWob 2.4s ease-in-out calc(var(--dl,0s) + .85s) 1,cmOut .65s ease-in calc(var(--dl,0s) + var(--du,4s) - .65s) forwards}
-.cmroot .cm.err{--c1:#fecaca;--c2:#f87171;--ink:#450a0a;--k1:#fff;--k2:#fca5a5;--k3:#ef4444}
-.cmroot .cm.warn{--c1:#fef3c7;--c2:#fbbf24;--ink:#451a03;--k1:#fff;--k2:#fde68a;--k3:#f59e0b}
-.cmroot .cm.info{--c1:#dbeafe;--c2:#60a5fa;--ink:#0b2447;--k1:#fff;--k2:#93c5fd;--k3:#3b82f6}
-.cmroot .cm.work{--c1:#e0e7ff;--c2:#818cf8;--ink:#1e1b4b;--k1:#fff;--k2:#c7d2fe;--k3:#6366f1;animation:cmIn .85s ease-out both,cmBob 1.6s ease-in-out .85s infinite}
-.cmroot .cm.dlg{cursor:default;animation:cmIn .85s ease-out both}
-.cmroot .cm.bye{animation:cmOut .5s ease-in forwards!important}
+#cmwrap{position:fixed;inset:0;z-index:100000;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:10px;padding:9vh 10px 0;perspective:900px}
+#cmask{position:fixed;inset:0;z-index:100002;display:flex;align-items:center;justify-content:center;padding:10px;background:rgba(15,23,42,.4);perspective:900px;animation:cmFadeIn .2s both}
+.cmroot .cm{--c1:#bbf7d0;--c2:#4ade80;--ink:#10281a;--k1:#fff7b0;--k2:#facc15;--k3:#f59e0b;position:relative;pointer-events:auto;cursor:pointer;max-width:min(380px,90vw);transform-style:preserve-3d;will-change:transform,opacity;animation:cmIn .6s cubic-bezier(.2,.8,.3,1) var(--dl,0s) both,cmWob 1.8s ease-in-out calc(var(--dl,0s) + .6s) 1,cmOut .5s ease-in calc(var(--dl,0s) + var(--du,4s) - .5s) forwards}
+.cmroot .cm.err{--c1:#fecaca;--c2:#f87171;--ink:#3b0808;--k1:#fff;--k2:#fca5a5;--k3:#ef4444}
+.cmroot .cm.warn{--c1:#fef3c7;--c2:#fbbf24;--ink:#3b1a02;--k1:#fff;--k2:#fde68a;--k3:#f59e0b}
+.cmroot .cm.info{--c1:#dbeafe;--c2:#60a5fa;--ink:#0a2040;--k1:#fff;--k2:#93c5fd;--k3:#3b82f6}
+.cmroot .cm.work{--c1:#e0e7ff;--c2:#818cf8;--ink:#1a1745;--k1:#fff;--k2:#c7d2fe;--k3:#6366f1;animation:cmIn .6s cubic-bezier(.2,.8,.3,1) both,cmBob 1.8s ease-in-out .6s infinite}
+.cmroot .cm.dlg{cursor:default;animation:cmIn .6s cubic-bezier(.2,.8,.3,1) both}
+.cmroot .cm.bye{animation:cmOut .4s ease-in forwards!important}
 .cmroot .cm:hover{animation-play-state:paused}
-.cmroot .cmc{position:relative;display:flex;align-items:center;gap:14px;padding:16px 26px 16px 18px;border:4px solid #1f2937;border-radius:26px;overflow:hidden;color:var(--ink);background:linear-gradient(180deg,var(--c1) 0%,var(--c2) 100%);box-shadow:0 8px 0 #1f2937,0 24px 32px -8px rgba(0,0,0,.45),inset 0 5px 0 rgba(255,255,255,.6),inset 0 -6px 0 rgba(0,0,0,.08)}
-.cmroot .cmc::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.65) 50%,transparent 70%);transform:translateX(-130%);animation:cmShine 1s calc(var(--dl,0s) + .6s) ease-in-out forwards;pointer-events:none}
-.cmroot .cmk{flex:none;width:52px;height:52px;border-radius:50%;border:4px solid #1f2937;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:900;line-height:1;color:#1f2937;background:radial-gradient(circle at 32% 28%,var(--k1),var(--k2) 60%,var(--k3));box-shadow:0 4px 0 #1f2937;transform-style:preserve-3d;animation:cmSpin 1s calc(var(--dl,0s) + .35s) ease-in-out 2 both}
+.cmroot .cmc{position:relative;display:flex;align-items:center;gap:10px;padding:9px 16px 9px 11px;border:3px solid #1f2937;border-radius:16px;overflow:hidden;color:var(--ink);background:linear-gradient(180deg,var(--c1) 0%,var(--c2) 100%);box-shadow:0 4px 0 #1f2937,0 12px 18px -6px rgba(0,0,0,.4),inset 0 3px 0 rgba(255,255,255,.6),inset 0 -3px 0 rgba(0,0,0,.08)}
+.cmroot .cmc::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.55) 50%,transparent 70%);transform:translateX(-130%);animation:cmShine .8s calc(var(--dl,0s) + .45s) ease-in-out forwards;pointer-events:none}
+.cmroot .cmk{flex:none;width:32px;height:32px;border-radius:50%;border:3px solid #1f2937;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:900;line-height:1;color:#1f2937;background:radial-gradient(circle at 32% 28%,var(--k1),var(--k2) 60%,var(--k3));box-shadow:0 2px 0 #1f2937;transform-style:preserve-3d;animation:cmSpin .8s calc(var(--dl,0s) + .3s) ease-in-out 1 both}
 .cmroot .cm.work .cmk{animation:cmSpinC 1.1s linear infinite}
 .cmroot .cmt{min-width:0}
-.cmroot .cmt b{display:block;font-size:clamp(16px,4.4vw,21px);line-height:1.15;text-shadow:2px 2px 0 rgba(255,255,255,.75)}
-.cmroot .cmt small{display:block;margin-top:3px;font-size:clamp(12px,3.3vw,14px);font-weight:700;opacity:.88;line-height:1.35;word-break:break-word}
-.cmroot .cms{position:absolute;left:50%;top:50%;width:var(--sz);height:var(--sz);margin:calc(var(--sz) / -2) 0 0 calc(var(--sz) / -2);font-size:var(--sz);line-height:1;text-align:center;opacity:0;-webkit-text-stroke:1.5px #1f2937;pointer-events:none;animation:cmStar 1.15s calc(var(--dl,0s) + .25s) ease-out forwards}
-.cmroot .cmbtn{display:flex;gap:12px;margin-top:12px;flex-wrap:wrap}
-.cmroot .cmb{font:inherit;font-weight:900;font-size:15px;padding:8px 20px;border:3px solid #1f2937;border-radius:16px;box-shadow:0 5px 0 #1f2937;cursor:pointer;color:#1f2937;background:#fff;transition:transform .08s,box-shadow .08s}
-.cmroot .cmb:active{transform:translateY(4px);box-shadow:0 1px 0 #1f2937}
-.cmroot .cmb:focus-visible{outline:3px solid #1f2937;outline-offset:2px}
+.cmroot .cmt b{display:block;font-size:clamp(13px,3.6vw,15px);line-height:1.2;font-weight:800;text-shadow:1px 1px 0 rgba(255,255,255,.7)}
+.cmroot .cmt small{display:block;margin-top:2px;font-size:clamp(11.5px,3vw,12.5px);font-weight:600;line-height:1.3;word-break:break-word}
+.cmroot .cms{position:absolute;left:50%;top:50%;width:var(--sz);height:var(--sz);margin:calc(var(--sz) / -2) 0 0 calc(var(--sz) / -2);font-size:var(--sz);line-height:1;text-align:center;opacity:0;-webkit-text-stroke:1px #1f2937;pointer-events:none;animation:cmStar .9s calc(var(--dl,0s) + .2s) ease-out forwards}
+.cmroot .cmbtn{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.cmroot .cmb{font:inherit;font-weight:800;font-size:13px;padding:5px 14px;border:2px solid #1f2937;border-radius:12px;box-shadow:0 3px 0 #1f2937;cursor:pointer;color:#1f2937;background:#fff;transition:transform .08s,box-shadow .08s}
+.cmroot .cmb:active{transform:translateY(2px);box-shadow:0 1px 0 #1f2937}
+.cmroot .cmb:focus-visible{outline:2px solid #1f2937;outline-offset:2px}
 .cmroot .cmb.yes{background:#4ade80}
 .cmroot .cmb.yes.danger{background:#f87171}
-@keyframes cmIn{0%{transform:translateY(60px) scale(.1) rotateX(70deg) rotateZ(-14deg);opacity:0}30%{transform:translateY(-26px) scale(1.2,.82) rotateX(-8deg) rotateZ(5deg);opacity:1}48%{transform:translateY(6px) scale(.9,1.14) rotateX(4deg) rotateZ(-3deg)}68%{transform:translateY(-8px) scale(1.06,.96) rotateX(-3deg) rotateZ(2deg)}100%{transform:none;opacity:1}}
-@keyframes cmWob{0%,100%{transform:none}25%{transform:translateY(-5px) rotateY(-8deg) rotateZ(-1.2deg)}50%{transform:none}75%{transform:translateY(-4px) rotateY(8deg) rotateZ(1.2deg)}}
-@keyframes cmBob{0%,100%{transform:none}50%{transform:translateY(-5px)}}
-@keyframes cmOut{0%{transform:none;opacity:1}100%{transform:translateY(-44px) scale(.2) rotateX(-70deg) rotateZ(10deg);opacity:0}}
+@keyframes cmIn{0%{transform:translateY(24px) scale(.6) rotateX(40deg);opacity:0}55%{transform:translateY(-4px) scale(1.04) rotateX(-4deg);opacity:1}80%{transform:translateY(1px) scale(.99)}100%{transform:none;opacity:1}}
+@keyframes cmWob{0%,100%{transform:none}35%{transform:translateY(-2px) rotateY(-4deg)}70%{transform:translateY(-1px) rotateY(4deg)}}
+@keyframes cmBob{0%,100%{transform:none}50%{transform:translateY(-3px)}}
+@keyframes cmOut{0%{transform:none;opacity:1}100%{transform:translateY(-18px) scale(.7) rotateX(-35deg);opacity:0}}
 @keyframes cmFadeIn{from{opacity:0}to{opacity:1}}
 @keyframes cmFadeOut{to{opacity:0}}
-@keyframes cmSpin{0%{transform:rotateY(0) scale(1)}50%{transform:rotateY(180deg) scale(1.18)}100%{transform:rotateY(360deg) scale(1)}}
+@keyframes cmSpin{0%{transform:rotateY(0) scale(1)}50%{transform:rotateY(180deg) scale(1.12)}100%{transform:rotateY(360deg) scale(1)}}
 @keyframes cmSpinC{to{transform:rotateY(360deg)}}
 @keyframes cmShine{to{transform:translateX(130%)}}
-@keyframes cmStar{0%{transform:translate(0,0) scale(.2) rotate(0);opacity:0}15%{opacity:1}100%{transform:translate(var(--dx),var(--dy)) scale(1.1) rotate(var(--r));opacity:0}}
+@keyframes cmStar{0%{transform:translate(0,0) scale(.2) rotate(0);opacity:0}15%{opacity:1}100%{transform:translate(var(--dx),var(--dy)) scale(1) rotate(var(--r));opacity:0}}
 @media (prefers-reduced-motion:reduce){ .cmroot .cm{animation:cmFadeIn .2s both,cmFadeOut .4s ease calc(var(--dl,0s) + var(--du,4s) - .4s) forwards} .cmroot .cm.work,.cmroot .cm.dlg{animation:cmFadeIn .2s both} .cmroot .cmk,.cmroot .cmc::after,.cmroot .cms{animation:none} }
 @media print{ #cmwrap,#cmask{display:none!important} }
 </style><div id="cmwrap" class="cmroot" role="status" aria-live="polite"></div><script>
@@ -2933,10 +2934,10 @@ var TITLE={ok:'Success! 😊',err:'Oops! 😟',warn:'Please note ⚠️',info:'H
 var COLS=['#facc15','#fb7185','#38bdf8','#a78bfa','#fb923c','#ffffff'],SYM=['★','✦','●'];
 var RM=window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)').matches;
 function kill(c){if(c&&c.parentNode)c.parentNode.removeChild(c)}
-function bye(c){if(!c||c.className.indexOf(' bye')>-1)return;c.className+=' bye';setTimeout(function(){kill(c)},600)}
+function bye(c){if(!c||c.className.indexOf(' bye')>-1)return;c.className+=' bye';setTimeout(function(){kill(c)},450)}
 function burst(c,n){for(var i=0;i<n;i++){var st=document.createElement('span');st.className='cms';st.textContent=SYM[i%3];
- var a=(i/n)*Math.PI*2+Math.random()*.3,d=110+Math.random()*80;
- st.style.cssText='--dx:'+Math.round(Math.cos(a)*d*1.3)+'px;--dy:'+Math.round(Math.sin(a)*d)+'px;--r:'+Math.round(Math.random()*540-270)+'deg;--sz:'+Math.round(14+Math.random()*14)+'px;color:'+COLS[i%COLS.length];c.appendChild(st)}}
+ var a=(i/n)*Math.PI*2+Math.random()*.3,d=70+Math.random()*50;
+ st.style.cssText='--dx:'+Math.round(Math.cos(a)*d*1.3)+'px;--dy:'+Math.round(Math.sin(a)*d)+'px;--r:'+Math.round(Math.random()*540-270)+'deg;--sz:'+Math.round(9+Math.random()*8)+'px;color:'+COLS[i%COLS.length];c.appendChild(st)}}
 function make(kind,title,msg,delay,secs){
  var c=document.createElement('div'),f=document.createElement('div'),k=document.createElement('div'),t=document.createElement('div'),b=document.createElement('b');
  c.className='cm '+kind;f.className='cmc';k.className='cmk';k.textContent=ICON[kind]||'✓';t.className='cmt';
@@ -2944,7 +2945,7 @@ function make(kind,title,msg,delay,secs){
  if(msg){var sm=document.createElement('small');sm.textContent=msg;t.appendChild(sm)}
  f.appendChild(k);f.appendChild(t);c.appendChild(f);
  if(kind!=='work'){c.style.setProperty('--dl',delay+'s');c.style.setProperty('--du',secs+'s')}
- if(kind==='ok')burst(c,12);
+ if(kind==='ok')burst(c,10);
  c.onclick=function(){bye(c)};
  c.addEventListener('animationend',function(e){if(e.animationName==='cmOut'||e.animationName==='cmFadeOut')kill(c)});
  while(W.children.length>=5)kill(W.firstChild);

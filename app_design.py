@@ -2845,7 +2845,10 @@ body .app.emp3d .card,body .app.emp3d .kpi{background:#ffffffd9}
 html.fit188,html.fit188 body{height:100%;overflow:hidden}
 html.fit188 .app.emp3d{height:100vh;height:100dvh;min-height:0;overflow:hidden}
 html.fit188 .app.emp3d aside.emp{height:100vh;height:100dvh;padding:12px 12px 10px;gap:0;overflow:hidden}
-html.fit188 .app.emp3d aside.emp .sbin{display:flex;flex-direction:column;gap:3px;min-height:0;transform-origin:0 0}
+html.fit188 .app.emp3d aside.emp .sbin{display:flex;flex-direction:column;gap:3px;min-height:0;overflow:hidden;transform-origin:0 0}
+html.fit188 .app.emp3d aside.emp .sbin>*{flex-shrink:0}
+html.fit188 .app.emp3d aside.emp>.prof-out{flex:none;display:block;position:relative;z-index:6;margin:8px 0 0;padding:9px 14px;text-align:center;font-size:13.5px;font-weight:600;color:#fff;background:linear-gradient(135deg,#ef4444,#dc2626);border-radius:10px;box-shadow:0 3px 0 #991b1b,0 8px 16px -6px #ef444499;text-decoration:none}
+html.fit188 .app.emp3d aside.emp>.prof-out:hover{filter:brightness(1.08);transform:translateY(-1px)}
 html.fit188 .app.emp3d main{height:100vh;height:100dvh;min-height:0;padding:14px 22px 0;overflow:hidden}
 html.fit188 .app.emp3d .mbody{flex:1 1 0;min-height:0;overflow:hidden;position:relative}
 html.fit188 .app.emp3d .mbody.fit-scroll{overflow:auto}
@@ -2910,18 +2913,22 @@ draw()})();
 var root=document.querySelector('.app.emp3d');if(!root)return;
 var aside=root.querySelector('aside.emp'),main=root.querySelector('main'),mb=root.querySelector('.mbody');
 if(!aside||!main||!mb)return;
-var mq=window.matchMedia('(min-width:801px)'),FLOOR=0.55,STEP=0.025,sbin=null,fin=null,tm=null;
+var mq=window.matchMedia('(min-width:801px)'),FLOOR=0.55,STEP=0.025,sbin=null,fin=null,tm=null,outEl=aside.querySelector('.prof-out'),profEl=aside.querySelector('.prof');
 function wrap(){
  if(!sbin){sbin=document.createElement('div');sbin.className='sbin';while(aside.firstChild)sbin.appendChild(aside.firstChild);aside.appendChild(sbin)}
+ if(outEl&&outEl.parentNode!==aside)aside.appendChild(outEl);
  if(!fin){fin=document.createElement('div');fin.className='fitin';while(mb.firstChild)fin.appendChild(mb.firstChild);mb.appendChild(fin)}
 }
 function reset(){
  [sbin,fin].forEach(function(e){if(e){e.style.zoom='';e.style.width='';e.style.height=''}});
+ if(outEl&&profEl&&outEl.parentNode!==profEl)profEl.appendChild(outEl);
+ if(sbin){sbin.style.overflowY=''}
  aside.style.overflowY='';mb.classList.remove('fit-scroll')
 }
 function px(v){return parseFloat(v)||0}
 function fitSide(){
  var cs=getComputedStyle(aside),W=aside.clientWidth-px(cs.paddingLeft)-px(cs.paddingRight),H=aside.clientHeight-px(cs.paddingTop)-px(cs.paddingBottom);
+ if(outEl&&outEl.parentNode===aside)H-=outEl.offsetHeight+8;
  if(W<=0||H<=0)return;
  var z=1,h=0;
  for(;;){
@@ -2931,7 +2938,7 @@ function fitSide(){
   z=Math.max(FLOOR,z-STEP)
  }
  sbin.style.height=(H/z)+'px';
- aside.style.overflowY=(h>H+1)?'auto':'hidden'
+ sbin.style.overflowY=(h>H+1)?'auto':'hidden'
 }
 function fitMain(){
  var W=mb.clientWidth,H=mb.clientHeight;

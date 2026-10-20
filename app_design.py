@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update187: every 3D animated message box (Employee + Admin) now appears COMPACT in the TOP-RIGHT corner of the page (slides in from the right edge, flips back out to the right); the Yes/No confirm box sits there too. New: a Logout message ("Logging out - see you soon!"). Links that open a page (View / Edit / Access / Logout) wait a moment (0.5 s, Logout 0.9 s) so the box can be seen before the page changes. Display only - nothing else changed.
   * Update186: all 3D animated message boxes (Employee + Admin) are now COMPACT: smaller card, coin, text and Yes/No buttons, a lighter outline and shadow, a smaller confetti burst, and a gentler, smoother pop-in / flip-out (no big swings). Text colours are darker for clear reading. Display only - nothing else changed.
   * Update185: Employee AND Admin pages (and the login page) now share ONE cartoon-style 3D animated message box for everything: success (green, confetti), error (red), notice (amber), info (blue) and working (indigo). It is shown for every Save / Edit / Delete / Send result (all flash messages), instantly when a user clicks Access / Download / View / Print / Edit, while a form is being processed ("Saving... / Deleting... / Sending..."), for Admin notifications and for page notices (shown once per session). Every browser confirm() ("Delete?", "Send ...?") is now a cartoon 3D Yes / No box. Click closes a box; hover pauses it; reduced-motion users get a plain fade. The Update183 Admin box and the Update184 stand-alone Save box are replaced by this one system. Display only - no route, sheet, e-mail or tracking code changed.
   * Update184: Productivity Entry page - clicking Save now shows a cartoon-style 3D animated confirmation in the middle of the page ("<name> - Saved Successfully!"): bouncy squash-and-stretch 3D pop-in, spinning coin badge, confetti-star burst, light sweep, flip-out. A failed save shows the same box in red ("Oops! Not saved") with the reason. Click closes it; the page opens the Employee page after the animation. Display only - no route, sheet, e-mail or tracking code changed.
@@ -2890,9 +2891,9 @@ poll();setInterval(poll,15000)})();
 {% if not bare %}<style>
 /* Update186: compact cartoon 3D message boxes (Employee + Admin + login) - success / error / notice / info / working / confirm */
 .cmroot{font-family:"Comic Sans MS","Chalkboard SE","Marker Felt","Trebuchet MS",sans-serif}
-#cmwrap{position:fixed;inset:0;z-index:100000;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:10px;padding:9vh 10px 0;perspective:900px}
-#cmask{position:fixed;inset:0;z-index:100002;display:flex;align-items:center;justify-content:center;padding:10px;background:rgba(15,23,42,.4);perspective:900px;animation:cmFadeIn .2s both}
-.cmroot .cm{--c1:#bbf7d0;--c2:#4ade80;--ink:#10281a;--k1:#fff7b0;--k2:#facc15;--k3:#f59e0b;position:relative;pointer-events:auto;cursor:pointer;max-width:min(380px,90vw);transform-style:preserve-3d;will-change:transform,opacity;animation:cmIn .6s cubic-bezier(.2,.8,.3,1) var(--dl,0s) both,cmWob 1.8s ease-in-out calc(var(--dl,0s) + .6s) 1,cmOut .5s ease-in calc(var(--dl,0s) + var(--du,4s) - .5s) forwards}
+#cmwrap{position:fixed;inset:0;z-index:100000;pointer-events:none;display:flex;flex-direction:column;align-items:flex-end;gap:8px;padding:14px 14px 0;perspective:900px;perspective-origin:100% 0}
+#cmask{position:fixed;inset:0;z-index:100002;display:flex;align-items:flex-start;justify-content:flex-end;padding:14px;background:rgba(15,23,42,.1);perspective:900px;perspective-origin:100% 0;animation:cmFadeIn .2s both}
+.cmroot .cm{--c1:#bbf7d0;--c2:#4ade80;--ink:#10281a;--k1:#fff7b0;--k2:#facc15;--k3:#f59e0b;position:relative;pointer-events:auto;cursor:pointer;max-width:min(340px,92vw);transform-origin:100% 0;transform-style:preserve-3d;will-change:transform,opacity;animation:cmIn .6s cubic-bezier(.2,.8,.3,1) var(--dl,0s) both,cmWob 1.8s ease-in-out calc(var(--dl,0s) + .6s) 1,cmOut .5s ease-in calc(var(--dl,0s) + var(--du,4s) - .5s) forwards}
 .cmroot .cm.err{--c1:#fecaca;--c2:#f87171;--ink:#3b0808;--k1:#fff;--k2:#fca5a5;--k3:#ef4444}
 .cmroot .cm.warn{--c1:#fef3c7;--c2:#fbbf24;--ink:#3b1a02;--k1:#fff;--k2:#fde68a;--k3:#f59e0b}
 .cmroot .cm.info{--c1:#dbeafe;--c2:#60a5fa;--ink:#0a2040;--k1:#fff;--k2:#93c5fd;--k3:#3b82f6}
@@ -2914,10 +2915,10 @@ poll();setInterval(poll,15000)})();
 .cmroot .cmb:focus-visible{outline:2px solid #1f2937;outline-offset:2px}
 .cmroot .cmb.yes{background:#4ade80}
 .cmroot .cmb.yes.danger{background:#f87171}
-@keyframes cmIn{0%{transform:translateY(24px) scale(.6) rotateX(40deg);opacity:0}55%{transform:translateY(-4px) scale(1.04) rotateX(-4deg);opacity:1}80%{transform:translateY(1px) scale(.99)}100%{transform:none;opacity:1}}
+@keyframes cmIn{0%{transform:translateX(40px) scale(.7) rotateY(-35deg);opacity:0}55%{transform:translateX(-4px) scale(1.03) rotateY(4deg);opacity:1}80%{transform:translateX(1px) scale(.995)}100%{transform:none;opacity:1}}
 @keyframes cmWob{0%,100%{transform:none}35%{transform:translateY(-2px) rotateY(-4deg)}70%{transform:translateY(-1px) rotateY(4deg)}}
 @keyframes cmBob{0%,100%{transform:none}50%{transform:translateY(-3px)}}
-@keyframes cmOut{0%{transform:none;opacity:1}100%{transform:translateY(-18px) scale(.7) rotateX(-35deg);opacity:0}}
+@keyframes cmOut{0%{transform:none;opacity:1}100%{transform:translateX(34px) scale(.7) rotateY(35deg);opacity:0}}
 @keyframes cmFadeIn{from{opacity:0}to{opacity:1}}
 @keyframes cmFadeOut{to{opacity:0}}
 @keyframes cmSpin{0%{transform:rotateY(0) scale(1)}50%{transform:rotateY(180deg) scale(1.12)}100%{transform:rotateY(360deg) scale(1)}}
@@ -3022,7 +3023,7 @@ var CLS=[[/download|export/i,'Download started ⬇️','Your file is being prepa
  [/print/i,'Printing 🖨️','Opening the print preview…',3.2],
  [/^(view|open|show|details?|see)( |$)/i,'Opening view 👀','Loading the details…',2.6],
  [/access/i,'Access 🔑','Opening access settings…',2.6],
- [/^(edit|update|modify)( |$)/i,'Edit mode ✏️','Opening the editor…',2.6]],lastL='',lastT=0;
+ [/^(edit|update|modify)( |$)/i,'Edit mode ✏️','Opening the editor…',2.6]],LO=[/^log ?out|sign ?out/i,'Logging out 👋','Signing you out – see you soon!',2.2],lastL='',lastT=0;CLS.push(LO);
 document.addEventListener('click',function(e){if(e.button>0)return;var tg=e.target;if(!tg||!tg.closest)return;
  var el=tg.closest('a[href],button,input[type=submit],input[type=button]');if(!el||el.closest('.cmroot')||el.disabled)return;
  var oc=el.getAttribute('onclick')||'';
@@ -3037,7 +3038,9 @@ document.addEventListener('click',function(e){if(e.button>0)return;var tg=e.targ
  else for(var i=2;i<CLS.length;i++){if(CLS[i][0].test(lbl)){hit=CLS[i];break}}
  if(!hit)return;
  var now=Date.now();if(lbl===lastL&&now-lastT<700)return;lastL=lbl;lastT=now;
- window.cartoon('info',hit[1],hit[2],hit[3])});
+ window.cartoon('info',hit[1],hit[2],hit[3]);
+ if(el.tagName==='A'&&hit!==CLS[0]&&hit!==CLS[1]&&!el.target&&!el.hasAttribute('download')&&h&&h.charAt(0)!=='#'&&!/^javascript:/i.test(h)&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&!e.defaultPrevented){
+  e.preventDefault();var go=el.href;setTimeout(function(){location.href=go},hit===LO?900:500)}});
 })();
 </script>{% endif %}
 {% if session.role=='employee' %}<div id="toasts"></div><script>(function(){var K='mzSeen',seen=null;

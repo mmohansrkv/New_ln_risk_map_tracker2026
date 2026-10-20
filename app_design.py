@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update184: Productivity Entry page - clicking Save now shows a cartoon-style 3D animated confirmation in the middle of the page ("<name> - Saved Successfully!"): bouncy squash-and-stretch 3D pop-in, spinning coin badge, confetti-star burst, light sweep, flip-out. A failed save shows the same box in red ("Oops! Not saved") with the reason. Click closes it; the page opens the Employee page after the animation. Display only - no route, sheet, e-mail or tracking code changed.
   * Update183: Admin pages now use the SAME 3D animated message box as the Employee page ("Saved Successfully" box: 3D flip-in, spinning coin, light sweep, flip-out). Every Admin action result (Send mail, Retry, Save, Delete, Lock, Import ... - all the flash messages) is shown in this box: green = success, red = failed, amber = notice; long messages stay longer, hover pauses it, click closes it. When an Admin clicks a button that submits a form, a blue "Working..." 3D box appears at once with the button name until the result page opens. Display only - no route, sheet, e-mail or tracking code changed.
   * Update182: EVERY Employee page now has a full-page flying 3D animation: a fixed, click-through background layer (#fly3d, pure CSS, no script) with 16 coloured 3D cubes, rings and tiles flying across the whole screen at different depths and speeds, behind the sidebar and page content. Employee pages only (Admin, login and Welcome are unchanged); cards are slightly more transparent so the objects show through; half of the objects are hidden on small screens; nothing is shown for reduced-motion users or when printing. No route, sheet, tracking or e-mail code changed.
   * Update181: Admin + Employee pages - every button is now smaller (compact padding / 11px text) with a modern 3D look: coloured bottom edge, soft shadow, smooth hover lift, press-down motion, a light sweep on primary buttons and a short fade-in. CSS only (one block at the end of the main stylesheet); colours, labels, links, forms and every route / handler are unchanged. Login pages, sidebar, calendar, group chat and the editor toolbar are not affected. Disabled buttons look flat, and reduced-motion users get no animation.
@@ -3409,6 +3410,35 @@ Productivity: <b id="tpct">0</b>% &middot; <b id="tstat"></b> <span class="mut">
 <div id="tgtMsg" class="flash err" style="display:none" role="alert"></div>
 <div id="formerr" class="flash err" style="display:none" role="alert"></div>
 <button class="primary sm">Save</button> {% if heading == 'Daily productivity entry' %}<button type="button" class="back sm" onclick="event.preventDefault();window.scrollTo({top:0,behavior:'smooth'});var d=document.querySelector('#entryCard [name=date]');if(d)d.focus({preventScroll:true});return false">Back</button>{% else %}<button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='{{ '/admin/summary' if session.role=='admin' else '/employee' }}'">Back</button>{% endif %}</form></div>
+<style id="cartoonSaveCss">
+#cartoonSave{position:fixed;inset:0;z-index:100001;display:flex;align-items:center;justify-content:center;perspective:1000px;background:rgba(15,23,42,.28);cursor:pointer;font-family:"Comic Sans MS","Chalkboard SE","Marker Felt","Trebuchet MS",sans-serif;animation:csFade var(--cs-dur,2.8s) linear forwards}
+@keyframes csFade{0%{opacity:0}6%{opacity:1}90%{opacity:1}100%{opacity:0}}
+#cartoonSave .cs-stage{position:relative;transform-style:preserve-3d;max-width:92vw}
+#cartoonSave .cs-card{position:relative;display:flex;align-items:center;gap:16px;padding:20px 30px 20px 22px;border:5px solid #1f2937;border-radius:30px;overflow:hidden;color:#14301f;background:linear-gradient(180deg,#bbf7d0 0%,#4ade80 100%);box-shadow:0 10px 0 #1f2937,0 28px 36px -8px rgba(0,0,0,.45),inset 0 -8px 0 rgba(0,0,0,.08),inset 0 6px 0 rgba(255,255,255,.6);transform-style:preserve-3d;will-change:transform;animation:csPop var(--cs-dur,2.8s) ease-in-out forwards}
+@keyframes csPop{
+0%{transform:translateY(70px) scale(.1) rotateX(70deg) rotateZ(-14deg);opacity:0}
+14%{transform:translateY(-28px) scale(1.2,.82) rotateX(-8deg) rotateZ(5deg);opacity:1}
+22%{transform:translateY(6px) scale(.9,1.14) rotateX(4deg) rotateZ(-3deg)}
+30%{transform:translateY(-8px) scale(1.06,.96) rotateX(-3deg) rotateZ(2deg)}
+38%{transform:translateY(0) scale(1) rotateX(0) rotateZ(0)}
+52%{transform:translateY(-6px) scale(1) rotateY(-9deg) rotateZ(-1.5deg)}
+66%{transform:translateY(0) scale(1) rotateY(9deg) rotateZ(1.5deg)}
+80%{transform:translateY(-4px) scale(1) rotateY(0) rotateZ(0)}
+90%{transform:translateY(0) scale(1);opacity:1}
+100%{transform:translateY(-44px) scale(.2) rotateX(-70deg) rotateZ(10deg);opacity:0}}
+#cartoonSave .cs-card::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.65) 50%,transparent 70%);transform:translateX(-130%);animation:csShine 1s .6s ease-in-out forwards;pointer-events:none}
+@keyframes csShine{to{transform:translateX(130%)}}
+#cartoonSave .cs-badge{flex:none;width:64px;height:64px;border-radius:50%;border:4px solid #1f2937;display:flex;align-items:center;justify-content:center;font-size:36px;font-weight:900;color:#1f2937;background:radial-gradient(circle at 32% 28%,#fff7b0,#facc15 60%,#f59e0b);box-shadow:0 5px 0 #1f2937;transform-style:preserve-3d;animation:csSpin 1s .35s ease-in-out 2 both}
+@keyframes csSpin{0%{transform:rotateY(0) scale(1)}50%{transform:rotateY(180deg) scale(1.18)}100%{transform:rotateY(360deg) scale(1)}}
+#cartoonSave .cs-txt b{display:block;font-size:clamp(17px,4.6vw,24px);line-height:1.15;text-shadow:2px 2px 0 rgba(255,255,255,.75)}
+#cartoonSave .cs-txt small{display:block;margin-top:4px;font-size:clamp(12px,3.4vw,14px);font-weight:700;opacity:.85}
+#cartoonSave .cs-line{margin-top:4px;font-size:clamp(11px,3.2vw,13px);font-weight:700;max-width:420px}
+#cartoonSave .cs-star{position:absolute;left:50%;top:50%;width:var(--sz);height:var(--sz);margin:calc(var(--sz) / -2) 0 0 calc(var(--sz) / -2);font-size:var(--sz);line-height:1;text-align:center;opacity:0;-webkit-text-stroke:1.5px #1f2937;pointer-events:none;animation:csStar 1.15s .25s ease-out forwards}
+@keyframes csStar{0%{transform:translate(0,0) scale(.2) rotate(0);opacity:0}15%{opacity:1}100%{transform:translate(var(--dx),var(--dy)) scale(1.1) rotate(var(--r));opacity:0}}
+#cartoonSave.bad .cs-card{color:#450a0a;background:linear-gradient(180deg,#fecaca 0%,#f87171 100%)}
+#cartoonSave.bad .cs-badge{color:#7f1d1d;background:radial-gradient(circle at 32% 28%,#fff,#fca5a5 60%,#ef4444)}
+@media (prefers-reduced-motion:reduce){ #cartoonSave .cs-card,#cartoonSave .cs-badge,#cartoonSave .cs-star,#cartoonSave .cs-card::after{animation:none}}
+</style>
 <script>
 const WORK={{workday|g}}, PERM={{perm|tojson}}, MAXD={{maxdate|tojson}};
 const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}}, OTHER_H={{other_hours|g}};
@@ -3459,10 +3489,28 @@ function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e
  tgtMsg.textContent=low.length?('⚠ Target not achieved (count per hour × hours worked) – '+low.join(' | ')):'';tgtMsg.style.display=low.length?'block':'none'}
 document.querySelector('[name=date]').addEventListener('change',calc);
 function showErr(m){formerr.textContent=m;formerr.style.display='block';formerr.scrollIntoView({behavior:'smooth',block:'center'})}
-function saveBanner(ok,lines){var b=document.getElementById('savebanner');if(!b){b=document.createElement('div');b.id='savebanner';b.setAttribute('role','status');b.setAttribute('aria-live','polite');
- b.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:100001;max-width:92vw;padding:22px 34px;border-radius:16px;color:#fff;font-weight:600;box-shadow:0 14px 40px #0006;text-align:center';document.body.appendChild(b)}
- b.style.background=ok?'#16a34a':'#b91c1c';b.innerHTML='';const h=document.createElement('div');h.textContent=ok?({{sub.emp_name|tojson}}+' \u2013 Saved Successfully \U0001F60A'):'\u26A0 Not saved';h.style.fontSize='20px';b.appendChild(h);
- (lines||[]).forEach(function(t){const p=document.createElement('div');p.style.cssText='font-size:13px;font-weight:400;margin-top:4px';p.textContent=t;b.appendChild(p)});b.style.display='block'}
+function saveBanner(ok,lines){
+ var old=document.getElementById('cartoonSave');if(old&&old.parentNode)old.parentNode.removeChild(old);
+ lines=lines||[];
+ var dur=ok?(lines.length?3.8:2.8):4.5;
+ var w=document.createElement('div');w.id='cartoonSave';w.className=ok?'ok':'bad';w.setAttribute('role','status');w.setAttribute('aria-live','polite');w.style.setProperty('--cs-dur',dur+'s');
+ var stage=document.createElement('div');stage.className='cs-stage';
+ if(ok){var cols=['#facc15','#fb7185','#38bdf8','#a78bfa','#fb923c','#ffffff'],sym=['★','✦','●'];      /* cartoon confetti burst */
+  for(var i=0;i<16;i++){var st=document.createElement('span');st.className='cs-star';st.textContent=sym[i%3];
+   var a=(i/16)*Math.PI*2+Math.random()*.3,d=130+Math.random()*90;
+   st.style.cssText='--dx:'+Math.round(Math.cos(a)*d*1.4)+'px;--dy:'+Math.round(Math.sin(a)*d)+'px;--r:'+Math.round(Math.random()*540-270)+'deg;--sz:'+Math.round(16+Math.random()*16)+'px;color:'+cols[i%cols.length];
+   stage.appendChild(st)}}
+ var card=document.createElement('div');card.className='cs-card';
+ var badge=document.createElement('div');badge.className='cs-badge';badge.textContent=ok?'✓':'!';
+ var txt=document.createElement('div');txt.className='cs-txt';
+ var h=document.createElement('b');h.textContent=ok?({{sub.emp_name|tojson}}+' – Saved Successfully! 🎉'):'Oops! Not saved 😟';
+ var sm=document.createElement('small');sm.textContent=ok?'Your daily productivity entry is saved.':'Please read the message below and try again.';
+ txt.appendChild(h);txt.appendChild(sm);
+ lines.forEach(function(t){var p=document.createElement('div');p.className='cs-line';p.textContent=t;txt.appendChild(p)});
+ card.appendChild(badge);card.appendChild(txt);stage.appendChild(card);w.appendChild(stage);
+ w.addEventListener('click',function(){if(w.parentNode)w.parentNode.removeChild(w)});
+ document.body.appendChild(w);
+ setTimeout(function(){if(w.parentNode)w.parentNode.removeChild(w)},Math.round(dur*1000)+150)}
 document.querySelector('form[action="{{action}}"]').addEventListener('submit',function(e){
  formerr.style.display='none';
  const d=document.querySelector('[name=date]').value;
@@ -3477,7 +3525,7 @@ document.querySelector('form[action="{{action}}"]').addEventListener('submit',fu
    fetch(f.action,{method:'POST',body:new FormData(f),credentials:'same-origin',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json()}).then(function(j){
     const lines=(j.messages||[]).filter(function(m){return !(j.ok&&/^Saved\\.?$/.test(m.text))}).map(function(m){return m.text});
     saveBanner(!!j.ok,lines);
-    if(j.ok){setTimeout(function(){location.href='/employee'},lines.length?3500:1800)}else if(b){b.disabled=false;b.textContent='Save'}
+    if(j.ok){setTimeout(function(){location.href='/employee'},lines.length?4000:3000)}else if(b){b.disabled=false;b.textContent='Save'}
    }).catch(function(){saveBanner(false,['Could not reach the server. Check Submitted today before pressing Save again.']);if(b){b.disabled=false;b.textContent='Save'}})}}
 });
 window.addEventListener('pageshow',function(){const b=document.querySelector('form button.primary[disabled]');if(b){b.disabled=false;b.textContent='Save'}});

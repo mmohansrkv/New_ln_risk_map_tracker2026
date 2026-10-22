@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update200: Employee Panel calendar - every date is marked Present / Absent / Leave (approved leave only) / Holiday / Weekly Off in its own colour; the NEXT upcoming holiday is highlighted (gold pulsing ring on its date + a banner with the days left: \"Today\" / \"Tomorrow\" / \"N days left\"); the calendar re-reads attendance, approved leave, holidays and weekly offs automatically (new /employee/calendar-data, refreshed every 2 minutes, when the tab is shown again and at midnight). Display only - no sheet, e-mail or tracking code changed.
   * Update191: Employee panel shown at a NORMAL, comfortable size: base text 14px, buttons / inputs 14px with balanced padding, headings 16-22px, KPI cards, tables, calendar and the left menu all enlarged to readable sizes. The fit-to-screen script no longer shrinks to ~55-70 % or scales up to 120 %: it now stays between 90 % and 100 % (left panel) and 95 % - 100 % (page), and when a long page does not fit, only the page content area scrolls instead of the text becoming tiny. Employee pages only (Admin and login pages unchanged); display only - no route, sheet, e-mail or tracking code changed.
   * Update188: every EMPLOYEE page (Daily entry, Leave & Permission, Personal details, Productivity Info, ...) now fits completely inside the browser window with NO page scrolling: the left panel (menu + calendar + profile + Logout) and the page content are measured live and scaled to the available screen, and re-fitted whenever the content changes (rows added, calendar month changed, window resized). Buttons, cards and forms stay aligned and fully visible. Desktop / tablet-landscape only (>= 801 px); phones keep their normal stacked layout. Display only (CSS + one script in the main template) - no route, sheet, e-mail or tracking code changed.
   * Update187: every 3D animated message box (Employee + Admin) now appears COMPACT in the TOP-RIGHT corner of the page (slides in from the right edge, flips back out to the right); the Yes/No confirm box sits there too. New: a Logout message ("Logging out - see you soon!"). Links that open a page (View / Edit / Access / Logout) wait a moment (0.5 s, Logout 0.9 s) so the box can be seen before the page changes. Display only - nothing else changed.
@@ -2780,6 +2781,13 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .cal-up div{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-top:1px solid #ffffff14;cursor:pointer}.cal-up div span:last-child{color:#fde68a;text-align:right}
 .cal-lg i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:3px;vertical-align:-1px}
 .cal-lg .lp{background:#22c55e}.cal-lg .la{background:#f87171}.cal-lg .ll{background:#60a5fa}.cal-lg .lo{background:#6b749f}.cal-lg .lh{background:#f59e0b}
+.cal-nh{margin:8px 0 0;padding:7px 8px;border-radius:8px;background:linear-gradient(180deg,#f59e0b55,#f59e0b2a);box-shadow:inset 0 0 0 1px #fbbf24cc;color:#fff;font-size:11px;line-height:1.35;cursor:pointer;text-align:center}
+.cal-nh small{display:block;color:#fde68a;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase}
+.cal-nh b{display:block;font-size:12px}.cal-nh em{font-style:normal;display:inline-block;margin-top:2px;padding:1px 8px;border-radius:10px;background:#f59e0b;color:#1f1300;font-weight:800}
+.cal-g .nh{box-shadow:inset 0 0 0 2px #fde047,0 0 10px #fbbf24;animation:nhp 1.6s ease-in-out infinite}
+@keyframes nhp{50%{box-shadow:inset 0 0 0 2px #fde047,0 0 2px #fbbf2455}}
+@media (prefers-reduced-motion:reduce){.cal-g .nh{animation:none}}
+body .app.emp3d .cal-nh{font-size:12.5px}body .app.emp3d .cal-nh b{font-size:13.5px}body .app.emp3d .cal-nh small{font-size:11px}
 .cal-today{display:block;width:100%;margin:6px 0 0;padding:3px 0;border:0;border-radius:6px;background:#2b3560;color:#fff;font-size:10.5px;box-shadow:none;cursor:pointer}
 .cal-today:hover{background:#4f46e5;transform:none}
 @media print{.cal{display:none!important}}
@@ -3024,40 +3032,56 @@ body .app.emp3d .site-ftr,body .app.emp3d .pg-ftr,html.fit188 .app.emp3d .site-f
 <div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
-<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-lg" id="cal_lg" hidden><span><i class="lp"></i>Present</span><span><i class="la"></i>Absent</span><span><i class="ll"></i>Leave</span><span><i class="lh"></i>Holiday</span><span><i class="lo"></i>Weekly off</span></div><div class="cal-up" id="cal_up" hidden></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
+<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-lg" id="cal_lg" hidden><span><i class="lp"></i>Present</span><span><i class="la"></i>Absent</span><span><i class="ll"></i>Leave</span><span><i class="lh"></i>Holiday</span><span><i class="lo"></i>Weekly off</span></div><div class="cal-nh" id="cal_nh" hidden></div><div class="cal-up" id="cal_up" hidden></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
 <div class="prof{{' prof-emp' if session.role=='employee' else ''}}"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name" title="{{session.name}}">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
 <main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></main></div>
 {% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}<div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></div>{% endif %}
-{% if att_json %}<script>window.ATT={{att_json|safe}};window.HOL={{hol_json|safe}};</script>{% endif %}
+{% if att_json %}<script>window.ATT={{att_json|safe}};window.HOL={{hol_json|safe}};window.SRVTODAY="{{srv_today}}";</script>{% endif %}
 {% if session.role and not bare %}<script>
 (function(){var g=document.getElementById('cal_g');if(!g)return;var d=document.getElementById('cal');
 var M=['January','February','March','April','May','June','July','August','September','October','November','December'],W=['S','M','T','W','T','F','S'];
-var now=new Date(),y=now.getFullYear(),m=now.getMonth();
+var now=new Date();if(window.SRVTODAY){var sp=window.SRVTODAY.split('-');now=new Date(+sp[0],+sp[1]-1,+sp[2])}var y=now.getFullYear(),m=now.getMonth(),NH='';
 var HL=window.HOL||{},A=window.ATT||null,FM=['January','February','March','April','May','June','July','August','September','October','November','December'];
 if((window.matchMedia&&window.matchMedia('(min-width:801px)').matches)||A)d.open=true;
 function z(n){return(n<10?'0':'')+n}
-function draw(){var h='',i,first=new Date(y,m,1).getDay(),n=new Date(y,m+1,0).getDate(),pn=new Date(y,m,0).getDate();
+function iso(d){return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())}
+function nextHol(){var tk=iso(now),ks=Object.keys(HL).filter(function(k){return k>=tk}).sort();return ks.length?ks[0]:''}
+function draw(){NH=nextHol();var h='',i,first=new Date(y,m,1).getDay(),n=new Date(y,m+1,0).getDate(),pn=new Date(y,m,0).getDate();
 document.getElementById('cal_t').textContent=M[m].slice(0,3)+' '+y;
 var np=0,na=0,nl=0;
 for(i=0;i<7;i++)h+='<span class="w">'+W[i]+'</span>';
 for(i=first-1;i>=0;i--)h+='<span class="o">'+(pn-i)+'</span>';
 for(i=1;i<=n;i++){var t=(i===now.getDate()&&m===now.getMonth()&&y===now.getFullYear()),k=y+'-'+z(m+1)+'-'+z(i),st=A?A[k]:'',c=t?'t':'e',tt='';
 if(st==='P'){c+=t?' sp':' p';np++;tt='Present'}else if(st==='A'){c+=t?' sa':' a';na++;tt='Absent'}else if(st==='L'){c+=t?' sl':' l';nl++;tt='Leave'}else if(st==='H'){c+=t?' sl':' l';nl+=.5;np+=.5;tt='Half day'}else if(st==='O'){c+=t?' sho':' ho';tt='Holiday'+(HL[k]?' - '+HL[k]:'')}else if(st==='W'){c+=t?' sw':' f';tt='Weekly off'}else if(t&&A){tt='Today'}
+if(k===NH){c+=' nh';tt=(tt||'Holiday')+' (next holiday)'}
 h+='<span class="'+c+'"'+(t?' aria-current="date"':'')+(tt?' title="'+i+' '+M[m].slice(0,3)+': '+tt+'"':'')+'>'+i+'</span>'}
 var tail=(7-(first+n)%7)%7;for(i=1;i<=tail;i++)h+='<span class="o">'+i+'</span>';g.innerHTML=h;
 if(A){document.getElementById('cal_lg').hidden=false;
 var ct=document.getElementById('cal_ct');ct.hidden=false;ct.innerHTML='<span><b class="cp">'+np+'</b> Present</span><span><b class="ca">'+na+'</b> Absent</span><span><b class="cl">'+nl+'</b> Leave</span>'}}
-(function(){var u=document.getElementById('cal_up');if(!u||!A)return;var n0=new Date(),tk=n0.getFullYear()+'-'+z(n0.getMonth()+1)+'-'+z(n0.getDate()),ks=Object.keys(HL).filter(function(k){return k>=tk}).sort().slice(0,5);
-u.hidden=false;var b=document.createElement('b');b.textContent='Upcoming holidays';u.appendChild(b);
+function side(){var u=document.getElementById('cal_up'),nb=document.getElementById('cal_nh');if(!u||!A)return;
+var tk=iso(now),ks=Object.keys(HL).filter(function(k){return k>=tk}).sort(),DN=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+function P(k){var p=k.split('-');return new Date(+p[0],+p[1]-1,+p[2])}
+function go(k){var dd=P(k);y=dd.getFullYear();m=dd.getMonth();draw()}
+u.innerHTML='';nb.innerHTML='';u.hidden=false;
+if(ks.length){var k0=ks[0],d0=P(k0),n=Math.round((d0-P(tk))/864e5),lab=n===0?'Today':(n===1?'Tomorrow':n+' days left');
+var s1=document.createElement('small');s1.textContent='Next holiday';var b1=document.createElement('b');b1.textContent=HL[k0];
+var s2=document.createElement('span');s2.textContent=DN[d0.getDay()]+', '+d0.getDate()+' '+M[d0.getMonth()].slice(0,3)+' '+d0.getFullYear()+' \u00b7 ';
+var em=document.createElement('em');em.textContent=lab;s2.appendChild(em);nb.appendChild(s1);nb.appendChild(b1);nb.appendChild(s2);nb.hidden=false;nb.onclick=function(){go(k0)}}
+else nb.hidden=true;
+var b=document.createElement('b');b.textContent='Upcoming holidays';u.appendChild(b);
 if(!ks.length){var e=document.createElement('div');e.textContent='None announced yet';u.appendChild(e)}
-ks.forEach(function(k){var p=k.split('-'),dd=new Date(+p[0],+p[1]-1,+p[2]),r=document.createElement('div'),a=document.createElement('span'),c=document.createElement('span');
-a.textContent=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dd.getDay()]+', '+dd.getDate()+' '+M[dd.getMonth()].slice(0,3);c.textContent=HL[k];r.appendChild(a);r.appendChild(c);
-r.onclick=function(){y=dd.getFullYear();m=dd.getMonth();draw()};u.appendChild(r)})})();
+ks.slice(0,5).forEach(function(k){var dd=P(k),r=document.createElement('div'),a=document.createElement('span'),c=document.createElement('span'),n=Math.round((dd-P(tk))/864e5);
+a.textContent=DN[dd.getDay()]+', '+dd.getDate()+' '+M[dd.getMonth()].slice(0,3);c.textContent=HL[k]+' ('+(n===0?'today':n===1?'tomorrow':n+'d')+')';r.appendChild(a);r.appendChild(c);r.onclick=function(){go(k)};u.appendChild(r)})}
+var _d=draw;draw=function(){_d();side()};
+function refresh(){if(!window.fetch)return;fetch('/employee/calendar-data',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(j){if(!j||!j.att)return;A=j.att;HL=j.hol||{};if(j.today){var q=j.today.split('-');now=new Date(+q[0],+q[1]-1,+q[2])}draw()}).catch(function(){})}
+setInterval(refresh,120000);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)refresh()});
+(function(){var t=iso(new Date());setInterval(function(){var n=iso(new Date());if(n!==t){t=n;refresh()}},60000)})();
 document.getElementById('cal_p').onclick=function(){m--;if(m<0){m=11;y--}draw()};
 document.getElementById('cal_n').onclick=function(){m++;if(m>11){m=0;y++}draw()};
-document.getElementById('cal_td').onclick=function(){now=new Date();y=now.getFullYear();m=now.getMonth();draw()};
+document.getElementById('cal_td').onclick=function(){y=now.getFullYear();m=now.getMonth();draw()};
 draw()})();
 </script>{% endif %}
 {% if session.role in ('employee','admin') and not bare %}<script>
@@ -3623,7 +3647,7 @@ def page(body, title="Productivity Tracker", **ctx):
             hol_json = employee_holiday_json()
         except Exception as ex: print("attendance calendar error:", repr(ex))
     return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json)
+                                  side_avatar=side_avatar, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, srv_today=str(today_local()))
 
 
 LOGIN = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i><i></i><i></i></div>
@@ -6153,6 +6177,7 @@ def employee_att_map(eid, months=13):
     present |= {_iso_date(r.get("Date")) for r in rows("Productivity log") if _key(r.get("Employee ID", "")) == k}
     full, half = set(), set()
     for l in live_leaves([l for l in rows("Leave") if _key(l.get("Employee ID", "")) == k]):
+        if leave_status(l) != "Approved": continue          # Update200: only APPROVED leave is marked Leave (Pending / Rejected are not)
         (half if leave_is_half(l) else full).add(_iso_date(l.get("Date")))
     out, d = {}, start
     end_ = today + dt.timedelta(days=366)                  # Update173: holidays / weekly offs are marked for the next 12 months too
@@ -6174,6 +6199,14 @@ def employee_holiday_json():
     today = today_local(); lo, hi = str(today - dt.timedelta(days=31)), str(today + dt.timedelta(days=366))
     out = {k: (v or "Holiday") for k, v in holiday_map().items() if lo <= k <= hi}
     return json.dumps(out, separators=(",", ":")).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+@app.route("/employee/calendar-data")
+@need("employee")
+def employee_calendar_data():
+    """Update200: live calendar data (status per date, holiday names, server today) - polled by the sidebar calendar so it stays current."""
+    resp = jsonify(att=employee_att_map(session.get("emp_id", "")), hol=json.loads(employee_holiday_json()), today=str(today_local()))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 @app.route("/employee/welcome")
 @need("employee")

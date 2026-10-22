@@ -7,6 +7,7 @@
   * Update183: Admin pages now use the SAME 3D animated message box as the Employee page ("Saved Successfully" box: 3D flip-in, spinning coin, light sweep, flip-out). Every Admin action result (Send mail, Retry, Save, Delete, Lock, Import ... - all the flash messages) is shown in this box: green = success, red = failed, amber = notice; long messages stay longer, hover pauses it, click closes it. When an Admin clicks a button that submits a form, a blue "Working..." 3D box appears at once with the button name until the result page opens. Display only - no route, sheet, e-mail or tracking code changed.
   * Update182: EVERY Employee page now has a full-page flying 3D animation: a fixed, click-through background layer (#fly3d, pure CSS, no script) with 16 coloured 3D cubes, rings and tiles flying across the whole screen at different depths and speeds, behind the sidebar and page content. Employee pages only (Admin, login and Welcome are unchanged); cards are slightly more transparent so the objects show through; half of the objects are hidden on small screens; nothing is shown for reduced-motion users or when printing. No route, sheet, tracking or e-mail code changed.
   * Update181: Admin + Employee pages - every button is now smaller (compact padding / 11px text) with a modern 3D look: coloured bottom edge, soft shadow, smooth hover lift, press-down motion, a light sweep on primary buttons and a short fade-in. CSS only (one block at the end of the main stylesheet); colours, labels, links, forms and every route / handler are unchanged. Login pages, sidebar, calendar, group chat and the editor toolbar are not affected. Disabled buttons look flat, and reduced-motion users get no animation.
+  * Update192: Code updates / deploys / restarts NO LONGER log anyone out. (1) The session-cookie signing key is now STABLE: SECRET_KEY if set, otherwise derived from the Google service-account key (credentials.json) that survives every deploy, instead of a '.secret_key' file that a fresh deploy could recreate; the old file key is still accepted (SECRET_KEY_FALLBACKS), so people signed in before this update stay signed in. (2) Open Employee and Admin pages notice a new version by themselves (/app-version, checked every 30 s and when the tab is shown again) and reload on their own with the same session; if the person has typed something that is not saved yet, a small 'New version available - Refresh' button is shown instead, so no typed data is lost. The check never resets the 30-minute inactivity timer. Normal idle logout and manual logout are unchanged.
   * Update191: Employee panel - the Logout button is pinned at the very bottom of the left panel (below the avatar, never covered or cut off) as a 3D animated button: raised 3D look with a coloured edge, gentle floating tilt, a light sweep, hover lift, press-down, power icon, clear keyboard focus ring; no animation for reduced-motion users. Display only.
   * Update190: Missed Entries e-mail - (1) the employee gets ONE e-mail (manual AND automatic) that lists ALL missed Productivity Entry dates, one per row (No. / Date / Day) - nothing is cut off any more (it used to show 4 dates + "+N more") - together with the TOTAL number of missed entries (in the e-mail body, the subject and the plain-text version). (2) The Manager(s) and Team Lead(s) stay in CC (Office Email ID, picked live from the Designation in Employee Info); the employee is in To. The automatic job now sends this single consolidated e-mail per employee (still re-checking the live Productivity log / Leave / Holidays right before sending, and sending only dates that are still missing) instead of one e-mail per date.
   * Update189: Missed Entries e-mail (manual AND automatic) - every employee whose Designation is a Manager or a Team Lead (any designation containing "Manager" or "Team Lead", e.g. Manager, Associate Manager, Senior Manager, Team Lead, Senior Team Lead) is added to the CC field automatically, using the Office Email ID registered in Employee Info. The employee still gets the mail in To; the employee is never CC'd on their own mail, duplicates / invalid addresses / locked accounts are skipped, and the CC list is re-read live so a Designation or e-mail change applies at once. Works over Brevo and SMTP.
@@ -591,6 +592,11 @@ def _load_secret_key():
     k = os.getenv("SECRET_KEY", "").strip()
     if k and k != "change-me":
         return k
+    try:                                                       # Update192: stable key - the same after every deploy / restart / worker
+        import hashlib
+        with open(CREDS_FILE, encoding="utf-8") as fh: _pk = str(json.load(fh).get("private_key", ""))
+        if len(_pk) > 100: return hashlib.sha256(("pt-session-v1|" + _pk).encode("utf-8")).hexdigest()
+    except Exception: pass
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".secret_key")
     for _ in range(3):
         try:
@@ -611,6 +617,23 @@ def _load_secret_key():
     return secrets.token_hex(32)                # last resort (read-only disk): valid for this process only
 
 app.secret_key = _load_secret_key()
+try:                                                           # Update192: sessions signed with the previous '.secret_key' file stay valid (no one is logged out by this update)
+    if not os.getenv("SECRET_KEY", "").strip():
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".secret_key")) as _fh: _old_k = _fh.read().strip()
+        if _old_k and _old_k != app.secret_key: app.config["SECRET_KEY_FALLBACKS"] = [_old_k]
+except Exception: pass
+def _build_id():
+    """Update192: short fingerprint of this code version (changes whenever the file changes)."""
+    try:
+        import hashlib
+        with open(os.path.abspath(__file__), "rb") as fh: return hashlib.sha1(fh.read()).hexdigest()[:12]
+    except Exception: return str(int(time.time()))
+BUILD_ID = _build_id()
+app.jinja_env.globals["BUILD_ID"] = BUILD_ID
+@app.route("/app-version")
+def app_version():
+    """Update192: lets open pages notice a new deploy. Public, tiny, never touches the session / idle timer."""
+    r = jsonify(v=BUILD_ID); r.headers["Cache-Control"] = "no-store"; return r
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_SECURE=os.getenv("COOKIE_SECURE", "0") == "1")   # set COOKIE_SECURE=1 when served over HTTPS
 app.jinja_env.filters["t12"] = t12
@@ -625,7 +648,7 @@ app.jinja_env.globals["LEAVE_MONTHLY_LIMIT"] = LEAVE_MONTHLY_LIMIT
 def _idle_auto_logout():
     """If nobody has clicked anything for SESSION_IDLE_MINUTES, the system logs the
     user out itself. That gets saved as an automatic logout, distinct from a manual one."""
-    if request.endpoint in (None, "static", "logout"):
+    if request.endpoint in (None, "static", "logout", "app_version"):
         return
     if session.get("role"):
         now_ts = time.time()
@@ -2917,6 +2940,34 @@ document.getElementById('cal_p').onclick=function(){m--;if(m<0){m=11;y--}draw()}
 document.getElementById('cal_n').onclick=function(){m++;if(m>11){m=0;y++}draw()};
 document.getElementById('cal_td').onclick=function(){now=new Date();y=now.getFullYear();m=now.getMonth();draw()};
 draw()})();
+</script>{% endif %}
+{% if session.role in ('employee','admin') and not bare %}<script>
+/* Update192: pick up a new code version without logging anyone out */
+(function(){
+var V='{{BUILD_ID}}',dirty=false,bar=null,tm=null;
+function mark(e){var t=e.target;if(t&&(/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)||t.isContentEditable))dirty=true}
+document.addEventListener('input',mark,true);
+document.addEventListener('submit',function(){dirty=false},true);
+function banner(){
+ if(bar)return;bar=document.createElement('button');bar.type='button';
+ bar.textContent='New version available - click to refresh';
+ bar.setAttribute('style','position:fixed;left:14px;bottom:14px;z-index:99999;padding:9px 16px;border:0;border-radius:10px;font:600 13px Poppins,Segoe UI,Arial,sans-serif;color:#fff;cursor:pointer;background:linear-gradient(180deg,#6366f1,#4f46e5);box-shadow:0 4px 0 #3730a3,0 10px 18px rgba(79,70,229,.45)');
+ bar.onclick=function(){location.replace(location.href)};document.body.appendChild(bar)
+}
+function check(){
+ if(document.hidden)return;
+ fetch('/app-version',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.ok?r.json():null}).then(function(j){
+  if(!j||!j.v||j.v===V)return;
+  var done='';try{done=sessionStorage.getItem('pt_reload_v')||''}catch(e){}
+  if(dirty||done===j.v){banner();return}
+  try{sessionStorage.setItem('pt_reload_v',j.v)}catch(e){}
+  location.replace(location.href)
+ }).catch(function(){})
+}
+tm=setInterval(check,30000);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)setTimeout(check,500)});
+window.addEventListener('online',function(){setTimeout(check,1500)})
+})();
 </script>{% endif %}
 {% if session.role=='employee' and not bare %}<script>
 /* Update188: fit the Employee panel + page content to the screen (no page scrolling) */

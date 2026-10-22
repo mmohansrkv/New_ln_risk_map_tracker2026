@@ -7,6 +7,7 @@
   * Update183: Admin pages now use the SAME 3D animated message box as the Employee page ("Saved Successfully" box: 3D flip-in, spinning coin, light sweep, flip-out). Every Admin action result (Send mail, Retry, Save, Delete, Lock, Import ... - all the flash messages) is shown in this box: green = success, red = failed, amber = notice; long messages stay longer, hover pauses it, click closes it. When an Admin clicks a button that submits a form, a blue "Working..." 3D box appears at once with the button name until the result page opens. Display only - no route, sheet, e-mail or tracking code changed.
   * Update182: EVERY Employee page now has a full-page flying 3D animation: a fixed, click-through background layer (#fly3d, pure CSS, no script) with 16 coloured 3D cubes, rings and tiles flying across the whole screen at different depths and speeds, behind the sidebar and page content. Employee pages only (Admin, login and Welcome are unchanged); cards are slightly more transparent so the objects show through; half of the objects are hidden on small screens; nothing is shown for reduced-motion users or when printing. No route, sheet, tracking or e-mail code changed.
   * Update181: Admin + Employee pages - every button is now smaller (compact padding / 11px text) with a modern 3D look: coloured bottom edge, soft shadow, smooth hover lift, press-down motion, a light sweep on primary buttons and a short fade-in. CSS only (one block at the end of the main stylesheet); colours, labels, links, forms and every route / handler are unchanged. Login pages, sidebar, calendar, group chat and the editor toolbar are not affected. Disabled buttons look flat, and reduced-motion users get no animation.
+  * Update196: Employee pages are shown LARGER: the fit-to-screen scaling now also scales UP when the screen has spare room (page content up to 120 %, left panel up to 112 %) and shrinks less on small screens (minimum 72 % / 78 % instead of 55 %), and the page / card / heading spacing was tightened so the text, buttons and sections can be shown bigger while everything still fits without scrolling. Display only.
   * Update195: Employee panel bottom dock - a SMALL, compact 3D Logout button now sits directly BELOW the 3D avatar (the name is shown beside them), at the bottom of the left panel on every Employee page, outside the scaled area so it never moves or gets cut off. Display only.
   * Update194: Employee panel bottom dock - the employee NAME is shown centred BELOW the 3D avatar (fully visible, wraps to two lines, full name on hover - no longer cut off at the left edge), with the 3D Logout button beside the avatar; identical on every Employee page. Display only.
   * Update193: Employee panel - the 3D Logout button now sits at the BOTTOM of the page right NEXT TO the 3D avatar animation (avatar on the left, Logout on the right, one docked row under a divider line), on every Employee page; it is outside the scaled area so it is never cut off. Display only.
@@ -2873,7 +2874,7 @@ body .app.emp3d .card,body .app.emp3d .kpi{background:#ffffffd9}
 @media(min-width:801px){
 html.fit188,html.fit188 body{height:100%;overflow:hidden}
 html.fit188 .app.emp3d{height:100vh;height:100dvh;min-height:0;overflow:hidden}
-html.fit188 .app.emp3d aside.emp{height:100vh;height:100dvh;padding:12px 12px 10px;gap:0;overflow:hidden}
+html.fit188 .app.emp3d aside.emp{height:100vh;height:100dvh;padding:10px 12px 8px;gap:0;overflow:hidden}
 html.fit188 .app.emp3d aside.emp .sbin{display:flex;flex-direction:column;gap:3px;min-height:0;overflow:visible;padding-bottom:4px;transform-origin:0 0}
 html.fit188 .app.emp3d aside.emp .sbin>*{flex-shrink:0}
 html.fit188 .app.emp3d aside.emp>.prof{flex:none;margin:6px 0 0;padding:8px 4px 2px;border-top:1px solid #2b3560;display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:10px;position:relative;z-index:6}
@@ -2901,15 +2902,15 @@ html.fit188 .app.emp3d aside.emp .prof .prof-out:active{box-shadow:0 1px 0 #991b
 @keyframes lo3dFloat{0%,100%{transform:perspective(420px) translateY(0) rotateX(0)}50%{transform:perspective(420px) translateY(-2px) rotateX(7deg)}}
 @keyframes lo3dSweep{0%{left:-60%}55%,100%{left:135%}}
 @media(prefers-reduced-motion:reduce){html.fit188 .app.emp3d aside.emp .prof .prof-out,html.fit188 .app.emp3d aside.emp .prof .prof-out::after{animation:none}}
-html.fit188 .app.emp3d main{height:100vh;height:100dvh;min-height:0;padding:14px 22px 0;overflow:hidden}
+html.fit188 .app.emp3d main{height:100vh;height:100dvh;min-height:0;padding:10px 22px 0;overflow:hidden}
 html.fit188 .app.emp3d .mbody{flex:1 1 0;min-height:0;overflow:hidden;position:relative}
 html.fit188 .app.emp3d .mbody.fit-scroll{overflow:auto}
 html.fit188 .app.emp3d .fitin{display:flow-root;padding:3px 3px 2px;transform-origin:0 0}
 html.fit188 .app.emp3d .site-foot{margin:0 auto;padding:3px 12px 5px}
 html.fit188 .app.emp3d h1{font-size:21px}
-html.fit188 .app.emp3d .head{margin-bottom:10px}
-html.fit188 .app.emp3d .card{margin-bottom:10px;padding:14px 18px}
-html.fit188 .app.emp3d h2{margin:12px 0 8px}
+html.fit188 .app.emp3d .head{margin-bottom:8px}
+html.fit188 .app.emp3d .card{margin-bottom:8px;padding:12px 16px}
+html.fit188 .app.emp3d h2{margin:9px 0 6px}
 html.fit188 .app.emp3d main>p.flash{margin:0 0 8px;padding:6px 12px}
 }
 @media print{html.fit188,html.fit188 body{height:auto!important;overflow:visible!important}
@@ -2993,7 +2994,7 @@ window.addEventListener('online',function(){setTimeout(check,1500)})
 var root=document.querySelector('.app.emp3d');if(!root)return;
 var aside=root.querySelector('aside.emp'),main=root.querySelector('main'),mb=root.querySelector('.mbody');
 if(!aside||!main||!mb)return;
-var mq=window.matchMedia('(min-width:801px)'),FLOOR=0.55,STEP=0.025,sbin=null,fin=null,tm=null,profEl=aside.querySelector('.prof');
+var mq=window.matchMedia('(min-width:801px)'),FS=0.78,FM=0.72,MS=1.12,MM=1.2,STEP=0.025,sbin=null,fin=null,tm=null,profEl=aside.querySelector('.prof');
 function wrap(){
  if(!sbin){sbin=document.createElement('div');sbin.className='sbin';while(aside.firstChild)sbin.appendChild(aside.firstChild);aside.appendChild(sbin)}
  if(profEl&&profEl.parentNode!==aside)aside.appendChild(profEl);
@@ -3010,12 +3011,12 @@ function fitSide(){
  var cs=getComputedStyle(aside),W=aside.clientWidth-px(cs.paddingLeft)-px(cs.paddingRight),H=aside.clientHeight-px(cs.paddingTop)-px(cs.paddingBottom);
  if(profEl&&profEl.parentNode===aside)H-=profEl.offsetHeight+px(getComputedStyle(profEl).marginTop)+2;
  if(W<=0||H<=0)return;
- var z=1,h=0;
+ var z=MS,h=0;
  for(;;){
   sbin.style.zoom=z;sbin.style.width=(W/z)+'px';sbin.style.height='auto';
   h=sbin.getBoundingClientRect().height;
-  if(h<=H+1||z<=FLOOR+0.0001)break;
-  z=Math.max(FLOOR,z-STEP)
+  if(h<=H+1||z<=FS+0.0001)break;
+  z=Math.max(FS,z-STEP)
  }
  sbin.style.height=(H/z)+'px';
  sbin.style.overflowY=(h>H+1)?'auto':'visible'
@@ -3023,13 +3024,13 @@ function fitSide(){
 function fitMain(){
  var W=mb.clientWidth,H=mb.clientHeight;
  if(W<=0||H<=0)return;
- var z=1,h=0,wide=false;
+ var z=MM,h=0,wide=false;
  for(;;){
   fin.style.zoom=z;fin.style.width=(W/z)+'px';
   h=fin.getBoundingClientRect().height;
   wide=fin.scrollWidth>(W/z)+2;
-  if((h<=H+1&&!wide)||z<=FLOOR+0.0001)break;
-  z=Math.max(FLOOR,z-STEP)
+  if((h<=H+1&&!wide)||z<=FM+0.0001)break;
+  z=Math.max(FM,z-STEP)
  }
  mb.classList.toggle('fit-scroll',(h>H+1||wide));
  if(!mb.classList.contains('fit-scroll')){mb.scrollTop=0;mb.scrollLeft=0}

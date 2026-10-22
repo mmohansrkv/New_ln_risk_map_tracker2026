@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update191: Employee panel shown at a NORMAL, comfortable size: base text 14px, buttons / inputs 14px with balanced padding, headings 16-22px, KPI cards, tables, calendar and the left menu all enlarged to readable sizes. The fit-to-screen script no longer shrinks to ~55-70 % or scales up to 120 %: it now stays between 90 % and 100 % (left panel) and 95 % - 100 % (page), and when a long page does not fit, only the page content area scrolls instead of the text becoming tiny. Employee pages only (Admin and login pages unchanged); display only - no route, sheet, e-mail or tracking code changed.
   * Update188: every EMPLOYEE page (Daily entry, Leave & Permission, Personal details, Productivity Info, ...) now fits completely inside the browser window with NO page scrolling: the left panel (menu + calendar + profile + Logout) and the page content are measured live and scaled to the available screen, and re-fitted whenever the content changes (rows added, calendar month changed, window resized). Buttons, cards and forms stay aligned and fully visible. Desktop / tablet-landscape only (>= 801 px); phones keep their normal stacked layout. Display only (CSS + one script in the main template) - no route, sheet, e-mail or tracking code changed.
   * Update187: every 3D animated message box (Employee + Admin) now appears COMPACT in the TOP-RIGHT corner of the page (slides in from the right edge, flips back out to the right); the Yes/No confirm box sits there too. New: a Logout message ("Logging out - see you soon!"). Links that open a page (View / Edit / Access / Logout) wait a moment (0.5 s, Logout 0.9 s) so the box can be seen before the page changes. Display only - nothing else changed.
   * Update186: all 3D animated message boxes (Employee + Admin) are now COMPACT: smaller card, coin, text and Yes/No buttons, a lighter outline and shadow, a smaller confetti burst, and a gentler, smoother pop-in / flip-out (no big swings). Text colours are darker for clear reading. Display only - nothing else changed.
@@ -7,6 +8,9 @@
   * Update183: Admin pages now use the SAME 3D animated message box as the Employee page ("Saved Successfully" box: 3D flip-in, spinning coin, light sweep, flip-out). Every Admin action result (Send mail, Retry, Save, Delete, Lock, Import ... - all the flash messages) is shown in this box: green = success, red = failed, amber = notice; long messages stay longer, hover pauses it, click closes it. When an Admin clicks a button that submits a form, a blue "Working..." 3D box appears at once with the button name until the result page opens. Display only - no route, sheet, e-mail or tracking code changed.
   * Update182: EVERY Employee page now has a full-page flying 3D animation: a fixed, click-through background layer (#fly3d, pure CSS, no script) with 16 coloured 3D cubes, rings and tiles flying across the whole screen at different depths and speeds, behind the sidebar and page content. Employee pages only (Admin, login and Welcome are unchanged); cards are slightly more transparent so the objects show through; half of the objects are hidden on small screens; nothing is shown for reduced-motion users or when printing. No route, sheet, tracking or e-mail code changed.
   * Update181: Admin + Employee pages - every button is now smaller (compact padding / 11px text) with a modern 3D look: coloured bottom edge, soft shadow, smooth hover lift, press-down motion, a light sweep on primary buttons and a short fade-in. CSS only (one block at the end of the main stylesheet); colours, labels, links, forms and every route / handler are unchanged. Login pages, sidebar, calendar, group chat and the editor toolbar are not affected. Disabled buttons look flat, and reduced-motion users get no animation.
+  * Update200: EMPLOYEE login page - the old idle flip (Update199) is removed for employees and replaced by a new idle theme effect: after 6 s without mouse movement (then every 8.5 s while idle) the new colour theme spreads as a circular WIPE that starts at the last mouse position, the login window lifts forward in 3D (depth pop with a slight tilt) and the 3D scene objects shift colour with it (Ocean > Emerald > Violet > Amber > original). Mouse / key / touch pauses it; not while signing in or in a hidden tab; reduced-motion users get a plain cross-fade. The Admin login page keeps the Update199 flip. Display only.
+  * Update200: EMPLOYEE login page now has exactly the same design as the ADMIN login page - same fire theme, same layout (left 3D "Panel / Productivity Dashboard" showcase with the animated bar / ring / report cards + the login card on the right with the 3D avatar and logo at the top), same 3D tilt, floating cubes, perspective grid floor and idle theme-flip animation. Only the wording differs (Employee Panel, Employee ID or Email, Forgot password hint). Form fields, ids, routes, login checks and the screen-lock permission step are unchanged.
+  * Update199: Admin + Employee LOGIN pages - when the mouse stays idle for 7 seconds the colour theme changes by itself (and every 9 s while still idle): the login window does a 3D flip (turns edge-on, the colours swap, turns back with a little overshoot) while the background cross-fades and the window glow changes colour. Admin: Emerald > Rose > Amber > Violet > original; Employee: Ocean > Emerald > Violet > Amber > original. Any mouse move / key press / touch pauses it; it never runs while signing in or in a hidden tab; reduced-motion users get a plain cross-fade. Display only.
   * Update198: Employee panel bottom dock is now a centred vertical stack on every Employee page: (1) 3D avatar, (2) employee name directly below it, (3) a small compact 3D Logout button below the name. Display only.
   * Update197: Employee pages - tables and text now follow the reference screenshot: Poppins, small UPPERCASE grey column headings (12px), 13.5px body text, comfortable cell padding, light row dividers, row hover highlight, long names wrap inside the cell, 12.5px helper/note lines and 13.5px form fields. Display only.
   * Update196: Employee pages are shown LARGER: the fit-to-screen scaling now also scales UP when the screen has spare room (page content up to 120 %, left panel up to 112 %) and shrinks less on small screens (minimum 72 % / 78 % instead of 55 %), and the page / card / heading spacing was tightened so the text, buttons and sections can be shown bigger while everything still fits without scrolling. Display only.
@@ -2937,6 +2941,81 @@ html.fit188 .app.emp3d,html.fit188 .app.emp3d main,html.fit188 .app.emp3d .mbody
 .app.emp3d table tr:last-child td{border-bottom:0}
 .app.emp3d .mut{font-size:12.5px}
 .app.emp3d input,.app.emp3d select,.app.emp3d textarea{font-size:13.5px}
+/* Update199: Admin + Employee LOGIN pages - after the mouse has been idle the colour theme changes by itself
+   with a 3D card flip (edge-on swap) and a soft cross-fade of the background + glow. */
+.win .wbody{position:relative;isolation:isolate}
+.ltbg{position:absolute;inset:0;border-radius:inherit;z-index:-1;opacity:0;transition:opacity 1.1s ease;pointer-events:none}
+.win{transition:transform .2s ease-out,box-shadow 1.1s ease}
+.win.lt-on{box-shadow:0 40px 70px -22px var(--lt-glow,#020617b3),0 22px 38px -20px #000a}
+@keyframes ltOut{0%{transform:perspective(1300px) rotateY(0) rotateX(0) scale(1)}100%{transform:perspective(1300px) rotateY(-90deg) rotateX(4deg) scale(.93)}}
+@keyframes ltIn{0%{transform:perspective(1300px) rotateY(90deg) rotateX(-4deg) scale(.93)}62%{transform:perspective(1300px) rotateY(-7deg) scale(1.025)}100%{transform:perspective(1300px) rotateY(0) rotateX(0) scale(1)}}
+.win.lt-out{animation:ltOut .48s cubic-bezier(.55,.05,.75,.4) forwards}
+.win.lt-in{animation:ltIn .78s cubic-bezier(.2,.8,.3,1) both}
+@media(prefers-reduced-motion:reduce){.win.lt-out,.win.lt-in{animation:none}}
+/* Update200: EMPLOYEE login only - idle theme change = circular colour wipe that grows from the last mouse position,
+   the window lifts forward in 3D (depth pop) and the 3D scene objects shift colour with it. */
+@keyframes ltWipe{from{clip-path:circle(0% at var(--cx,50%) var(--cy,55%))}to{clip-path:circle(150% at var(--cx,50%) var(--cy,55%))}}
+@keyframes ltPop{0%{transform:perspective(1300px) translateZ(0) rotateX(0) rotateY(0) scale(1)}30%{transform:perspective(1300px) translateZ(70px) rotateX(10deg) rotateY(-6deg) scale(1.025)}65%{transform:perspective(1300px) translateZ(20px) rotateX(-3deg) rotateY(3deg) scale(1.01)}100%{transform:perspective(1300px) translateZ(0) rotateX(0) rotateY(0) scale(1)}}
+.ltbg.wipe{animation:ltWipe 1.5s cubic-bezier(.65,0,.2,1) both}
+.win.employee.lt-pop{animation:ltPop 1.5s cubic-bezier(.3,.7,.2,1)}
+.win.employee .scene{transition:filter 1.5s ease}
+@media(prefers-reduced-motion:reduce){.ltbg.wipe{animation:none}.win.employee.lt-pop{animation:none}}
+/* ================= Update191: Employee panel - normal, comfortable size =================
+   Earlier compact passes (Update104/181/188/196) plus the fit-to-screen zoom made text and buttons too small.
+   This block restores balanced sizes (body 14px, buttons/inputs 14px, headings 17-22px) for Employee pages only.
+   Display only - no route, sheet, e-mail or tracking code changed. */
+@media(min-width:801px){
+body .app.emp3d{font-size:14px}
+body .app.emp3d aside.emp{width:232px;padding:14px 12px 10px}
+body .app.emp3d .brand,body .app.emp3d .panel-ttl{font-size:16px;padding:2px 10px 10px}
+body .app.emp3d aside a{font-size:14px;padding:9px 14px;border-radius:10px}
+body .app.emp3d aside .ng .kids a{font-size:13.5px;padding:7px 12px}
+body .app.emp3d .cal{padding:9px 8px 10px;font-size:12.5px}
+body .app.emp3d .cal summary{font-size:12px}
+body .app.emp3d .cal-h b{font-size:14px}
+body .app.emp3d .cal-h button{width:24px;height:24px;font-size:15px}
+body .app.emp3d .cal-g span{font-size:12.5px;padding:4px 0}
+body .app.emp3d .cal-g .w{font-size:11px}
+body .app.emp3d .cal-at{font-size:12.5px;padding:6px 8px}
+body .app.emp3d .cal-ct{font-size:12px}
+body .app.emp3d .cal-lg{font-size:11px}
+body .app.emp3d .cal-up{font-size:12.5px}
+body .app.emp3d .cal-up b{font-size:11.5px}
+body .app.emp3d .cal-today{font-size:12.5px;padding:5px 0}
+html.fit188 .app.emp3d aside.emp>.prof .prof-name{font-size:14px}
+html.fit188 .app.emp3d aside.emp .prof .prof-out{width:96px;padding:6px 12px;font-size:13px}
+body .app.emp3d main{padding:14px 26px 0}
+html.fit188 .app.emp3d main{padding:14px 26px 0}
+html.fit188 .app.emp3d h1,body .app.emp3d h1{font-size:22px}
+body .app.emp3d h2,html.fit188 .app.emp3d h2{font-size:16px;margin:12px 0 8px}
+body .app.emp3d h3{font-size:14.5px;margin:10px 0 6px}
+body .app.emp3d .wt{font-size:24px}
+body .app.emp3d .wt .wt-hi{font-size:16px}
+body .app.emp3d .wt .wt-name{font-size:24px}
+body .app.emp3d .wsub{font-size:13px}
+body .app.emp3d .mut,body .app.emp3d p,body .app.emp3d small{font-size:13px}
+body .app.emp3d .head,html.fit188 .app.emp3d .head{margin-bottom:12px;gap:10px}
+body .app.emp3d .card,html.fit188 .app.emp3d .card{padding:16px 20px;margin-bottom:14px;border-radius:14px}
+body .app.emp3d .kpis{gap:14px;margin-bottom:14px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+body .app.emp3d .kpi{padding:12px 16px;border-radius:12px}
+body .app.emp3d .kpis .kpi span,body .app.emp3d .kpi span{font-size:12.5px}
+body .app.emp3d .kpis .kpi b,body .app.emp3d .kpi b{font-size:24px;margin:4px 0 8px}
+body .app.emp3d label,body .app.emp3d .grid label{font-size:12.5px}
+body .app.emp3d input,body .app.emp3d select,body .app.emp3d textarea{padding:8px 11px;font-size:14px;margin:3px;border-radius:8px}
+body .app.emp3d button{padding:8px 14px;font-size:14px;margin:3px;border-radius:8px}
+body .app.emp3d .primary,body .app.emp3d .btnl,body .app.emp3d .pbtn{padding:8px 18px;font-size:14px;border-radius:8px}
+body .app.emp3d .pbtn{height:38px;padding:0 18px}
+body .app.emp3d .primary.sm,body .app.emp3d .back.sm,body .app.emp3d .danger.sm{padding:7px 16px;font-size:13.5px;border-radius:8px;margin:4px 8px 4px 0}
+body .app.emp3d .tabs a{font-size:14px;padding:8px 14px}
+body .app.emp3d .totals{font-size:13.5px}
+body .app.emp3d .flash{padding:10px 14px;font-size:14px}
+body .app.emp3d .pill,body .app.emp3d table .pill{font-size:12px!important;padding:2px 10px!important}
+html.fit188 .app.emp3d main>p.flash{padding:9px 14px}
+.app.emp3d table th,.app.emp3d table td{font-size:14px!important;padding:10px 14px!important}
+.app.emp3d table th{font-size:12.5px!important}
+.app.emp3d table td small,.app.emp3d table th small{font-size:12px!important}
+body .app.emp3d .site-ftr,body .app.emp3d .pg-ftr,html.fit188 .app.emp3d .site-foot{font-size:12px}
+}
 </style></head><body>
 {% if bare %}{{body|safe}}
 {% elif session.role %}<div class="app{{' emp3d' if session.role=='employee' else ''}}">{% if session.role=='employee' %}<script>document.documentElement.classList.add('fit188')</script><div id="fly3d" aria-hidden="true"><div class="fo" style="--s:64px;--x0:-12vw;--y0:78vh;--x1:112vw;--y1:-14vh;--z0:-380px;--z1:160px;--d:46s;--dl:0s;--c1:#6366f1;--c2:#a78bfa;--t:24s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:44px;--x0:110vw;--y0:64vh;--x1:-14vw;--y1:20vh;--z0:-120px;--z1:220px;--d:38s;--dl:-9s;--c1:#ec4899;--c2:#f9a8d4;--t:21s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:86px;--x0:-10vw;--y0:22vh;--x1:112vw;--y1:88vh;--z0:-420px;--z1:-60px;--d:58s;--dl:-21s;--c1:#06b6d4;--c2:#67e8f9;--t:28s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:52px;--x0:30vw;--y0:112vh;--x1:70vw;--y1:-16vh;--z0:-200px;--z1:240px;--d:34s;--dl:-14s;--c1:#f59e0b;--c2:#fcd34d;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:72px;--x0:112vw;--y0:92vh;--x1:-12vw;--y1:40vh;--z0:-340px;--z1:120px;--d:52s;--dl:-30s;--c1:#8b5cf6;--c2:#c4b5fd;--t:26s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:38px;--x0:-10vw;--y0:48vh;--x1:110vw;--y1:6vh;--z0:-60px;--z1:260px;--d:30s;--dl:-4s;--c1:#10b981;--c2:#6ee7b7;--t:20s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:58px;--x0:60vw;--y0:-14vh;--x1:16vw;--y1:114vh;--z0:-260px;--z1:180px;--d:44s;--dl:-26s;--c1:#3b82f6;--c2:#93c5fd;--t:23s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:48px;--x0:88vw;--y0:112vh;--x1:40vw;--y1:-14vh;--z0:-160px;--z1:200px;--d:36s;--dl:-17s;--c1:#f43f5e;--c2:#fda4af;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:90px;--x0:-14vw;--y0:60vh;--x1:112vw;--y1:20vh;--z0:-300px;--z1:140px;--d:50s;--dl:-6s;--c1:#6366f1;--c2:#6366f1;--t:29s"><div class="fr"></div></div><div class="fo" style="--s:64px;--x0:112vw;--y0:18vh;--x1:-14vw;--y1:80vh;--z0:-180px;--z1:200px;--d:42s;--dl:-19s;--c1:#ec4899;--c2:#ec4899;--t:24s"><div class="fr"></div></div><div class="fo" style="--s:110px;--x0:20vw;--y0:114vh;--x1:84vw;--y1:-18vh;--z0:-400px;--z1:60px;--d:60s;--dl:-33s;--c1:#06b6d4;--c2:#06b6d4;--t:32s"><div class="fr"></div></div><div class="fo" style="--s:56px;--x0:80vw;--y0:-14vh;--x1:6vw;--y1:100vh;--z0:-100px;--z1:240px;--d:40s;--dl:-12s;--c1:#f59e0b;--c2:#f59e0b;--t:23s"><div class="fr"></div></div><div class="fo" style="--s:54px;--x0:-12vw;--y0:34vh;--x1:112vw;--y1:70vh;--z0:-240px;--z1:180px;--d:48s;--dl:-2s;--c1:#6366f1;--c2:#22d3ee;--t:23s"><div class="ft"></div></div><div class="fo" style="--s:40px;--x0:112vw;--y0:50vh;--x1:-12vw;--y1:8vh;--z0:-80px;--z1:240px;--d:34s;--dl:-23s;--c1:#ec4899;--c2:#f59e0b;--t:20s"><div class="ft"></div></div><div class="fo" style="--s:70px;--x0:46vw;--y0:-14vh;--x1:92vw;--y1:114vh;--z0:-320px;--z1:100px;--d:54s;--dl:-36s;--c1:#8b5cf6;--c2:#06b6d4;--t:25s"><div class="ft"></div></div><div class="fo" style="--s:46px;--x0:-12vw;--y0:104vh;--x1:114vw;--y1:30vh;--z0:-140px;--z1:220px;--d:40s;--dl:-28s;--c1:#10b981;--c2:#3b82f6;--t:21s"><div class="ft"></div></div></div>{% endif %}<aside class="emp">
@@ -3015,7 +3094,7 @@ window.addEventListener('online',function(){setTimeout(check,1500)})
 var root=document.querySelector('.app.emp3d');if(!root)return;
 var aside=root.querySelector('aside.emp'),main=root.querySelector('main'),mb=root.querySelector('.mbody');
 if(!aside||!main||!mb)return;
-var mq=window.matchMedia('(min-width:801px)'),FS=0.78,FM=0.72,MS=1.12,MM=1.2,STEP=0.025,sbin=null,fin=null,tm=null,profEl=aside.querySelector('.prof');
+var mq=window.matchMedia('(min-width:801px)'),FS=0.9,FM=0.95,MS=1,MM=1,STEP=0.025,sbin=null,fin=null,tm=null,profEl=aside.querySelector('.prof');
 function wrap(){
  if(!sbin){sbin=document.createElement('div');sbin.className='sbin';while(aside.firstChild)sbin.appendChild(aside.firstChild);aside.appendChild(sbin)}
  if(profEl&&profEl.parentNode!==aside)aside.appendChild(profEl);
@@ -3547,8 +3626,8 @@ def page(body, title="Productivity Tracker", **ctx):
                                   side_avatar=side_avatar, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json)
 
 
-LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></div>
-<div class="wbody"><div class="scene {{role}}" aria-hidden="true"><div class="sheen"></div>
+LOGIN = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i><i></i><i></i></div>
+<div class="wbody"><div class="scene admin" aria-hidden="true"><div class="sheen"></div>
 <div class="gfw"><div class="gf"></div></div>
 <div class="fl" style="left:5%;top:12%;--s:62px;--bt:8s"><div class="cube" style="--s:62px;--t:18s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
 <div class="fl" style="right:6%;top:9%;--s:46px;--bt:6.5s;--d:-2s"><div class="cube" style="--s:46px;--t:13s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
@@ -3558,7 +3637,7 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
 <div class="fl" style="left:22%;top:6%;--bt:6s;--d:-2.5s"><div class="sph" style="--s:26px"></div></div>
 <div class="fl hm" style="right:5%;top:46%;--bt:7s;--d:-1.5s"><div class="sph" style="--s:34px"></div></div>
 <div class="fl hm" style="left:4%;top:48%;--bt:8s;--d:-5s"><div class="sph" style="--s:20px"></div></div>{% if role=='admin' %}<div class="dp adm"><div class="dp-lab"><b>&#9664;&#9664;&#9664;</b>&nbsp; LIVE DATA FEED &middot; INCOMING FROM SERVER</div><div class="dp-node l"><div class="dp-dash"><i></i><i></i><i></i><i></i></div><div class="dp-stand"></div><small>ADMIN DASHBOARD</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% else %}<div class="dp emp"><div class="dp-lab">UPLOADING ENCRYPTED DATA TO SERVER &nbsp;<b>&#9654;&#9654;&#9654;</b></div><div class="dp-node l"><div class="dp-scr"><i></i><i></i><i></i></div><div class="dp-stand"></div><small>EMPLOYEE</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% endif %}</div>
-{% if role=='admin' %}<div class="adp"><div class="adp-body" aria-hidden="true"><p class="adp-t">Admin Panel</p><h3>Productivity<br>Dashboard</h3><p class="adp-s">Monitor attendance, tasks and team performance in one place.</p><div class="adp-3d"><div class="adp-st"><div class="adp-c c1"><small>Performance</small><div class="adp-bars"><i style="height:38%"></i><i style="height:62%"></i><i style="height:48%"></i><i style="height:80%"></i><i style="height:58%"></i><i style="height:92%"></i><i style="height:70%"></i></div></div><div class="adp-c c2"><small>Attendance</small><div class="adp-ring"></div></div><div class="adp-c c3"><small>Reports</small><div class="adp-ln"></div><div class="adp-ln s"></div></div></div></div></div></div>{% endif %}{% if role=='employee' %}<div class="rb" style="left:14%;top:56%;width:54px;height:54px;--d:-3s"></div><div class="rb hm" style="right:16%;top:14%;width:70px;height:40px;animation-delay:-6s"></div><div class="rb" style="right:8%;bottom:12%;width:44px;height:44px;animation-delay:-9s"></div>{% endif %}<div class="lcard">{% if role=='admin' %}<div class="lcard-top"><div class="lav">{{admin_avatar|safe}}</div><img class="lcard-logo" src="/logo.png" alt="Mobius Technologies and Services" width="190" height="99"></div>{% else %}<img class="lcard-logo" src="/logo.png" alt="Mobius Technologies and Services" width="190" height="99">{% endif %}<h2>Welcome back</h2><p>{{title}}</p>
+<div class="adp"><div class="adp-body" aria-hidden="true"><p class="adp-t">{{ 'Admin' if role=='admin' else 'Employee' }} Panel</p><h3>Productivity<br>Dashboard</h3><p class="adp-s">{% if role=='admin' %}Monitor attendance, tasks and team performance in one place.{% else %}Log your daily work, leave and productivity in one place.{% endif %}</p><div class="adp-3d"><div class="adp-st"><div class="adp-c c1"><small>Performance</small><div class="adp-bars"><i style="height:38%"></i><i style="height:62%"></i><i style="height:48%"></i><i style="height:80%"></i><i style="height:58%"></i><i style="height:92%"></i><i style="height:70%"></i></div></div><div class="adp-c c2"><small>Attendance</small><div class="adp-ring"></div></div><div class="adp-c c3"><small>Reports</small><div class="adp-ln"></div><div class="adp-ln s"></div></div></div></div></div></div><div class="lcard"><div class="lcard-top"><div class="lav">{{admin_avatar|safe}}</div><img class="lcard-logo" src="/logo.png" alt="Mobius Technologies and Services" width="190" height="99"></div><h2>Welcome back</h2><p>{{title}}</p>
 <form method="post">
 <div class="field"><input id="login_u" name="u" placeholder="{{ph}}" required autofocus autocomplete="off"></div>
 <div class="field pw"><input id="login_p" name="p" type="password" placeholder="Password" required autocomplete="off">
@@ -3566,7 +3645,7 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
 <svg class="eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
 <svg class="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.9 10.9 0 0 1 12 19c-7 0-11-7-11-7a19.8 19.8 0 0 1 5.1-5.9M9.9 4.2A10.6 10.6 0 0 1 12 5c7 0 11 7 11 7a19.7 19.7 0 0 1-3.2 4.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>
 <span class="pw-t">Show</span></button></div>
-<button>Log in</button></form>{% if role!='admin' %}<span class="fgt" title="Please contact your admin to reset your password">Forgot password?</span>{% endif %}</div></div>{% if role!='admin' %}<img class="orb" src="/photo/{{role}}" alt="">{% endif %}</div>
+<button>Log in</button></form>{% if role!='admin' %}<span class="fgt" title="Please contact your admin to reset your password">Forgot password?</span>{% endif %}</div></div></div>
 {% if role=='employee' and WT_LOGIN_PROMPT %}<script>
 /* Update131: the Log in click is the user gesture the browser needs, so screen-lock tracking permission is requested right there - once per browser.
    After "Allow", every later login starts tracking by itself. Login is never blocked: any error / no support / no answer within 20 s just signs in. */
@@ -3627,6 +3706,99 @@ LOGIN = """<div class="win {{role}}"><div class="wbar"><i></i><i></i><i></i></di
       p.focus();
     });
   }
+})();
+</script>
+<script>
+/* Update199: idle theme change on the login page (Admin + Employee) */
+(function(){
+  var w = document.querySelector('.win'), wb = document.querySelector('.win .wbody');
+  if (!w || !wb) return;
+  var admin = w.getAttribute('data-role') === 'admin';
+  if (!admin) return;                                  /* Update200: the Employee login page uses its own new idle theme effect (next script) */
+  var TH = {
+    emerald:{bg:'radial-gradient(900px 420px at 20% 0%,#34d39955,transparent 60%),linear-gradient(120deg,#04201d 0%,#0f766e 48%,#34d399 100%)',glow:'#0f766eb3'},
+    rose:{bg:'radial-gradient(900px 420px at 80% 0%,#fb718566,transparent 60%),linear-gradient(120deg,#3b0a2a 0%,#be185d 48%,#fb7185 100%)',glow:'#be185db3'},
+    amber:{bg:'radial-gradient(900px 420px at 20% 0%,#fbbf2466,transparent 60%),linear-gradient(120deg,#1c1204 0%,#92400e 48%,#f59e0b 100%)',glow:'#d97706b3'},
+    violet:{bg:'radial-gradient(900px 420px at 80% 0%,#c084fc66,transparent 60%),linear-gradient(120deg,#1e0b4b 0%,#6d28d9 48%,#c084fc 100%)',glow:'#7c3aedb3'},
+    ocean:{bg:'radial-gradient(900px 420px at 20% 0%,#38bdf866,transparent 60%),linear-gradient(120deg,#07162e 0%,#1d4ed8 48%,#38bdf8 100%)',glow:'#2563ebb3'}
+  };
+  var seq = admin ? [TH.emerald, TH.rose, TH.amber, TH.violet, null] : [TH.ocean, TH.emerald, TH.violet, TH.amber, null];
+  var IDLE = 7000, GAP = 9000;                      /* mouse idle for 7 s -> change theme, then every 9 s while still idle */
+  var RM = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  function mk(){ var d = document.createElement('div'); d.className = 'ltbg'; wb.insertBefore(d, wb.firstChild); return d; }
+  var L = [mk(), mk()], cur = 0, idx = -1, busy = false, lastAct = Date.now(), lastSw = 0;
+  function apply(t){
+    var n = 1 - cur;
+    if (t) L[n].style.background = t.bg;
+    L[n].style.opacity = t ? 1 : 0; L[cur].style.opacity = 0; cur = n;
+    w.style.setProperty('--lt-glow', t ? t.glow : '#020617b3');
+    w.classList.toggle('lt-on', !!t);
+  }
+  function go(){
+    if (busy || document.hidden) return;
+    if (document.querySelector('.scene.dp-paused')) return;      /* signing in - leave it alone */
+    busy = true; lastSw = Date.now(); idx = (idx + 1) % seq.length;
+    var t = seq[idx];
+    if (RM) { apply(t); busy = false; return; }
+    w.classList.add('lt-out');
+    setTimeout(function(){
+      apply(t); w.classList.remove('lt-out'); w.classList.add('lt-in');
+      setTimeout(function(){ w.classList.remove('lt-in'); busy = false; }, 800);
+    }, 480);
+  }
+  function act(){ lastAct = Date.now(); }
+  ['mousemove','mousedown','keydown','touchstart','wheel'].forEach(function(ev){ document.addEventListener(ev, act, {passive:true}); });
+  setInterval(function(){
+    var n = Date.now();
+    if (n - lastAct >= IDLE && n - lastSw >= GAP) go();
+  }, 500);
+})();
+</script>
+<script>
+/* Update200: Employee login - NEW idle theme effect (colour wipe from the mouse position + 3D depth pop + scene colour shift) */
+(function(){
+  var w = document.querySelector('.win.employee'), wb = document.querySelector('.win.employee .wbody');
+  if (!w || !wb) return;
+  var sc = wb.querySelector('.scene');
+  var base = getComputedStyle(wb).backgroundImage;              /* the original look, so the cycle can return to it */
+  var seq = [
+    {bg:'radial-gradient(900px 420px at 20% 0%,#38bdf866,transparent 60%),linear-gradient(120deg,#07162e 0%,#1d4ed8 48%,#38bdf8 100%)',glow:'#2563ebb3',hue:150},
+    {bg:'radial-gradient(900px 420px at 80% 0%,#34d39955,transparent 60%),linear-gradient(120deg,#04201d 0%,#0f766e 48%,#34d399 100%)',glow:'#0f766eb3',hue:95},
+    {bg:'radial-gradient(900px 420px at 20% 0%,#c084fc66,transparent 60%),linear-gradient(120deg,#1e0b4b 0%,#6d28d9 48%,#c084fc 100%)',glow:'#7c3aedb3',hue:300},
+    {bg:'radial-gradient(900px 420px at 80% 0%,#fbbf2466,transparent 60%),linear-gradient(120deg,#1c1204 0%,#92400e 48%,#f59e0b 100%)',glow:'#d97706b3',hue:25},
+    {bg:base,glow:'#020617b3',hue:0}
+  ];
+  var IDLE = 6000, GAP = 8500;                                  /* mouse idle 6 s -> new theme, then every 8.5 s while still idle */
+  var RM = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  function mk(){ var d = document.createElement('div'); d.className = 'ltbg'; wb.insertBefore(d, wb.firstChild); return d; }
+  var L = [mk(), mk()], cur = 0, idx = -1, busy = false, lastAct = Date.now(), lastSw = 0, mx = 50, my = 55;
+  function track(e){
+    lastAct = Date.now();
+    if (e.type !== 'mousemove') return;
+    var r = wb.getBoundingClientRect(); if (!r.width || !r.height) return;
+    mx = Math.max(0, Math.min(100, (e.clientX - r.left) / r.width * 100));
+    my = Math.max(0, Math.min(100, (e.clientY - r.top) / r.height * 100));
+  }
+  function go(){
+    if (busy || document.hidden) return;
+    if (document.querySelector('.scene.dp-paused')) return;     /* signing in - leave it alone */
+    busy = true; lastSw = Date.now(); idx = (idx + 1) % seq.length;
+    var t = seq[idx], n = 1 - cur, N = L[n], O = L[cur];
+    N.style.background = t.bg; N.style.zIndex = '-1'; O.style.zIndex = '-2';
+    w.style.setProperty('--lt-glow', t.glow); w.classList.add('lt-on');
+    if (sc) sc.style.filter = 'hue-rotate(' + t.hue + 'deg)';
+    if (RM) { N.style.opacity = 1; O.style.opacity = 0; cur = n; busy = false; return; }
+    N.style.setProperty('--cx', mx.toFixed(1) + '%'); N.style.setProperty('--cy', my.toFixed(1) + '%');
+    N.classList.remove('wipe'); N.style.opacity = 1; void N.offsetWidth; N.classList.add('wipe');
+    w.classList.remove('lt-pop'); void w.offsetWidth; w.classList.add('lt-pop');
+    setTimeout(function(){ O.classList.remove('wipe'); O.style.opacity = 0; cur = n; }, 1550);
+    setTimeout(function(){ w.classList.remove('lt-pop'); busy = false; }, 1600);
+  }
+  ['mousemove','mousedown','keydown','touchstart','wheel'].forEach(function(ev){ document.addEventListener(ev, track, {passive:true}); });
+  setInterval(function(){
+    var now = Date.now();
+    if (now - lastAct >= IDLE && now - lastSw >= GAP) go();
+  }, 500);
 })();
 </script>
 """
@@ -4711,7 +4883,8 @@ def employee_login():
             if u in (str(e["Employee ID"]).lower(), str(e["Email"]).lower()) and eq(request.form["p"], e["Password"]):
                 if emp_locked(e):                                   # Update96: locked accounts cannot log in
                     flash("Your account is locked. Please contact the Admin to unlock it.", "error")
-                    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee")
+                    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee",
+                admin_avatar=render_fast(AVATAR3D, gender="male", initials="E"))
                 track_logout(auto=True, reason="New login")      # closes a previous session in this browser, if any
                 session.clear()
                 session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"],
@@ -4720,7 +4893,8 @@ def employee_login():
                 _bg(warm_employee_cache)                  # dashboard data loads while the welcome animation plays
                 return redirect("/employee/welcome")
         flash("Wrong username or password.")
-    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee")
+    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee",
+                admin_avatar=render_fast(AVATAR3D, gender="male", initials="E"))
 
 def form_page(sub, action, heading):
     procs = rows("Processes")

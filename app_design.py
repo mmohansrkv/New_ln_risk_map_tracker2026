@@ -7,6 +7,7 @@
   * Update183: Admin pages now use the SAME 3D animated message box as the Employee page ("Saved Successfully" box: 3D flip-in, spinning coin, light sweep, flip-out). Every Admin action result (Send mail, Retry, Save, Delete, Lock, Import ... - all the flash messages) is shown in this box: green = success, red = failed, amber = notice; long messages stay longer, hover pauses it, click closes it. When an Admin clicks a button that submits a form, a blue "Working..." 3D box appears at once with the button name until the result page opens. Display only - no route, sheet, e-mail or tracking code changed.
   * Update182: EVERY Employee page now has a full-page flying 3D animation: a fixed, click-through background layer (#fly3d, pure CSS, no script) with 16 coloured 3D cubes, rings and tiles flying across the whole screen at different depths and speeds, behind the sidebar and page content. Employee pages only (Admin, login and Welcome are unchanged); cards are slightly more transparent so the objects show through; half of the objects are hidden on small screens; nothing is shown for reduced-motion users or when printing. No route, sheet, tracking or e-mail code changed.
   * Update181: Admin + Employee pages - every button is now smaller (compact padding / 11px text) with a modern 3D look: coloured bottom edge, soft shadow, smooth hover lift, press-down motion, a light sweep on primary buttons and a short fade-in. CSS only (one block at the end of the main stylesheet); colours, labels, links, forms and every route / handler are unchanged. Login pages, sidebar, calendar, group chat and the editor toolbar are not affected. Disabled buttons look flat, and reduced-motion users get no animation.
+  * Update193: Employee panel - the 3D Logout button now sits at the BOTTOM of the page right NEXT TO the 3D avatar animation (avatar on the left, Logout on the right, one docked row under a divider line), on every Employee page; it is outside the scaled area so it is never cut off. Display only.
   * Update192: Code updates / deploys / restarts NO LONGER log anyone out. (1) The session-cookie signing key is now STABLE: SECRET_KEY if set, otherwise derived from the Google service-account key (credentials.json) that survives every deploy, instead of a '.secret_key' file that a fresh deploy could recreate; the old file key is still accepted (SECRET_KEY_FALLBACKS), so people signed in before this update stay signed in. (2) Open Employee and Admin pages notice a new version by themselves (/app-version, checked every 30 s and when the tab is shown again) and reload on their own with the same session; if the person has typed something that is not saved yet, a small 'New version available - Refresh' button is shown instead, so no typed data is lost. The check never resets the 30-minute inactivity timer. Normal idle logout and manual logout are unchanged.
   * Update191: Employee panel - the Logout button is pinned at the very bottom of the left panel (below the avatar, never covered or cut off) as a 3D animated button: raised 3D look with a coloured edge, gentle floating tilt, a light sweep, hover lift, press-down, power icon, clear keyboard focus ring; no animation for reduced-motion users. Display only.
   * Update190: Missed Entries e-mail - (1) the employee gets ONE e-mail (manual AND automatic) that lists ALL missed Productivity Entry dates, one per row (No. / Date / Day) - nothing is cut off any more (it used to show 4 dates + "+N more") - together with the TOTAL number of missed entries (in the e-mail body, the subject and the plain-text version). (2) The Manager(s) and Team Lead(s) stay in CC (Office Email ID, picked live from the Designation in Employee Info); the employee is in To. The automatic job now sends this single consolidated e-mail per employee (still re-checking the live Productivity log / Leave / Holidays right before sending, and sending only dates that are still missing) instead of one e-mail per date.
@@ -2873,16 +2874,20 @@ html.fit188 .app.emp3d{height:100vh;height:100dvh;min-height:0;overflow:hidden}
 html.fit188 .app.emp3d aside.emp{height:100vh;height:100dvh;padding:12px 12px 10px;gap:0;overflow:hidden}
 html.fit188 .app.emp3d aside.emp .sbin{display:flex;flex-direction:column;gap:3px;min-height:0;overflow:visible;padding-bottom:4px;transform-origin:0 0}
 html.fit188 .app.emp3d aside.emp .sbin>*{flex-shrink:0}
+html.fit188 .app.emp3d aside.emp>.prof{flex:none;margin:6px 0 0;padding:8px 4px 2px;border-top:1px solid #2b3560;display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:10px;position:relative;z-index:6}
+html.fit188 .app.emp3d aside.emp>.prof .prof-row{flex:0 1 auto;min-width:0}
+html.fit188 .app.emp3d aside.emp>.prof .prof-name{font-size:11.5px;max-width:92px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+html.fit188 .app.emp3d aside.emp .prof .prof-out{flex:none}
 /* Update191: 3D animated Logout button pinned at the very bottom of the Employee panel */
-html.fit188 .app.emp3d aside.emp>.prof-out{flex:none;display:flex;align-items:center;justify-content:center;gap:8px;position:relative;z-index:6;overflow:hidden;width:fit-content;min-width:118px;margin:10px auto 4px;padding:7px 22px;font-size:12.5px;line-height:1.2;font-weight:700;letter-spacing:.5px;color:#fff;text-decoration:none;text-shadow:0 1px 0 rgba(0,0,0,.3);background:linear-gradient(180deg,#ff7a7a 0%,#ef4444 48%,#dc2626 100%);border:0;border-radius:12px;box-shadow:0 5px 0 #991b1b,0 10px 16px -4px rgba(239,68,68,.65),inset 0 1px 0 rgba(255,255,255,.5);transform:perspective(420px) translateY(0) rotateX(0);transition:box-shadow .18s,filter .18s;animation:lo3dFloat 3s ease-in-out infinite}
-html.fit188 .app.emp3d aside.emp>.prof-out::before{content:"";flex:none;width:10px;height:10px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;background:linear-gradient(#fff,#fff) center top/2px 6px no-repeat;background-origin:border-box}
-html.fit188 .app.emp3d aside.emp>.prof-out::after{content:"";position:absolute;top:0;left:-60%;width:38%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.6),transparent);transform:skewX(-20deg);animation:lo3dSweep 3.4s ease-in-out infinite;pointer-events:none}
-html.fit188 .app.emp3d aside.emp>.prof-out:hover{animation:none;transform:perspective(420px) translateY(-3px) rotateX(10deg);filter:brightness(1.1);box-shadow:0 8px 0 #991b1b,0 16px 22px -6px rgba(239,68,68,.8),inset 0 1px 0 rgba(255,255,255,.55)}
-html.fit188 .app.emp3d aside.emp>.prof-out:active{animation:none;transform:perspective(420px) translateY(4px);box-shadow:0 1px 0 #991b1b,0 3px 6px -2px rgba(239,68,68,.6),inset 0 1px 0 rgba(255,255,255,.3)}
-html.fit188 .app.emp3d aside.emp>.prof-out:focus-visible{outline:3px solid #fde68a;outline-offset:3px}
+html.fit188 .app.emp3d aside.emp .prof .prof-out{flex:none;display:flex;align-items:center;justify-content:center;gap:8px;position:relative;z-index:6;overflow:hidden;width:fit-content;min-width:104px;margin:0;padding:8px 18px;font-size:12.5px;line-height:1.2;font-weight:700;letter-spacing:.5px;color:#fff;text-decoration:none;text-shadow:0 1px 0 rgba(0,0,0,.3);background:linear-gradient(180deg,#ff7a7a 0%,#ef4444 48%,#dc2626 100%);border:0;border-radius:12px;box-shadow:0 5px 0 #991b1b,0 10px 16px -4px rgba(239,68,68,.65),inset 0 1px 0 rgba(255,255,255,.5);transform:perspective(420px) translateY(0) rotateX(0);transition:box-shadow .18s,filter .18s;animation:lo3dFloat 3s ease-in-out infinite}
+html.fit188 .app.emp3d aside.emp .prof .prof-out::before{content:"";flex:none;width:10px;height:10px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;background:linear-gradient(#fff,#fff) center top/2px 6px no-repeat;background-origin:border-box}
+html.fit188 .app.emp3d aside.emp .prof .prof-out::after{content:"";position:absolute;top:0;left:-60%;width:38%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.6),transparent);transform:skewX(-20deg);animation:lo3dSweep 3.4s ease-in-out infinite;pointer-events:none}
+html.fit188 .app.emp3d aside.emp .prof .prof-out:hover{animation:none;transform:perspective(420px) translateY(-3px) rotateX(10deg);filter:brightness(1.1);box-shadow:0 8px 0 #991b1b,0 16px 22px -6px rgba(239,68,68,.8),inset 0 1px 0 rgba(255,255,255,.55)}
+html.fit188 .app.emp3d aside.emp .prof .prof-out:active{animation:none;transform:perspective(420px) translateY(4px);box-shadow:0 1px 0 #991b1b,0 3px 6px -2px rgba(239,68,68,.6),inset 0 1px 0 rgba(255,255,255,.3)}
+html.fit188 .app.emp3d aside.emp .prof .prof-out:focus-visible{outline:3px solid #fde68a;outline-offset:3px}
 @keyframes lo3dFloat{0%,100%{transform:perspective(420px) translateY(0) rotateX(0)}50%{transform:perspective(420px) translateY(-2px) rotateX(7deg)}}
 @keyframes lo3dSweep{0%{left:-60%}55%,100%{left:135%}}
-@media(prefers-reduced-motion:reduce){html.fit188 .app.emp3d aside.emp>.prof-out,html.fit188 .app.emp3d aside.emp>.prof-out::after{animation:none}}
+@media(prefers-reduced-motion:reduce){html.fit188 .app.emp3d aside.emp .prof .prof-out,html.fit188 .app.emp3d aside.emp .prof .prof-out::after{animation:none}}
 html.fit188 .app.emp3d main{height:100vh;height:100dvh;min-height:0;padding:14px 22px 0;overflow:hidden}
 html.fit188 .app.emp3d .mbody{flex:1 1 0;min-height:0;overflow:hidden;position:relative}
 html.fit188 .app.emp3d .mbody.fit-scroll{overflow:auto}
@@ -2975,22 +2980,22 @@ window.addEventListener('online',function(){setTimeout(check,1500)})
 var root=document.querySelector('.app.emp3d');if(!root)return;
 var aside=root.querySelector('aside.emp'),main=root.querySelector('main'),mb=root.querySelector('.mbody');
 if(!aside||!main||!mb)return;
-var mq=window.matchMedia('(min-width:801px)'),FLOOR=0.55,STEP=0.025,sbin=null,fin=null,tm=null,outEl=aside.querySelector('.prof-out'),profEl=aside.querySelector('.prof');
+var mq=window.matchMedia('(min-width:801px)'),FLOOR=0.55,STEP=0.025,sbin=null,fin=null,tm=null,profEl=aside.querySelector('.prof');
 function wrap(){
  if(!sbin){sbin=document.createElement('div');sbin.className='sbin';while(aside.firstChild)sbin.appendChild(aside.firstChild);aside.appendChild(sbin)}
- if(outEl&&outEl.parentNode!==aside)aside.appendChild(outEl);
+ if(profEl&&profEl.parentNode!==aside)aside.appendChild(profEl);
  if(!fin){fin=document.createElement('div');fin.className='fitin';while(mb.firstChild)fin.appendChild(mb.firstChild);mb.appendChild(fin)}
 }
 function reset(){
  [sbin,fin].forEach(function(e){if(e){e.style.zoom='';e.style.width='';e.style.height=''}});
- if(outEl&&profEl&&outEl.parentNode!==profEl)profEl.appendChild(outEl);
+ if(profEl&&sbin&&profEl.parentNode!==sbin)sbin.appendChild(profEl);
  if(sbin){sbin.style.overflowY=''}
  aside.style.overflowY='';mb.classList.remove('fit-scroll')
 }
 function px(v){return parseFloat(v)||0}
 function fitSide(){
  var cs=getComputedStyle(aside),W=aside.clientWidth-px(cs.paddingLeft)-px(cs.paddingRight),H=aside.clientHeight-px(cs.paddingTop)-px(cs.paddingBottom);
- if(outEl&&outEl.parentNode===aside)H-=outEl.offsetHeight+6;
+ if(profEl&&profEl.parentNode===aside)H-=profEl.offsetHeight+px(getComputedStyle(profEl).marginTop)+2;
  if(W<=0||H<=0)return;
  var z=1,h=0;
  for(;;){

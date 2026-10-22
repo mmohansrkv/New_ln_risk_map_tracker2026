@@ -7,6 +7,8 @@
   * Update183: Admin pages now use the SAME 3D animated message box as the Employee page ("Saved Successfully" box: 3D flip-in, spinning coin, light sweep, flip-out). Every Admin action result (Send mail, Retry, Save, Delete, Lock, Import ... - all the flash messages) is shown in this box: green = success, red = failed, amber = notice; long messages stay longer, hover pauses it, click closes it. When an Admin clicks a button that submits a form, a blue "Working..." 3D box appears at once with the button name until the result page opens. Display only - no route, sheet, e-mail or tracking code changed.
   * Update182: EVERY Employee page now has a full-page flying 3D animation: a fixed, click-through background layer (#fly3d, pure CSS, no script) with 16 coloured 3D cubes, rings and tiles flying across the whole screen at different depths and speeds, behind the sidebar and page content. Employee pages only (Admin, login and Welcome are unchanged); cards are slightly more transparent so the objects show through; half of the objects are hidden on small screens; nothing is shown for reduced-motion users or when printing. No route, sheet, tracking or e-mail code changed.
   * Update181: Admin + Employee pages - every button is now smaller (compact padding / 11px text) with a modern 3D look: coloured bottom edge, soft shadow, smooth hover lift, press-down motion, a light sweep on primary buttons and a short fade-in. CSS only (one block at the end of the main stylesheet); colours, labels, links, forms and every route / handler are unchanged. Login pages, sidebar, calendar, group chat and the editor toolbar are not affected. Disabled buttons look flat, and reduced-motion users get no animation.
+  * Update190: Missed Entries e-mail - (1) the employee gets ONE e-mail (manual AND automatic) that lists ALL missed Productivity Entry dates, one per row (No. / Date / Day) - nothing is cut off any more (it used to show 4 dates + "+N more") - together with the TOTAL number of missed entries (in the e-mail body, the subject and the plain-text version). (2) The Manager(s) and Team Lead(s) stay in CC (Office Email ID, picked live from the Designation in Employee Info); the employee is in To. The automatic job now sends this single consolidated e-mail per employee (still re-checking the live Productivity log / Leave / Holidays right before sending, and sending only dates that are still missing) instead of one e-mail per date.
+  * Update189: Missed Entries e-mail (manual AND automatic) - every employee whose Designation is a Manager or a Team Lead (any designation containing "Manager" or "Team Lead", e.g. Manager, Associate Manager, Senior Manager, Team Lead, Senior Team Lead) is added to the CC field automatically, using the Office Email ID registered in Employee Info. The employee still gets the mail in To; the employee is never CC'd on their own mail, duplicates / invalid addresses / locked accounts are skipped, and the CC list is re-read live so a Designation or e-mail change applies at once. Works over Brevo and SMTP.
   * Update178: Automatic missed-entry e-mail checks ONLY the current month (1st of this month to yesterday) and re-verifies the live Productivity log / Leave / Holidays before every batch of 5 e-mails.
   * Update177: Automatic missed-entry e-mail - e-mails are now sent ONLY for dates that are STILL missing at the moment of sending. The job used to work out the missing dates once and then
     send in batches with no re-check, so a date submitted (or covered by leave / a holiday) after that list was built - or one whose date the sheet displayed in another format - still got a
@@ -8428,6 +8430,19 @@ def productivity_access(eid, access_rows):
 def employee_office_email(e):
     return str(e.get("Office Email ID") or e.get("Email") or "").strip()      # Office Email ID mirrors the login Email
 
+def manager_lead_cc(to_email=""):
+    """Update189: Office Email IDs of every employee whose Designation is a Manager or a Team Lead (live from the Employees sheet).
+    The recipient of the mail (To) is never repeated in CC; invalid / duplicate addresses and locked accounts are skipped."""
+    out, seen = [], {str(to_email or "").strip().lower()}
+    for e in rows("Employees"):
+        d = _norm_desig(e.get("Designation", ""))
+        if not d or not ("manager" in d or "team lead" in d or "teamlead" in d.replace(" ", "")): continue
+        if emp_locked(e): continue
+        mail = employee_office_email(e)
+        if not EMAIL_RE.match(mail) or mail.lower() in seen: continue
+        seen.add(mail.lower()); out.append(mail)
+    return out
+
 def _brevo_send(messages):
     """Send via Brevo's HTTPS API (no SMTP port needed). Returns {email: 'Sent' | 'Failed: reason'}."""
     import json, urllib.request, urllib.error
@@ -8441,6 +8456,8 @@ def _brevo_send(messages):
             payload = {"sender": {"name": _sn or "Productivity Tracker", "email": _se or MAIL_FROM}, "to": [{"email": to}], "subject": str(m["Subject"]),
                        "htmlContent": html.get_content() if html else "<p>" + (plain.get_content() if plain else "") + "</p>"}
             if plain: payload["textContent"] = plain.get_content()
+            _cc = [a for _n, a in __import__("email.utils", fromlist=["getaddresses"]).getaddresses([str(m["Cc"])]) if a] if m["Cc"] else []      # Update189
+            if _cc: payload["cc"] = [{"email": a} for a in _cc]
             req = urllib.request.Request("https://api.brevo.com/v3/smtp/email", data=json.dumps(payload).encode("utf-8"), method="POST",
                                          headers={"api-key": BREVO_API_KEY, "content-type": "application/json", "accept": "application/json"})
             with urllib.request.urlopen(req, timeout=30) as r: r.read()
@@ -8580,16 +8597,26 @@ def _orange_row(cells, F="font-family:'Segoe UI',Arial,Helvetica,sans-serif;"):
             f'box-shadow:0 10px 18px rgba(234,88,12,.35)"><tr>{tds}</tr></table>')
 
 def _missed_html(nm, ds, pretty, link):
+    """Update190: ALL missed dates (one per row) + the TOTAL count. nm is already HTML-escaped."""
     import html as _h
     F = "font-family:'Segoe UI',Arial,Helvetica,sans-serif;"
-    line = "  &bull;  ".join(_h.escape(d.strftime("%d %b %Y (%a)")) for d in ds[:4])
-    tiles = _orange_row([("Missing Productivity Entry", line)], F)
-    more = (f'<p style="{F}margin:0 0 6px 0;font-size:13px;color:#64748b;text-align:center">+ {len(ds) - 4} more date(s)</p>' if len(ds) > 4 else "")
-    dl = _h.escape(", ".join(pretty))
-    return _html3d(nm, f"Your Productivity Entry is missing for {', '.join(pretty)}.",
-                   f'Your Productivity Entry is missing for <b style="color:#b91c1c">{dl}</b>.',
-                   f'{tiles}{more.replace("margin:0 0 6px 0","margin:8px 0 6px 0")}', link,
-                   "Please log in to the Productivity Tracker and complete the required entry:")
+    n = len(ds)
+    summary = _orange_row([("Employee", nm), ("Total Missed Entries", str(n))], F)
+    th = f'padding:8px 10px;{F}font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:#7c2d12;background:#fed7aa;border-bottom:2px solid #ea580c;'
+    body = "".join(
+        f'<tr><td align="center" style="padding:8px 10px;{F}font-size:14px;color:#7c2d12;border-bottom:1px solid #fdba74">{i}</td>'
+        f'<td style="padding:8px 10px;{F}font-size:14px;font-weight:bold;color:#431407;border-bottom:1px solid #fdba74">{_h.escape(d.strftime("%d %b %Y"))}</td>'
+        f'<td style="padding:8px 10px;{F}font-size:14px;color:#431407;border-bottom:1px solid #fdba74">{_h.escape(d.strftime("%A"))}</td></tr>'
+        for i, d in enumerate(ds, 1))
+    table = (f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#fff7ed" '
+             'style="max-width:532px;margin-top:14px;background:#fff7ed;border:1px solid #fdba74;border-radius:12px;border-collapse:separate;border-spacing:0">'
+             f'<tr><td align="center" style="{th}">No.</td><td style="{th}">Missed Date</td><td style="{th}">Day</td></tr>{body}</table>')
+    label = f"{n} Productivity Entr{'y' if n == 1 else 'ies'}"
+    return _html3d(nm, f"You have {label} missing: {', '.join(pretty)}.",
+                   f'Your Productivity Entry is missing for <b style="color:#b91c1c">{n}</b> date{"" if n == 1 else "s"}. '
+                   f'Total missed entries: <b style="color:#b91c1c">{n}</b>. The missed date{"" if n == 1 else "s"} {"is" if n == 1 else "are"} listed below.',
+                   f'{summary}{table}', link,
+                   "Please log in to the Productivity Tracker and complete the required entr" + ("y" if n == 1 else "ies") + ":")
 
 def approval_message(emp, kind, date_txt, duration_txt):
     """Update100: 'Leave' / 'Permission' APPROVED e-mail - same 3D template. Fields: employee name, request type, date, duration / hours, approval status."""
@@ -8614,13 +8641,18 @@ def approval_message(emp, kind, date_txt, duration_txt):
 def missed_message(emp, dates):
     """Update99: the single missed-entry e-mail (3D template) - used by Manual AND Automatic sending."""
     import html as _h
-    ds = [dt.date.fromisoformat(d) for d in dates]
+    ds = sorted({dt.date.fromisoformat(str(d).strip()) for d in dates})      # Update190: sorted, no duplicates
     pretty = [d.strftime("%d %b %Y") for d in ds]
     n = len(pretty); link = employee_login_link(); name = str(emp["name"])
     msg = EmailMessage()
-    msg["Subject"] = "Productivity Entry missing for " + pretty[0] + (f" (+{n - 1} more)" if n > 1 else "")
+    msg["Subject"] = (f"Productivity Entry missing for {pretty[0]}" if n == 1 else f"Productivity Entry missing - {n} missed entries ({pretty[0]} to {pretty[-1]})")      # Update190: count in the subject
     msg["From"] = formataddr(mail_sender()); msg["To"] = emp["email"]
-    msg.set_content(f"Hello {name},\n\nYour Productivity Entry is missing for {', '.join(pretty)}.\n\n"
+    try: _cc = manager_lead_cc(emp["email"])                    # Update189: Managers + Team Leads in CC (never blocks the mail)
+    except Exception as ex_: _cc = []; print("CC lookup error:", ex_)
+    if _cc: msg["Cc"] = ", ".join(_cc)
+    _lines = "\n".join(f"  {i}. {d.strftime('%d %b %Y (%A)')}" for i, d in enumerate(ds, 1))      # Update190: every missed date, numbered
+    msg.set_content(f"Hello {name},\n\nYour Productivity Entry is missing for {n} date{'' if n == 1 else 's'}.\n"
+                    f"Total missed entries: {n}\n\nMissed dates:\n{_lines}\n\n"
                     "Please log in to the Productivity Tracker and complete the required entry:\n"
                     f"{link or '(open the Productivity Tracker and log in)'}\n\n"
                     "This is an automated email. Please do not reply to this email.\n\nThanks,\nProductivity Tracker (LN_Map)")
@@ -8908,13 +8940,8 @@ def run_auto_missed_mail(force=False):
             emp = dict(eid=eid, name=str(e.get("Name", "")), email=mail)
             if not EMAIL_RE.match(mail): noaddr.append((emp, pending)); continue
             per_emp.append((emp, pending))
-        # ONE separate e-mail per missed date. Mails go out in "waves" (wave n = the n-th missed date of every employee) so each wave has one mail per address
-        waves, items_n = [], 0
-        for emp, pending in per_emp:
-            for i, d in enumerate(pending):
-                while len(waves) <= i: waves.append([])
-                waves[i].append((emp, missed_message(emp, [d]), d, 1)); items_n += 1
-        items = [x for w in waves for x in w]
+        # Update190: ONE e-mail per employee listing ALL still-missing dates + the total count (Manager / Team Lead in CC)
+        items = list(per_emp)
         if noaddr:                                              # visible on the Email Controls status board (once per day per employee)
             ws = ws_of(MISSED_LOG); t = str(today)
             have = {_key(r.get("Employee ID", "")) for r in _fetch_rows(MISSED_LOG) if str(r.get("Date sent", "")) == t and str(r.get("Mode", "")) == "Auto" and str(r.get("Status", "")).startswith("Failed: no valid")}
@@ -8922,21 +8949,24 @@ def run_auto_missed_mail(force=False):
             if rowsx: ws.append_rows(rowsx, value_input_option="RAW"); invalidate_cache(MISSED_LOG)
         failed = 0
         skipped = 0
-        for w in waves:
-            for i in range(0, len(w), 5):
-                chunk = w[i:i + 5]      # Update178: the live Productivity-log check runs before every small batch of 5 e-mails
-                try:                                                        # Update177: re-check LIVE right before sending - only dates that are STILL missing are mailed
-                    covered, hol = _live_covered()
-                except Exception as ex:
-                    print("Automatic missed-entry e-mail: live re-check failed - this batch is NOT sent, it is retried in the next slot:", repr(ex)); failed += len(chunk); continue
-                keep = [x for x in chunk if x[2] not in covered.get(_key(x[0]["eid"]), set()) and x[2] not in hol and not is_off(x[2])]
-                for x in chunk:
-                    if x not in keep: print(f"Automatic missed-entry e-mail: SKIPPED {x[0]['eid']} {x[2]} - entry / leave / holiday found at send time")
-                skipped += len(chunk) - len(keep)
-                if not keep: continue
-                out = send_logged(keep, "Auto", "System")      # one log row per missed date; failed ones stay "not e-mailed" and are retried
-                failed += sum(1 for v in out.values() if v != "Sent")
-        print(f"Automatic missed-entry e-mail: {len(items) - skipped} e-mail(s) sent/tried for {len(per_emp)} employee(s), {skipped} skipped (no longer missing), {failed} failed, {len(noaddr)} without a valid e-mail.")
+        sent_n = 0
+        for i in range(0, len(items), 5):
+            chunk = items[i:i + 5]      # Update178: the live Productivity-log check runs before every small batch of 5 e-mails
+            try:                                                        # Update177: re-check LIVE right before sending - only dates that are STILL missing are mailed
+                covered, hol = _live_covered()
+            except Exception as ex:
+                print("Automatic missed-entry e-mail: live re-check failed - this batch is NOT sent, it is retried in the next slot:", repr(ex)); failed += len(chunk); continue
+            keep = []
+            for emp, pend in chunk:
+                left = [d for d in pend if d not in covered.get(_key(emp["eid"]), set()) and d not in hol and not is_off(d)]
+                if len(left) != len(pend): print(f"Automatic missed-entry e-mail: {emp['eid']} - {len(pend) - len(left)} date(s) SKIPPED (entry / leave / holiday found at send time)")
+                skipped += len(pend) - len(left)
+                if left: keep.append((emp, missed_message(emp, left), ", ".join(left), len(left)))
+            if not keep: continue
+            out = send_logged(keep, "Auto", "System")      # one log row per employee e-mail; failed ones stay "not e-mailed" and are retried
+            sent_n += len(keep)
+            failed += sum(1 for v in out.values() if v != "Sent")
+        print(f"Automatic missed-entry e-mail: {sent_n} e-mail(s) sent/tried for {len(per_emp)} employee(s), {skipped} date(s) skipped (no longer missing), {failed} failed, {len(noaddr)} without a valid e-mail.")
         return (len(items), failed)                                   # employees without a valid address are listed on the status board (Failed: no valid Office Email ID)
     except Exception as ex:
         print("Automatic missed-entry e-mail error:", ex); return (0, 1)

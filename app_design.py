@@ -1,5 +1,6 @@
 """Productivity Tracker - Flask + Google Sheets.
   * Update201: Employee login page - the left "Employee Panel / Productivity Dashboard / Performance / Attendance / Reports" promo block is removed (the login card is centred); the Admin login page is unchanged.
+  * Update203: Connection Game - PLAY TOGETHER. Employee menu "Play Together": every employee sees the colleagues who are online (live, updates on login / logout) and can select one; only employees the Admin has granted access (Admin > Employee Info > Game Access, new sheet "Game Access") can invite, accept and play. Access is enforced on the server for every invite / accept / guess; revoking it ends the game. Two players share one puzzle (same words, mistakes and timer). Invitations also pop up on any employee page. The old single-player bonus round is unchanged.
   * Update202: (1) calendar status legend removed; (2) login goes straight to /admin/summary (Admin) or /employee (Employee) - welcome pages no longer shown; (3) generic \"Something went wrong...\" message removed - real errors now show a specific message (data service busy / could not save / could not reach server).
   * Update200: Employee Panel calendar - every date is marked Present / Absent / Leave (approved leave only) / Holiday / Weekly Off in its own colour; the NEXT upcoming holiday date is highlighted with a gold pulsing ring (days left shown in the Upcoming holidays list); the calendar re-reads attendance, approved leave, holidays and weekly offs automatically (new /employee/calendar-data, refreshed every 2 minutes, when the tab is shown again and at midnight). Display only - no sheet, e-mail or tracking code changed.
   * Update191: Employee panel shown at a NORMAL, comfortable size: base text 14px, buttons / inputs 14px with balanced padding, headings 16-22px, KPI cards, tables, calendar and the left menu all enlarged to readable sizes. The fit-to-screen script no longer shrinks to ~55-70 % or scales up to 120 %: it now stays between 90 % and 100 % (left panel) and 95 % - 100 % (page), and when a long page does not fit, only the page content area scrolls instead of the text becoming tiny. Employee pages only (Admin and login pages unchanged); display only - no route, sheet, e-mail or tracking code changed.
@@ -496,6 +497,7 @@ HEADERS = {
     # Mahizhchi (Update62): Admin's questions (A-D options, one ✓ correct answer) and which employees may view them.
     "Mahizhchi Log": ["Question", "A", "B", "C", "D", "Correct Answer"],
     "Mahizhchi Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
+    "Game Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],      # Update203: who may play the Connection Game together
     "Mahizhchi Answers": ["Employee ID", "Employee name", "Question ID", "Question", "Answer", "Submitted at"],
     # Update84: one row per employee PER SET: when they pressed Start (timer runs from this SERVER time), when the Set closed, and its result
     "Mahizhchi Attempts": ["Employee ID", "Employee name", "Started at", "Closed at", "Set", "Answered", "Correct", "Result", "Extra seconds"],
@@ -687,7 +689,7 @@ def _idle_auto_logout():
             session.clear()
             flash(f"You were logged out automatically after {SESSION_IDLE_MINUTES} minutes of inactivity.")
             return redirect("/admin/login" if was_admin else "/employee/login")
-        if request.endpoint in ("employee_ping", "gc_state"):          # heartbeat: shows "online" but must NOT reset the idle timer
+        if request.endpoint in ("employee_ping", "gc_state", "gm_state", "gm_invites"):          # heartbeat: shows "online" but must NOT reset the idle timer
             online_set(session.get("att_id"), session.get("att_eid"), session.get("att_name"), active=last)
             return
         session["last_seen"] = now_ts
@@ -3363,6 +3365,17 @@ function poll(){fetch('/employee/mahizhchi/winners',{credentials:'same-origin',c
   if(j.overall&&seen.indexOf('ALL')<0){seen.push('ALL');toast(j.overall.text)}}
  try{sessionStorage.setItem(K,JSON.stringify(seen))}catch(e){}}).catch(function(){})}
 poll();setInterval(poll,10000)})();</script>
+<script>(function(){if(!window.fetch||location.pathname.indexOf('/employee/play')===0||location.pathname.indexOf('/employee/welcome')===0)return;var box=null,cur='';
+function hide(){if(box){box.remove();box=null;cur=''}}
+function post(d){return fetch('/employee/play/respond',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(d)}).then(function(r){return r.json()})}
+function show(v){hide();cur=v.id;box=document.createElement('div');box.setAttribute('role','alert');box.style.cssText='position:fixed;right:16px;bottom:16px;z-index:99999;max-width:320px;background:#1e1b4b;color:#fff;padding:14px 16px;border-radius:14px;box-shadow:0 14px 34px #0007;font:14px system-ui,sans-serif';
+var t=document.createElement('div');t.textContent=v.from_name+' invited you to play the Connection Game together.';box.appendChild(t);
+var a=document.createElement('button'),d=document.createElement('button');a.type=d.type='button';a.textContent='Accept';d.textContent='Decline';
+a.style.cssText='margin:10px 8px 0 0;padding:6px 14px;border:0;border-radius:8px;background:#22c55e;color:#fff;font-weight:700;cursor:pointer';d.style.cssText='padding:6px 14px;border:0;border-radius:8px;background:#64748b;color:#fff;cursor:pointer';
+a.onclick=function(){post({id:v.id,action:'accept'}).then(function(r){if(r.ok)location.href='/employee/play';else{t.textContent=r.msg;a.remove();d.remove();setTimeout(hide,5000)}})};
+d.onclick=function(){post({id:v.id,action:'decline'}).then(hide)};box.appendChild(a);box.appendChild(d);document.body.appendChild(box)}
+function poll(){fetch('/employee/play/invites',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(j){if(!j.items.length){hide();return}if(cur!==j.items[0].id)show(j.items[0])}).catch(function(){})}
+poll();setInterval(poll,6000)})();</script>
 <script>(function(){function p(){fetch('/employee/ping',{credentials:'same-origin',cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();</script><script>(function(){if(!window.fetch)return;var W=location.pathname==='/employee/welcome',last=null,D=null;
 var QK='wtq',busy=0;
 function qget(){try{return JSON.parse(localStorage.getItem(QK)||'[]')}catch(x){return[]}}
@@ -3616,6 +3629,7 @@ def page(body, title="Productivity Tracker", **ctx):
             if audit_active(audit_access(session.get("emp_id", ""))): items.append(("/employee/audit", "Audit Log"))
         except Exception:
             pass
+        items.append(("/employee/play", "Play Together"))      # Update203: every employee can see who is online; only Admin-approved employees can invite / play
         try:      # Admin-controlled: Mahizhchi appears only while it is published AND shared with this employee
             if mz_active(session.get("emp_id", "")): items.append(("/employee/mahizhchi", MZ_TITLE))
         except Exception as e:
@@ -3625,7 +3639,8 @@ def page(body, title="Productivity Tracker", **ctx):
         view = request.args.get("view", "")
         kids = [("/admin/employee-info", "Employees", p.startswith("/admin/employee-info") and view != "notifications"),
                 ("/admin/employee-info?view=notifications", "Notifications", p == "/admin/employee-info" and view == "notifications"),
-                ("/admin/mahizhchi", "Mahizhchi", p.startswith("/admin/mahizhchi"))]
+                ("/admin/mahizhchi", "Mahizhchi", p.startswith("/admin/mahizhchi")),
+                ("/admin/game-access", "Game Access", p.startswith("/admin/game-access"))]
         nav = [(h, l, on or any(k[2] for k in kids), kids) if h == "/admin/employee-info" else (h, l, on, [])
                for h, l, on, _k in nav]
         # Update103: Productivity Log / Leave & Permission Log / Audit Log / Email Controls are grouped under one expandable "Log" menu.
@@ -8718,6 +8733,381 @@ def employee_mahizhchi_connect_guess():
         if mist >= MZ_CONN_MISTAKES: result = "Lost"; flash("No mistakes left - the Connection Game is over.", "error")
     mz_conn_save(att, solved, mist, result)
     return redirect("/employee/mahizhchi")
+
+
+# ---------------------------------------------------------------- Update203: CONNECTION GAME - PLAY TOGETHER (online colleagues)
+# Every employee can SEE who is online (live) and SELECT a colleague, but only employees the Admin has granted game access
+# ("Game Access" sheet, Admin > Employee Info > Game Access) can invite, accept or play. Access is checked on the SERVER for
+# every invite / accept / guess, so revoking it takes effect at once (a running game is ended). Invites and games live in memory
+# (like the Online list) - nothing is written to Google Sheets while playing. The two players share one puzzle: the same 16 words,
+# the same mistakes and timer; either player can submit a guess. Unsolved groups are never sent to the browser until the game ends.
+GM_SHEET = "Game Access"
+GM_INVITE_TTL = 120          # seconds an invitation stays open
+GM_KEEP = 900                # seconds a finished game stays visible before it is cleaned up
+_GM_LOCK = threading.RLock()
+_GM_INV, _GM_GAMES, _GM_OF = {}, {}, {}      # invites {id: dict}, games {id: dict}, employee key -> game id
+
+def gm_access_map(fresh=False):
+    src = _fetch_rows(GM_SHEET) if fresh else rows(GM_SHEET)
+    return {_key(r["Employee ID"]): str(r.get("Enabled", "")).strip().lower() == "yes" for r in src if str(r.get("Employee ID", "")).strip()}
+
+def gm_allowed(eid, fresh=False):
+    """True only if the Admin has granted game access to this employee (fresh=True bypasses the cache - used to ENFORCE access)."""
+    try: return bool(eid) and gm_access_map(fresh).get(_key(eid), False)
+    except Exception as ex:
+        print("Game Access check failed (restart the app once so the 'Game Access' sheet is created):", ex); return False
+
+def gm_set_access(emps, enabled):
+    """Grant / revoke for many employees with one read + one write."""
+    if not emps: return
+    ws = ws_of(GM_SHEET)
+    vals = _with_retry(ws.get_all_values)
+    idx = {_key(row[0]): i for i, row in enumerate(vals, start=1) if i > 1 and row and row[0].strip()}
+    stamp = now_local().strftime("%Y-%m-%d %H:%M:%S")
+    upd, new = [], []
+    for e in emps:
+        row = [str(e["Employee ID"]), e["Name"], "Yes" if enabled else "No", stamp, "Admin"]
+        i = idx.get(_key(e["Employee ID"]))
+        if i: upd.append({"range": f"A{i}:E{i}", "values": [row]})
+        else: new.append(row)
+    if upd: _with_retry(ws.batch_update, upd, value_input_option="RAW")
+    if new: _with_retry(ws.append_rows, new, value_input_option="RAW")
+    invalidate_cache(GM_SHEET)
+
+def _gm_in_game(eid):
+    gid = _GM_OF.get(_key(eid)); g = _GM_GAMES.get(gid) if gid else None
+    return g if g and not g["result"] else None
+
+def _gm_finish(g, result, note):
+    if g["result"]: return
+    g["result"], g["note"], g["done"] = result, note, time.time()
+
+def _gm_sweep():
+    now = time.time()
+    for iid, v in list(_GM_INV.items()):
+        if v["status"] == "pending" and now - v["t"] > GM_INVITE_TTL: v["status"], v["t_done"] = "expired", now
+        elif v["status"] != "pending" and now - v.get("t_done", v["t"]) > 45: del _GM_INV[iid]
+    for gid, g in list(_GM_GAMES.items()):
+        if not g["result"] and now - g["start"] > g["limit"]: _gm_finish(g, "Lost", "Time is up.")
+        if g["result"] and now - g.get("done", now) > GM_KEEP:
+            for p in g["players"]:
+                if _GM_OF.get(_key(p["id"])) == gid: _GM_OF.pop(_key(p["id"]), None)
+            del _GM_GAMES[gid]
+
+def _gm_drop_player_invites(eid, status="cancelled"):
+    for v in _GM_INV.values():
+        if v["status"] == "pending" and _key(eid) in (_key(v["frm"]), _key(v["to"])): v["status"], v["t_done"] = status, time.time()
+
+def gm_revoke_cleanup(ids):
+    """Admin revoked access: their invites are cancelled and any game they are in is ended."""
+    with _GM_LOCK:
+        for eid in ids:
+            _gm_drop_player_invites(eid)
+            g = _gm_in_game(eid)
+            if g: _gm_finish(g, "Ended", "Game access was removed by the Admin.")
+
+def _gm_emp_name(eid):
+    for r in online_list():
+        if _key(r["id"]) == _key(eid): return r["name"]
+    e = next((e for e in rows("Employees") if _key(e.get("Employee ID", "")) == _key(eid)), None)
+    return str(e["Name"]) if e else str(eid)
+
+def _gm_new_game(a, b):
+    ready = [p for p in mz_conn_puzzles().values() if p["ok"]]
+    if not ready: return None
+    puz = random.choice(ready)
+    words = [w for g in puz["groups"] for w in g["words"]]; random.shuffle(words)
+    g = dict(id=uuid.uuid4().hex[:10], players=[dict(id=str(a[0]), name=a[1]), dict(id=str(b[0]), name=b[1])],
+             puz=dict(id=puz["id"], groups=[dict(name=x["name"], words=list(x["words"])) for x in puz["groups"]]),
+             words=words, solved=[], by={}, mistakes=0, result="", note="", start=time.time(), limit=MZ_CONN_TIME, log=[], done=None)
+    _GM_GAMES[g["id"]] = g
+    for p in g["players"]: _GM_OF[_key(p["id"])] = g["id"]
+    return g
+
+def _gm_view(g, me):
+    now = time.time(); done_w = {mz_conn_norm(w) for i in g["solved"] for w in g["puz"]["groups"][i]["words"]}
+    other = next(p for p in g["players"] if _key(p["id"]) != _key(me))
+    onl = {_key(r["id"]) for r in online_list()}
+    view = dict(id=g["id"], partner=other["name"], partner_id=other["id"], partner_online=_key(other["id"]) in onl,
+                words=[w for w in g["words"] if mz_conn_norm(w) not in done_w],
+                solved=[dict(name=g["puz"]["groups"][i]["name"], words=g["puz"]["groups"][i]["words"], tone=TONES[i], by=g["by"].get(i, "")) for i in g["solved"]],
+                mistakes=g["mistakes"], max_m=MZ_CONN_MISTAKES, result=g["result"], note=g["note"], log=g["log"][-6:],
+                remaining=0 if g["result"] else max(0, int(g["limit"] - (now - g["start"]))), reveal=[])
+    if g["result"] in ("Lost", "Ended"):
+        view["reveal"] = [dict(name=g["puz"]["groups"][i]["name"], words=g["puz"]["groups"][i]["words"], tone=TONES[i]) for i in range(4) if i not in g["solved"]]
+    return view
+
+@app.route("/employee/play")
+@need("employee")
+def employee_play():
+    return page(GM_PLAY, title="Play Together", me_allowed=gm_allowed(session.get("emp_id", "")), limit=MZ_CONN_TIME, max_m=MZ_CONN_MISTAKES)
+
+@app.route("/employee/play/state")
+@need("employee")
+def gm_state():
+    me = session.get("emp_id", "")
+    with _GM_LOCK:
+        _gm_sweep()
+        allowed = gm_allowed(me)
+        if not allowed:                                    # access removed (or never given): nothing of the game is available to them
+            gm_revoke_cleanup([me])
+        onl = online_list(); gid = _GM_OF.get(_key(me)); mine = _GM_GAMES.get(gid) if gid else None
+        amap = gm_access_map()
+        rowsout = []
+        for r in onl:
+            if _key(r["id"]) == _key(me): continue
+            rowsout.append(dict(id=r["id"], name=r["name"], status=r["status"], allowed=amap.get(_key(r["id"]), False),
+                                busy=bool(_gm_in_game(r["id"])),
+                                invited=any(v["status"] == "pending" and _key(v["frm"]) == _key(me) and _key(v["to"]) == _key(r["id"]) for v in _GM_INV.values())))
+        incoming = [dict(id=v["id"], from_id=v["frm"], from_name=v["frm_name"]) for v in _GM_INV.values()
+                    if v["status"] == "pending" and _key(v["to"]) == _key(me)] if allowed else []
+        out = next((v for v in sorted(_GM_INV.values(), key=lambda x: -x["t"]) if _key(v["frm"]) == _key(me) and v["status"] in ("pending", "declined", "expired")), None)
+        resp = jsonify(me=dict(id=me, name=session.get("name", ""), allowed=allowed), online=rowsout, incoming=incoming,
+                       outgoing=dict(id=out["id"], to_name=out["to_name"], status=out["status"]) if out else None,
+                       game=_gm_view(mine, me) if mine and allowed else None)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+@app.route("/employee/play/invites")
+@need("employee")
+def gm_invites():
+    """Tiny poll used on every employee page so an invitation pops up wherever the employee is."""
+    me = session.get("emp_id", "")
+    with _GM_LOCK:
+        _gm_sweep()
+        items = [dict(id=v["id"], from_name=v["frm_name"]) for v in _GM_INV.values() if v["status"] == "pending" and _key(v["to"]) == _key(me)] if gm_allowed(me) else []
+    resp = jsonify(items=items); resp.headers["Cache-Control"] = "no-store"; return resp
+
+@app.route("/employee/play/invite", methods=["POST"])
+@need("employee")
+def gm_invite():
+    me, to = session.get("emp_id", ""), str(request.form.get("to", "")).strip()
+    if not gm_allowed(me, fresh=True):
+        return jsonify(ok=False, msg="You have not been given access to the Connection Game by the Admin, so you cannot invite anyone. Please ask your Admin.")
+    with _GM_LOCK:
+        _gm_sweep()
+        tgt = next((r for r in online_list() if _key(r["id"]) == _key(to)), None)
+        if not tgt or _key(to) == _key(me): return jsonify(ok=False, msg="That colleague is not online any more. Please choose someone from the list.")
+        if _gm_in_game(me): return jsonify(ok=False, msg="You are already in a game. Finish or leave it first.")
+        if _gm_in_game(to): return jsonify(ok=False, msg=f"{tgt['name']} is already playing a game.")
+        if not gm_allowed(to, fresh=True): return jsonify(ok=False, msg=f"{tgt['name']} has not been given access to the Connection Game by the Admin, so they cannot be invited.")
+        if any(v["status"] == "pending" and _key(v["frm"]) == _key(to) and _key(v["to"]) == _key(me) for v in _GM_INV.values()):
+            return jsonify(ok=False, msg=f"{tgt['name']} has already invited you - accept it under 'Invitations'.")
+        for v in _GM_INV.values():                                  # one open invitation at a time
+            if v["status"] == "pending" and _key(v["frm"]) == _key(me): v["status"], v["t_done"] = "cancelled", time.time()
+        iid = uuid.uuid4().hex[:10]
+        _GM_INV[iid] = dict(id=iid, frm=str(me), frm_name=session.get("name", ""), to=str(tgt["id"]), to_name=tgt["name"], t=time.time(), status="pending")
+    return jsonify(ok=True, msg=f"Invitation sent to {tgt['name']}. Waiting for them to accept...")
+
+@app.route("/employee/play/cancel", methods=["POST"])
+@need("employee")
+def gm_cancel():
+    me = session.get("emp_id", "")
+    with _GM_LOCK:
+        for v in _GM_INV.values():
+            if v["status"] == "pending" and _key(v["frm"]) == _key(me): v["status"], v["t_done"] = "cancelled", time.time()
+    return jsonify(ok=True, msg="Invitation cancelled.")
+
+@app.route("/employee/play/respond", methods=["POST"])
+@need("employee")
+def gm_respond():
+    me = session.get("emp_id", ""); iid = str(request.form.get("id", "")); accept = request.form.get("action") == "accept"
+    with _GM_LOCK:
+        _gm_sweep(); v = _GM_INV.get(iid)
+        if not v or v["status"] != "pending" or _key(v["to"]) != _key(me):
+            return jsonify(ok=False, msg="That invitation is no longer open.")
+        if not accept:
+            v["status"], v["t_done"] = "declined", time.time(); return jsonify(ok=True, msg="Invitation declined.")
+        if not gm_allowed(me, fresh=True):
+            return jsonify(ok=False, msg="You have not been given access to the Connection Game by the Admin, so you cannot play. Please ask your Admin.")
+        if not gm_allowed(v["frm"], fresh=True):
+            v["status"], v["t_done"] = "cancelled", time.time(); return jsonify(ok=False, msg=f"{v['frm_name']} no longer has game access.")
+        if not any(_key(r["id"]) == _key(v["frm"]) for r in online_list()):
+            v["status"], v["t_done"] = "cancelled", time.time(); return jsonify(ok=False, msg=f"{v['frm_name']} is not online any more.")
+        if _gm_in_game(me) or _gm_in_game(v["frm"]): return jsonify(ok=False, msg="One of you is already in a game.")
+        g = _gm_new_game((v["frm"], v["frm_name"]), (str(me), session.get("name", "")))
+        if not g: return jsonify(ok=False, msg="No Connection puzzle is ready yet. Please ask your Admin to add one (Admin > Mahizhchi > Connection Game).")
+        v["status"], v["t_done"] = "accepted", time.time()
+        _gm_drop_player_invites(me)
+    return jsonify(ok=True, msg="Game started!")
+
+@app.route("/employee/play/guess", methods=["POST"])
+@need("employee")
+def gm_guess():
+    me = session.get("emp_id", "")
+    if not gm_allowed(me, fresh=True):
+        with _GM_LOCK: gm_revoke_cleanup([me])
+        return jsonify(ok=False, msg="You do not have game access (the Admin controls it).")
+    data = request.get_json(silent=True) or {}
+    pick = data.get("w") or request.form.getlist("w")
+    with _GM_LOCK:
+        _gm_sweep(); g = _gm_in_game(me)
+        if not g: return jsonify(ok=False, msg="The game is not open any more.")
+        kind, gi = mz_conn_judge(g["puz"], g["solved"], pick)
+        if kind == "invalid": return jsonify(ok=False, msg="Pick exactly 4 of the words shown.")
+        who = session.get("name", "") or str(me)
+        if kind == "correct":
+            g["solved"].append(gi); g["by"][gi] = who
+            g["log"].append(f"{who} found '{g['puz']['groups'][gi]['name']}'.")
+            msg = f"Correct! That group is '{g['puz']['groups'][gi]['name']}'."
+            if len(g["solved"]) == 4: _gm_finish(g, "Won", "You found all 4 groups together - you win!")
+        else:
+            g["mistakes"] += 1
+            msg = ("One away! " if kind == "one_away" else "Not a group. ") + f"Mistakes left: {max(0, MZ_CONN_MISTAKES - g['mistakes'])}."
+            g["log"].append(f"{who}: " + ("one away." if kind == "one_away" else "not a group."))
+            if g["mistakes"] >= MZ_CONN_MISTAKES: _gm_finish(g, "Lost", "No mistakes left.")
+    return jsonify(ok=True, kind=kind, msg=msg)
+
+@app.route("/employee/play/leave", methods=["POST"])
+@need("employee")
+def gm_leave():
+    me = session.get("emp_id", "")
+    with _GM_LOCK:
+        gid = _GM_OF.get(_key(me)); g = _GM_GAMES.get(gid) if gid else None
+        if g and not g["result"]: _gm_finish(g, "Ended", f"{session.get('name', '')} left the game.")
+        _GM_OF.pop(_key(me), None)
+        if g and all(_GM_OF.get(_key(p["id"])) != gid for p in g["players"]): _GM_GAMES.pop(gid, None)
+    return jsonify(ok=True)
+
+# ---- Admin: who may play
+@app.route("/admin/game-access")
+@need("admin")
+def admin_game_access():
+    q = request.args.get("q", "").strip().lower()
+    try: amap, stamp = gm_access_map(True), {_key(r["Employee ID"]): r.get("Updated at", "") for r in _fetch_rows(GM_SHEET)}
+    except Exception:
+        flash("The 'Game Access' sheet is not ready yet. Restart the app once so it is created, then reload this page.", "error"); amap, stamp = {}, {}
+    onl = {_key(r["id"]) for r in online_list()}
+    emps = [dict(id=str(e["Employee ID"]), name=str(e["Name"]), desig=str(e.get("Designation", "")), on=_key(e["Employee ID"]) in onl,
+                 yes=amap.get(_key(e["Employee ID"]), False), at=stamp.get(_key(e["Employee ID"]), ""))
+            for e in rows("Employees") if not q or q in str(e["Employee ID"]).lower() or q in str(e["Name"]).lower()]
+    with _GM_LOCK: _gm_sweep(); playing = sum(1 for g in _GM_GAMES.values() if not g["result"])
+    return page(GM_ADMIN, title="Game Access", emps=emps, q=request.args.get("q", ""), n_yes=sum(1 for v in amap.values() if v), playing=playing)
+
+@app.route("/admin/game-access/set", methods=["POST"])
+@need("admin")
+def admin_game_access_set():
+    action = request.form.get("action", ""); emps = rows("Employees")
+    if action in ("grant_all", "revoke_all"): chosen = emps
+    elif action in ("grant_selected", "revoke_selected"):
+        want = {_key(i) for i in request.form.getlist("ids")}
+        chosen = [e for e in emps if _key(e["Employee ID"]) in want]          # only real employees, never raw form values
+        if not chosen:
+            flash("Tick at least one employee first.", "error"); return redirect("/admin/game-access")
+    else: abort(400)
+    grant = action.startswith("grant")
+    try: gm_set_access(chosen, grant)
+    except Exception as ex:
+        print("Game Access save failed:", ex); flash("Game access could not be saved (the data service is busy or the 'Game Access' sheet is missing). Please try again.", "error")
+        return redirect("/admin/game-access")
+    if not grant: gm_revoke_cleanup([str(e["Employee ID"]) for e in chosen])
+    flash(f"Game access {'granted to' if grant else 'removed from'} {len(chosen)} employee(s).")
+    return redirect("/admin/game-access")
+
+GM_ADMIN = """<style>.gm-p{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700}.gm-p.y{background:#dcfce7;color:#166534}.gm-p.n{background:#f1f5f9;color:#64748b}.gm-p.o{background:#dbeafe;color:#1e40af}</style>
+<div class="card"><h2 style="margin:0 0 6px">&#127918; Game Access &mdash; Connection Game (play together)</h2>
+<p class="mut">All employees can see who is online, but <b>only the employees you tick here can invite colleagues and play</b>. Removing access ends any game that employee is in right away.
+{{n_yes}} employee(s) currently have access &middot; {{playing}} game(s) in progress.</p>
+<form method="get" class="no-print" style="margin:8px 0"><input name="q" value="{{q}}" placeholder="Search employee ID or name"> <button class="btnl">Search</button></form>
+<form method="post" action="/admin/game-access/set">
+<p class="no-print"><button class="primary" name="action" value="grant_selected">Grant access to selected</button>
+<button class="btnl" name="action" value="revoke_selected">Remove access from selected</button>
+<button class="btnl" name="action" value="grant_all" onclick="return confirm('Grant game access to ALL employees?')">Grant to all</button>
+<button class="btnl" name="action" value="revoke_all" onclick="return confirm('Remove game access from ALL employees?')">Remove from all</button></p>
+<table><tr><th><input type="checkbox" onclick="document.querySelectorAll('.gmck').forEach(function(c){c.checked=this.checked}.bind(this))" aria-label="Select all"></th><th>Employee ID</th><th>Name</th><th>Designation</th><th>Now</th><th>Game access</th><th>Updated</th></tr>
+{% for e in emps %}<tr><td><input class="gmck" type="checkbox" name="ids" value="{{e.id}}"></td><td>{{e.id}}</td><td>{{e.name}}</td><td>{{e.desig}}</td>
+<td>{% if e.on %}<span class="gm-p o">&#9679; Online</span>{% else %}<span class="mut">Offline</span>{% endif %}</td>
+<td><span class="gm-p {{'y' if e.yes else 'n'}}">{{'Allowed' if e.yes else 'Not allowed'}}</span></td><td class="mut">{{e.at}}</td></tr>
+{% else %}<tr><td colspan="7">No employees found.</td></tr>{% endfor %}</table></form></div>"""
+
+GM_PLAY = """<style>
+.gm-note{padding:9px 12px;border-radius:10px;margin:0 0 12px;font-size:13.5px}.gm-note.ok{background:#dcfce7;color:#14532d}.gm-note.bad{background:#fee2e2;color:#7f1d1d}.gm-note.info{background:#fef3c7;color:#78350f}
+.gm-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e2e6f3;border-radius:12px;margin:6px 0;cursor:pointer;background:#fff;flex-wrap:wrap}
+.gm-row:hover{border-color:#a5b4fc}.gm-row.on{border-color:#4f46e5;box-shadow:0 0 0 2px #c7d2fe;background:#eef2ff}
+.gm-dot{width:10px;height:10px;border-radius:50%;background:#22c55e;flex:none}.gm-dot.away{background:#f59e0b}
+.gm-nm{flex:1;min-width:120px;font-weight:600}.gm-nm small{display:block;font-weight:400;color:#64748b}
+.gm-pill{padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700}.gm-pill.in{background:#dcfce7;color:#166534}.gm-pill.act{background:#fef3c7;color:#92400e}.gm-pill.ok{background:#e0e7ff;color:#3730a3}.gm-pill.no{background:#f1f5f9;color:#64748b}
+.gm-empty{padding:14px;color:#64748b;text-align:center}
+.gm-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
+.gm-t{padding:16px 6px;border-radius:10px;border:2px solid #d9def0;background:#f8f9ff;text-align:center;font-weight:700;cursor:pointer;font-size:14px;word-break:break-word;user-select:none}
+.gm-t.on{background:#4f46e5;color:#fff;border-color:#4338ca}
+.gm-band{padding:10px;border-radius:10px;margin:6px 0;text-align:center;font-weight:700}.gm-band small{display:block;font-weight:500}
+.gm-band.t0{background:#fde68a}.gm-band.t1{background:#bbf7d0}.gm-band.t2{background:#bfdbfe}.gm-band.t3{background:#e9d5ff}
+.gm-bar{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-weight:600}
+.gm-log{font-size:12.5px;color:#475569;margin:8px 0}.gm-acts{display:flex;gap:8px;flex-wrap:wrap}
+@media(max-width:480px){.gm-t{font-size:12px;padding:12px 3px}}
+</style>
+<div class="card"><h2 style="margin:0 0 4px">&#128279; Connection Game &mdash; play together</h2>
+<p class="mut" style="margin:0">Pick a colleague who is online, invite them, and solve the puzzle as a team: find 4 hidden groups of 4 words ({{max_m}} mistakes allowed, {{(limit//60)}} min {{limit%60}} s).</p></div>
+<div id="gm_acc" class="gm-note info" {% if me_allowed %}hidden{% endif %}>You can see who is online, but the Admin has not given you access to the Connection Game yet. Once access is granted you can invite colleagues and play. Please ask your Admin.</div>
+<div id="gm_note" class="gm-note" hidden></div>
+<div id="gm_lobby">
+<div class="card" id="gm_incoming" hidden><h2 style="margin:0 0 6px">Invitations</h2><div id="gm_inl"></div></div>
+<div class="card" id="gm_outgoing" hidden><span id="gm_outt"></span> <button type="button" class="btnl" id="gm_outc">Cancel invitation</button></div>
+<div class="card"><h2 style="margin:0 0 6px">Colleagues online now <span class="gm-pill in" id="gm_cnt">0</span></h2>
+<p class="mut" style="margin:0 0 6px">Updates automatically when someone logs in or out. Tap a name to select, then press Invite.</p>
+<div id="gm_list" aria-live="polite"></div>
+<p style="margin:10px 0 0"><button type="button" class="primary" id="gm_invb" disabled>Invite selected colleague</button></p></div>
+</div>
+<div class="card" id="gm_game" hidden>
+<div class="gm-bar"><span id="gm_with"></span><span>&#9201; <b id="gm_time">0:00</b></span><span id="gm_mist"></span></div>
+<div id="gm_solved"></div><div class="gm-grid" id="gm_grid"></div>
+<div class="gm-acts" id="gm_gacts"><button type="button" class="primary" id="gm_sub" disabled>Submit group</button><button type="button" class="btnl" id="gm_clr">Deselect</button><button type="button" class="btnl" id="gm_leave">Leave game</button></div>
+<div id="gm_end" hidden></div><div class="gm-log" id="gm_log"></div></div>
+<script>(function(){
+var $=function(i){return document.getElementById(i)},sel='',gsel=[],LAST=null,sig='',remain=0,lastOut='',busy=false;
+function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}
+function post(u,d){var b=new URLSearchParams();for(var k in d){b.append(k,d[k])}return fetch(u,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b}).then(function(r){return r.json()})}
+function note(t,bad){var n=$('gm_note');n.textContent=t||'';n.className='gm-note'+(t?(bad?' bad':' ok'):'');n.hidden=!t}
+function fmt(s){return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2)}
+function drawOnline(j){var L=$('gm_list');L.textContent='';$('gm_cnt').textContent=j.online.length;
+ if(!j.online.some(function(o){return o.id===sel}))sel='';
+ if(!j.online.length)L.appendChild(el('div','gm-empty','No other colleagues are online right now.'));
+ j.online.forEach(function(o){var r=el('div','gm-row'+(o.id===sel?' on':''));r.tabIndex=0;r.setAttribute('role','button');
+  r.appendChild(el('span','gm-dot'+(o.status==='Online'?'':' away')));
+  var n=el('span','gm-nm',o.name);n.appendChild(el('small','',o.id));r.appendChild(n);
+  r.appendChild(el('span','gm-pill '+(o.status==='Online'?'in':'act'),o.status));
+  r.appendChild(el('span','gm-pill '+(o.allowed?'ok':'no'),o.busy?'Playing':(o.invited?'Invited':(o.allowed?'Game access':'No game access'))));
+  var pick=function(){sel=(sel===o.id?'':o.id);drawOnline(LAST)};r.onclick=pick;r.onkeydown=function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();pick()}};
+  L.appendChild(r)});
+ $('gm_invb').disabled=!sel||busy}
+function drawInv(j){var b=$('gm_incoming'),L=$('gm_inl');L.textContent='';b.hidden=!j.incoming.length;
+ j.incoming.forEach(function(v){var r=el('div','gm-row');r.style.cursor='default';r.appendChild(el('span','gm-nm',v.from_name+' invited you to play'));
+  var a=el('button','primary','Accept'),d=el('button','btnl','Decline');a.type=d.type='button';
+  a.onclick=function(){post('/employee/play/respond',{id:v.id,action:'accept'}).then(function(r){note(r.msg,!r.ok);tick()})};
+  d.onclick=function(){post('/employee/play/respond',{id:v.id,action:'decline'}).then(function(r){note(r.msg,!r.ok);tick()})};
+  r.appendChild(a);r.appendChild(d);L.appendChild(r)})}
+function drawOut(j){var o=j.outgoing,b=$('gm_outgoing');
+ if(o&&o.status==='pending'){b.hidden=false;$('gm_outt').textContent='Waiting for '+o.to_name+' to accept...';return}
+ b.hidden=true;
+ if(o&&(o.status==='declined'||o.status==='expired')&&lastOut!==o.id+o.status){lastOut=o.id+o.status;note(o.status==='declined'?o.to_name+' declined the invitation.':'The invitation to '+o.to_name+' expired.',true)}}
+function drawGame(g){var show=!!g;$('gm_game').hidden=!show;$('gm_lobby').hidden=show;if(!show){sig='';gsel=[];return}
+ remain=g.remaining;$('gm_with').textContent='Playing with '+g.partner+(g.partner_online?'':' (offline)');
+ $('gm_mist').textContent='Mistakes left: '+Math.max(0,g.max_m-g.mistakes)+' of '+g.max_m;
+ var s=g.words.join('|')+'#'+g.solved.length+'#'+g.mistakes+'#'+g.result;
+ gsel=gsel.filter(function(w){return g.words.indexOf(w)>=0});
+ if(s!==sig){sig=s;var S=$('gm_solved');S.textContent='';
+  g.solved.forEach(function(x){var b=el('div','gm-band '+x.tone,x.name);b.appendChild(el('small','',x.words.join(', ')+(x.by?'  ('+x.by+')':'')));S.appendChild(b)});
+  var G=$('gm_grid');G.textContent='';
+  if(!g.result)g.words.forEach(function(w){var t=el('div','gm-t'+(gsel.indexOf(w)>=0?' on':''),w);t.tabIndex=0;t.setAttribute('role','button');
+   var tog=function(){var i=gsel.indexOf(w);if(i>=0)gsel.splice(i,1);else if(gsel.length<4)gsel.push(w);sig='';drawGame(LAST.game)};t.onclick=tog;t.onkeydown=function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();tog()}};G.appendChild(t)});
+  var E=$('gm_end');E.hidden=!g.result;E.textContent='';
+  if(g.result){E.appendChild(el('p','gm-note '+(g.result==='Won'?'ok':'bad'),(g.result==='Won'?'You won! ':g.result==='Lost'?'Game over. ':'Game ended. ')+g.note));
+   g.reveal.forEach(function(x){var b=el('div','gm-band '+x.tone,x.name);b.appendChild(el('small','',x.words.join(', ')));E.appendChild(b)});
+   var c=el('button','primary','Back to online colleagues');c.type='button';c.onclick=function(){post('/employee/play/leave',{}).then(tick)};E.appendChild(c)}
+  var L=$('gm_log');L.textContent=g.log.join('  |  ')}
+ $('gm_gacts').hidden=!!g.result;$('gm_sub').disabled=gsel.length!==4}
+function draw(j){LAST=j;$('gm_acc').hidden=j.me.allowed;drawInv(j);drawOut(j);drawOnline(j);drawGame(j.game)}
+function tick(){fetch('/employee/play/state',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(draw).catch(function(){})}
+$('gm_invb').onclick=function(){if(!sel)return;busy=true;$('gm_invb').disabled=true;post('/employee/play/invite',{to:sel}).then(function(r){note(r.msg,!r.ok);busy=false;tick()}).catch(function(){busy=false;note('Could not reach the server. Please try again.',true)})};
+$('gm_outc').onclick=function(){post('/employee/play/cancel',{}).then(function(r){note(r.msg,false);tick()})};
+$('gm_sub').onclick=function(){if(gsel.length!==4)return;$('gm_sub').disabled=true;fetch('/employee/play/guess',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({w:gsel})}).then(function(r){return r.json()}).then(function(r){note(r.msg,!r.ok||r.kind==='wrong'||r.kind==='one_away');gsel=[];sig='';tick()}).catch(function(){note('Could not reach the server. Please try again.',true);$('gm_sub').disabled=false})};
+$('gm_clr').onclick=function(){gsel=[];sig='';if(LAST)drawGame(LAST.game)};
+$('gm_leave').onclick=function(){if(confirm('Leave the game? It ends for both of you.'))post('/employee/play/leave',{}).then(tick)};
+setInterval(function(){if(LAST&&LAST.game&&!LAST.game.result&&remain>0){remain--;$('gm_time').textContent=fmt(remain)}},1000);
+setInterval(function(){if(LAST&&LAST.game)$('gm_time').textContent=fmt(remain)},500);
+setInterval(tick,2500);tick()})();
+</script>"""
 
 
 # ---------------------------------------------------------------- Update90: REMINDER MAIL (Daily Productivity Entry not submitted)

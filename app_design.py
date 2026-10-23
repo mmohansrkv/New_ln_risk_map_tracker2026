@@ -1,6 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
   * Update201: Employee login page - the left "Employee Panel / Productivity Dashboard / Performance / Attendance / Reports" promo block is removed (the login card is centred); the Admin login page is unchanged.
-  * Update204: (1)+(2) the Present / Absent / Leave / Holiday / Weekly Off colour legend is shown ONLY in the Employee panel calendar (Admin calendar shows no attendance statuses); (3) a holiday date needs no Productivity Entry: the entry form shows a holiday notice and disables Save for that date (the server already refuses it) and holidays stay excluded from every productivity / attendance / missed-entry calculation; (4) Employee login = 3D animated scene of data being SENT to the server; (5) Admin login = the same scene with data RECEIVED from the server (canvas, no libraries, honours reduced-motion, pauses when the tab is hidden). On the Admin login the three decorative cards (Performance / Attendance / Reports) were removed because the new scene replaces them.
   * Update202: (1) calendar status legend removed; (2) login goes straight to /admin/summary (Admin) or /employee (Employee) - welcome pages no longer shown; (3) generic \"Something went wrong...\" message removed - real errors now show a specific message (data service busy / could not save / could not reach server).
   * Update200: Employee Panel calendar - every date is marked Present / Absent / Leave (approved leave only) / Holiday / Weekly Off in its own colour; the NEXT upcoming holiday date is highlighted with a gold pulsing ring (days left shown in the Upcoming holidays list); the calendar re-reads attendance, approved leave, holidays and weekly offs automatically (new /employee/calendar-data, refreshed every 2 minutes, when the tab is shown again and at midnight). Display only - no sheet, e-mail or tracking code changed.
   * Update191: Employee panel shown at a NORMAL, comfortable size: base text 14px, buttons / inputs 14px with balanced padding, headings 16-22px, KPI cards, tables, calendar and the left menu all enlarged to readable sizes. The fit-to-screen script no longer shrinks to ~55-70 % or scales up to 120 %: it now stays between 90 % and 100 % (left panel) and 95 % - 100 % (page), and when a long page does not fit, only the page content area scrolls instead of the text becoming tiny. Employee pages only (Admin and login pages unchanged); display only - no route, sheet, e-mail or tracking code changed.
@@ -2642,17 +2641,6 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .win.admin .wbody{min-height:420px;border-radius:0 0 16px 16px;gap:40px;padding:28px 36px;justify-content:space-between;
  background:radial-gradient(700px 380px at 15% 10%,#3b5bdb44,transparent 60%),radial-gradient(500px 300px at 90% 100%,#7c3aed33,transparent 60%),linear-gradient(135deg,#0a1030 0%,#111a4a 55%,#1d2470 100%)}
 .win.admin .scene .fl,.win.admin .scene .dp{display:none}
-/* ---- Update204: login 3D data-flow scene (Employee = data sent TO the server, Admin = data received FROM the server). Same scene, opposite direction. ---- */
-.win.admin .scene .gfw{display:none}
-.win.admin[data-role="admin"] .adp{align-self:flex-start}
-.win.admin[data-role="admin"] .adp-3d{display:none}      /* the 3D data-feed scene replaces these three decorative cards */
-.lgfx{position:absolute;inset:0;width:100%;height:100%;display:block}
-.lg-cap{position:absolute;top:12px;left:0;right:0;text-align:center;font:600 10px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.22em;color:#fff;opacity:.85;text-shadow:0 0 10px var(--r,#fff)}
-.lg-cap b{display:inline-block;animation:lgBlink 1.4s steps(2,end) infinite}
-@keyframes lgBlink{50%{opacity:.25}}
-@media(prefers-reduced-motion:reduce){.lg-cap b{animation:none}}
-@media(max-width:480px){.lg-cap{font-size:8.5px;letter-spacing:.14em}}
-
 .win.admin .scene .gfw{opacity:.55}
 .adp{position:relative;z-index:2;flex:1;min-width:0;color:#fff;transform:translateZ(30px)}
 .adp-t{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#8ea8ff;margin:0 0 6px}
@@ -3058,7 +3046,7 @@ body .app.emp3d .site-ftr,body .app.emp3d .pg-ftr,html.fit188 .app.emp3d .site-f
 <div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
-<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div>{% if session.role=='employee' and att_json %}<div class="cal-lg" id="cal_lg"><span><i class="lp"></i>Present</span><span><i class="la"></i>Absent</span><span><i class="ll"></i>Leave</span><span><i class="lh"></i>Holiday</span><span><i class="lo"></i>Weekly Off</span></div>{% endif %}<div class="cal-up" id="cal_up" hidden></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
+<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-up" id="cal_up" hidden></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
 <div class="prof{{' prof-emp' if session.role=='employee' else ''}}"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name" title="{{session.name}}">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
@@ -3673,7 +3661,7 @@ def page(body, title="Productivity Tracker", **ctx):
 
 LOGIN = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i><i></i><i></i></div>
 <div class="wbody"><div class="scene admin" aria-hidden="true"><div class="sheen"></div>
-<div class="gfw"><div class="gf"></div></div><canvas id="lgfx" class="lgfx"></canvas><div class="lg-cap">{% if role=='admin' %}<b>&#9664;&#9664;&#9664;</b>&nbsp; RECEIVING DATA FROM SERVER{% else %}UPLOADING DATA TO SERVER &nbsp;<b>&#9654;&#9654;&#9654;</b>{% endif %}</div>
+<div class="gfw"><div class="gf"></div></div>
 <div class="fl" style="left:5%;top:12%;--s:62px;--bt:8s"><div class="cube" style="--s:62px;--t:18s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
 <div class="fl" style="right:6%;top:9%;--s:46px;--bt:6.5s;--d:-2s"><div class="cube" style="--s:46px;--t:13s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
 <div class="fl hm" style="right:9%;bottom:14%;--s:74px;--bt:9s;--d:-4s"><div class="cube" style="--s:74px;--t:22s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
@@ -3846,81 +3834,7 @@ LOGIN = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i>
   }, 500);
 })();
 </script>
-
-<script>/* Update204 */
-(function(){
-var cv=document.getElementById('lgfx');if(!cv||!cv.getContext)return;
-var ctx=cv.getContext('2d'),win=cv.closest('.win'),UP=!(win&&win.getAttribute('data-role')==='admin'),DIR=UP?1:-1;
-var PAL=UP?{a:[255,208,150],b:[255,112,172]}:{a:[150,178,255],b:[96,232,250]},GREEN=[125,255,176];
-var W=0,H=0,dpr=1,F=1,raf=0,go=false,T0=0,tOff=0;
-var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-var HZ=UP?0.40:0.50,TH=-0.5,CS=Math.cos(TH),SN=Math.sin(TH),CY=1.7,CD=7.2,LANES=[-1.35,-0.45,0.45,1.35],STX=-5.1,SVX=UP?5.1:1.9,XS=-4.0,XE=UP?4.3:1.1;
-function rgba(c,a){return 'rgba('+c[0]+','+c[1]+','+c[2]+','+Math.max(0,Math.min(1,a)).toFixed(3)+')'}
-function P(x,y,z){var rx=x*CS+z*SN,rz=-x*SN+z*CS+CD,k=F/rz;return [W*0.5+rx*k+SHX,H*HZ-(y-CY)*k,k,rz]}
-var SHX=0;
-function size(){var r=cv.parentNode.getBoundingClientRect();W=Math.max(2,Math.round(r.width));H=Math.max(2,Math.round(r.height));dpr=Math.min(window.devicePixelRatio||1,2);
- cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);
- var L=W*0.15,R=UP?W*0.85:W*0.56;F=1;SHX=0;var a=P(STX,0,0),b=P(SVX,0,0);F=Math.min((R-L)/(b[0]-a[0]),H*0.95);SHX=0;a=P(STX,0,0);SHX=L-a[0]}
-function poly(pts){ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(var i=1;i<pts.length;i++)ctx.lineTo(pts[i][0],pts[i][1]);ctx.closePath()}
-var FACES=[[0,1,2,3],[4,5,6,7],[0,1,5,4],[3,2,6,7],[0,3,7,4],[1,2,6,5]];
-function box(cx,y0,cz,w,h,d,ry,fillC,fa,edgeC,ea){
- var hx=w/2,hz=d/2,c=Math.cos(ry),s=Math.sin(ry),loc=[[-hx,-hz],[hx,-hz],[hx,hz],[-hx,hz]],v=[],i;
- for(i=0;i<8;i++){var l=loc[i%4],X=cx+l[0]*c-l[1]*s,Z=cz+l[0]*s+l[1]*c;v.push(P(X,i<4?y0:y0+h,Z))}
- var fs=FACES.map(function(f){var z=0;for(var j=0;j<4;j++)z+=v[f[j]][3];return {f:f,z:z/4}}).sort(function(a,b){return b.z-a.z});
- for(i=0;i<6;i++){var pts=fs[i].f.map(function(k){return v[k]});poly(pts);ctx.fillStyle=rgba(fillC,fa*(i>3?1.5:1));ctx.fill();ctx.strokeStyle=rgba(edgeC,ea);ctx.lineWidth=1;ctx.stroke()}
- return v}
-function fpt(x0,y0,z0,w,h,u,v){return P(x0+u*w,y0+v*h,z0)}
-function floor(t){
- var off=((t*0.8*DIR)%0.8+0.8)%0.8,i,x,z;ctx.lineWidth=1;
- for(z=-3.2;z<=3.21;z+=0.8){var a=P(-6.6,0,z),b=P(6.6,0,z);var g=ctx.createLinearGradient(a[0],a[1],b[0],b[1]);g.addColorStop(0,rgba([255,255,255],0.16));g.addColorStop(1,rgba([255,255,255],0.04));ctx.strokeStyle=g;ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke()}
- for(x=-6.4+off;x<=6.5;x+=0.8){var p=P(x,0,-3.2),q=P(x,0,3.2),f=1-Math.abs(x)/7.2;ctx.strokeStyle=rgba([255,255,255],0.03+0.12*f*(1-p[3]/16));ctx.beginPath();ctx.moveTo(p[0],p[1]);ctx.lineTo(q[0],q[1]);ctx.stroke()}
- for(i=0;i<LANES.length;i++){var s=P(UP?XS-0.4:XE+0.4,0.01,LANES[i]),e=P(UP?XE+0.4:XS-0.4,0.01,LANES[i]);
-  ctx.strokeStyle=rgba(PAL.a,0.14);ctx.lineWidth=2.4;ctx.beginPath();ctx.moveTo(s[0],s[1]);ctx.lineTo(e[0],e[1]);ctx.stroke();
-  ctx.setLineDash([9,15]);ctx.lineDashOffset=-(t*46)%24;ctx.strokeStyle=rgba(PAL.b,0.5);ctx.lineWidth=1.4;ctx.stroke();ctx.setLineDash([])}}
-function server(t){
- var cx=SVX,w=1.1,d=1.4,h=2.6,v=box(cx,0,0,w,h,d,0,[120,130,200],0.16,PAL.a,0.6);
- var x0=cx-w/2,z0=-d/2,i,u;
- for(i=0;i<5;i++){var a=fpt(x0,0.18+i*0.48,z0,w,0.4,0.08,0.0),b=fpt(x0,0.18+i*0.48,z0,w,0.4,0.92,0.0),c=fpt(x0,0.18+i*0.48,z0,w,0.4,0.92,1),e=fpt(x0,0.18+i*0.48,z0,w,0.4,0.08,1);
-  poly([a,b,c,e]);ctx.fillStyle=rgba([255,255,255],0.07);ctx.fill();ctx.strokeStyle=rgba(PAL.a,0.5);ctx.stroke();
-  var led=fpt(x0,0.18+i*0.48,z0,w,0.4,0.82,0.5),on=(Math.sin(t*(3+i*1.3)+i*2)>-0.2),sz=Math.max(1.5,led[2]*0.045);
-  ctx.beginPath();ctx.arc(led[0],led[1],sz,0,6.283);ctx.fillStyle=rgba(on?GREEN:[255,255,255],on?0.95:0.25);ctx.shadowColor=rgba(GREEN,0.9);ctx.shadowBlur=on?8:0;ctx.fill();ctx.shadowBlur=0;
-  for(u=0;u<3;u++){var m1=fpt(x0,0.18+i*0.48,z0,w,0.4,0.16+u*0.17,0.35),m2=fpt(x0,0.18+i*0.48,z0,w,0.4,0.16+u*0.17,0.65);ctx.strokeStyle=rgba(PAL.a,0.35);ctx.beginPath();ctx.moveTo(m1[0],m1[1]);ctx.lineTo(m2[0],m2[1]);ctx.stroke()}}
- var o=P(cx,0,0),r=o[2]*1.5,gr=ctx.createRadialGradient(o[0],o[1],0,o[0],o[1],r);gr.addColorStop(0,rgba(PAL.b,0.28));gr.addColorStop(1,rgba(PAL.b,0));ctx.fillStyle=gr;ctx.beginPath();ctx.ellipse(o[0],o[1],r,r*0.35,0,0,6.283);ctx.fill();
- var lab=P(cx,h+0.25,0);ctx.font='600 '+Math.max(8,Math.min(11,lab[2]*0.09))+'px ui-monospace,Menlo,Consolas,monospace';ctx.textAlign='center';ctx.fillStyle=rgba([255,255,255],0.8);ctx.fillText('SERVER',lab[0],lab[1])}
-function station(t){
- var cx=STX,y0=0.55,w=1.9,h=1.15,d=0.14;
- box(cx,0,0,0.3,0.55,0.3,0,[255,255,255],0.12,PAL.a,0.55);box(cx,0,0,1.1,0.06,0.7,0,[255,255,255],0.1,PAL.a,0.5);
- box(cx,y0,0,w,h,d,0,[255,255,255],UP?0.12:0.1,PAL.b,0.85);
- var x0=cx-w/2,z0=-d/2,i;
- if(UP){for(i=0;i<5;i++){var len=0.35+0.5*(0.5+0.5*Math.sin(t*1.7+i*1.9)),a=fpt(x0,y0,z0,w,h,0.1,0.8-i*0.15),b=fpt(x0,y0,z0,w,h,0.1+len*0.8,0.8-i*0.15);ctx.strokeStyle=rgba(PAL.a,0.85);ctx.lineWidth=Math.max(1.5,a[2]*0.045);ctx.lineCap='round';ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke()}}
- else{for(i=0;i<5;i++){var hh=0.2+0.6*(0.5+0.5*Math.sin(t*1.3+i*1.4)),a2=fpt(x0,y0,z0,w,h,0.14+i*0.17,0.1),b2=fpt(x0,y0,z0,w,h,0.14+i*0.17,0.1+hh*0.8);ctx.strokeStyle=rgba(PAL.b,0.9);ctx.lineWidth=Math.max(2,a2[2]*0.09);ctx.lineCap='butt';ctx.beginPath();ctx.moveTo(a2[0],a2[1]);ctx.lineTo(b2[0],b2[1]);ctx.stroke()}}
- ctx.lineCap='butt';var lab=P(cx,y0+h+0.25,0);ctx.font='600 '+Math.max(8,Math.min(12,lab[2]*0.085))+'px ui-monospace,Menlo,Consolas,monospace';ctx.textAlign='center';ctx.fillStyle=rgba([255,255,255],0.85);ctx.fillText(UP?'EMPLOYEE':'ADMIN DASHBOARD',lab[0],lab[1])}
-var BITS=[];(function(){var s=7;function r(){s=(s*16807)%2147483647;return s/2147483647}for(var i=0;i<42;i++)BITS.push({x:-6+r()*12,y:0.15+r()*2.3,z:-3+r()*6,v:0.25+r()*0.5,a:0.2+r()*0.5})})();
-function bits(t){for(var i=0;i<BITS.length;i++){var b=BITS[i],x=((b.x+DIR*t*b.v+6)%12+12)%12-6,p=P(x,b.y+Math.sin(t+i)*0.05,b.z),f=1-Math.abs(x)/6.4;ctx.fillStyle=rgba(i%3?PAL.a:PAL.b,b.a*f);ctx.fillRect(p[0],p[1],Math.max(1.2,p[2]*0.02),Math.max(1.2,p[2]*0.02))}}
-function packets(t){
- var list=[],L,i;
- for(L=0;L<LANES.length;L++)for(i=0;i<4;i++){var per=5.6+L*0.7,p=(((t/per)+i/4+L*0.19)%1+1)%1,q=UP?p:1-p,x=XS+(XE-XS)*q,fade=Math.min(p/0.1,(1-p)/0.1,1);list.push({x:x,p:p,L:L,i:i,f:fade})}
- list.sort(function(a,b){return b.x-a.x});
- for(i=0;i<list.length;i++){var k=list[i],y=0.34+0.1*Math.sin(t*2.1+k.i*1.7+k.L),z=LANES[k.L],a=P(k.x,y,z),b=P(k.x-DIR*1.5,y,z);
-  var g=ctx.createLinearGradient(a[0],a[1],b[0],b[1]);g.addColorStop(0,rgba(PAL.b,0.55*k.f));g.addColorStop(1,rgba(PAL.b,0));ctx.strokeStyle=g;ctx.lineWidth=Math.max(1.5,a[2]*0.05);ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();
-  ctx.save();ctx.shadowColor=rgba(PAL.b,0.8);ctx.shadowBlur=7*k.f;
-  box(k.x,y-0.11,z,0.22,0.22,0.22,t*1.3+k.i+k.L,PAL.b,0.38*k.f,[255,255,255],0.9*k.f);ctx.restore()}
- for(L=0;L<LANES.length;L++)for(i=0;i<4;i++){var pp=(((t/(5.6+L*0.7))+i/4+L*0.19)%1+1)%1;
-  if(UP?pp>0.9:pp<0.1){var fr=UP?(pp-0.9)/0.1:(0.1-pp)/0.1,xd=UP?XE+0.1:XS-0.1,pts=[],n;for(n=0;n<=24;n++){var an=n/24*6.283,pr=P(xd+Math.cos(an)*0.7*fr,0.02,LANES[L]+Math.sin(an)*0.7*fr);pts.push(pr)}
-   poly(pts);ctx.strokeStyle=rgba(PAL.b,0.7*(1-fr));ctx.lineWidth=1.5;ctx.stroke()}}}
-function frame(now){
- if(!go)return;var t=(now-T0)/1000+tOff;ctx.clearRect(0,0,W,H);
- floor(t);bits(t);server(t);packets(t);station(t);
- if(!reduce)raf=requestAnimationFrame(frame)}
-function start(){if(go||reduce)return;go=true;T0=performance.now();raf=requestAnimationFrame(frame)}
-function stop(){go=false;cancelAnimationFrame(raf)}
-function still(){go=true;ctx.clearRect(0,0,W,H);var n=performance.now();T0=n-1700;frame(n);go=false}
-size();
-if(window.ResizeObserver){new ResizeObserver(function(){size();if(reduce)still()}).observe(cv.parentNode)}else{window.addEventListener('resize',function(){size();if(reduce)still()})}
-document.addEventListener('visibilitychange',function(){if(document.hidden)stop();else if(!reduce){tOff=tOff;start()}});
-if(reduce)still();else start();
-})();
-</script>"""
+"""
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}{% if h=='Target count / hour' %} (count in 1 hr, e.g. 1000){% endif %}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
@@ -3983,16 +3897,11 @@ FORM = """<div class="card" id="entryCard"><h2>{{heading}} <span id="tgtBadge"><
 <div class="totals">Total day: <b>{{day|g}}</b> hrs &middot; Productive: <b id="tp">0</b> hrs &middot;
 Non-productive: <b id="tn">0</b> hrs &middot; Balance: <b id="tb">{{day|g}}</b> hrs &middot;
 Productivity: <b id="tpct">0</b>% &middot; <b id="tstat"></b> <span class="mut">({{target|g}} productive hrs = 100%, target set by Admin)</span></div>
-<div id="holMsg" class="flash" style="display:none;background:#fef3c7;color:#78350f;border:1px solid #fcd34d" role="status"></div>
 <div id="tgtMsg" class="flash err" style="display:none" role="alert"></div>
 <div id="formerr" class="flash err" style="display:none" role="alert"></div>
 <button class="primary sm">Save</button> {% if heading == 'Daily productivity entry' %}<button type="button" class="back sm" onclick="event.preventDefault();window.scrollTo({top:0,behavior:'smooth'});var d=document.querySelector('#entryCard [name=date]');if(d)d.focus({preventScroll:true});return false">Back</button>{% else %}<button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='{{ '/admin/summary' if session.role=='admin' else '/employee' }}'">Back</button>{% endif %}</form></div>
 <script>
-const WORK={{workday|g}}, PERM={{perm|tojson}}, MAXD={{maxdate|tojson}}, HOLS={{hols|tojson}}, HOLBLK={{hol_block|tojson}};
-function holName(d){return HOLBLK&&Object.prototype.hasOwnProperty.call(HOLS,d)?(HOLS[d]||'Holiday'):''}
-function holCheck(){const d=document.querySelector('[name=date]').value,n=holName(d),m=document.getElementById('holMsg'),b=document.querySelector('#entryCard form button.primary');
- if(m){m.style.display=n?'block':'none';m.textContent=n?(d+' is a holiday ('+n+'). No Productivity Entry is required for this date, and holidays are not counted in productivity calculations.'):''}
- if(b)b.disabled=!!n}
+const WORK={{workday|g}}, PERM={{perm|tojson}}, MAXD={{maxdate|tojson}};
 const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}}, OTHER_H={{other_hours|g}};
 const isOther=v=>['other','others'].includes(String(v==null?'':v).trim().toLowerCase()), isPoc=v=>String(v==null?'':v).trim().toLowerCase().replace(/ /g,'_')==='poc_sample', isGenai=v=>String(v==null?'':v).trim().toLowerCase().replace(/[ _-]/g,'')==='genai', isTrain=v=>String(v==null?'':v).trim().toLowerCase()==='training';
 const effH=(nm,h)=>h;      // Update96: hours are exactly what the employee typed
@@ -4040,7 +3949,6 @@ function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e
   if(need>0&&ct<need)low.push(nm+': '+ct+' of '+Math.round(need*100)/100)});
  tgtMsg.textContent=low.length?('⚠ Target not achieved (count per hour × hours worked) – '+low.join(' | ')):'';tgtMsg.style.display=low.length?'block':'none'}
 document.querySelector('[name=date]').addEventListener('change',calc);
-document.querySelector('[name=date]').addEventListener('change',holCheck);holCheck();
 function showErr(m){formerr.textContent=m;formerr.style.display='block';formerr.scrollIntoView({behavior:'smooth',block:'center'})}
 function saveBanner(ok,lines){lines=(lines||[]).map(function(x){return String(x).replace(/^Saved\\.\\s*/,'')}).filter(Boolean);
  if(ok)window.cartoon('ok',{{sub.emp_name|tojson}}+' – Saved Successfully! 🎉',lines.join(' ')||'Your daily productivity entry is saved.',lines.length?3.9:2.9);
@@ -4048,7 +3956,6 @@ function saveBanner(ok,lines){lines=(lines||[]).map(function(x){return String(x)
 document.querySelector('form[action="{{action}}"]').addEventListener('submit',function(e){
  formerr.style.display='none';
  const d=document.querySelector('[name=date]').value;
- if(holName(d)){e.preventDefault();return showErr(d+' is a holiday ('+holName(d)+'). No Productivity Entry is required for this date.')}
  if(MAXD&&d>MAXD){e.preventDefault();return showErr('Future dates are not allowed. Choose today or an earlier date.')}
  if(!document.querySelector('[name=pn]')){e.preventDefault();return showErr('Add at least one process entry.')}
  const bad=[...document.querySelectorAll('#procs [name]')].some(x=>!String(x.value).trim());
@@ -5035,8 +4942,7 @@ def form_page(sub, action, heading):
     jd_ = join_date(sub.get("emp_id")) if session.get("role") == "employee" else None
     mindate = str(jd_) if jd_ else ""      # Update97: no entry before the joining date
     return FORM, dict(sub=sub, action=action, heading=heading, names=names, tph=tph, day=day_limit(), target=target_hours(),
-                      workday=float(DAY_HOURS), perm=perm, maxdate=maxdate, mindate=mindate, other_hours=OTHER_HOURS,
-                      hols=holiday_map(), hol_block=(session.get("role") == "employee"))      # Update204: a holiday needs no Productivity Entry
+                      workday=float(DAY_HOURS), perm=perm, maxdate=maxdate, mindate=mindate, other_hours=OTHER_HOURS)
 
 def gender_of(emp):
     g = str(emp.get("Gender", "")).strip().lower()
@@ -9988,7 +9894,7 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
  var ed=document.getElementById('mn-ed'), bar=document.getElementById('mn-tb'), rich=document.getElementById('mn-rich'),
      sizeSel=document.getElementById('mn-size'), colorIn=document.getElementById('mn-color'), saved=null, pendingPx=16, clean='', tmr=null, seq=0;
  var PH='<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>';
- function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
+ function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
  function paint(){
   var v={subject:esc(sub.value.trim())||'Your subject appears here', message:(hasText()&&clean)?clean:PH};
   frame.srcdoc=T.replace(/[{][{](\w+)[}][}]/g,function(m,k){return (k in v)?v[k]:m;});}

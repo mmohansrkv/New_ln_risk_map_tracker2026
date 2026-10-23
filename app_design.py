@@ -824,6 +824,7 @@ def ws_of(name):
 # entry immediately, so nobody sees stale data after their own action.
 _ROWS_CACHE_TTL = float(os.getenv("ROWS_CACHE_TTL", "4"))
 _rows_cache = {}
+LIVE_TTL = 10.0   # Update203
 _rows_cache_lock = threading.Lock()
 _tl = threading.local()          # Update159: _tl.fresh = True -> rows() reads the sheet live (used by background jobs)
 
@@ -896,7 +897,11 @@ def rows(name):
         from flask import g as _g
         memo = getattr(_g, "_rows_live", None)
         if memo is None: memo = _g._rows_live = {}
-        if name not in memo: memo[name] = _fetch_rows(name)
+        if name not in memo:
+            c = _rows_cache.get(name)                                    # Update203: a live sheet younger than LIVE_TTL is reused (admin pages open fast)
+            if c and not getattr(_tl, "fresh", False) and not (has_request_context() and (session.get("fresh_all", 0) > time.time() or (session.get("fresh") or {}).get(name, 0) > time.time())) and time.monotonic() - c[0] < LIVE_TTL:
+                memo[name] = c[1]
+            else: memo[name] = _fetch_rows(name)
         return [dict(r) for r in memo[name]]
     with _rows_cache_lock:
         cached = _rows_cache.get(name)
@@ -3038,6 +3043,14 @@ html.fit188 .app.emp3d main>p.flash{padding:9px 14px}
 .app.emp3d table td small,.app.emp3d table th small{font-size:12px!important}
 body .app.emp3d .site-ftr,body .app.emp3d .pg-ftr,html.fit188 .app.emp3d .site-foot{font-size:12px}
 }
+/* Update203 */
+@supports (width:1cqw){
+.lg .win.admin .scene .dp{display:block;left:0;right:400px;top:auto;bottom:0;height:46%}
+.lg .win.admin .adp-3d{display:none}
+.dp-pk{width:18px;height:18px}
+}
+@media(max-width:800px){.lg .win.admin .scene .dp{display:none}}
+#fly3d .fo:nth-child(n+9){display:none}
 </style></head><body>
 {% if bare %}{{body|safe}}
 {% elif session.role %}<div class="app{{' emp3d' if session.role=='employee' else ''}}">{% if session.role=='employee' %}<script>document.documentElement.classList.add('fit188')</script><div id="fly3d" aria-hidden="true"><div class="fo" style="--s:64px;--x0:-12vw;--y0:78vh;--x1:112vw;--y1:-14vh;--z0:-380px;--z1:160px;--d:46s;--dl:0s;--c1:#6366f1;--c2:#a78bfa;--t:24s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:44px;--x0:110vw;--y0:64vh;--x1:-14vw;--y1:20vh;--z0:-120px;--z1:220px;--d:38s;--dl:-9s;--c1:#ec4899;--c2:#f9a8d4;--t:21s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:86px;--x0:-10vw;--y0:22vh;--x1:112vw;--y1:88vh;--z0:-420px;--z1:-60px;--d:58s;--dl:-21s;--c1:#06b6d4;--c2:#67e8f9;--t:28s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:52px;--x0:30vw;--y0:112vh;--x1:70vw;--y1:-16vh;--z0:-200px;--z1:240px;--d:34s;--dl:-14s;--c1:#f59e0b;--c2:#fcd34d;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:72px;--x0:112vw;--y0:92vh;--x1:-12vw;--y1:40vh;--z0:-340px;--z1:120px;--d:52s;--dl:-30s;--c1:#8b5cf6;--c2:#c4b5fd;--t:26s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:38px;--x0:-10vw;--y0:48vh;--x1:110vw;--y1:6vh;--z0:-60px;--z1:260px;--d:30s;--dl:-4s;--c1:#10b981;--c2:#6ee7b7;--t:20s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:58px;--x0:60vw;--y0:-14vh;--x1:16vw;--y1:114vh;--z0:-260px;--z1:180px;--d:44s;--dl:-26s;--c1:#3b82f6;--c2:#93c5fd;--t:23s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:48px;--x0:88vw;--y0:112vh;--x1:40vw;--y1:-14vh;--z0:-160px;--z1:200px;--d:36s;--dl:-17s;--c1:#f43f5e;--c2:#fda4af;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:90px;--x0:-14vw;--y0:60vh;--x1:112vw;--y1:20vh;--z0:-300px;--z1:140px;--d:50s;--dl:-6s;--c1:#6366f1;--c2:#6366f1;--t:29s"><div class="fr"></div></div><div class="fo" style="--s:64px;--x0:112vw;--y0:18vh;--x1:-14vw;--y1:80vh;--z0:-180px;--z1:200px;--d:42s;--dl:-19s;--c1:#ec4899;--c2:#ec4899;--t:24s"><div class="fr"></div></div><div class="fo" style="--s:110px;--x0:20vw;--y0:114vh;--x1:84vw;--y1:-18vh;--z0:-400px;--z1:60px;--d:60s;--dl:-33s;--c1:#06b6d4;--c2:#06b6d4;--t:32s"><div class="fr"></div></div><div class="fo" style="--s:56px;--x0:80vw;--y0:-14vh;--x1:6vw;--y1:100vh;--z0:-100px;--z1:240px;--d:40s;--dl:-12s;--c1:#f59e0b;--c2:#f59e0b;--t:23s"><div class="fr"></div></div><div class="fo" style="--s:54px;--x0:-12vw;--y0:34vh;--x1:112vw;--y1:70vh;--z0:-240px;--z1:180px;--d:48s;--dl:-2s;--c1:#6366f1;--c2:#22d3ee;--t:23s"><div class="ft"></div></div><div class="fo" style="--s:40px;--x0:112vw;--y0:50vh;--x1:-12vw;--y1:8vh;--z0:-80px;--z1:240px;--d:34s;--dl:-23s;--c1:#ec4899;--c2:#f59e0b;--t:20s"><div class="ft"></div></div><div class="fo" style="--s:70px;--x0:46vw;--y0:-14vh;--x1:92vw;--y1:114vh;--z0:-320px;--z1:100px;--d:54s;--dl:-36s;--c1:#8b5cf6;--c2:#06b6d4;--t:25s"><div class="ft"></div></div><div class="fo" style="--s:46px;--x0:-12vw;--y0:104vh;--x1:114vw;--y1:30vh;--z0:-140px;--z1:220px;--d:40s;--dl:-28s;--c1:#10b981;--c2:#3b82f6;--t:21s"><div class="ft"></div></div></div>{% endif %}<aside class="emp">
@@ -3362,7 +3375,7 @@ function poll(){fetch('/employee/mahizhchi/winners',{credentials:'same-origin',c
  if(seen===null){seen=cur}else{j.winners.forEach(function(w){if(seen.indexOf(w.set)<0){seen.push(w.set);toast(w.text)}});
   if(j.overall&&seen.indexOf('ALL')<0){seen.push('ALL');toast(j.overall.text)}}
  try{sessionStorage.setItem(K,JSON.stringify(seen))}catch(e){}}).catch(function(){})}
-poll();setInterval(poll,10000)})();</script>
+poll();setInterval(poll,20000)})();</script>
 <script>(function(){function p(){fetch('/employee/ping',{credentials:'same-origin',cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();</script><script>(function(){if(!window.fetch)return;var W=location.pathname==='/employee/welcome',last=null,D=null;
 var QK='wtq',busy=0;
 function qget(){try{return JSON.parse(localStorage.getItem(QK)||'[]')}catch(x){return[]}}
@@ -9894,7 +9907,7 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
  var ed=document.getElementById('mn-ed'), bar=document.getElementById('mn-tb'), rich=document.getElementById('mn-rich'),
      sizeSel=document.getElementById('mn-size'), colorIn=document.getElementById('mn-color'), saved=null, pendingPx=16, clean='', tmr=null, seq=0;
  var PH='<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>';
- function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
+ function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
  function paint(){
   var v={subject:esc(sub.value.trim())||'Your subject appears here', message:(hasText()&&clean)?clean:PH};
   frame.srcdoc=T.replace(/[{][{](\w+)[}][}]/g,function(m,k){return (k in v)?v[k]:m;});}

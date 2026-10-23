@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update204: NEW \"Multiplayer Game\" (Number Rush) - a separate link on the EMPLOYEE page (left menu, employees only). Two employees play the same board online in real time: the game lobby lists the employees who are online, an employee invites an available colleague, the colleague accepts / declines, and both then race to tap the numbers 1-25 in order (the server decides who tapped first, so scores and progress are identical on both screens). Admin > Employee Info > Multiplayer Game: master Enable / Disable switch (default OFF) and a per-employee access list, saved in the Settings sheet (keys \"Multiplayer Game enabled\" / \"Multiplayer Game blocked\"); switching it off or removing someone ends running matches at once and hides the link. Live data (online lobby, invitations, matches) is kept in a small SQLite file shared by all workers (GAME_DB env var to move it) - no Google Sheets calls while playing, game polling does not reset the idle-logout timer, and nothing else in the application was changed.
   * Update201: Employee login page - the left "Employee Panel / Productivity Dashboard / Performance / Attendance / Reports" promo block is removed (the login card is centred); the Admin login page is unchanged.
   * Update202: (1) calendar status legend removed; (2) login goes straight to /admin/summary (Admin) or /employee (Employee) - welcome pages no longer shown; (3) generic \"Something went wrong...\" message removed - real errors now show a specific message (data service busy / could not save / could not reach server).
   * Update200: Employee Panel calendar - every date is marked Present / Absent / Leave (approved leave only) / Holiday / Weekly Off in its own colour; the NEXT upcoming holiday date is highlighted with a gold pulsing ring (days left shown in the Upcoming holidays list); the calendar re-reads attendance, approved leave, holidays and weekly offs automatically (new /employee/calendar-data, refreshed every 2 minutes, when the tab is shown again and at midnight). Display only - no sheet, e-mail or tracking code changed.
@@ -687,7 +688,7 @@ def _idle_auto_logout():
             session.clear()
             flash(f"You were logged out automatically after {SESSION_IDLE_MINUTES} minutes of inactivity.")
             return redirect("/admin/login" if was_admin else "/employee/login")
-        if request.endpoint in ("employee_ping", "gc_state"):          # heartbeat: shows "online" but must NOT reset the idle timer
+        if request.endpoint in ("employee_ping", "gc_state", "gm_state"):          # heartbeat: shows "online" but must NOT reset the idle timer
             online_set(session.get("att_id"), session.get("att_eid"), session.get("att_name"), active=last)
             return
         session["last_seen"] = now_ts
@@ -1560,6 +1561,8 @@ def online_set(att_id, emp_id, name, active=None):
         cur = _online.get(att_id) or {"since": now}
         cur.update(eid=str(emp_id), name=str(name or ""), seen=now, active=active or now)
         _online[att_id] = cur
+    try: gm_touch_app(str(emp_id), str(name or ""))      # Update204: Multiplayer Game lobby - who is online in the app (throttled, shared by all workers)
+    except Exception: pass
 
 def online_drop(att_id):
     with _online_lock: _online.pop(att_id, None)
@@ -3692,12 +3695,17 @@ def page(body, title="Productivity Tracker", **ctx):
             if mz_active(session.get("emp_id", "")): items.append(("/employee/mahizhchi", MZ_TITLE))
         except Exception as e:
             print("Mahizhchi menu check failed (are the Mahizhchi sheets created? restart the app once):", e)
+        try:      # Update204: Multiplayer Game link - Employee page only, and only while the Admin has enabled it for this employee
+            if gm_allowed(session.get("emp_id", "")): items.append(("/employee/game", GM_TITLE))
+        except Exception as e:
+            print("Multiplayer Game menu check failed:", repr(e))
     nav = [(h, l, p == h or (h != "/employee" and p.startswith(h + "/")), []) for h, l in items]
     if session.get("role") == "admin":      # Update66: Employee Info expands to Employees / Notifications / Mahizhchi
         view = request.args.get("view", "")
         kids = [("/admin/employee-info", "Employees", p.startswith("/admin/employee-info") and view != "notifications"),
                 ("/admin/employee-info?view=notifications", "Notifications", p == "/admin/employee-info" and view == "notifications"),
-                ("/admin/mahizhchi", "Mahizhchi", p.startswith("/admin/mahizhchi"))]
+                ("/admin/mahizhchi", "Mahizhchi", p.startswith("/admin/mahizhchi")),
+                ("/admin/game", "Multiplayer Game", p.startswith("/admin/game"))]
         nav = [(h, l, on or any(k[2] for k in kids), kids) if h == "/admin/employee-info" else (h, l, on, [])
                for h, l, on, _k in nav]
         # Update103: Productivity Log / Leave & Permission Log / Audit Log / Email Controls are grouped under one expandable "Log" menu.
@@ -10282,6 +10290,708 @@ def admin_work_time_access_add(): return _wts_one(True)
 @app.route("/admin/work-time/access/remove", methods=["POST"])
 @need("admin")
 def admin_work_time_access_remove(): return _wts_one(False)
+
+
+
+# ================================================================ Multiplayer Game "Number Rush"  - Update204
+# Two employees play the SAME board at the SAME time and race to tap the numbers 1..25 in order; whoever taps the current number first
+# scores it. The SERVER decides who was first, so both screens always agree and scores / progress stay synchronized.
+#   * Admin > Employee Info > Multiplayer Game: master Enable / Disable switch + per-employee access (stored in the Settings sheet).
+#   * Employees open it from their own left menu ("Multiplayer Game"); the link exists only for employees and only while the Admin allows it.
+#   * Lobby: lists the employees who are online (green = in the game lobby and can be invited), invite -> accept / decline -> match.
+#   * Live state (presence, invites, matches) lives in a small SQLite file shared by ALL server workers (gunicorn -w 4 safe, no Google Sheets
+#     calls while playing, so the main application is never slowed down). It is temporary data: a restart only ends running matches.
+import sqlite3, tempfile
+
+GM_DB = os.getenv("GAME_DB", os.path.join(tempfile.gettempdir(), "pt_multiplayer_game.db"))
+GM_ON_KEY, GM_BLOCK_KEY = "Multiplayer Game enabled", "Multiplayer Game blocked"        # rows in the Settings sheet (Yes / No, comma separated Employee IDs)
+GM_TITLE = "Multiplayer Game"
+GM_TILES = 25               # numbers 1..25 on the board
+GM_MATCH_SEC = 90           # a match ends after this many seconds (or when all numbers are taken)
+GM_COUNTDOWN = 3.5          # seconds between "accepted" and the first tap
+GM_WRONG_LOCK = 1.0         # a wrong tap freezes that player's board for this long (stops button mashing)
+GM_LOBBY_TTL = 10           # game page not polled for this long -> no longer "in the lobby"
+GM_APP_TTL = 90             # same meaning as the main app's online list
+GM_INVITE_TTL = 30          # an invitation waits this long for an answer
+GM_PLAYER_TTL = 15          # a player silent this long during a match forfeits it
+
+_gm_ready, _gm_init_lock = False, threading.Lock()
+_gm_cfg_cache = (0.0, None)
+_gm_app_touch, _gm_last_purge = {}, [0.0]
+
+
+def _gm_conn():
+    global _gm_ready
+    if not _gm_ready:
+        with _gm_init_lock:
+            if not _gm_ready:
+                c = sqlite3.connect(GM_DB, timeout=10)
+                try:
+                    try: c.execute("PRAGMA journal_mode=WAL")
+                    except Exception: pass
+                    c.executescript("""
+                    CREATE TABLE IF NOT EXISTS cfg(k TEXT PRIMARY KEY, v TEXT);
+                    CREATE TABLE IF NOT EXISTS presence(eid TEXT PRIMARY KEY, name TEXT, app_seen REAL DEFAULT 0, game_seen REAL DEFAULT 0);
+                    CREATE TABLE IF NOT EXISTS invites(id INTEGER PRIMARY KEY AUTOINCREMENT, frm TEXT, frm_name TEXT, to_id TEXT, to_name TEXT,
+                                                       status TEXT, created REAL, match_id TEXT);
+                    CREATE TABLE IF NOT EXISTS matches(id TEXT PRIMARY KEY, p1 TEXT, p1n TEXT, p2 TEXT, p2n TEXT, s1 INTEGER, s2 INTEGER,
+                                                       w1 INTEGER, w2 INTEGER, layout TEXT, claimed TEXT, nxt INTEGER, start_at REAL, status TEXT,
+                                                       winner TEXT, reason TEXT, last_n INTEGER, last_by INTEGER, lock1 REAL, lock2 REAL,
+                                                       rm1 INTEGER, rm2 INTEGER, gone1 INTEGER, gone2 INTEGER, seen1 REAL, seen2 REAL,
+                                                       created REAL, updated REAL);
+                    CREATE INDEX IF NOT EXISTS ix_inv_to ON invites(to_id, status);
+                    CREATE INDEX IF NOT EXISTS ix_inv_frm ON invites(frm, status);
+                    CREATE INDEX IF NOT EXISTS ix_m_p1 ON matches(p1, status);
+                    CREATE INDEX IF NOT EXISTS ix_m_p2 ON matches(p2, status);
+                    """)
+                    c.commit()
+                finally: c.close()
+                _gm_ready = True
+    c = sqlite3.connect(GM_DB, timeout=10, isolation_level=None)
+    c.row_factory = sqlite3.Row
+    c.execute("PRAGMA busy_timeout=8000"); c.execute("PRAGMA synchronous=NORMAL")
+    return c
+
+
+class _gm_tx:
+    """One short write transaction (BEGIN IMMEDIATE): two players tapping at the same moment are handled strictly one after the other."""
+    def __enter__(self): self.c = _gm_conn(); self.c.execute("BEGIN IMMEDIATE"); return self.c
+    def __exit__(self, et, ev, tb):
+        try: self.c.execute("ROLLBACK" if et else "COMMIT")
+        finally: self.c.close()
+        return False
+
+
+# ---------------------------------------------------------------- Admin switch (Settings sheet is the permanent copy, SQLite the fast shared copy)
+def gm_cfg():
+    """-> (enabled, {blocked Employee IDs as _key()}). Cached for 3 s inside one process; the same value is seen by every worker."""
+    global _gm_cfg_cache
+    ts, val = _gm_cfg_cache
+    if val is not None and time.time() - ts < 3: return val
+    c = _gm_conn()
+    try:
+        d = {r["k"]: r["v"] for r in c.execute("SELECT k, v FROM cfg")}
+        if GM_ON_KEY not in d:                       # first start (or the temp file was wiped by a deploy): load what the Admin saved earlier
+            try:
+                on, bl = _setting(GM_ON_KEY).lower() in ("yes", "y", "true", "1", "on", "enabled"), _setting(GM_BLOCK_KEY)
+                c.execute("INSERT OR IGNORE INTO cfg VALUES(?,?)", (GM_ON_KEY, "Yes" if on else "No"))
+                c.execute("INSERT OR IGNORE INTO cfg VALUES(?,?)", (GM_BLOCK_KEY, bl))
+                d = {r["k"]: r["v"] for r in c.execute("SELECT k, v FROM cfg")}
+            except Exception as e:
+                print("Multiplayer Game: could not read the Settings sheet yet:", repr(e))
+                return (False, set())                # stays OFF (and is not cached) until the sheet can be read
+    finally: c.close()
+    val = (d.get(GM_ON_KEY, "No") == "Yes", {_key(x) for x in d.get(GM_BLOCK_KEY, "").split(",") if x.strip()})
+    _gm_cfg_cache = (time.time(), val)
+    return val
+
+
+def gm_set_cfg(on=None, blocked=None):
+    global _gm_cfg_cache
+    c = _gm_conn()
+    try:
+        gm_cfg()
+        if on is not None: c.execute("INSERT OR REPLACE INTO cfg VALUES(?,?)", (GM_ON_KEY, "Yes" if on else "No"))
+        if blocked is not None: c.execute("INSERT OR REPLACE INTO cfg VALUES(?,?)", (GM_BLOCK_KEY, ",".join(sorted(blocked))))
+    finally: c.close()
+    _gm_cfg_cache = (0.0, None)
+    try:
+        if on is not None: _set_setting(GM_ON_KEY, "Yes" if on else "No")
+        if blocked is not None: _set_setting(GM_BLOCK_KEY, ",".join(sorted(blocked)))
+    except Exception as e: print("Multiplayer Game: saved for now, but the Settings sheet could not be updated:", repr(e))
+
+
+def gm_allowed(eid):
+    try:
+        on, blocked = gm_cfg()
+        return bool(on and eid and _key(eid) not in blocked)
+    except Exception: return False
+
+
+def gm_touch_app(eid, name):
+    """Called from the existing online bookkeeping: remembers who is online in the app (at most one tiny write per employee every 15 s)."""
+    now = time.time()
+    if now - _gm_app_touch.get(eid, 0) < 15 or not gm_cfg()[0]: return
+    _gm_app_touch[eid] = now
+    c = _gm_conn()
+    try:
+        c.execute("INSERT INTO presence(eid,name,app_seen) VALUES(?,?,?) ON CONFLICT(eid) DO UPDATE SET name=excluded.name, app_seen=excluded.app_seen", (eid, name, now))
+    finally: c.close()
+
+
+# ---------------------------------------------------------------- match engine
+def _gm_active(c, eid):
+    return c.execute("SELECT 1 FROM matches WHERE (p1=? OR p2=?) AND status IN ('countdown','live') LIMIT 1", (eid, eid)).fetchone() is not None
+
+def _gm_my_match(c, eid, now):
+    return c.execute("SELECT * FROM matches WHERE ((p1=? AND gone1=0) OR (p2=? AND gone2=0)) AND (status!='done' OR updated>?) ORDER BY created DESC LIMIT 1",
+                     (eid, eid, now - 600)).fetchone()
+
+def _gm_get(c, mid): return c.execute("SELECT * FROM matches WHERE id=?", (mid,)).fetchone()
+
+def _gm_finish(c, mid, winner, reason, now):
+    """winner: '1' / '2' / '0' (draw) / '-' (nobody). Series wins are kept on the match row and carried into a rematch."""
+    c.execute("UPDATE matches SET status='done', winner=?, reason=?, updated=?, w1=w1+?, w2=w2+? WHERE id=? AND status IN ('countdown','live')",
+              (winner, reason, now, 1 if winner == "1" else 0, 1 if winner == "2" else 0, mid))
+
+def _gm_by_score(m): return "1" if m["s1"] > m["s2"] else ("2" if m["s2"] > m["s1"] else "0")
+
+def _gm_advance(c, m, eid, now):
+    """Time based transitions (countdown -> live, time up, a player disappeared). Runs on every poll of either player."""
+    if m["status"] not in ("countdown", "live"): return m
+    me = 1 if m["p1"] == eid else 2; op = 3 - me
+    stale_me, stale_op = now - m["seen%d" % me] > GM_PLAYER_TTL, now - m["seen%d" % op] > GM_PLAYER_TTL
+    c.execute("UPDATE matches SET seen%d=? WHERE id=?" % me, (now, m["id"]))
+    if stale_op:
+        if stale_me or m["status"] == "countdown": _gm_finish(c, m["id"], "-", "Match cancelled - a player left", now)
+        else: _gm_finish(c, m["id"], str(me), "Opponent left the match", now)
+        return _gm_get(c, m["id"])
+    if m["status"] == "countdown" and now >= m["start_at"]:
+        c.execute("UPDATE matches SET status='live', updated=? WHERE id=? AND status='countdown'", (now, m["id"]))
+        m = _gm_get(c, m["id"])
+    if m["status"] == "live" and now > m["start_at"] + GM_MATCH_SEC:
+        _gm_finish(c, m["id"], _gm_by_score(m), "Time is up", now)
+        m = _gm_get(c, m["id"])
+    return m
+
+def _gm_create_match(c, a, an, b, bn, now, w1=0, w2=0):
+    lay = list(range(1, GM_TILES + 1)); random.shuffle(lay)
+    for x in (a, b):                                     # a finished match still open on someone's screen is closed for them
+        c.execute("UPDATE matches SET gone1=1 WHERE p1=? AND status='done'", (x,)); c.execute("UPDATE matches SET gone2=1 WHERE p2=? AND status='done'", (x,))
+    mid = uuid.uuid4().hex[:12]
+    c.execute("""INSERT INTO matches(id,p1,p1n,p2,p2n,s1,s2,w1,w2,layout,claimed,nxt,start_at,status,winner,reason,last_n,last_by,lock1,lock2,rm1,rm2,gone1,gone2,seen1,seen2,created,updated)
+                 VALUES(:id,:a,:an,:b,:bn,0,0,:w1,:w2,:lay,'{}',1,:st,'countdown','','',0,0,0,0,0,0,0,0,:now,:now,:now,:now)""",
+              dict(id=mid, a=a, an=an, b=b, bn=bn, w1=w1, w2=w2, lay=json.dumps(lay), st=now + GM_COUNTDOWN, now=now))
+    c.execute("UPDATE invites SET status='cancelled' WHERE status='pending' AND (frm IN (?,?) OR to_id IN (?,?))", (a, b, a, b))
+    return mid
+
+def _gm_view(m, eid, now):
+    me = 1 if m["p1"] == eid else 2; op = 3 - me
+    cl = {k: ("me" if v == me else "opp") for k, v in json.loads(m["claimed"] or "{}").items()}
+    w = None
+    if m["status"] == "done":
+        w = "none" if m["winner"] in ("-", "", None) else ("draw" if m["winner"] == "0" else ("me" if m["winner"] == str(me) else "opp"))
+    return {"id": m["id"], "status": m["status"], "me": {"name": m["p%dn" % me], "score": m["s%d" % me], "wins": m["w%d" % me]},
+            "opp": {"name": m["p%dn" % op], "score": m["s%d" % op], "wins": m["w%d" % op]},
+            "layout": json.loads(m["layout"]), "claimed": cl, "nxt": m["nxt"], "total": GM_TILES, "secs": GM_MATCH_SEC,
+            "start_in": round(max(0.0, m["start_at"] - now), 2),
+            "left": round(max(0.0, m["start_at"] + GM_MATCH_SEC - now), 2) if m["status"] != "done" else 0,
+            "winner": w, "reason": m["reason"] or "", "last_n": m["last_n"], "last_by": ("me" if m["last_by"] == me else "opp") if m["last_by"] else "",
+            "lock_left": round(max(0.0, m["lock%d" % me] - now), 2), "rm_me": bool(m["rm%d" % me]), "rm_opp": bool(m["rm%d" % op]), "opp_gone": bool(m["gone%d" % op])}
+
+def _gm_purge(c, now):
+    if now - _gm_last_purge[0] < 300: return
+    _gm_last_purge[0] = now
+    c.execute("DELETE FROM matches WHERE updated<?", (now - 3600,)); c.execute("DELETE FROM invites WHERE created<?", (now - 3600,))
+    c.execute("DELETE FROM presence WHERE app_seen<? AND game_seen<?", (now - 86400, now - 86400))
+
+
+# ---------------------------------------------------------------- the snapshot every screen polls
+def gm_snapshot(eid, name):
+    now = time.time()
+    if not gm_allowed(eid): return {"ok": False, "disabled": True, "now": now}
+    c = _gm_conn()
+    try:
+        c.execute("INSERT INTO presence(eid,name,app_seen,game_seen) VALUES(?,?,?,?) ON CONFLICT(eid) DO UPDATE SET name=excluded.name, app_seen=excluded.app_seen, game_seen=excluded.game_seen",
+                  (eid, name, now, now))
+        c.execute("UPDATE invites SET status='expired' WHERE status='pending' AND created<?", (now - GM_INVITE_TTL,))
+        _gm_purge(c, now)
+        m = _gm_my_match(c, eid, now)
+        if m: m = _gm_advance(c, m, eid, now)
+        busy = {x for r in c.execute("SELECT p1,p2 FROM matches WHERE status IN ('countdown','live')") for x in (r["p1"], r["p2"])}
+        pend = {r["to_id"] for r in c.execute("SELECT to_id FROM invites WHERE frm=? AND status='pending'", (eid,))}
+        blocked = gm_cfg()[1]
+        online = []
+        for r in c.execute("SELECT eid,name,game_seen FROM presence WHERE eid!=? AND (game_seen>? OR app_seen>?) LIMIT 400", (eid, now - GM_LOBBY_TTL, now - GM_APP_TTL)):
+            if _key(r["eid"]) in blocked: continue
+            st = "playing" if r["eid"] in busy else ("available" if now - r["game_seen"] <= GM_LOBBY_TTL else "app")
+            online.append({"id": r["eid"], "name": r["name"], "state": st, "pending": r["eid"] in pend})
+        rank = {"available": 0, "playing": 1, "app": 2}
+        online.sort(key=lambda o: (rank[o["state"]], str(o["name"]).lower()))
+        incoming = []
+        if not (m and m["status"] in ("countdown", "live")):
+            incoming = [{"id": r["id"], "name": r["frm_name"], "left": round(max(0.0, GM_INVITE_TTL - (now - r["created"])), 1), "ttl": GM_INVITE_TTL}
+                        for r in c.execute("SELECT * FROM invites WHERE to_id=? AND status='pending' ORDER BY id", (eid,))]
+        o = c.execute("SELECT * FROM invites WHERE frm=? AND created>? AND status IN ('pending','declined','expired') ORDER BY id DESC LIMIT 1", (eid, now - GM_INVITE_TTL - 15)).fetchone()
+        return {"ok": True, "now": now, "me": {"id": eid, "name": name}, "online": online, "incoming": incoming,
+                "outgoing": ({"id": o["id"], "name": o["to_name"], "status": o["status"]} if o else None), "match": _gm_view(m, eid, now) if m else None}
+    finally: c.close()
+
+
+# ---------------------------------------------------------------- actions (each returns None = OK, or a short message for the screen)
+def gm_invite(eid, name, to):
+    now, to = time.time(), str(to)
+    if not gm_allowed(to): return "That employee cannot play right now."
+    if to == eid: return "You cannot invite yourself."
+    with _gm_tx() as c:
+        c.execute("UPDATE invites SET status='expired' WHERE status='pending' AND created<?", (now - GM_INVITE_TTL,))
+        if _gm_active(c, eid): return "You are already in a match."
+        p = c.execute("SELECT * FROM presence WHERE eid=?", (to,)).fetchone()
+        if not p or now - p["game_seen"] > GM_LOBBY_TTL: return "That employee is not in the game lobby right now."
+        if _gm_active(c, to): return "%s is already playing." % p["name"]
+        rev = c.execute("SELECT id FROM invites WHERE frm=? AND to_id=? AND status='pending'", (to, eid)).fetchone()
+        if rev:                                           # they had already invited me -> simply start
+            _gm_create_match(c, to, p["name"], eid, name, now); return None
+        c.execute("UPDATE invites SET status='cancelled' WHERE frm=? AND status='pending'", (eid,))
+        c.execute("INSERT INTO invites(frm,frm_name,to_id,to_name,status,created) VALUES(?,?,?,?,'pending',?)", (eid, name, to, p["name"], now))
+    return None
+
+def gm_respond(eid, name, inv_id, accept):
+    now = time.time()
+    with _gm_tx() as c:
+        inv = c.execute("SELECT * FROM invites WHERE id=? AND to_id=? AND status='pending' AND created>=?", (inv_id, eid, now - GM_INVITE_TTL)).fetchone()
+        if not inv: return "That invitation is no longer available."
+        if not accept:
+            c.execute("UPDATE invites SET status='declined' WHERE id=?", (inv["id"],)); return None
+        p = c.execute("SELECT game_seen FROM presence WHERE eid=?", (inv["frm"],)).fetchone()
+        if _gm_active(c, eid) or _gm_active(c, inv["frm"]) or not p or now - p["game_seen"] > GM_LOBBY_TTL:
+            c.execute("UPDATE invites SET status='cancelled' WHERE id=?", (inv["id"],)); return "%s is no longer available." % inv["frm_name"]
+        mid = _gm_create_match(c, inv["frm"], inv["frm_name"], eid, name, now)
+        c.execute("UPDATE invites SET status='accepted', match_id=? WHERE id=?", (mid, inv["id"]))
+    return None
+
+def gm_cancel(eid):
+    with _gm_tx() as c: c.execute("UPDATE invites SET status='cancelled' WHERE frm=? AND status='pending'", (eid,))
+
+def gm_tap(eid, n):
+    now = time.time()
+    try: n = int(n)
+    except Exception: return "bad"
+    with _gm_tx() as c:
+        m = _gm_my_match(c, eid, now)
+        if not m: return "nomatch"
+        m = _gm_advance(c, m, eid, now)
+        if m["status"] == "done": return "over"
+        if m["status"] != "live" or now < m["start_at"]: return "early"
+        me = 1 if m["p1"] == eid else 2
+        if m["lock%d" % me] > now: return "locked"
+        if n != m["nxt"]:
+            if 1 <= n < m["nxt"]: return "taken"
+            c.execute("UPDATE matches SET lock%d=?, updated=? WHERE id=?" % me, (now + GM_WRONG_LOCK, now, m["id"]))
+            return "wrong"
+        claimed = json.loads(m["claimed"] or "{}"); claimed[str(n)] = me
+        c.execute("UPDATE matches SET claimed=?, s%d=s%d+1, nxt=nxt+1, last_n=?, last_by=?, updated=? WHERE id=?" % (me, me), (json.dumps(claimed), n, me, now, m["id"]))
+        if n >= GM_TILES: _gm_finish(c, m["id"], _gm_by_score(_gm_get(c, m["id"])), "All numbers taken", now)
+        return "ok"
+
+def gm_leave(eid):
+    now = time.time()
+    with _gm_tx() as c:
+        c.execute("UPDATE invites SET status='cancelled' WHERE frm=? AND status='pending'", (eid,))
+        m = _gm_my_match(c, eid, now)
+        if m:
+            me = 1 if m["p1"] == eid else 2
+            if m["status"] == "live": _gm_finish(c, m["id"], str(3 - me), "Opponent left the match", now)
+            elif m["status"] == "countdown": _gm_finish(c, m["id"], "-", "Match cancelled - a player left", now)
+            c.execute("UPDATE matches SET gone%d=1 WHERE id=?" % me, (m["id"],))
+
+def gm_rematch(eid, name):
+    now = time.time()
+    with _gm_tx() as c:
+        m = _gm_my_match(c, eid, now)
+        if not m or m["status"] != "done": return "Nothing to replay."
+        me = 1 if m["p1"] == eid else 2; op = 3 - me
+        opid = m["p%d" % op]
+        p = c.execute("SELECT game_seen FROM presence WHERE eid=?", (opid,)).fetchone()
+        if m["gone%d" % op] or not p or now - p["game_seen"] > GM_LOBBY_TTL or not gm_allowed(opid): return "Your opponent has left."
+        if _gm_active(c, opid): return "Your opponent is already in another match."
+        c.execute("UPDATE matches SET rm%d=1 WHERE id=?" % me, (m["id"],))
+        m = _gm_get(c, m["id"])
+        if m["rm1"] and m["rm2"]:
+            _gm_create_match(c, m["p1"], m["p1n"], m["p2"], m["p2n"], now, m["w1"], m["w2"])
+    return None
+
+def gm_bye(eid):
+    """Tab closed / left the page: the employee leaves the lobby at once (a running match is NOT ended, a refresh can rejoin it)."""
+    with _gm_tx() as c:
+        c.execute("UPDATE presence SET game_seen=0 WHERE eid=?", (eid,))
+        c.execute("UPDATE invites SET status='cancelled' WHERE frm=? AND status='pending'", (eid,))
+
+def gm_end_matches(ids=None, reason="Ended by Admin"):
+    """Admin switched the game off / took access away: running matches stop at once. ids=None -> everybody."""
+    now, keys = time.time(), (None if ids is None else {_key(x) for x in ids})
+    with _gm_tx() as c:
+        for r in c.execute("SELECT id,p1,p2 FROM matches WHERE status IN ('countdown','live')").fetchall():
+            if keys is None or _key(r["p1"]) in keys or _key(r["p2"]) in keys: _gm_finish(c, r["id"], "-", reason, now)
+        for r in c.execute("SELECT id,frm,to_id FROM invites WHERE status='pending'").fetchall():
+            if keys is None or _key(r["frm"]) in keys or _key(r["to_id"]) in keys: c.execute("UPDATE invites SET status='cancelled' WHERE id=?", (r["id"],))
+
+def gm_admin_live():
+    now = time.time(); c = _gm_conn()
+    try:
+        ms = c.execute("SELECT * FROM matches WHERE status IN ('countdown','live') ORDER BY created DESC").fetchall()
+        busy = {x for m in ms for x in (m["p1"], m["p2"])}
+        status = {}
+        for r in c.execute("SELECT eid,game_seen,app_seen FROM presence WHERE game_seen>? OR app_seen>?", (now - GM_LOBBY_TTL, now - GM_APP_TTL)):
+            status[_key(r["eid"])] = "In a match" if r["eid"] in busy else ("In game lobby" if now - r["game_seen"] <= GM_LOBBY_TTL else "Online")
+        return {"status": status, "lobby": sum(1 for v in status.values() if v == "In game lobby"), "online": len(status),
+                "matches": [{"a": m["p1n"], "b": m["p2n"], "sa": m["s1"], "sb": m["s2"], "state": m["status"]} for m in ms]}
+    finally: c.close()
+
+
+# ---------------------------------------------------------------- employee routes
+def _gm_who(): return str(session.get("emp_id", "")), str(session.get("name", ""))
+
+@app.route("/employee/game")
+@need("employee")
+def employee_game():
+    eid, _n = _gm_who()
+    if not gm_allowed(eid):
+        flash("The multiplayer game is not available right now. Please contact the Admin.", "error")
+        return redirect("/employee")
+    return page(GM_PAGE, title=GM_TITLE, eid=eid)
+
+@app.route("/employee/game/state")
+@need("employee")
+def gm_state():
+    eid, name = _gm_who()
+    try: return jsonify(gm_snapshot(eid, name))
+    except Exception as e:
+        print("Multiplayer Game state error:", repr(e)); return jsonify({"ok": False, "error": "Game server busy - retrying..."}), 503
+
+def _gm_act(fn):
+    """Run one POST action, then answer with the fresh snapshot so the screen updates instantly (no extra round trip)."""
+    if not _same_origin(): abort(403)
+    eid, name = _gm_who()
+    if not gm_allowed(eid): return jsonify({"ok": False, "disabled": True, "now": time.time()})
+    body = request.get_json(silent=True) or {}
+    try:
+        msg = fn(eid, name, body)
+        snap = gm_snapshot(eid, name)
+    except Exception as e:
+        print("Multiplayer Game action error:", repr(e)); return jsonify({"ok": False, "error": "Game server busy - please try again."}), 503
+    if isinstance(msg, str) and msg not in ("ok",):
+        snap["tap"] = msg
+        if msg not in ("wrong", "locked", "early", "taken", "over", "nomatch", "bad"): snap["error"] = msg
+    elif msg == "ok": snap["tap"] = "ok"
+    return jsonify(snap)
+
+@app.route("/employee/game/invite", methods=["POST"])
+@need("employee")
+def gm_invite_api(): return _gm_act(lambda e, n, b: gm_invite(e, n, str(b.get("to", ""))))
+
+@app.route("/employee/game/respond", methods=["POST"])
+@need("employee")
+def gm_respond_api(): return _gm_act(lambda e, n, b: gm_respond(e, n, int(b.get("id", 0) or 0), bool(b.get("accept"))))
+
+@app.route("/employee/game/cancel", methods=["POST"])
+@need("employee")
+def gm_cancel_api(): return _gm_act(lambda e, n, b: gm_cancel(e))
+
+@app.route("/employee/game/tap", methods=["POST"])
+@need("employee")
+def gm_tap_api(): return _gm_act(lambda e, n, b: gm_tap(e, b.get("n")))
+
+@app.route("/employee/game/leave", methods=["POST"])
+@need("employee")
+def gm_leave_api(): return _gm_act(lambda e, n, b: gm_leave(e))
+
+@app.route("/employee/game/rematch", methods=["POST"])
+@need("employee")
+def gm_rematch_api(): return _gm_act(lambda e, n, b: gm_rematch(e, n))
+
+@app.route("/employee/game/bye", methods=["POST"])
+@need("employee")
+def gm_bye_api():
+    if not _same_origin(): abort(403)
+    try: gm_bye(_gm_who()[0])
+    except Exception: pass
+    return ("", 204)
+
+
+# ---------------------------------------------------------------- admin routes
+@app.route("/admin/game")
+@need("admin")
+def admin_game():
+    on, blocked = gm_cfg()
+    try: live = gm_admin_live()
+    except Exception as e: print("Multiplayer Game live view error:", repr(e)); live = {"status": {}, "lobby": 0, "online": 0, "matches": []}
+    emps = []
+    for r in rows("Employees"):
+        eid = str(r.get("Employee ID", "")).strip()
+        if eid: emps.append({"id": eid, "name": str(r.get("Name", "")).strip(), "allowed": _key(eid) not in blocked, "live": live["status"].get(_key(eid), "")})
+    emps.sort(key=lambda x: (x["name"].lower(), x["id"]))
+    return page(GM_ADMIN, title=GM_TITLE, on=on, emps=emps, live=live, n_allowed=sum(1 for x in emps if x["allowed"]))
+
+@app.route("/admin/game/toggle", methods=["POST"])
+@need("admin")
+def admin_game_toggle():
+    on = request.form.get("enabled") == "1"
+    gm_set_cfg(on=on)
+    if not on: gm_end_matches(None, "Multiplayer Game was switched off by the Admin")
+    flash("Multiplayer Game %s." % ("enabled - employees can now see the game link" if on else "disabled - the link is hidden and running matches were ended"))
+    return redirect("/admin/game")
+
+@app.route("/admin/game/access", methods=["POST"])
+@need("admin")
+def admin_game_access():
+    all_ids = [x.strip() for x in request.form.getlist("ids") if x.strip()]
+    allow = {_key(x) for x in request.form.getlist("allow")}
+    blocked = {_key(x) for x in all_ids if _key(x) not in allow}
+    old = gm_cfg()[1]
+    gm_set_cfg(blocked=blocked)
+    newly = [x for x in blocked if x not in old]
+    if newly: gm_end_matches(newly, "Access was removed by the Admin")
+    flash("Multiplayer Game access saved - %d employee(s) allowed, %d blocked." % (len(all_ids) - len(blocked), len(blocked)))
+    return redirect("/admin/game")
+
+
+# ---------------------------------------------------------------- employee screen (everything between {% raw %} is plain CSS / JS, untouched by the template engine)
+GM_PAGE = r"""<div id="gm" class="gm" data-me="{{eid}}">
+<div class="gm-head"><div><h1>Multiplayer Game <span class="gm-tag">Number Rush</span></h1>
+<p class="mut">Invite an online colleague and race to tap the numbers 1 to 25 in order. The first to tap the current number scores it.</p></div>
+<span id="gm-conn" class="gm-conn ok"><i></i><b>Live</b></span></div>
+<div id="gm-note" class="gm-note" role="status" aria-live="polite"></div>
+<div class="gm-grid">
+<aside class="gm-card gm-lobby"><div class="gm-ct"><h2>Online employees</h2><span class="gm-count" id="gm-count">0</span></div>
+<p class="mut" style="margin:0 0 8px">Green = in the game lobby, ready to be invited.</p>
+<ul id="gm-list" class="gm-list"></ul></aside>
+<section class="gm-card gm-arena">
+<div id="gm-idle" class="gm-center"><div class="gm-ico">&#127918;</div><h2>Ready to play?</h2>
+<p class="mut">Pick an available colleague on the left and press <b>Invite</b>.<br>When they accept, both of you see the same board and the scores update live.</p>
+<div class="gm-rules"><span>&#9312; Find the highlighted number</span><span>&#9313; Tap it before your opponent</span><span>&#9314; A wrong tap freezes your board for 1 s</span></div></div>
+<div id="gm-wait" class="gm-center" hidden><div class="gm-ico gm-spin">&#9203;</div><h2>Waiting for <span id="gm-wait-name"></span>...</h2>
+<p class="mut">The invitation expires in 30 seconds.</p><button type="button" id="gm-cancel">Cancel invitation</button></div>
+<div id="gm-match" hidden>
+<div class="gm-score">
+<div class="gm-p me"><div class="gm-pn" id="gm-n1"></div><div class="gm-ps" id="gm-s1">0</div><div class="gm-bar"><i id="gm-b1"></i></div></div>
+<div class="gm-mid"><div class="gm-timer" id="gm-timer">90</div><div class="gm-series" id="gm-series"></div></div>
+<div class="gm-p opp"><div class="gm-pn" id="gm-n2"></div><div class="gm-ps" id="gm-s2">0</div><div class="gm-bar"><i id="gm-b2"></i></div></div></div>
+<div class="gm-target" id="gm-target"></div>
+<div class="gm-boardwrap"><div class="gm-board" id="gm-board"></div></div>
+<div id="gm-result" class="gm-result" hidden><div class="gm-rt" id="gm-rt"></div><div class="gm-rs" id="gm-rs"></div>
+<div class="gm-ra"><button type="button" class="primary" id="gm-again">Play again</button><button type="button" id="gm-back">Back to lobby</button></div></div>
+<div class="gm-foot" id="gm-foot"><button type="button" id="gm-quit">Leave match</button></div>
+</div></section></div>
+<div id="gm-modal" class="gm-modal" hidden><div class="gm-mbox" role="dialog" aria-modal="true" aria-labelledby="gm-inv-t">
+<div class="gm-ico">&#128276;</div><h3 id="gm-inv-t"><span id="gm-inv-name"></span> invited you to play!</h3><p class="mut">Number Rush &middot; 2 players &middot; 90 seconds</p>
+<div class="gm-tbar"><i id="gm-inv-bar"></i></div>
+<div class="gm-ra"><button type="button" class="primary" id="gm-acc">Accept</button><button type="button" id="gm-dec">Decline</button></div></div></div>
+</div>
+{% raw %}<style>
+.gm{max-width:1080px;margin:0 auto}
+.gm-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+.gm-head h1{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.gm-tag{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#fff;background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:3px 10px;border-radius:99px}
+.gm-conn{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:5px 12px;border-radius:99px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0}
+.gm-conn i{width:8px;height:8px;border-radius:50%;background:#10b981;box-shadow:0 0 0 0 #10b98180;animation:gmPulse 1.8s infinite}
+.gm-conn.bad{background:#fef2f2;color:#b91c1c;border-color:#fecaca}.gm-conn.bad i{background:#ef4444;animation:none}
+@keyframes gmPulse{70%{box-shadow:0 0 0 7px #10b98100}100%{box-shadow:0 0 0 0 #10b98100}}
+.gm-note{min-height:0;height:0;overflow:hidden;opacity:0;margin:0 0 0;padding:0 14px;border-radius:10px;font-size:13px;font-weight:600;background:#eef2ff;color:#3730a3;transition:all .25s ease}
+.gm-note.show{height:auto;opacity:1;padding:9px 14px;margin-bottom:10px}.gm-note.bad{background:#fef2f2;color:#b91c1c}.gm-note.good{background:#ecfdf5;color:#047857}
+.gm-grid{display:grid;grid-template-columns:290px minmax(0,1fr);gap:14px;align-items:start}
+@media(max-width:860px){.gm-grid{grid-template-columns:1fr}}
+.gm-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 1px 2px #0f172a0a,0 12px 28px -14px #0f172a30}
+.gm-ct{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}.gm-ct h2{margin:0;font-size:15px}
+.gm-count{min-width:24px;text-align:center;font-size:12px;font-weight:700;background:#eef2ff;color:#4338ca;border-radius:99px;padding:2px 8px}
+.gm-list{list-style:none;margin:0;padding:0;max-height:430px;overflow:auto;display:flex;flex-direction:column;gap:6px}
+.gm-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #edf0f8;border-radius:12px;background:#fafbff}
+.gm-row.av{background:#f3fff8;border-color:#bbf7d0}.gm-row.dim{opacity:.62}
+.gm-av{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;background:linear-gradient(135deg,#6366f1,#8b5cf6);position:relative}
+.gm-av::after{content:"";position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;border-radius:50%;border:2px solid #fff;background:#cbd5e1}
+.gm-row.av .gm-av::after{background:#10b981}.gm-row.pl .gm-av::after{background:#f59e0b}
+.gm-info{min-width:0;flex:1}.gm-nm{font-size:13.5px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gm-st{font-size:11.5px;color:var(--mut)}
+.gm-row button{flex:none;margin:0;padding:6px 12px;font-size:12.5px;font-weight:600;border-radius:9px}
+.gm-empty{padding:18px 8px;text-align:center;color:var(--mut);font-size:13px}
+.gm-center{text-align:center;padding:34px 12px}.gm-center h2{margin:6px 0 4px;font-size:20px}
+.gm-ico{font-size:40px;line-height:1}.gm-spin{animation:gmSpin 2.2s ease-in-out infinite}@keyframes gmSpin{50%{transform:rotate(180deg)}}
+.gm-rules{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:16px}
+.gm-rules span{font-size:12px;background:#f1f3fb;border-radius:99px;padding:5px 12px;color:#475069}
+.gm-score{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center;margin-bottom:10px}
+.gm-p{border-radius:14px;padding:10px 14px;color:#fff}.gm-p.me{background:linear-gradient(135deg,#6366f1,#4f46e5)}.gm-p.opp{background:linear-gradient(135deg,#fb923c,#ea580c);text-align:right}
+.gm-pn{font-size:12.5px;font-weight:600;opacity:.95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gm-ps{font-size:34px;font-weight:800;line-height:1.1}
+.gm-bar{height:5px;border-radius:9px;background:#ffffff40;overflow:hidden}.gm-bar i{display:block;height:100%;width:0;background:#fff;border-radius:9px;transition:width .3s ease}
+.gm-mid{text-align:center}.gm-timer{font-size:26px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}.gm-series{font-size:11.5px;color:var(--mut)}
+.gm-target{text-align:center;font-size:15px;font-weight:600;color:#475069;margin:6px 0 10px;min-height:44px}
+.gm-target b{display:inline-block;min-width:56px;margin-left:8px;padding:2px 14px;font-size:30px;border-radius:14px;background:linear-gradient(135deg,#eef2ff,#e0e7ff);color:#4338ca}
+.gm-target.big{font-size:54px;font-weight:800;color:#4f46e5}
+.gm-boardwrap{position:relative}
+.gm-board{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;max-width:420px;margin:0 auto;transition:opacity .2s}
+.gm-board.lock{opacity:.45;pointer-events:none}.gm-board.off{pointer-events:none}
+.gm-tile{aspect-ratio:1;margin:0;padding:0;font-size:20px;font-weight:700;border-radius:12px;border:1px solid #dfe3f3;background:linear-gradient(#fff,#f1f3fb);color:#1e2547;box-shadow:0 3px 0 #d5daee;font-variant-numeric:tabular-nums}
+.gm-tile:hover{transform:translateY(-2px)}.gm-tile:active{transform:translateY(1px) scale(.96);box-shadow:0 1px 0 #d5daee}
+.gm-tile.me,.gm-tile.opp{pointer-events:none;color:#fff;transform:none}
+.gm-tile.me{background:linear-gradient(#818cf8,#6366f1);border-color:#4f46e5;box-shadow:0 3px 0 #4338ca}
+.gm-tile.opp{background:linear-gradient(#fdba74,#f97316);border-color:#ea580c;box-shadow:0 3px 0 #c2410c}
+.gm-tile.pop{animation:gmPop .45s cubic-bezier(.34,1.56,.64,1)}.gm-tile.shake{animation:gmShake .35s}
+@keyframes gmPop{0%{transform:scale(.7)}100%{transform:scale(1)}}@keyframes gmShake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+.gm-result{max-width:420px;margin:14px auto 0;text-align:center;padding:16px;border-radius:16px;background:linear-gradient(135deg,#eef2ff,#f5f3ff);border:1px solid #ddd6fe;animation:gmPop .45s cubic-bezier(.34,1.56,.64,1)}
+.gm-result.win{background:linear-gradient(135deg,#ecfdf5,#d1fae5);border-color:#6ee7b7}.gm-result.lose{background:linear-gradient(135deg,#fff7ed,#ffedd5);border-color:#fdba74}
+.gm-rt{font-size:22px;font-weight:800;color:var(--ink)}.gm-rs{font-size:13px;color:var(--mut);margin-top:4px}
+.gm-ra{display:flex;gap:8px;justify-content:center;margin-top:12px;flex-wrap:wrap}.gm-ra button{margin:0;padding:9px 18px;font-weight:600}
+.gm-foot{text-align:center;margin-top:12px}.gm-foot button{margin:0;font-size:12.5px;padding:6px 14px;color:#b91c1c;border-color:#fecaca;background:#fff}
+.gm-modal{position:fixed;inset:0;z-index:9000;display:grid;place-items:center;background:#0f172a66;backdrop-filter:blur(3px)}.gm-modal[hidden]{display:none}
+.gm-mbox{width:min(360px,92vw);background:#fff;border-radius:20px;padding:24px 22px;text-align:center;box-shadow:0 24px 60px -10px #0f172a66;animation:gmPop .4s cubic-bezier(.34,1.56,.64,1)}
+.gm-mbox h3{margin:8px 0 2px;font-size:18px}.gm-tbar{height:5px;background:#eef0f8;border-radius:9px;overflow:hidden;margin-top:12px}.gm-tbar i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#6366f1,#8b5cf6);transition:width 1s linear}
+@media(prefers-reduced-motion:reduce){.gm *,.gm-mbox{animation:none!important;transition:none!important}}
+</style>
+<script>
+(function(){
+var root=document.getElementById('gm');if(!root)return;
+var offset=0,lastNow=0,busy=false,timer=null,S=null,boardId=null,tiles={},lockUntil=0,ref=null,lastListKey='',outSeen='',modalId='',lastNxt=0,lastCl=0;
+function $(i){return document.getElementById(i)}
+function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}
+function note(msg,kind){var n=$('gm-note');n.textContent=msg;n.className='gm-note show '+(kind||'');clearTimeout(note.t);note.t=setTimeout(function(){n.className='gm-note'},3600)}
+function conn(ok){var b=$('gm-conn');b.className='gm-conn '+(ok?'ok':'bad');b.lastChild.textContent=ok?'Live':'Reconnecting...'}
+function req(path,body){
+  var o={credentials:'same-origin',cache:'no-store'};
+  if(body){o.method='POST';o.headers={'Content-Type':'application/json'};o.body=JSON.stringify(body)}
+  return fetch('/employee/game/'+path,o).then(function(r){if(r.redirected){location.href='/employee/login';throw new Error('signed out')}return r.json()});
+}
+function initials(n){var p=String(n||'?').trim().split(/\s+/);return ((p[0]||'?')[0]+(p.length>1?p[p.length-1][0]:'')).toUpperCase()}
+function show(id){['gm-idle','gm-wait','gm-match'].forEach(function(k){$(k).hidden=(k!==id)})}
+
+function apply(j){
+  if(!j)return;
+  if(j.disabled){location.href='/employee';return}
+  if(j.now){offset=j.now*1000-Date.now();if(j.now<lastNow)return;lastNow=j.now}
+  if(j.ok===false){conn(false);note(j.error||'Connection problem',"bad");return}
+  conn(true);S=j;
+  if(j.error)note(j.error,'bad');
+  renderList(j);renderInvite(j);renderArena(j);
+}
+function renderList(j){
+  var key=JSON.stringify([j.online,j.match?1:0,j.outgoing&&j.outgoing.status==='pending'?j.outgoing.id:0]);
+  if(key===lastListKey)return;lastListKey=key;
+  var ul=$('gm-list');ul.textContent='';$('gm-count').textContent=j.online.length;
+  if(!j.online.length){ul.appendChild(el('li','gm-empty','No other employees are online right now.'));return}
+  var free=!j.match&&!(j.outgoing&&j.outgoing.status==='pending');
+  j.online.forEach(function(o){
+    var li=el('li','gm-row '+(o.state==='available'?'av':(o.state==='playing'?'pl':'dim')));
+    li.appendChild(el('div','gm-av',initials(o.name)));
+    var info=el('div','gm-info');info.appendChild(el('div','gm-nm',o.name));
+    info.appendChild(el('div','gm-st',o.state==='available'?'In game lobby':(o.state==='playing'?'Playing a match':'Online - not in the game')));li.appendChild(info);
+    if(o.state==='available'){
+      var b=el('button',o.pending?'':'primary',o.pending?'Invited':'Invite');b.type='button';b.disabled=!free||o.pending;
+      b.onclick=function(){b.disabled=true;b.textContent='Sending...';send('invite',{to:o.id})};li.appendChild(b);
+    }
+    ul.appendChild(li);
+  });
+}
+function renderInvite(j){
+  var m=$('gm-modal'),inc=j.incoming&&j.incoming[0];
+  if(!inc){m.hidden=true;modalId='';return}
+  if(modalId!==String(inc.id)){modalId=String(inc.id);$('gm-inv-name').textContent=inc.name;
+    $('gm-inv-bar').style.transition='none';$('gm-inv-bar').style.width=(inc.left/inc.ttl*100)+'%';
+    setTimeout(function(){$('gm-inv-bar').style.transition='width '+inc.left+'s linear';$('gm-inv-bar').style.width='0%'},30)}
+  m.hidden=false;
+}
+function renderArena(j){
+  var o=j.outgoing;
+  if(o&&o.status!=='pending'&&outSeen!==o.id+o.status){outSeen=o.id+o.status;
+    note(o.name+(o.status==='declined'?' declined your invitation.':' did not answer in time.'),'bad')}
+  if(j.match){show('gm-match');renderMatch(j.match);return}
+  boardId=null;ref=null;
+  if(o&&o.status==='pending'){$('gm-wait-name').textContent=o.name;show('gm-wait')}else show('gm-idle');
+}
+function buildBoard(m){
+  var b=$('gm-board');b.textContent='';tiles={};
+  m.layout.forEach(function(n){var t=el('button','gm-tile',n);t.type='button';t.dataset.n=n;
+    t.addEventListener('click',function(){tap(n)});b.appendChild(t);tiles[n]=t});
+  boardId=m.id;lastNxt=0;lastCl=0;$('gm-result').hidden=true;
+}
+function renderMatch(m){
+  if(boardId!==m.id)buildBoard(m);
+  var n=0;
+  Object.keys(m.claimed).forEach(function(k){n++;var t=tiles[k];if(t&&!t.classList.contains(m.claimed[k])){t.classList.remove('shake');t.classList.add(m.claimed[k],'pop')}});
+  $('gm-n1').textContent=m.me.name+' (You)';$('gm-n2').textContent=m.opp.name;
+  $('gm-s1').textContent=m.me.score;$('gm-s2').textContent=m.opp.score;
+  $('gm-b1').style.width=(m.me.score/m.total*100)+'%';$('gm-b2').style.width=(m.opp.score/m.total*100)+'%';
+  $('gm-series').textContent=(m.me.wins||m.opp.wins)?('Series '+m.me.wins+' - '+m.opp.wins):'First to claim wins';
+  ref={t:Date.now(),start_in:m.start_in,left:m.left};lockUntil=Date.now()+m.lock_left*1000;
+  var live=m.status==='live',done=m.status==='done',tg=$('gm-target'),bd=$('gm-board');
+  bd.classList.toggle('off',done||m.status==='countdown');
+  $('gm-foot').hidden=done;
+  if(live){tg.className='gm-target';
+    if(lastNxt!==m.nxt){tg.textContent='Find';var b=el('b',null,m.nxt<=m.total?m.nxt:'-');tg.appendChild(b);lastNxt=m.nxt}}
+  else if(done){tg.className='gm-target';tg.textContent=m.winner==='me'?'You won!':(m.winner==='opp'?m.opp.name+' won':(m.winner==='draw'?'It is a draw':'Match ended'));lastNxt=0}
+  else{tg.className='gm-target big';lastNxt=0}
+  var r=$('gm-result');
+  if(done){r.hidden=false;r.className='gm-result '+(m.winner==='me'?'win':(m.winner==='opp'?'lose':''));
+    $('gm-rt').textContent=m.winner==='me'?'You win!':(m.winner==='opp'?'You lost this round':(m.winner==='draw'?'Draw':'Match cancelled'));
+    $('gm-rs').textContent=m.me.score+' - '+m.opp.score+(m.reason?'  \u00b7  '+m.reason:'');
+    var ag=$('gm-again');ag.disabled=m.opp_gone||m.rm_me;
+    ag.textContent=m.opp_gone?'Opponent left':(m.rm_me?'Waiting for opponent...':(m.rm_opp?'Accept rematch':'Play again'));
+  }else r.hidden=true;
+  tick();
+}
+function tick(){
+  if(!S||!S.match||!ref)return;var m=S.match,dt=(Date.now()-ref.t)/1000,tg=$('gm-target');
+  if(m.status==='countdown'){var c=Math.ceil(ref.start_in-dt);tg.textContent=c>0?c:'GO!'}
+  if(m.status!=='done')$('gm-timer').textContent=m.status==='countdown'?m.secs:Math.max(0,Math.ceil(ref.left-dt));
+  else $('gm-timer').textContent='-';
+  $('gm-board').classList.toggle('lock',Date.now()<lockUntil&&m.status==='live');
+}
+setInterval(tick,150);
+
+function send(path,body){
+  return req(path,body||{}).then(function(j){apply(j);schedule();return j}).catch(function(){conn(false)});
+}
+function tap(n){
+  if(!S||!S.match||S.match.status==='done'||Date.now()<lockUntil)return;
+  var t=tiles[n];
+  req('tap',{n:n}).then(function(j){
+    if(j&&j.tap==='wrong'){if(t){t.classList.remove('shake');void t.offsetWidth;t.classList.add('shake')}lockUntil=Date.now()+1000;note('Wrong number - wait a second!','bad')}
+    apply(j);schedule();
+  }).catch(function(){conn(false)});
+}
+$('gm-cancel').onclick=function(){send('cancel')};
+$('gm-acc').onclick=function(){$('gm-modal').hidden=true;send('respond',{id:+modalId,accept:true})};
+$('gm-dec').onclick=function(){$('gm-modal').hidden=true;send('respond',{id:+modalId,accept:false})};
+$('gm-quit').onclick=function(){if(confirm('Leave this match? Your opponent will win.'))send('leave')};
+$('gm-back').onclick=function(){send('leave')};
+$('gm-again').onclick=function(){send('rematch')};
+
+function delay(){
+  if(document.hidden)return 4000;
+  if(S&&S.match&&S.match.status!=='done')return 450;
+  if(S&&((S.outgoing&&S.outgoing.status==='pending')||(S.incoming&&S.incoming.length)||(S.match&&S.match.status==='done')))return 900;
+  return 1800;
+}
+function schedule(){clearTimeout(timer);timer=setTimeout(poll,delay())}
+function poll(){
+  if(busy){schedule();return}busy=true;
+  req('state').then(apply).catch(function(){conn(false)}).then(function(){busy=false;schedule()});
+}
+document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()});
+window.addEventListener('pagehide',function(){try{navigator.sendBeacon('/employee/game/bye',new Blob(['{}'],{type:'application/json'}))}catch(e){}});
+poll();
+})();
+</script>{% endraw %}"""
+
+
+# ---------------------------------------------------------------- Admin control page
+GM_ADMIN = r"""<div class="head"><div><h1>Multiplayer Game</h1>
+<p class="mut">Control the two-player game employees see on their own page. Nothing here is visible to employees except the game link itself.</p></div></div>
+<div class="card gmA-top"><div class="gmA-state"><span class="gmA-dot {{'on' if on else 'off'}}"></span>
+<div><b>{{ 'Enabled' if on else 'Disabled' }}</b><div class="mut">{% if on %}Allowed employees see the &ldquo;Multiplayer Game&rdquo; link in their left menu.{% else %}The link is hidden from every employee and the game cannot be opened.{% endif %}</div></div></div>
+<form method="post" action="/admin/game/toggle" {% if on %}onsubmit="return confirm('Disable the Multiplayer Game? Matches that are running now will be ended.')"{% endif %}>
+<input type="hidden" name="enabled" value="{{ '0' if on else '1' }}"><button class="primary" type="submit">{{ 'Disable game' if on else 'Enable game' }}</button></form></div>
+<div class="gmA-kpis"><div class="card"><div class="mut">Online in the app</div><b class="gmA-n">{{live.online}}</b></div>
+<div class="card"><div class="mut">In the game lobby</div><b class="gmA-n">{{live.lobby}}</b></div>
+<div class="card"><div class="mut">Matches running</div><b class="gmA-n">{{live.matches|length}}</b></div>
+<div class="card"><div class="mut">Employees allowed</div><b class="gmA-n">{{n_allowed}} / {{emps|length}}</b></div></div>
+{% if live.matches %}<div class="card"><h2 style="margin-top:0">Matches running now</h2><table><tr><th>Player 1</th><th>Score</th><th>Player 2</th><th>State</th></tr>
+{% for m in live.matches %}<tr><td>{{m.a}}</td><td>{{m.sa}} - {{m.sb}}</td><td>{{m.b}}</td><td>{{ 'Starting' if m.state=='countdown' else 'Playing' }}</td></tr>{% endfor %}</table></div>{% endif %}
+<div class="card"><h2 style="margin-top:0">Who can play</h2><p class="mut">Tick the employees allowed to use the game. Unticked employees never see the link and cannot open the page. Takes effect within a few seconds.</p>
+<form method="post" action="/admin/game/access"><div class="gmA-bar"><input id="gmA-q" placeholder="Search name or ID" autocomplete="off" style="min-width:220px">
+<button type="button" onclick="gmAll(true)">Select all</button><button type="button" onclick="gmAll(false)">Select none</button><button class="primary" type="submit">Save access</button></div>
+<table id="gmA-t"><tr><th style="width:70px">Allowed</th><th>Employee ID</th><th>Name</th><th>Right now</th></tr>
+{% for e in emps %}<tr data-s="{{(e.id ~ ' ' ~ e.name)|lower}}"><td><input type="hidden" name="ids" value="{{e.id}}"><input type="checkbox" name="allow" value="{{e.id}}" {{'checked' if e.allowed}}></td>
+<td>{{e.id}}</td><td>{{e.name}}</td><td>{% if e.live %}<span class="pill">{{e.live}}</span>{% else %}<span class="mut">-</span>{% endif %}</td></tr>
+{% else %}<tr><td colspan="4" class="mut">No employees found.</td></tr>{% endfor %}</table></form></div>
+{% raw %}<style>
+.gmA-top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.gmA-top form{margin:0}
+.gmA-state{display:flex;align-items:center;gap:12px}.gmA-dot{width:14px;height:14px;border-radius:50%;flex:none}.gmA-dot.on{background:#10b981;box-shadow:0 0 0 5px #10b98126}.gmA-dot.off{background:#94a3b8;box-shadow:0 0 0 5px #94a3b826}
+.gmA-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}.gmA-kpis .card{margin-bottom:12px}.gmA-n{font-size:26px;display:block;margin-top:2px}
+.gmA-bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}.gmA-bar button{margin:3px 0}
+</style>
+<script>
+function gmAll(v){document.querySelectorAll('#gmA-t tr:not([hidden]) input[name=allow]').forEach(function(c){c.checked=v})}
+document.getElementById('gmA-q').addEventListener('input',function(){var q=this.value.toLowerCase().trim();
+  document.querySelectorAll('#gmA-t tr[data-s]').forEach(function(r){r.hidden=q&&r.dataset.s.indexOf(q)<0})});
+</script>{% endraw %}"""
 
 
 if __name__ == "__main__":

@@ -3069,13 +3069,21 @@ body .app.emp3d .site-ftr,body .app.emp3d .pg-ftr,html.fit188 .app.emp3d .site-f
 .s3d-lane i::before{content:"";position:absolute;left:0;top:0;width:14px;height:14px;border-radius:3px;background:linear-gradient(135deg,#fde68a,#f59e0b);box-shadow:0 0 12px #fbbf24;transform:rotateX(35deg) rotateZ(45deg)}
 .s3d-lane i:nth-child(2){animation-delay:-.6s}.s3d-lane i:nth-child(3){animation-delay:-1.2s}.s3d-lane i:nth-child(4){animation-delay:-1.8s}.s3d-lane i:nth-child(5){animation-delay:-2.4s}
 .s3d-lab{position:absolute;left:0;right:0;bottom:8px;text-align:center;font:700 10px/1 system-ui,sans-serif;letter-spacing:.16em;color:#a5b4fc}
-.s3d.rx .s3d-lane i{animation-name:s3dgo}.s3d.rx .s3d-lane i::before{background:linear-gradient(135deg,#a5f3fc,#06b6d4);box-shadow:0 0 12px #22d3ee}
+.s3d.rx .s3d-lane i{animation-name:s3drx}.s3d.rx .s3d-lane i::before{background:linear-gradient(135deg,#a5f3fc,#06b6d4);box-shadow:0 0 12px #22d3ee}
 @keyframes s3dgo{0%{transform:translateX(0);opacity:0}10%,85%{opacity:1}100%{transform:translateX(calc(100% - 14px));opacity:0}}
 @keyframes s3drx{0%{transform:translateX(calc(100% - 14px));opacity:0}10%,85%{opacity:1}100%{transform:translateX(0);opacity:0}}
 @keyframes s3dbl{50%{opacity:.25}}
 @media(max-width:560px){.s3d{height:92px}.s3d-n{width:48px}.s3d-lane{left:calc(7% + 60px);right:calc(7% + 60px)}}
 @media(prefers-reduced-motion:reduce){.s3d-lane i,.s3d-n.srv b::after{animation:none}}
 @media print{.s3d{display:none}}
+/* Update205: login-only server animation */
+.lg .win .scene .dp{display:none!important}
+.lgx.s3d{position:absolute;left:2%;right:2%;top:5%;height:104px;margin:0;background:none;box-shadow:none;overflow:visible;pointer-events:none;z-index:1;perspective:700px}
+.lgx .s3d-grid{display:none}
+.lgx .s3d-lab{bottom:-6px;color:#fdba74;text-shadow:0 1px 6px rgba(0,0,0,.6)}
+.lgx .s3d-n.b{right:3%}.lgx .s3d-n.a{left:3%}
+.lgx .s3d-lane{left:calc(3% + 80px);right:calc(3% + 80px)}
+@media(max-width:800px){.lgx.s3d{display:none}}
 </style></head><body>
 {% if bare %}{{body|safe}}
 {% elif session.role %}<div class="app{{' emp3d' if session.role=='employee' else ''}}">{% if session.role=='employee' %}<script>document.documentElement.classList.add('fit188')</script><div id="fly3d" aria-hidden="true"><div class="fo" style="--s:64px;--x0:-12vw;--y0:78vh;--x1:112vw;--y1:-14vh;--z0:-380px;--z1:160px;--d:46s;--dl:0s;--c1:#6366f1;--c2:#a78bfa;--t:24s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:44px;--x0:110vw;--y0:64vh;--x1:-14vw;--y1:20vh;--z0:-120px;--z1:220px;--d:38s;--dl:-9s;--c1:#ec4899;--c2:#f9a8d4;--t:21s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:86px;--x0:-10vw;--y0:22vh;--x1:112vw;--y1:88vh;--z0:-420px;--z1:-60px;--d:58s;--dl:-21s;--c1:#06b6d4;--c2:#67e8f9;--t:28s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:52px;--x0:30vw;--y0:112vh;--x1:70vw;--y1:-16vh;--z0:-200px;--z1:240px;--d:34s;--dl:-14s;--c1:#f59e0b;--c2:#fcd34d;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:72px;--x0:112vw;--y0:92vh;--x1:-12vw;--y1:40vh;--z0:-340px;--z1:120px;--d:52s;--dl:-30s;--c1:#8b5cf6;--c2:#c4b5fd;--t:26s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:38px;--x0:-10vw;--y0:48vh;--x1:110vw;--y1:6vh;--z0:-60px;--z1:260px;--d:30s;--dl:-4s;--c1:#10b981;--c2:#6ee7b7;--t:20s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:58px;--x0:60vw;--y0:-14vh;--x1:16vw;--y1:114vh;--z0:-260px;--z1:180px;--d:44s;--dl:-26s;--c1:#3b82f6;--c2:#93c5fd;--t:23s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:48px;--x0:88vw;--y0:112vh;--x1:40vw;--y1:-14vh;--z0:-160px;--z1:200px;--d:36s;--dl:-17s;--c1:#f43f5e;--c2:#fda4af;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:90px;--x0:-14vw;--y0:60vh;--x1:112vw;--y1:20vh;--z0:-300px;--z1:140px;--d:50s;--dl:-6s;--c1:#6366f1;--c2:#6366f1;--t:29s"><div class="fr"></div></div><div class="fo" style="--s:64px;--x0:112vw;--y0:18vh;--x1:-14vw;--y1:80vh;--z0:-180px;--z1:200px;--d:42s;--dl:-19s;--c1:#ec4899;--c2:#ec4899;--t:24s"><div class="fr"></div></div><div class="fo" style="--s:110px;--x0:20vw;--y0:114vh;--x1:84vw;--y1:-18vh;--z0:-400px;--z1:60px;--d:60s;--dl:-33s;--c1:#06b6d4;--c2:#06b6d4;--t:32s"><div class="fr"></div></div><div class="fo" style="--s:56px;--x0:80vw;--y0:-14vh;--x1:6vw;--y1:100vh;--z0:-100px;--z1:240px;--d:40s;--dl:-12s;--c1:#f59e0b;--c2:#f59e0b;--t:23s"><div class="fr"></div></div><div class="fo" style="--s:54px;--x0:-12vw;--y0:34vh;--x1:112vw;--y1:70vh;--z0:-240px;--z1:180px;--d:48s;--dl:-2s;--c1:#6366f1;--c2:#22d3ee;--t:23s"><div class="ft"></div></div><div class="fo" style="--s:40px;--x0:112vw;--y0:50vh;--x1:-12vw;--y1:8vh;--z0:-80px;--z1:240px;--d:34s;--dl:-23s;--c1:#ec4899;--c2:#f59e0b;--t:20s"><div class="ft"></div></div><div class="fo" style="--s:70px;--x0:46vw;--y0:-14vh;--x1:92vw;--y1:114vh;--z0:-320px;--z1:100px;--d:54s;--dl:-36s;--c1:#8b5cf6;--c2:#06b6d4;--t:25s"><div class="ft"></div></div><div class="fo" style="--s:46px;--x0:-12vw;--y0:104vh;--x1:114vw;--y1:30vh;--z0:-140px;--z1:220px;--d:40s;--dl:-28s;--c1:#10b981;--c2:#3b82f6;--t:21s"><div class="ft"></div></div></div>{% endif %}<aside class="emp">
@@ -3698,7 +3706,7 @@ def page(body, title="Productivity Tracker", **ctx):
 
 
 LOGIN = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i><i></i><i></i></div>
-<div class="wbody"><div class="scene admin" aria-hidden="true"><div class="sheen"></div>
+<div class="wbody"><div class="scene admin" aria-hidden="true"><div class="sheen"></div>{% if role=='admin' %}<div class="lgx s3d rx"><div class="s3d-grid"></div><div class="s3d-n a"><b></b><small>ADMIN</small></div><div class="s3d-lane"><i></i><i></i><i></i><i></i><i></i></div><div class="s3d-n b srv"><b></b><small>SERVER</small></div><span class="s3d-lab">&larr; RECEIVING DATA FROM SERVER</span></div>{% else %}<div class="lgx s3d"><div class="s3d-grid"></div><div class="s3d-n a"><b></b><small>EMPLOYEE</small></div><div class="s3d-lane"><i></i><i></i><i></i><i></i><i></i></div><div class="s3d-n b srv"><b></b><small>SERVER</small></div><span class="s3d-lab">SENDING EMPLOYEE DATA &rarr; SERVER</span></div>{% endif %}
 <div class="gfw"><div class="gf"></div></div>
 <div class="fl" style="left:5%;top:12%;--s:62px;--bt:8s"><div class="cube" style="--s:62px;--t:18s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
 <div class="fl" style="right:6%;top:9%;--s:46px;--bt:6.5s;--d:-2s"><div class="cube" style="--s:46px;--t:13s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
@@ -6738,7 +6746,7 @@ w.addEventListener('pointerleave',function(){A.forEach(function(x){x.classList.r
 })();
 </script>"""
 
-EMP_TOP = """<div class="s3d" aria-hidden="true"><div class="s3d-grid"></div><div class="s3d-n a"><b></b><small>YOU</small></div><div class="s3d-lane"><i></i><i></i><i></i><i></i><i></i></div><div class="s3d-n b srv"><b></b><small>SERVER</small></div><span class="s3d-lab">SENDING YOUR DATA TO THE SERVER</span></div><div class="head hero"><div class="welcome wflex"><div class="wtxt"><h1 class="wt"><span class="wt-hi">Hello,</span> <span class="wt-name">{{session.name}}</span></h1>
+EMP_TOP = """<div class="head hero"><div class="welcome wflex"><div class="wtxt"><h1 class="wt"><span class="wt-hi">Hello,</span> <span class="wt-name">{{session.name}}</span></h1>
 <p class="mut wsub"><span class="seg">{{today}}</span>{% if session.designation %}<span class="dot">&middot;</span><span class="seg">{{session.designation}}</span>{% endif %}<span class="dot">&middot;</span><span class="seg">Band {{session.band}}</span><span class="dot">&middot;</span><span class="seg">{{month_label}} summary</span>
 {% if today_perm %}<span class="dot">&middot;</span>Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div></div></div>""" + KPI
 
@@ -6747,7 +6755,7 @@ VIEW_ONLY_CARD = """<div class="card"><h2 style="margin-top:0">Productivity &mda
 no productivity % is calculated, and no missed-entry reminders are sent. Leave &amp; Permission works as usual.</p>
 <a class="btnl" href="/employee/leave">Leave &amp; Permission</a> <a class="btnl" href="/employee/productivity">Productivity Info</a></div>"""
 
-SUMMARY = """<div class="s3d rx" aria-hidden="true"><div class="s3d-grid"></div><div class="s3d-n a srv"><b></b><small>SERVER</small></div><div class="s3d-lane"><i></i><i></i><i></i><i></i><i></i></div><div class="s3d-n b"><b></b><small>ADMIN</small></div><span class="s3d-lab">RECEIVING LIVE DATA FROM THE SERVER</span></div><div class="head ov-head"><div><h1>Overview</h1>
+SUMMARY = """<div class="head ov-head"><div><h1>Overview</h1>
 <p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; the daily target of {{target|g}} hrs per present day (capped at 100%).</p></div>
 <div class="ov-tools no-print">
 <button type="button" class="btnl pbtn" onclick="window.print()" title="Print this overview"><span aria-hidden="true">&#128438;</span> Print</button>

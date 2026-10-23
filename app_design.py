@@ -1,5 +1,6 @@
 """Productivity Tracker - Flask + Google Sheets.
   * Update201: Employee login page - the left "Employee Panel / Productivity Dashboard / Performance / Attendance / Reports" promo block is removed (the login card is centred); the Admin login page is unchanged.
+  * Update202: (1) calendar status legend removed; (2) login goes straight to /admin/summary (Admin) or /employee (Employee) - welcome pages no longer shown; (3) generic \"Something went wrong...\" message removed - real errors now show a specific message (data service busy / could not save / could not reach server).
   * Update200: Employee Panel calendar - every date is marked Present / Absent / Leave (approved leave only) / Holiday / Weekly Off in its own colour; the NEXT upcoming holiday date is highlighted with a gold pulsing ring (days left shown in the Upcoming holidays list); the calendar re-reads attendance, approved leave, holidays and weekly offs automatically (new /employee/calendar-data, refreshed every 2 minutes, when the tab is shown again and at midnight). Display only - no sheet, e-mail or tracking code changed.
   * Update191: Employee panel shown at a NORMAL, comfortable size: base text 14px, buttons / inputs 14px with balanced padding, headings 16-22px, KPI cards, tables, calendar and the left menu all enlarged to readable sizes. The fit-to-screen script no longer shrinks to ~55-70 % or scales up to 120 %: it now stays between 90 % and 100 % (left panel) and 95 % - 100 % (page), and when a long page does not fit, only the page content area scrolls instead of the text becoming tiny. Employee pages only (Admin and login pages unchanged); display only - no route, sheet, e-mail or tracking code changed.
   * Update188: every EMPLOYEE page (Daily entry, Leave & Permission, Personal details, Productivity Info, ...) now fits completely inside the browser window with NO page scrolling: the left panel (menu + calendar + profile + Logout) and the page content are measured live and scaled to the available screen, and re-fitted whenever the content changes (rows added, calendar month changed, window resized). Buttons, cards and forms stay aligned and fully visible. Desktop / tablet-landscape only (>= 801 px); phones keep their normal stacked layout. Display only (CSS + one script in the main template) - no route, sheet, e-mail or tracking code changed.
@@ -576,18 +577,33 @@ def _method_not_allowed(e):
     if session.get("role") == "admin": return redirect("/admin/summary")
     return redirect("/")
 
+def _error_text(e):
+    """Update202: a clear, relevant message for a REAL error only (replaces the old generic 'Something went wrong...' text)."""
+    ex = getattr(e, "original_exception", None) or e
+    if isinstance(ex, APIError):
+        return "The data service (Google Sheets) is busy right now, so this action was not completed. Please try again in a few seconds."
+    p = request.path
+    what = ("saving your entry" if p.endswith("/save") else "submitting your leave request" if "leave" in p
+            else "updating your profile" if "profile" in p or "password" in p else "completing this action")
+    return "We could not finish " + what + " because of an unexpected error. Please try again; if it keeps happening, contact the Admin."
+
 @app.errorhandler(500)
 def _server_error(e):
     import traceback; traceback.print_exc()
+    msg = _error_text(e)
+    _home = "/employee" if session.get("role") == "employee" else ("/admin/summary" if session.get("role") == "admin" else "/")
     try:
+        if request.headers.get("X-Requested-With") == "fetch":
+            return jsonify(ok=False, messages=[dict(kind="error", text=msg)]), 500
         if request.method == "POST" and session.get("role") in ("employee", "admin"):
-            flash("Something went wrong and the request could not be completed. Please try again in a few seconds.", "error")
-            return redirect(request.referrer or ("/employee" if session.get("role") == "employee" else "/admin/summary"))
+            flash(msg, "error")
+            return redirect(request.referrer or _home)
     except Exception:
         pass
-    _home = "/employee" if session.get("role") == "employee" else ("/admin/summary" if session.get("role") == "admin" else "/")
-    return ("<h2>Something went wrong</h2><p>Please wait a few seconds and <a href='" + _home + "'>try again</a>. "
-            "If you just pressed Save, check <b>Submitted today</b> before saving again - your entry may already be saved.</p>"), 500
+    import html as _hh
+    return ("<!doctype html><meta name='viewport' content='width=device-width,initial-scale=1'><body style='font-family:system-ui,sans-serif;padding:40px;color:#1c2340'>"
+            "<h2>This page could not be loaded</h2><p>" + _hh.escape(msg) + "</p>"
+            "<p><a href='" + _hh.escape(request.path) + "'>Reload this page</a> &middot; <a href='" + _home + "'>Go to home</a></p></body>"), 500
 
 @app.errorhandler(APIError)
 def _handle_sheets_api_error(e):
@@ -3030,7 +3046,7 @@ body .app.emp3d .site-ftr,body .app.emp3d .pg-ftr,html.fit188 .app.emp3d .site-f
 <div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
-<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-lg" id="cal_lg" hidden><span><i class="lp"></i>Present</span><span><i class="la"></i>Absent</span><span><i class="ll"></i>Leave</span><span><i class="lh"></i>Holiday</span><span><i class="lo"></i>Weekly off</span></div><div class="cal-up" id="cal_up" hidden></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
+<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-up" id="cal_up" hidden></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
 <div class="prof{{' prof-emp' if session.role=='employee' else ''}}"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name" title="{{session.name}}">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
@@ -3056,7 +3072,7 @@ if(st==='P'){c+=t?' sp':' p';np++;tt='Present'}else if(st==='A'){c+=t?' sa':' a'
 if(k===NH){c+=' nh';tt=(tt||'Holiday')+' (next holiday)'}
 h+='<span class="'+c+'"'+(t?' aria-current="date"':'')+(tt?' title="'+i+' '+M[m].slice(0,3)+': '+tt+'"':'')+'>'+i+'</span>'}
 var tail=(7-(first+n)%7)%7;for(i=1;i<=tail;i++)h+='<span class="o">'+i+'</span>';g.innerHTML=h;
-if(A){document.getElementById('cal_lg').hidden=false;
+if(A){
 var ct=document.getElementById('cal_ct');ct.hidden=false;ct.innerHTML='<span><b class="cp">'+np+'</b> Present</span><span><b class="ca">'+na+'</b> Absent</span><span><b class="cl">'+nl+'</b> Leave</span>'}}
 function side(){var u=document.getElementById('cal_up');if(!u||!A)return;
 var tk=iso(now),ks=Object.keys(HL).filter(function(k){return k>=tk}).sort(),DN=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -3952,7 +3968,7 @@ document.querySelector('form[action="{{action}}"]').addEventListener('submit',fu
     const lines=(j.messages||[]).filter(function(m){return !(j.ok&&/^Saved\\.?$/.test(m.text))}).map(function(m){return m.text});
     saveBanner(!!j.ok,lines);
     if(j.ok){setTimeout(function(){location.href='/employee'},lines.length?4000:3000)}else if(b){b.disabled=false;b.textContent='Save'}
-   }).catch(function(){saveBanner(false,['Could not reach the server. Check Submitted today before pressing Save again.']);if(b){b.disabled=false;b.textContent='Save'}})}}
+   }).catch(function(){saveBanner(false,['Could not reach the server, so the entry was not saved. Check your internet connection and press Save again.']);if(b){b.disabled=false;b.textContent='Save'}})}}
 });
 window.addEventListener('pageshow',function(){const b=document.querySelector('form button.primary[disabled]');if(b){b.disabled=false;b.textContent='Save'}});
 {{sub.procs|tojson}}.forEach(addProc);{{sub.notes|tojson}}.forEach(addNote);
@@ -4024,7 +4040,7 @@ def admin_login():
             session.clear(); session.update(role="admin", name="Admin")
             track_login("ADMIN", "Admin", "-")
             _bg(prefetch, "Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays")   # Update114: dashboard data loads while the welcome animation plays
-            return redirect("/admin/welcome")
+            return redirect("/admin/summary")             # Update202: straight to the Admin Panel (no welcome page)
         flash("Wrong username or password.")
     return page(LOGIN, title="Admin login", ph="Admin username", role="admin",
                 admin_avatar=render_fast(AVATAR3D, gender="male", initials="A"))
@@ -4908,7 +4924,7 @@ def employee_login():
                                designation=str(e.get("Designation", "")))
                 track_login(session["emp_id"], session["name"], session["band"])
                 _bg(warm_employee_cache)                  # dashboard data loads while the welcome animation plays
-                return redirect("/employee/welcome")
+                return redirect("/employee")                  # Update202: straight to the Employee Panel (no welcome page)
         flash("Wrong username or password.")
     return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee",
                 admin_avatar=render_fast(AVATAR3D, gender="male", initials="E"))
@@ -4973,6 +4989,7 @@ WELCOME = """<style>
 @app.route("/admin/welcome")
 @need("admin")
 def admin_welcome():
+    return redirect("/admin/summary")                     # Update202: the welcome page is no longer shown
     return page(WELCOME, title="Welcome", wl_gender="male", bare=True)
 
 # ---------------------------------------------------------------- employee GROUP CHAT (Update80 / Update82)
@@ -6204,6 +6221,7 @@ def employee_calendar_data():
 @app.route("/employee/welcome")
 @need("employee")
 def employee_welcome():
+    return redirect("/employee")                          # Update202: the welcome page is no longer shown (old bookmarks go to the panel)
     try:
         g = gender_of(my_emp_row())
     except Exception:
@@ -6327,7 +6345,7 @@ def employee_save():
         return jsonify(ok=ok, messages=[dict(kind=c, text=m) for c, m in msgs])
     except Exception as ex:
         import traceback; traceback.print_exc()
-        return jsonify(ok=False, messages=[dict(kind="error", text="Your entry could not be saved right now. Please wait a few seconds and press Save again.")]), 200
+        return jsonify(ok=False, messages=[dict(kind="error", text=_error_text(ex))]), 200
 
 def _employee_save_impl():
     if is_view_only(session.get("emp_id", "")):                  # Update105

@@ -1,7 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
-  * Update205: CONNECTIONS ONLINE GAME + ADMIN GAME ACCESS. Employees get a Connections menu (only if Admin allows them): 16 words, find the 4 hidden groups of 4 (4 mistakes, 5 minutes). Play alone, or see which colleagues are online and invite one to a live RACE on the same puzzle - you both see the other's progress (groups found / mistakes) and the first to find all four groups wins; Play again gives a new puzzle and keeps the win count. Invites arrive as an Accept / Decline pop-up on whatever Employee page the colleague is on. The server judges every guess (one-away hint, no penalty for repeating a guess) and never sends the groups until solved or the round is over. ADMIN: Employee Info > Games - tick / untick which employees may play (search, Tick all shown, one Save), stored in the new Game Access sheet (created automatically). Not ticked = no menu, page redirects, every request is refused, not listed as online players, cannot be invited; unticking ends their running game. Nobody has access until Admin ticks them. In-memory like the online list / group chat; nothing is written to Google Sheets per move. Separate from the Mahizhchi bonus Connection Game, which is unchanged.
   * Update201: Employee login page - the left "Employee Panel / Productivity Dashboard / Performance / Attendance / Reports" promo block is removed (the login card is centred); the Admin login page is unchanged.
-  * Update204: (1)+(2) the Present / Absent / Leave / Holiday / Weekly Off colour legend is shown ONLY in the Employee panel calendar (Admin calendar shows no attendance statuses); (3) a holiday date needs no Productivity Entry: the entry form shows a holiday notice and disables Save for that date (the server already refuses it) and holidays stay excluded from every productivity / attendance / missed-entry calculation; (4) Employee login = 3D animated scene of data being SENT to the server; (5) Admin login = the same scene with data RECEIVED from the server (canvas, no libraries, honours reduced-motion, pauses when the tab is hidden). On the Admin login the three decorative cards (Performance / Attendance / Reports) were removed because the new scene replaces them.
   * Update202: (1) calendar status legend removed; (2) login goes straight to /admin/summary (Admin) or /employee (Employee) - welcome pages no longer shown; (3) generic \"Something went wrong...\" message removed - real errors now show a specific message (data service busy / could not save / could not reach server).
   * Update200: Employee Panel calendar - every date is marked Present / Absent / Leave (approved leave only) / Holiday / Weekly Off in its own colour; the NEXT upcoming holiday date is highlighted with a gold pulsing ring (days left shown in the Upcoming holidays list); the calendar re-reads attendance, approved leave, holidays and weekly offs automatically (new /employee/calendar-data, refreshed every 2 minutes, when the tab is shown again and at midnight). Display only - no sheet, e-mail or tracking code changed.
   * Update191: Employee panel shown at a NORMAL, comfortable size: base text 14px, buttons / inputs 14px with balanced padding, headings 16-22px, KPI cards, tables, calendar and the left menu all enlarged to readable sizes. The fit-to-screen script no longer shrinks to ~55-70 % or scales up to 120 %: it now stays between 90 % and 100 % (left panel) and 95 % - 100 % (page), and when a long page does not fit, only the page content area scrolls instead of the text becoming tiny. Employee pages only (Admin and login pages unchanged); display only - no route, sheet, e-mail or tracking code changed.
@@ -495,7 +493,6 @@ HEADERS = {
                       "Section", "Action", "Details"],
     # Audit Log permissions set by Admin: one row per employee. Processes = the ticked process names "A | B | C".
     "Audit Access": ["Employee ID", "Employee name", "Enabled", "Processes", "Updated at", "Updated by"],
-    "Game Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],      # Update205: Admin grants / revokes the Connections game per employee
     # Mahizhchi (Update62): Admin's questions (A-D options, one ✓ correct answer) and which employees may view them.
     "Mahizhchi Log": ["Question", "A", "B", "C", "D", "Correct Answer"],
     "Mahizhchi Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
@@ -690,7 +687,7 @@ def _idle_auto_logout():
             session.clear()
             flash(f"You were logged out automatically after {SESSION_IDLE_MINUTES} minutes of inactivity.")
             return redirect("/admin/login" if was_admin else "/employee/login")
-        if request.endpoint in ("employee_ping", "gc_state", "cn_state"):          # heartbeat: shows "online" but must NOT reset the idle timer
+        if request.endpoint in ("employee_ping", "gc_state"):          # heartbeat: shows "online" but must NOT reset the idle timer
             online_set(session.get("att_id"), session.get("att_eid"), session.get("att_name"), active=last)
             return
         session["last_seen"] = now_ts
@@ -2644,17 +2641,6 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .win.admin .wbody{min-height:420px;border-radius:0 0 16px 16px;gap:40px;padding:28px 36px;justify-content:space-between;
  background:radial-gradient(700px 380px at 15% 10%,#3b5bdb44,transparent 60%),radial-gradient(500px 300px at 90% 100%,#7c3aed33,transparent 60%),linear-gradient(135deg,#0a1030 0%,#111a4a 55%,#1d2470 100%)}
 .win.admin .scene .fl,.win.admin .scene .dp{display:none}
-/* ---- Update204: login 3D data-flow scene (Employee = data sent TO the server, Admin = data received FROM the server). Same scene, opposite direction. ---- */
-.win.admin .scene .gfw{display:none}
-.win.admin[data-role="admin"] .adp{align-self:flex-start}
-.win.admin[data-role="admin"] .adp-3d{display:none}      /* the 3D data-feed scene replaces these three decorative cards */
-.lgfx{position:absolute;inset:0;width:100%;height:100%;display:block}
-.lg-cap{position:absolute;top:12px;left:0;right:0;text-align:center;font:600 10px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.22em;color:#fff;opacity:.85;text-shadow:0 0 10px var(--r,#fff)}
-.lg-cap b{display:inline-block;animation:lgBlink 1.4s steps(2,end) infinite}
-@keyframes lgBlink{50%{opacity:.25}}
-@media(prefers-reduced-motion:reduce){.lg-cap b{animation:none}}
-@media(max-width:480px){.lg-cap{font-size:8.5px;letter-spacing:.14em}}
-
 .win.admin .scene .gfw{opacity:.55}
 .adp{position:relative;z-index:2;flex:1;min-width:0;color:#fff;transform:translateZ(30px)}
 .adp-t{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#8ea8ff;margin:0 0 6px}
@@ -3060,7 +3046,7 @@ body .app.emp3d .site-ftr,body .app.emp3d .pg-ftr,html.fit188 .app.emp3d .site-f
 <div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
-<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div>{% if session.role=='employee' and att_json %}<div class="cal-lg" id="cal_lg"><span><i class="lp"></i>Present</span><span><i class="la"></i>Absent</span><span><i class="ll"></i>Leave</span><span><i class="lh"></i>Holiday</span><span><i class="lo"></i>Weekly Off</span></div>{% endif %}<div class="cal-up" id="cal_up" hidden></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
+<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-up" id="cal_up" hidden></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
 <div class="prof{{' prof-emp' if session.role=='employee' else ''}}"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name" title="{{session.name}}">{{session.name}}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
@@ -3133,53 +3119,6 @@ function check(){
 tm=setInterval(check,30000);
 document.addEventListener('visibilitychange',function(){if(!document.hidden)setTimeout(check,500)});
 window.addEventListener('online',function(){setTimeout(check,1500)})
-})();
-</script>{% endif %}
-{% if session.role=='employee' and not bare and game_ok %}<script>
-/* Update205: Connections invite pop-up on every Employee page */
-(function(){
-  if (location.pathname.indexOf('/employee/connections') === 0) return;
-  var shown = {}, box = document.createElement('div');
-  box.setAttribute('style', 'position:fixed;right:16px;bottom:16px;z-index:99998;display:flex;flex-direction:column;gap:10px;max-width:320px');
-  document.body.appendChild(box);
-  function post(path, data){
-    var b = new URLSearchParams(); for (var k in data) b.append(k, data[k]);
-    return fetch(path, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: b.toString()}).then(function(r){ return r.json(); });
-  }
-  function esc(t){ return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-  function card(key, html, buttons){
-    var d = document.createElement('div'); d.id = 'cn' + key;
-    d.setAttribute('style', 'background:linear-gradient(180deg,#fff,#eef2ff);border:1px solid #c7d2fe;border-radius:14px;padding:12px 14px;font:500 13px Poppins,Segoe UI,Arial,sans-serif;color:#1c2340;box-shadow:0 14px 28px -10px #1c2340aa,0 3px 0 #c7d2fe');
-    d.innerHTML = '<div style="margin-bottom:8px">' + html + '</div>';
-    var row = document.createElement('div'); row.setAttribute('style', 'display:flex;gap:8px');
-    buttons.forEach(function(b){
-      var x = document.createElement('button'); x.type = 'button'; x.textContent = b[0];
-      x.setAttribute('style', 'border:0;cursor:pointer;padding:6px 14px;border-radius:9px;font:600 12.5px Poppins,Segoe UI,Arial,sans-serif;' + (b[2] ? 'color:#fff;background:linear-gradient(180deg,#6d70f5,#4f46e5);box-shadow:0 3px 0 #3730a3' : 'color:#4b5379;background:#eceffa'));
-      x.onclick = b[1]; row.appendChild(x);
-    });
-    d.appendChild(row); box.appendChild(d);
-  }
-  function poll(){
-    if (document.hidden) return;
-    fetch('/employee/connections/state?lite=1', {credentials: 'same-origin', cache: 'no-store'}).then(function(r){ return r.json(); }).then(function(j){
-      if (!j || j.denied) return;
-      var live = {};
-      (j.invites || []).forEach(function(v){
-        live['cn' + v.id] = 1;
-        if (shown[v.id]) return;
-        shown[v.id] = 1;
-        card(v.id, '&#129513; <b>' + esc(v.name) + '</b> invited you to race in <b>Connections</b>', [
-          ['Accept', function(){ post('/employee/connections/respond', {inv: v.id, accept: '1'}).then(function(){ location.href = '/employee/connections'; }); }, true],
-          ['Decline', function(){ post('/employee/connections/respond', {inv: v.id, accept: '0'}); var e = document.getElementById('cn' + v.id); if (e) e.remove(); }, false]]);
-      });
-      if (j.match && !shown['m' + j.match.id]) {
-        shown['m' + j.match.id] = 1; live['cnm' + j.match.id] = 1;
-        card('m' + j.match.id, '&#129513; Your <b>Connections</b> game is ready', [['Open game', function(){ location.href = '/employee/connections'; }, true]]);
-      } else if (j.match) live['cnm' + j.match.id] = 1;
-      Array.prototype.slice.call(box.children).forEach(function(e){ if (!live[e.id]) e.remove(); });
-    }).catch(function(){});
-  }
-  setTimeout(poll, 2500); setInterval(poll, 6000);
 })();
 </script>{% endif %}
 {% if session.role=='employee' and not bare %}<script>
@@ -3681,19 +3620,12 @@ def page(body, title="Productivity Tracker", **ctx):
             if mz_active(session.get("emp_id", "")): items.append(("/employee/mahizhchi", MZ_TITLE))
         except Exception as e:
             print("Mahizhchi menu check failed (are the Mahizhchi sheets created? restart the app once):", e)
-        try:      # Update205: Admin-controlled: Connections (and its invite pop-ups) exist only for employees Admin has granted game access
-            ctx["game_ok"] = game_allowed(session.get("emp_id", ""))
-            if ctx["game_ok"]: items.append(("/employee/connections", "Connections"))
-        except Exception as e:
-            ctx["game_ok"] = False
-            print("Game access check failed (restart the app once so the Game Access sheet is created):", e)
     nav = [(h, l, p == h or (h != "/employee" and p.startswith(h + "/")), []) for h, l in items]
     if session.get("role") == "admin":      # Update66: Employee Info expands to Employees / Notifications / Mahizhchi
         view = request.args.get("view", "")
         kids = [("/admin/employee-info", "Employees", p.startswith("/admin/employee-info") and view != "notifications"),
                 ("/admin/employee-info?view=notifications", "Notifications", p == "/admin/employee-info" and view == "notifications"),
-                ("/admin/mahizhchi", "Mahizhchi", p.startswith("/admin/mahizhchi")),
-                ("/admin/game-access", "Games", p.startswith("/admin/game-access"))]
+                ("/admin/mahizhchi", "Mahizhchi", p.startswith("/admin/mahizhchi"))]
         nav = [(h, l, on or any(k[2] for k in kids), kids) if h == "/admin/employee-info" else (h, l, on, [])
                for h, l, on, _k in nav]
         # Update103: Productivity Log / Leave & Permission Log / Audit Log / Email Controls are grouped under one expandable "Log" menu.
@@ -3729,7 +3661,7 @@ def page(body, title="Productivity Tracker", **ctx):
 
 LOGIN = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i><i></i><i></i></div>
 <div class="wbody"><div class="scene admin" aria-hidden="true"><div class="sheen"></div>
-<div class="gfw"><div class="gf"></div></div><canvas id="lgfx" class="lgfx"></canvas><div class="lg-cap">{% if role=='admin' %}<b>&#9664;&#9664;&#9664;</b>&nbsp; RECEIVING DATA FROM SERVER{% else %}UPLOADING DATA TO SERVER &nbsp;<b>&#9654;&#9654;&#9654;</b>{% endif %}</div>
+<div class="gfw"><div class="gf"></div></div>
 <div class="fl" style="left:5%;top:12%;--s:62px;--bt:8s"><div class="cube" style="--s:62px;--t:18s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
 <div class="fl" style="right:6%;top:9%;--s:46px;--bt:6.5s;--d:-2s"><div class="cube" style="--s:46px;--t:13s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
 <div class="fl hm" style="right:9%;bottom:14%;--s:74px;--bt:9s;--d:-4s"><div class="cube" style="--s:74px;--t:22s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
@@ -3902,81 +3834,7 @@ LOGIN = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i>
   }, 500);
 })();
 </script>
-
-<script>/* Update204 */
-(function(){
-var cv=document.getElementById('lgfx');if(!cv||!cv.getContext)return;
-var ctx=cv.getContext('2d'),win=cv.closest('.win'),UP=!(win&&win.getAttribute('data-role')==='admin'),DIR=UP?1:-1;
-var PAL=UP?{a:[255,208,150],b:[255,112,172]}:{a:[150,178,255],b:[96,232,250]},GREEN=[125,255,176];
-var W=0,H=0,dpr=1,F=1,raf=0,go=false,T0=0,tOff=0;
-var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-var HZ=UP?0.40:0.50,TH=-0.5,CS=Math.cos(TH),SN=Math.sin(TH),CY=1.7,CD=7.2,LANES=[-1.35,-0.45,0.45,1.35],STX=-5.1,SVX=UP?5.1:1.9,XS=-4.0,XE=UP?4.3:1.1;
-function rgba(c,a){return 'rgba('+c[0]+','+c[1]+','+c[2]+','+Math.max(0,Math.min(1,a)).toFixed(3)+')'}
-function P(x,y,z){var rx=x*CS+z*SN,rz=-x*SN+z*CS+CD,k=F/rz;return [W*0.5+rx*k+SHX,H*HZ-(y-CY)*k,k,rz]}
-var SHX=0;
-function size(){var r=cv.parentNode.getBoundingClientRect();W=Math.max(2,Math.round(r.width));H=Math.max(2,Math.round(r.height));dpr=Math.min(window.devicePixelRatio||1,2);
- cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);
- var L=W*0.15,R=UP?W*0.85:W*0.56;F=1;SHX=0;var a=P(STX,0,0),b=P(SVX,0,0);F=Math.min((R-L)/(b[0]-a[0]),H*0.95);SHX=0;a=P(STX,0,0);SHX=L-a[0]}
-function poly(pts){ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(var i=1;i<pts.length;i++)ctx.lineTo(pts[i][0],pts[i][1]);ctx.closePath()}
-var FACES=[[0,1,2,3],[4,5,6,7],[0,1,5,4],[3,2,6,7],[0,3,7,4],[1,2,6,5]];
-function box(cx,y0,cz,w,h,d,ry,fillC,fa,edgeC,ea){
- var hx=w/2,hz=d/2,c=Math.cos(ry),s=Math.sin(ry),loc=[[-hx,-hz],[hx,-hz],[hx,hz],[-hx,hz]],v=[],i;
- for(i=0;i<8;i++){var l=loc[i%4],X=cx+l[0]*c-l[1]*s,Z=cz+l[0]*s+l[1]*c;v.push(P(X,i<4?y0:y0+h,Z))}
- var fs=FACES.map(function(f){var z=0;for(var j=0;j<4;j++)z+=v[f[j]][3];return {f:f,z:z/4}}).sort(function(a,b){return b.z-a.z});
- for(i=0;i<6;i++){var pts=fs[i].f.map(function(k){return v[k]});poly(pts);ctx.fillStyle=rgba(fillC,fa*(i>3?1.5:1));ctx.fill();ctx.strokeStyle=rgba(edgeC,ea);ctx.lineWidth=1;ctx.stroke()}
- return v}
-function fpt(x0,y0,z0,w,h,u,v){return P(x0+u*w,y0+v*h,z0)}
-function floor(t){
- var off=((t*0.8*DIR)%0.8+0.8)%0.8,i,x,z;ctx.lineWidth=1;
- for(z=-3.2;z<=3.21;z+=0.8){var a=P(-6.6,0,z),b=P(6.6,0,z);var g=ctx.createLinearGradient(a[0],a[1],b[0],b[1]);g.addColorStop(0,rgba([255,255,255],0.16));g.addColorStop(1,rgba([255,255,255],0.04));ctx.strokeStyle=g;ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke()}
- for(x=-6.4+off;x<=6.5;x+=0.8){var p=P(x,0,-3.2),q=P(x,0,3.2),f=1-Math.abs(x)/7.2;ctx.strokeStyle=rgba([255,255,255],0.03+0.12*f*(1-p[3]/16));ctx.beginPath();ctx.moveTo(p[0],p[1]);ctx.lineTo(q[0],q[1]);ctx.stroke()}
- for(i=0;i<LANES.length;i++){var s=P(UP?XS-0.4:XE+0.4,0.01,LANES[i]),e=P(UP?XE+0.4:XS-0.4,0.01,LANES[i]);
-  ctx.strokeStyle=rgba(PAL.a,0.14);ctx.lineWidth=2.4;ctx.beginPath();ctx.moveTo(s[0],s[1]);ctx.lineTo(e[0],e[1]);ctx.stroke();
-  ctx.setLineDash([9,15]);ctx.lineDashOffset=-(t*46)%24;ctx.strokeStyle=rgba(PAL.b,0.5);ctx.lineWidth=1.4;ctx.stroke();ctx.setLineDash([])}}
-function server(t){
- var cx=SVX,w=1.1,d=1.4,h=2.6,v=box(cx,0,0,w,h,d,0,[120,130,200],0.16,PAL.a,0.6);
- var x0=cx-w/2,z0=-d/2,i,u;
- for(i=0;i<5;i++){var a=fpt(x0,0.18+i*0.48,z0,w,0.4,0.08,0.0),b=fpt(x0,0.18+i*0.48,z0,w,0.4,0.92,0.0),c=fpt(x0,0.18+i*0.48,z0,w,0.4,0.92,1),e=fpt(x0,0.18+i*0.48,z0,w,0.4,0.08,1);
-  poly([a,b,c,e]);ctx.fillStyle=rgba([255,255,255],0.07);ctx.fill();ctx.strokeStyle=rgba(PAL.a,0.5);ctx.stroke();
-  var led=fpt(x0,0.18+i*0.48,z0,w,0.4,0.82,0.5),on=(Math.sin(t*(3+i*1.3)+i*2)>-0.2),sz=Math.max(1.5,led[2]*0.045);
-  ctx.beginPath();ctx.arc(led[0],led[1],sz,0,6.283);ctx.fillStyle=rgba(on?GREEN:[255,255,255],on?0.95:0.25);ctx.shadowColor=rgba(GREEN,0.9);ctx.shadowBlur=on?8:0;ctx.fill();ctx.shadowBlur=0;
-  for(u=0;u<3;u++){var m1=fpt(x0,0.18+i*0.48,z0,w,0.4,0.16+u*0.17,0.35),m2=fpt(x0,0.18+i*0.48,z0,w,0.4,0.16+u*0.17,0.65);ctx.strokeStyle=rgba(PAL.a,0.35);ctx.beginPath();ctx.moveTo(m1[0],m1[1]);ctx.lineTo(m2[0],m2[1]);ctx.stroke()}}
- var o=P(cx,0,0),r=o[2]*1.5,gr=ctx.createRadialGradient(o[0],o[1],0,o[0],o[1],r);gr.addColorStop(0,rgba(PAL.b,0.28));gr.addColorStop(1,rgba(PAL.b,0));ctx.fillStyle=gr;ctx.beginPath();ctx.ellipse(o[0],o[1],r,r*0.35,0,0,6.283);ctx.fill();
- var lab=P(cx,h+0.25,0);ctx.font='600 '+Math.max(8,Math.min(11,lab[2]*0.09))+'px ui-monospace,Menlo,Consolas,monospace';ctx.textAlign='center';ctx.fillStyle=rgba([255,255,255],0.8);ctx.fillText('SERVER',lab[0],lab[1])}
-function station(t){
- var cx=STX,y0=0.55,w=1.9,h=1.15,d=0.14;
- box(cx,0,0,0.3,0.55,0.3,0,[255,255,255],0.12,PAL.a,0.55);box(cx,0,0,1.1,0.06,0.7,0,[255,255,255],0.1,PAL.a,0.5);
- box(cx,y0,0,w,h,d,0,[255,255,255],UP?0.12:0.1,PAL.b,0.85);
- var x0=cx-w/2,z0=-d/2,i;
- if(UP){for(i=0;i<5;i++){var len=0.35+0.5*(0.5+0.5*Math.sin(t*1.7+i*1.9)),a=fpt(x0,y0,z0,w,h,0.1,0.8-i*0.15),b=fpt(x0,y0,z0,w,h,0.1+len*0.8,0.8-i*0.15);ctx.strokeStyle=rgba(PAL.a,0.85);ctx.lineWidth=Math.max(1.5,a[2]*0.045);ctx.lineCap='round';ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke()}}
- else{for(i=0;i<5;i++){var hh=0.2+0.6*(0.5+0.5*Math.sin(t*1.3+i*1.4)),a2=fpt(x0,y0,z0,w,h,0.14+i*0.17,0.1),b2=fpt(x0,y0,z0,w,h,0.14+i*0.17,0.1+hh*0.8);ctx.strokeStyle=rgba(PAL.b,0.9);ctx.lineWidth=Math.max(2,a2[2]*0.09);ctx.lineCap='butt';ctx.beginPath();ctx.moveTo(a2[0],a2[1]);ctx.lineTo(b2[0],b2[1]);ctx.stroke()}}
- ctx.lineCap='butt';var lab=P(cx,y0+h+0.25,0);ctx.font='600 '+Math.max(8,Math.min(12,lab[2]*0.085))+'px ui-monospace,Menlo,Consolas,monospace';ctx.textAlign='center';ctx.fillStyle=rgba([255,255,255],0.85);ctx.fillText(UP?'EMPLOYEE':'ADMIN DASHBOARD',lab[0],lab[1])}
-var BITS=[];(function(){var s=7;function r(){s=(s*16807)%2147483647;return s/2147483647}for(var i=0;i<42;i++)BITS.push({x:-6+r()*12,y:0.15+r()*2.3,z:-3+r()*6,v:0.25+r()*0.5,a:0.2+r()*0.5})})();
-function bits(t){for(var i=0;i<BITS.length;i++){var b=BITS[i],x=((b.x+DIR*t*b.v+6)%12+12)%12-6,p=P(x,b.y+Math.sin(t+i)*0.05,b.z),f=1-Math.abs(x)/6.4;ctx.fillStyle=rgba(i%3?PAL.a:PAL.b,b.a*f);ctx.fillRect(p[0],p[1],Math.max(1.2,p[2]*0.02),Math.max(1.2,p[2]*0.02))}}
-function packets(t){
- var list=[],L,i;
- for(L=0;L<LANES.length;L++)for(i=0;i<4;i++){var per=5.6+L*0.7,p=(((t/per)+i/4+L*0.19)%1+1)%1,q=UP?p:1-p,x=XS+(XE-XS)*q,fade=Math.min(p/0.1,(1-p)/0.1,1);list.push({x:x,p:p,L:L,i:i,f:fade})}
- list.sort(function(a,b){return b.x-a.x});
- for(i=0;i<list.length;i++){var k=list[i],y=0.34+0.1*Math.sin(t*2.1+k.i*1.7+k.L),z=LANES[k.L],a=P(k.x,y,z),b=P(k.x-DIR*1.5,y,z);
-  var g=ctx.createLinearGradient(a[0],a[1],b[0],b[1]);g.addColorStop(0,rgba(PAL.b,0.55*k.f));g.addColorStop(1,rgba(PAL.b,0));ctx.strokeStyle=g;ctx.lineWidth=Math.max(1.5,a[2]*0.05);ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();
-  ctx.save();ctx.shadowColor=rgba(PAL.b,0.8);ctx.shadowBlur=7*k.f;
-  box(k.x,y-0.11,z,0.22,0.22,0.22,t*1.3+k.i+k.L,PAL.b,0.38*k.f,[255,255,255],0.9*k.f);ctx.restore()}
- for(L=0;L<LANES.length;L++)for(i=0;i<4;i++){var pp=(((t/(5.6+L*0.7))+i/4+L*0.19)%1+1)%1;
-  if(UP?pp>0.9:pp<0.1){var fr=UP?(pp-0.9)/0.1:(0.1-pp)/0.1,xd=UP?XE+0.1:XS-0.1,pts=[],n;for(n=0;n<=24;n++){var an=n/24*6.283,pr=P(xd+Math.cos(an)*0.7*fr,0.02,LANES[L]+Math.sin(an)*0.7*fr);pts.push(pr)}
-   poly(pts);ctx.strokeStyle=rgba(PAL.b,0.7*(1-fr));ctx.lineWidth=1.5;ctx.stroke()}}}
-function frame(now){
- if(!go)return;var t=(now-T0)/1000+tOff;ctx.clearRect(0,0,W,H);
- floor(t);bits(t);server(t);packets(t);station(t);
- if(!reduce)raf=requestAnimationFrame(frame)}
-function start(){if(go||reduce)return;go=true;T0=performance.now();raf=requestAnimationFrame(frame)}
-function stop(){go=false;cancelAnimationFrame(raf)}
-function still(){go=true;ctx.clearRect(0,0,W,H);var n=performance.now();T0=n-1700;frame(n);go=false}
-size();
-if(window.ResizeObserver){new ResizeObserver(function(){size();if(reduce)still()}).observe(cv.parentNode)}else{window.addEventListener('resize',function(){size();if(reduce)still()})}
-document.addEventListener('visibilitychange',function(){if(document.hidden)stop();else if(!reduce){tOff=tOff;start()}});
-if(reduce)still();else start();
-})();
-</script>"""
+"""
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}{% if h=='Target count / hour' %} (count in 1 hr, e.g. 1000){% endif %}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
@@ -4039,16 +3897,11 @@ FORM = """<div class="card" id="entryCard"><h2>{{heading}} <span id="tgtBadge"><
 <div class="totals">Total day: <b>{{day|g}}</b> hrs &middot; Productive: <b id="tp">0</b> hrs &middot;
 Non-productive: <b id="tn">0</b> hrs &middot; Balance: <b id="tb">{{day|g}}</b> hrs &middot;
 Productivity: <b id="tpct">0</b>% &middot; <b id="tstat"></b> <span class="mut">({{target|g}} productive hrs = 100%, target set by Admin)</span></div>
-<div id="holMsg" class="flash" style="display:none;background:#fef3c7;color:#78350f;border:1px solid #fcd34d" role="status"></div>
 <div id="tgtMsg" class="flash err" style="display:none" role="alert"></div>
 <div id="formerr" class="flash err" style="display:none" role="alert"></div>
 <button class="primary sm">Save</button> {% if heading == 'Daily productivity entry' %}<button type="button" class="back sm" onclick="event.preventDefault();window.scrollTo({top:0,behavior:'smooth'});var d=document.querySelector('#entryCard [name=date]');if(d)d.focus({preventScroll:true});return false">Back</button>{% else %}<button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='{{ '/admin/summary' if session.role=='admin' else '/employee' }}'">Back</button>{% endif %}</form></div>
 <script>
-const WORK={{workday|g}}, PERM={{perm|tojson}}, MAXD={{maxdate|tojson}}, HOLS={{hols|tojson}}, HOLBLK={{hol_block|tojson}};
-function holName(d){return HOLBLK&&Object.prototype.hasOwnProperty.call(HOLS,d)?(HOLS[d]||'Holiday'):''}
-function holCheck(){const d=document.querySelector('[name=date]').value,n=holName(d),m=document.getElementById('holMsg'),b=document.querySelector('#entryCard form button.primary');
- if(m){m.style.display=n?'block':'none';m.textContent=n?(d+' is a holiday ('+n+'). No Productivity Entry is required for this date, and holidays are not counted in productivity calculations.'):''}
- if(b)b.disabled=!!n}
+const WORK={{workday|g}}, PERM={{perm|tojson}}, MAXD={{maxdate|tojson}};
 const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}}, OTHER_H={{other_hours|g}};
 const isOther=v=>['other','others'].includes(String(v==null?'':v).trim().toLowerCase()), isPoc=v=>String(v==null?'':v).trim().toLowerCase().replace(/ /g,'_')==='poc_sample', isGenai=v=>String(v==null?'':v).trim().toLowerCase().replace(/[ _-]/g,'')==='genai', isTrain=v=>String(v==null?'':v).trim().toLowerCase()==='training';
 const effH=(nm,h)=>h;      // Update96: hours are exactly what the employee typed
@@ -4096,7 +3949,6 @@ function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e
   if(need>0&&ct<need)low.push(nm+': '+ct+' of '+Math.round(need*100)/100)});
  tgtMsg.textContent=low.length?('⚠ Target not achieved (count per hour × hours worked) – '+low.join(' | ')):'';tgtMsg.style.display=low.length?'block':'none'}
 document.querySelector('[name=date]').addEventListener('change',calc);
-document.querySelector('[name=date]').addEventListener('change',holCheck);holCheck();
 function showErr(m){formerr.textContent=m;formerr.style.display='block';formerr.scrollIntoView({behavior:'smooth',block:'center'})}
 function saveBanner(ok,lines){lines=(lines||[]).map(function(x){return String(x).replace(/^Saved\\.\\s*/,'')}).filter(Boolean);
  if(ok)window.cartoon('ok',{{sub.emp_name|tojson}}+' – Saved Successfully! 🎉',lines.join(' ')||'Your daily productivity entry is saved.',lines.length?3.9:2.9);
@@ -4104,7 +3956,6 @@ function saveBanner(ok,lines){lines=(lines||[]).map(function(x){return String(x)
 document.querySelector('form[action="{{action}}"]').addEventListener('submit',function(e){
  formerr.style.display='none';
  const d=document.querySelector('[name=date]').value;
- if(holName(d)){e.preventDefault();return showErr(d+' is a holiday ('+holName(d)+'). No Productivity Entry is required for this date.')}
  if(MAXD&&d>MAXD){e.preventDefault();return showErr('Future dates are not allowed. Choose today or an earlier date.')}
  if(!document.querySelector('[name=pn]')){e.preventDefault();return showErr('Add at least one process entry.')}
  const bad=[...document.querySelectorAll('#procs [name]')].some(x=>!String(x.value).trim());
@@ -5091,8 +4942,7 @@ def form_page(sub, action, heading):
     jd_ = join_date(sub.get("emp_id")) if session.get("role") == "employee" else None
     mindate = str(jd_) if jd_ else ""      # Update97: no entry before the joining date
     return FORM, dict(sub=sub, action=action, heading=heading, names=names, tph=tph, day=day_limit(), target=target_hours(),
-                      workday=float(DAY_HOURS), perm=perm, maxdate=maxdate, mindate=mindate, other_hours=OTHER_HOURS,
-                      hols=holiday_map(), hol_block=(session.get("role") == "employee"))      # Update204: a holiday needs no Productivity Entry
+                      workday=float(DAY_HOURS), perm=perm, maxdate=maxdate, mindate=mindate, other_hours=OTHER_HOURS)
 
 def gender_of(emp):
     g = str(emp.get("Gender", "")).strip().lower()
@@ -7229,532 +7079,6 @@ def employee_password():
     else:
         flash("Could not change the password - please reload the page and try again.")
     return redirect("/employee/profile")
-
-CONNECTIONS = """<style>
-.cn{max-width:620px;margin:0 auto}
-.cn h1{margin:0}
-.cn-top{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin:12px 0}
-.cn-btn{border:0;cursor:pointer;padding:9px 22px;border-radius:11px;color:#fff;font:600 13.5px Poppins,Segoe UI,sans-serif;background:linear-gradient(180deg,#6d70f5,#4f46e5);box-shadow:0 4px 0 #3730a3;transition:transform .12s,box-shadow .12s}
-.cn-btn:hover:not(:disabled){transform:translateY(-1px)}
-.cn-btn:active:not(:disabled){transform:translateY(3px);box-shadow:0 1px 0 #3730a3}
-.cn-btn:disabled{opacity:.45;cursor:not-allowed}
-.cn-btn.o{background:linear-gradient(180deg,#ff8a2a,#e8501a);box-shadow:0 4px 0 #b3340f}
-.cn-btn.o:active:not(:disabled){box-shadow:0 1px 0 #b3340f}
-.cn-btn.s{padding:5px 14px;font-size:12.5px;box-shadow:0 3px 0 #3730a3}
-.cn-btn.o.s{box-shadow:0 3px 0 #b3340f}
-.cn-sm{border:0;cursor:pointer;padding:6px 14px;border-radius:9px;background:#eceffa;color:#4b5379;font:600 12.5px Poppins,Segoe UI,sans-serif}
-.cn-sm:hover:not(:disabled){background:#e0e5fa}.cn-sm:disabled{opacity:.45;cursor:not-allowed}
-.cn-h{margin:14px 0 6px;font-size:13px;font-weight:600;color:#4b5379;text-align:center}
-.cn-box{margin:0 auto 10px;padding:10px 14px;border-radius:12px;background:#fff7ed;border:1px solid #fdba74;color:#7c2d12;font-size:13px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.cn-box.inf{background:#eef2ff;border-color:#c7d2fe;color:#3730a3}
-.cn-list{margin:0 auto;max-height:240px;overflow:auto;border:1px solid #e6e9f2;border-radius:14px;background:#fff}
-.cn-p{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid #eef0f7}
-.cn-p:last-child{border-bottom:0}
-.cn-av{flex:none;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6d70f5,#4f46e5);color:#fff;font-weight:700;font-size:14px}
-.cn-n{flex:1;min-width:0;font-weight:600;font-size:13.5px;color:#1c2340;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cn-st{font-size:11.5px;color:#64748b;white-space:nowrap}
-.cn-st:before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:#34d399;margin-right:5px}
-.cn-st.away:before{background:#f59e0b}.cn-st.busy:before{background:#ef4444}
-.cn-err{margin:8px auto 0;text-align:center;font-size:12.5px;color:#b91c1c;min-height:16px}
-.cn-bar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;color:#4b5379;margin:4px 0 10px}
-.cn-bar b{color:#4f46e5}
-.cn-dots{display:inline-flex;gap:5px;vertical-align:middle}
-.cn-dot{width:11px;height:11px;border-radius:50%;background:#4f46e5}
-.cn-dot.x{background:#e2e8f0}
-.cn-opp{margin:0 0 10px;padding:8px 12px;border-radius:12px;background:#f5f7fd;border:1px solid #e6e9f2;font-size:12.5px;color:#4b5379;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.cn-prog{display:inline-flex;gap:4px;vertical-align:middle;margin-right:6px}
-.cn-prog i{width:18px;height:8px;border-radius:4px;background:#e2e8f0}.cn-prog i.on{background:#34d399}
-.cn-sg{margin:0 0 8px;padding:9px 12px;border-radius:12px;text-align:center;color:#1c2340;animation:cnIn .45s ease both}
-.cn-sg b{display:block;font-size:12.5px;letter-spacing:.5px;text-transform:uppercase}
-.cn-sg span{font-size:13px}
-.cn-g0{background:#fde68a}.cn-g1{background:#bbf7d0}.cn-g2{background:#bfdbfe}.cn-g3{background:#e9d5ff}
-.cn-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:0 0 10px}
-.cn-grid.shake{animation:cnShake .4s}
-.cn-t{border:0;cursor:pointer;min-height:54px;padding:6px;border-radius:12px;background:#eceffa;color:#1c2340;font:600 13px Poppins,Segoe UI,sans-serif;text-transform:uppercase;letter-spacing:.3px;box-shadow:0 3px 0 #cdd3ea;transition:transform .12s,background .12s,color .12s}
-.cn-t:hover:not(:disabled){transform:translateY(-2px)}
-.cn-t.on{background:#4f46e5;color:#fff;box-shadow:0 3px 0 #3730a3;transform:translateY(-2px)}
-.cn-t:disabled{cursor:default;opacity:.7}
-.cn-msg{text-align:center;min-height:20px;margin:0 0 8px;font-weight:600;font-size:13.5px;color:#1c2340}
-.cn-msg.bad{color:#b91c1c}.cn-msg.good{color:#15803d}.cn-msg.one{color:#b45309}
-.cn-row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:6px}
-.cn-over{margin:0 0 10px;padding:12px;border-radius:14px;text-align:center;font-weight:700;font-size:16px;background:linear-gradient(135deg,#eef2ff,#fdf2f8);border:1px solid #c7d2fe;color:#3730a3;animation:cnIn .5s ease both}
-.cn-over small{display:block;font-weight:500;font-size:12.5px;margin-top:3px;color:#4b5379}
-@keyframes cnIn{0%{opacity:0;transform:translateY(-10px) scale(.97)}100%{opacity:1;transform:none}}
-@keyframes cnShake{0%,100%{transform:none}20%{transform:translateX(-7px)}40%{transform:translateX(7px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
-</style>
-<div class="card cn"><h1>Connections</h1>
-<p class="mut">Find four groups of four related words. Play alone, or invite an online colleague to race on the same puzzle - the first to find all four groups wins. You have {{cn_max}} mistakes and {{(cn_time // 60)}} minutes.</p>
-<div id="cn"></div></div>
-<script>
-(function(){
-var $ = function(i){ return document.getElementById(i) };
-var root = $('cn'), S = null, sel = [], msg = '', msgK = '', sig = '', shake = false, endAt = 0, timer = null, tick = null, busy = false;
-function esc(t){ return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-function post(path, data){
-  var body = new URLSearchParams(); for (var k in data) { var v = data[k]; if (Array.isArray(v)) v.forEach(function(x){ body.append(k, x); }); else body.append(k, v); }
-  return fetch(path, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body.toString()}).then(function(r){ return r.json(); });
-}
-function fmt(s){ s = Math.max(0, s); return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2); }
-function lobby(){
-  var h = '<div class="cn-top"><button type="button" class="cn-btn" data-a="solo">&#127919; Play alone</button></div>';
-  (S.invites || []).forEach(function(v){
-    h += '<div class="cn-box inf"><span><b>' + esc(v.name) + '</b> invited you to race in <b>Connections</b> <small>(' + v.left + 's left)</small></span><span><button type="button" class="cn-btn s" data-a="accept" data-v="' + v.id + '">Accept</button> <button type="button" class="cn-sm" data-a="decline" data-v="' + v.id + '">Decline</button></span></div>';
-  });
-  var o = S.out;
-  if (o && o.status === 'pending') h += '<div class="cn-box"><span>Waiting for <b>' + esc(o.name) + '</b> to accept... <small>(' + o.left + 's)</small></span><button type="button" class="cn-sm" data-a="cancel">Cancel</button></div>';
-  else if (o && o.status === 'declined') h += '<div class="cn-box"><span><b>' + esc(o.name) + '</b> declined your invitation.</span></div>';
-  else if (o && o.status === 'expired') h += '<div class="cn-box"><span><b>' + esc(o.name) + '</b> did not respond in time.</span></div>';
-  var waiting = o && o.status === 'pending', on = S.online || [];
-  h += '<div class="cn-h">Colleagues online - invite one to play together</div><div class="cn-list">';
-  if (!on.length) h += '<div class="cn-p"><span class="cn-n" style="font-weight:400;color:#64748b">No colleagues with game access are online right now.</span></div>';
-  on.forEach(function(r){
-    var st = r.busy ? 'busy' : (r.status === 'Away' ? 'away' : ''), lab = r.busy ? 'In a game' : r.status;
-    var ok = !r.busy && r.status === 'Online' && !waiting;
-    h += '<div class="cn-p"><span class="cn-av">' + esc((r.name || '?').charAt(0).toUpperCase()) + '</span><span class="cn-n" title="' + esc(r.name) + '">' + esc(r.name) + '</span><span class="cn-st ' + st + '">' + lab + '</span><button type="button" class="cn-btn o s" data-a="invite" data-v="' + esc(r.id) + '"' + (ok ? '' : ' disabled') + '>Invite</button></div>';
-  });
-  return h + '</div><div class="cn-err">' + esc(msg) + '</div>';
-}
-function game(m){
-  var h = '', over = m.over, op = m.opp, i, dots = '';
-  for (i = 0; i < m.max; i++) dots += '<i class="cn-dot' + (i < m.max - m.miss ? '' : ' x') + '"></i>';
-  h += '<div class="cn-bar"><span>Mistakes left: <span class="cn-dots">' + dots + '</span></span><span>Time: <b id="cnT">' + fmt(m.left) + '</b></span>' + (op ? '<span>Wins - you <b>' + m.score[m.you] + '</b> : <b>' + m.score[1 - m.you] + '</b> ' + esc(op.name) + '</span>' : '') + '</div>';
-  if (op) {
-    var pr = ''; for (i = 0; i < 4; i++) pr += '<i class="' + (i < op.solved ? 'on' : '') + '"></i>';
-    h += '<div class="cn-opp"><span><b>' + esc(op.name) + '</b> <span class="cn-prog">' + pr + '</span>' + op.solved + '/4 groups</span><span>' + (op.gone ? 'left the game' : op.out ? 'out of mistakes' : (op.online ? op.miss + ' mistake' + (op.miss === 1 ? '' : 's') : 'seems offline')) + '</span></div>';
-  }
-  if (over) {
-    var t = m.winner === m.you ? 'You win! &#127881;' : m.winner === 2 ? (m.opp ? "It's a draw" : 'Better luck next time') : esc(op ? op.name : '') + ' wins';
-    if (!op && m.winner === m.you) t = 'You found them all! &#127881;';
-    h += '<div class="cn-over">' + t + '<small>' + esc(m.why) + '</small></div>';
-  } else if (m.out) h += '<div class="cn-over">You are out of mistakes<small>You can watch ' + (op ? esc(op.name) + ' finish' : 'the answers') + '.</small></div>';
-  m.solved.concat(m.reveal || []).forEach(function(g, k){
-    h += '<div class="cn-sg cn-g' + g.g + '" style="' + (k >= m.solved.length ? 'opacity:.75' : '') + '"><b>' + esc(g.name) + '</b><span>' + g.words.map(esc).join(', ') + '</span></div>';
-  });
-  if (!over) {
-    var can = !m.out, g = '';
-    m.words.forEach(function(w){ g += '<button type="button" class="cn-t' + (sel.indexOf(w) >= 0 ? ' on' : '') + '" data-a="tile" data-v="' + esc(w) + '"' + (can ? '' : ' disabled') + '>' + esc(w) + '</button>'; });
-    h += '<div class="cn-grid' + (shake ? ' shake' : '') + '">' + g + '</div>';
-    h += '<div class="cn-msg ' + msgK + '">' + esc(msg) + '</div>';
-    h += '<div class="cn-row"><button type="button" class="cn-sm" data-a="shuffle"' + (can ? '' : ' disabled') + '>Shuffle</button><button type="button" class="cn-sm" data-a="clear"' + (sel.length && can ? '' : ' disabled') + '>Deselect all</button><button type="button" class="cn-btn" data-a="submit"' + (sel.length === 4 && can && !busy ? '' : ' disabled') + '>Submit</button></div>';
-  } else {
-    h += '<div class="cn-row"><button type="button" class="cn-btn o" data-a="again"' + (op && op.gone ? ' disabled' : '') + '>Play again</button></div>';
-  }
-  h += '<div class="cn-row" style="margin-top:10px"><button type="button" class="cn-sm" data-a="leave">' + (over ? 'Back to lobby' : 'Leave game') + '</button></div>';
-  return h;
-}
-function render(force){
-  if (!S) return;
-  var m = S.match;
-  if (m) { sel = sel.filter(function(w){ return m.words.indexOf(w) >= 0; }); endAt = Date.now() + m.left * 1000; }
-  var s = JSON.stringify(S, function(k, v){ return (k === 'left' && typeof v === 'number') ? undefined : v; }) + '#' + sel.join('|') + '#' + msg + msgK + shake + busy;
-  if (!force && s === sig) return;
-  sig = s;
-  root.innerHTML = m ? game(m) : lobby();
-  if (shake) shake = false;
-}
-function poll(){
-  fetch('/employee/connections/state', {credentials: 'same-origin', cache: 'no-store'}).then(function(r){ return r.json(); })
-    .then(function(j){ if (j && j.denied) { location.href = '/employee'; return; } S = j; render(); }).catch(function(){});
-}
-function act(path, data, after){
-  return post(path, data || {}).then(function(j){
-    if (j.denied) { location.href = '/employee'; return; }
-    if (j.ok === false) { msg = j.error || 'Something went wrong.'; msgK = 'bad'; } else if (!after) { msg = ''; msgK = ''; }
-    if (j.state) S = j.state;
-    if (after) after(j);
-    busy = false; render(true);
-  }).catch(function(){ busy = false; msg = 'Connection problem - please try again.'; msgK = 'bad'; render(true); });
-}
-root.onclick = function(e){
-  var t = e.target.closest ? e.target.closest('[data-a]') : null;
-  if (!t || t.disabled) return;
-  var a = t.getAttribute('data-a'), v = t.getAttribute('data-v');
-  if (a === 'solo') act('/employee/connections/solo');
-  else if (a === 'invite') act('/employee/connections/invite', {to: v});
-  else if (a === 'accept' || a === 'decline') act('/employee/connections/respond', {inv: v, accept: a === 'accept' ? '1' : '0'});
-  else if (a === 'cancel') act('/employee/connections/cancel');
-  else if (a === 'again') { sel = []; msg = ''; msgK = ''; act('/employee/connections/again'); }
-  else if (a === 'leave') { sel = []; msg = ''; msgK = ''; act('/employee/connections/leave'); }
-  else if (a === 'tile') {
-    var k = sel.indexOf(v);
-    if (k >= 0) sel.splice(k, 1); else if (sel.length < 4) sel.push(v);
-    msg = ''; msgK = ''; render(true);
-  }
-  else if (a === 'clear') { sel = []; msg = ''; msgK = ''; render(true); }
-  else if (a === 'shuffle' && S && S.match) { S.match.words.sort(function(){ return Math.random() - .5; }); render(true); }
-  else if (a === 'submit' && sel.length === 4) {
-    busy = true; render(true);
-    act('/employee/connections/guess', {w: sel.slice()}, function(j){
-      var k = j.kind;
-      if (k === 'right') { msg = 'Correct!'; msgK = 'good'; sel = []; }
-      else if (k === 'one') { msg = 'One away!'; msgK = 'one'; shake = true; }
-      else if (k === 'wrong') { msg = 'Not a group - try again.'; msgK = 'bad'; shake = true; }
-      else if (k === 'dup') { msg = 'You already tried that combination.'; msgK = 'one'; }
-    });
-  }
-};
-root.innerHTML = '<div class="cn-msg">Loading...</div>';
-poll(); timer = setInterval(poll, 1500);
-tick = setInterval(function(){ var e = $('cnT'); if (e && S && S.match && !S.match.over) e.textContent = fmt(Math.round((endAt - Date.now()) / 1000)); }, 500);
-})();
-</script>"""
-
-# ---------------------------------------------------------------- Update205: GAME ACCESS (Admin) + CONNECTIONS (online word-group game)
-# "Game Access" sheet: Employee ID | Employee name | Enabled (Yes/No) | Updated at | Updated by. Only employees with Enabled = Yes see the Connections menu,
-# can open the page, play, be listed as online players or be invited. Saving from Admin > Employee Info > Games invalidates the cache, so a change applies at once.
-def game_access_ids(fresh=False):
-    src = _fetch_rows("Game Access") if fresh else rows("Game Access")
-    return {_key(r.get("Employee ID", "")) for r in src if str(r.get("Employee ID", "")).strip() and str(r.get("Enabled", "")).strip().lower() == "yes"}
-
-def game_allowed(eid):
-    return bool(str(eid or "").strip()) and _key(eid) in game_access_ids()
-
-def game_json(f):
-    """Employee-side guard for the Connections JSON endpoints: no permission -> nothing happens."""
-    @wraps(f)
-    def w(*a, **k):
-        if not game_allowed(session.get("emp_id", "")):
-            if request.endpoint == "cn_state": return jsonify(denied=True, invites=[], out=None, match=None, online=[])
-            return jsonify(ok=False, denied=True, error="Games are not enabled for your account."), 403
-        return f(*a, **k)
-    return w
-
-def game_access_save(emps, allow):
-    """Write the ticked / unticked state for the listed employees in ONE pass. Returns (granted, revoked) employee rows."""
-    ws = ws_of("Game Access")
-    pos = {_key(v): i + 1 for i, v in enumerate(ws.col_values(1)) if i > 0 and str(v).strip()}
-    old, stamp = game_access_ids(fresh=True), now_local().strftime("%Y-%m-%d %H:%M:%S")
-    upd, new, granted, revoked = [], [], [], []
-    for e in emps:
-        k, on = _key(e["Employee ID"]), _key(e["Employee ID"]) in allow
-        if on == (k in old): continue
-        (granted if on else revoked).append(e)
-        vals = [str(e["Employee ID"]), str(e.get("Name", "")), "Yes" if on else "No", stamp, "Admin"]
-        if k in pos: upd.append({"range": f"A{pos[k]}:E{pos[k]}", "values": [vals]})
-        else: new.append(vals)
-    if upd: _with_retry(ws.batch_update, upd, value_input_option="RAW")
-    if new: ws.append_rows(new, value_input_option="RAW")
-    invalidate_cache("Game Access")
-    return granted, revoked
-
-GAME_ACCESS = """<style>
-.ga-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}
-.ga-bar input[type=search]{padding:7px 12px;border:1px solid var(--line);border-radius:10px;min-width:240px}
-.ga-wrap{max-height:62vh;overflow:auto;border-radius:14px}
-.ga-on{background:#e8fbf0;color:#15803d}.ga-off{background:#f1f5f9;color:#64748b}
-.ga-wrap table{margin:0}.ga-wrap th{position:sticky;top:0;z-index:1}
-</style>
-<div class="card"><h1>Game Access</h1>
-<p class="mut">Tick the employees who may play <b>Connections</b>. Employees who are not ticked do not see the Connections menu, cannot open the game and are not shown to - or invited by - other players. Unticking someone also ends the game they are playing right now.</p>
-<form method="post" action="/admin/game-access/save">
-<div class="ga-bar"><input type="search" id="gaq" placeholder="Search by name, ID or designation" autocomplete="off">
-<button type="button" id="gaAll">Tick all shown</button><button type="button" id="gaNone">Untick all shown</button>
-<button class="primary">Save changes</button><span class="mut" id="gaCnt">{{n_on}} of {{emps|length}} employees allowed</span></div>
-<div class="ga-wrap"><table><thead><tr><th style="width:70px">Allowed</th><th>Employee ID</th><th>Name</th><th>Designation</th><th>Access</th></tr></thead><tbody id="gaBody">
-{% for e in emps %}<tr data-s="{{(e.id ~ ' ' ~ e.name ~ ' ' ~ e.desig)|lower}}"><td><input type="checkbox" name="allow" value="{{e.id}}" {{'checked' if e.on}}><input type="hidden" name="ids" value="{{e.id}}"></td>
-<td>{{e.id}}</td><td><b>{{e.name}}</b></td><td>{{e.desig or '-'}}</td><td><span class="pill {{'ga-on' if e.on else 'ga-off'}}">{{'Allowed' if e.on else 'Not allowed'}}</span></td></tr>
-{% else %}<tr><td colspan="5" class="mut">No employees found.</td></tr>{% endfor %}</tbody></table></div></form></div>
-<script>
-(function(){
-  var body = document.getElementById('gaBody'), q = document.getElementById('gaq'), cnt = document.getElementById('gaCnt');
-  function rows(){ return Array.prototype.slice.call(body.querySelectorAll('tr[data-s]')); }
-  function sync(){
-    var n = 0;
-    rows().forEach(function(tr){
-      var cb = tr.querySelector('input[type=checkbox]'), pl = tr.querySelector('.pill');
-      if (cb.checked) n++;
-      pl.textContent = cb.checked ? 'Allowed' : 'Not allowed'; pl.className = 'pill ' + (cb.checked ? 'ga-on' : 'ga-off');
-    });
-    cnt.textContent = n + ' of ' + rows().length + ' employees allowed (not saved yet)';
-  }
-  function shown(){ return rows().filter(function(tr){ return tr.style.display !== 'none'; }); }
-  body.addEventListener('change', sync);
-  q.addEventListener('input', function(){ var t = q.value.toLowerCase().trim(); rows().forEach(function(tr){ tr.style.display = !t || tr.getAttribute('data-s').indexOf(t) >= 0 ? '' : 'none'; }); });
-  document.getElementById('gaAll').onclick = function(){ shown().forEach(function(tr){ tr.querySelector('input[type=checkbox]').checked = true; }); sync(); };
-  document.getElementById('gaNone').onclick = function(){ shown().forEach(function(tr){ tr.querySelector('input[type=checkbox]').checked = false; }); sync(); };
-})();
-</script>"""
-
-@app.route("/admin/game-access")
-@need("admin")
-def admin_game_access():
-    on = game_access_ids(fresh=True)
-    emps = []
-    for r in rows("Employees"):
-        eid = str(r.get("Employee ID", "")).strip()
-        if eid: emps.append(dict(id=eid, name=str(r.get("Name", "")), desig=str(r.get("Designation", "")), on=_key(eid) in on))
-    emps.sort(key=lambda e: e["name"].lower())
-    return page(GAME_ACCESS, title="Game Access", emps=emps, n_on=sum(1 for e in emps if e["on"]))
-
-@app.route("/admin/game-access/save", methods=["POST"])
-@need("admin")
-def admin_game_access_save():
-    shown = {_key(x) for x in request.form.getlist("ids")}
-    allow = {_key(x) for x in request.form.getlist("allow")}
-    emps = [r for r in rows("Employees") if _key(r.get("Employee ID", "")) in shown]
-    granted, revoked = game_access_save(emps, allow)
-    for e in revoked: _cn_kick(str(e["Employee ID"]))
-    flash(f"Game access saved: {len(granted)} granted, {len(revoked)} revoked." if (granted or revoked) else "No changes - game access is already as selected.")
-    return redirect("/admin/game-access")
-
-# ---------------------------------------------------------------- Connections: 16 words, find the 4 hidden groups of 4
-# Play alone, or invite an online colleague to a RACE on the same puzzle (first to find all four groups wins). The server judges every guess;
-# the groups are never sent to the browser until they are solved (or the round is over). Everything lives in memory (like the online list / group chat).
-import random as _rnd
-CN_TIME = int(os.getenv("CN_SECONDS", "300"))              # round time limit (seconds)
-CN_MISTAKES = int(os.getenv("CN_MISTAKES", "4"))           # wrong guesses allowed
-CN_INV_TTL, CN_IDLE_TTL = 60, 30 * 60
-CN_PUZZLES = [      # each puzzle: 4 groups (easiest first), 4 words each - no word is repeated inside a puzzle
-    [("Programming languages", ["Python", "Java", "Swift", "Kotlin"]), ("Snakes", ["Cobra", "Viper", "Mamba", "Adder"]),
-     ("Gemstones", ["Ruby", "Opal", "Topaz", "Jade"]), ("Types of coffee", ["Latte", "Mocha", "Espresso", "Cortado"])],
-    [("Cricket terms", ["Wicket", "Bouncer", "Yorker", "Googly"]), ("Chess pieces", ["Rook", "Bishop", "Knight", "Pawn"]),
-     ("Playing cards", ["Ace", "King", "Queen", "Joker"]), ("Board games", ["Ludo", "Carrom", "Monopoly", "Scrabble"])],
-    [("Web browsers", ["Chrome", "Firefox", "Safari", "Opera"]), ("Planets", ["Mars", "Venus", "Saturn", "Jupiter"]),
-     ("File types", ["PDF", "JPEG", "MP3", "ZIP"]), ("Car brands", ["Tesla", "Toyota", "Honda", "Suzuki"])],
-    [("South Indian dishes", ["Idli", "Dosa", "Vada", "Pongal"]), ("Indian sweets", ["Jalebi", "Laddu", "Halwa", "Payasam"]),
-     ("Fruits", ["Mango", "Guava", "Papaya", "Banana"]), ("Spices", ["Cumin", "Clove", "Cardamom", "Turmeric"])],
-    [("Office furniture", ["Desk", "Chair", "Cabinet", "Locker"]), ("Keyboard keys", ["Shift", "Enter", "Escape", "Control"]),
-     ("Stationery", ["Stapler", "Marker", "Eraser", "Highlighter"]), ("Job roles", ["Manager", "Analyst", "Intern", "Director"])],
-    [("Indian rivers", ["Ganga", "Cauvery", "Godavari", "Krishna"]), ("Indian cities", ["Chennai", "Mumbai", "Delhi", "Kolkata"]),
-     ("Indian languages", ["Tamil", "Hindi", "Telugu", "Malayalam"]), ("Festivals", ["Diwali", "Holi", "Onam", "Navratri"])],
-    [("Olympic sports", ["Archery", "Judo", "Rowing", "Fencing"]), ("Yoga poses", ["Cobra", "Tree", "Lotus", "Warrior"]),
-     ("Weather", ["Drizzle", "Monsoon", "Blizzard", "Cyclone"]), ("Kitchen tools", ["Ladle", "Whisk", "Spatula", "Tongs"])],
-    [("Birds", ["Peacock", "Parrot", "Sparrow", "Eagle"]), ("Big cats", ["Tiger", "Lion", "Leopard", "Cheetah"]),
-     ("Sea animals", ["Dolphin", "Octopus", "Shark", "Whale"]), ("Insects", ["Ant", "Bee", "Beetle", "Butterfly"])],
-]
-_cn_lock = threading.Lock()
-_cn_inv, _cn_match, _cn_of, _cn_seq = {}, {}, {}, [0]
-
-def _cn_cf(w): return " ".join(str(w).split()).casefold()
-
-def _cn_new(kind, players, prev=-1, score=None):
-    pi = _rnd.choice([i for i in range(len(CN_PUZZLES)) if i != prev] or [0])
-    words = [w for g in CN_PUZZLES[pi] for w in g[1]]
-    _cn_seq[0] += 1
-    now = time.time()
-    pl = [dict(eid=e, name=n, order=_rnd.sample(words, len(words)), solved=[], miss=0, tried=[], out=False) for e, n in players]
-    return dict(id=_cn_seq[0], kind=kind, puz=pi, pl=pl, start=now, over=False, winner=None, why="", last=now,
-                left=[False] * len(pl), score=list(score or [0] * len(pl)))
-
-def _cn_tick(m, now):
-    """Time over -> the round closes by itself. winner: player index, or 2 = nobody / draw."""
-    if m["over"] or now - m["start"] <= CN_TIME: return
-    m["over"], m["why"] = True, "Time is up"
-    if len(m["pl"]) == 2:
-        k = [(-len(p["solved"]), p["miss"]) for p in m["pl"]]
-        m["winner"] = 2 if k[0] == k[1] else (0 if k[0] < k[1] else 1)
-        if m["winner"] < 2: m["score"][m["winner"]] += 1
-    else: m["winner"] = 2
-
-def _cn_after(m, i, now):
-    p = m["pl"][i]
-    if len(p["solved"]) == 4:
-        m["over"], m["winner"], m["why"] = True, i, "found all four groups"
-        m["score"][i] += 1
-    elif p["miss"] >= CN_MISTAKES:
-        p["out"] = True
-        if all(q["out"] for q in m["pl"]): m["over"], m["winner"], m["why"] = True, 2, "No mistakes left"
-
-def _cn_purge(now=None):
-    now = now or time.time()
-    for k, v in list(_cn_inv.items()):
-        if v["status"] == "pending" and now - v["ts"] > CN_INV_TTL: v["status"], v["done"] = "expired", now
-        if v["status"] != "pending" and now - v.get("done", now) > 12: del _cn_inv[k]
-    for k, m in list(_cn_match.items()):
-        if now - m["last"] > CN_IDLE_TTL or all(m["left"]):
-            for p in m["pl"]:
-                if _cn_of.get(p["eid"]) == k: del _cn_of[p["eid"]]
-            del _cn_match[k]
-
-def _cn_kick(eid):
-    """Access revoked: leave the running game (the opponent is told) and cancel the pending invites."""
-    k, now = _key(eid), time.time()
-    with _cn_lock:
-        for e in [e for e in list(_cn_of) if _key(e) == k]:
-            m = _cn_match.get(_cn_of.pop(e, None))
-            if m:
-                for i, p in enumerate(m["pl"]):
-                    if p["eid"] == e: m["left"][i] = True
-        for v in _cn_inv.values():
-            if v["status"] == "pending" and (_key(v["frm"]) == k or _key(v["to"]) == k): v["status"], v["done"] = "cancelled", now
-        _cn_purge(now)
-
-def _cn_state(me, lite=False):
-    online = online_list()
-    ids = {r["id"] for r in online}
-    now = time.time()
-    with _cn_lock:
-        _cn_purge(now)
-        inc = [dict(id=v["id"], frm=v["frm"], name=v["frm_name"], left=max(0, int(CN_INV_TTL - (now - v["ts"])))) for v in _cn_inv.values() if v["to"] == me and v["status"] == "pending"]
-        mine = sorted((v for v in _cn_inv.values() if v["frm"] == me), key=lambda x: x["ts"])
-        out = None
-        if mine and mine[-1]["status"] != "accepted":
-            v = mine[-1]
-            out = dict(id=v["id"], to=v["to"], name=v["to_name"], status=v["status"], left=max(0, int(CN_INV_TTL - (now - v["ts"]))))
-        mm = None
-        m = _cn_match.get(_cn_of.get(me))
-        if m:
-            _cn_tick(m, now)
-            i = [p["eid"] for p in m["pl"]].index(me)
-            p, puz = m["pl"][i], CN_PUZZLES[m["puz"]]
-            done = {_cn_cf(w) for gi in p["solved"] for w in puz[gi][1]}
-            mm = dict(id=m["id"], kind=m["kind"], you=i, words=[w for w in p["order"] if _cn_cf(w) not in done],
-                      solved=[dict(g=gi, name=puz[gi][0], words=puz[gi][1]) for gi in p["solved"]],
-                      miss=p["miss"], max=CN_MISTAKES, out=p["out"], over=m["over"], winner=m["winner"], why=m["why"], score=list(m["score"]),
-                      left=0 if m["over"] else max(0, int(CN_TIME - (now - m["start"]))), total=CN_TIME, opp=None, reveal=[])
-            if len(m["pl"]) == 2:
-                o = m["pl"][1 - i]
-                mm["opp"] = dict(name=o["name"], solved=len(o["solved"]), miss=o["miss"], out=o["out"], gone=m["left"][1 - i], online=(o["eid"] in ids))
-            if m["over"]: mm["reveal"] = [dict(g=gi, name=puz[gi][0], words=puz[gi][1]) for gi in range(4) if gi not in p["solved"]]
-        busy = set(_cn_of)
-    res = dict(me=me, invites=inc, out=out, match=mm)
-    if not lite:
-        okids = game_access_ids()          # only colleagues Admin has granted game access are listed
-        res["online"] = [dict(id=r["id"], name=r["name"], status=r["status"], busy=(r["id"] in busy)) for r in online if r["id"] != me and _key(r["id"]) in okids]
-    return res
-
-def _cn_json(me, **kw):
-    return jsonify(dict(kw, state=_cn_state(me)))
-
-@app.route("/employee/connections")
-@need("employee")
-def employee_connections():
-    if not game_allowed(session.get("emp_id", "")):      # only employees Admin has granted access
-        flash("Connections is not enabled for your account. Please contact your admin.")
-        return redirect("/employee")
-    return page(CONNECTIONS, title="Connections", cn_time=CN_TIME, cn_max=CN_MISTAKES)
-
-@app.route("/employee/connections/state")
-@need("employee")
-@game_json
-def cn_state():
-    return jsonify(_cn_state(str(session.get("emp_id", "")), request.args.get("lite") == "1"))
-
-@app.route("/employee/connections/solo", methods=["POST"])
-@need("employee")
-@game_json
-def cn_solo():
-    me = str(session.get("emp_id", ""))
-    with _cn_lock:
-        _cn_purge()
-        if me not in _cn_of:
-            m = _cn_new("solo", [(me, str(session.get("name", "")))])
-            _cn_match[m["id"]] = m; _cn_of[me] = m["id"]
-    return _cn_json(me, ok=True)
-
-@app.route("/employee/connections/invite", methods=["POST"])
-@need("employee")
-@game_json
-def cn_invite():
-    me, to = str(session.get("emp_id", "")), (request.form.get("to") or "").strip()
-    okids = game_access_ids()
-    everyone = {r["id"]: r for r in online_list()}
-    if to in everyone and to != me and _key(to) not in okids: return _cn_json(me, ok=False, error=everyone[to]["name"] + " does not have game access.")
-    online = {k: v for k, v in everyone.items() if _key(k) in okids}
-    if to == me or to not in online: return _cn_json(me, ok=False, error="That colleague is not online any more.")
-    if online[to]["status"] != "Online": return _cn_json(me, ok=False, error=online[to]["name"] + " is away right now.")
-    now, err = time.time(), ""
-    with _cn_lock:
-        _cn_purge(now)
-        if me in _cn_of: err = "Finish or leave your current game first."
-        elif to in _cn_of: err = online[to]["name"] + " is already playing a game."
-        else:
-            for v in _cn_inv.values():
-                if v["frm"] == me and v["status"] == "pending": v["status"], v["done"] = "cancelled", now
-            _cn_seq[0] += 1
-            _cn_inv[_cn_seq[0]] = dict(id=_cn_seq[0], frm=me, frm_name=str(session.get("name", "")), to=to, to_name=online[to]["name"], status="pending", ts=now)
-    return _cn_json(me, ok=not err, error=err)
-
-@app.route("/employee/connections/cancel", methods=["POST"])
-@need("employee")
-@game_json
-def cn_cancel():
-    me, now = str(session.get("emp_id", "")), time.time()
-    with _cn_lock:
-        for v in _cn_inv.values():
-            if v["frm"] == me and v["status"] == "pending": v["status"], v["done"] = "cancelled", now
-    return _cn_json(me, ok=True)
-
-@app.route("/employee/connections/respond", methods=["POST"])
-@need("employee")
-@game_json
-def cn_respond():
-    me, now, err = str(session.get("emp_id", "")), time.time(), ""
-    try: iid = int(request.form.get("inv", "0"))
-    except ValueError: iid = 0
-    accept = request.form.get("accept") == "1"
-    with _cn_lock:
-        _cn_purge(now)
-        v = _cn_inv.get(iid)
-        if not v or v["to"] != me or v["status"] != "pending": err = "That invitation is no longer available."
-        elif not accept: v["status"], v["done"] = "declined", now
-        elif me in _cn_of or v["frm"] in _cn_of: v["status"], v["done"] = "cancelled", now; err = "One of you is already in a game."
-        else:
-            v["status"], v["done"] = "accepted", now
-            m = _cn_new("race", [(v["frm"], v["frm_name"]), (me, str(session.get("name", "")))])
-            _cn_match[m["id"]] = m; _cn_of[v["frm"]] = _cn_of[me] = m["id"]
-    return _cn_json(me, ok=not err, error=err)
-
-@app.route("/employee/connections/guess", methods=["POST"])
-@need("employee")
-@game_json
-def cn_guess():
-    me, now, err, kind = str(session.get("emp_id", "")), time.time(), "", ""
-    sel = {_cn_cf(w) for w in request.form.getlist("w") if str(w).strip()}
-    with _cn_lock:
-        m = _cn_match.get(_cn_of.get(me))
-        if not m: err = "This game has ended."
-        else:
-            _cn_tick(m, now)
-            i = [p["eid"] for p in m["pl"]].index(me)
-            p, puz = m["pl"][i], CN_PUZZLES[m["puz"]]
-            done = {_cn_cf(w) for gi in p["solved"] for w in puz[gi][1]}
-            valid = {_cn_cf(w) for w in p["order"]} - done
-            if m["over"]: err = "This round is over."
-            elif p["out"]: err = "You have no mistakes left."
-            elif any(m["left"]): err = "Your opponent left the game."
-            elif len(sel) != 4 or not sel <= valid: err = "Pick exactly four words."
-            else:
-                key = "|".join(sorted(sel))
-                if key in p["tried"]: kind = "dup"
-                else:
-                    found, best = None, 0
-                    for gi in range(4):
-                        if gi in p["solved"]: continue
-                        ov = len(sel & {_cn_cf(w) for w in puz[gi][1]})
-                        if ov == 4: found = gi
-                        elif ov > best: best = ov
-                    if found is not None: p["solved"].append(found); kind = "right"
-                    else: p["miss"] += 1; p["tried"].append(key); kind = "one" if best == 3 else "wrong"
-                    m["last"] = now
-                    _cn_after(m, i, now)
-    return _cn_json(me, ok=not err, error=err, kind=kind)
-
-@app.route("/employee/connections/again", methods=["POST"])
-@need("employee")
-@game_json
-def cn_again():
-    me = str(session.get("emp_id", ""))
-    with _cn_lock:
-        m = _cn_match.get(_cn_of.get(me))
-        if m and m["over"] and not any(m["left"]):          # the first click starts the next puzzle for both players
-            n = _cn_new(m["kind"], [(p["eid"], p["name"]) for p in m["pl"]], prev=m["puz"], score=m["score"])
-            del _cn_match[m["id"]]; _cn_match[n["id"]] = n
-            for p in n["pl"]: _cn_of[p["eid"]] = n["id"]
-    return _cn_json(me, ok=True)
-
-@app.route("/employee/connections/leave", methods=["POST"])
-@need("employee")
-def cn_leave():
-    me = str(session.get("emp_id", ""))
-    with _cn_lock:
-        mid = _cn_of.pop(me, None)
-        m = _cn_match.get(mid)
-        if m:
-            for i, p in enumerate(m["pl"]):
-                if p["eid"] == me: m["left"][i] = True
-        _cn_purge()
-    return _cn_json(me, ok=True)
 
 @app.route("/employee/leave", methods=["GET", "POST"])
 @need("employee")
@@ -10570,7 +9894,7 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
  var ed=document.getElementById('mn-ed'), bar=document.getElementById('mn-tb'), rich=document.getElementById('mn-rich'),
      sizeSel=document.getElementById('mn-size'), colorIn=document.getElementById('mn-color'), saved=null, pendingPx=16, clean='', tmr=null, seq=0;
  var PH='<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>';
- function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
+ function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
  function paint(){
   var v={subject:esc(sub.value.trim())||'Your subject appears here', message:(hasText()&&clean)?clean:PH};
   frame.srcdoc=T.replace(/[{][{](\w+)[}][}]/g,function(m,k){return (k in v)?v[k]:m;});}

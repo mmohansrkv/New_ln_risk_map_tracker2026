@@ -1,5 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
-  * Update205: Employees MUST fill in their daily productivity entry even on a declared HOLIDAY. (1) The holiday block on the entry form is removed (employees can submit / edit an entry for a holiday); (2) a holiday is now a normal working day for productivity: the entry counts in productivity %, reports and working days, and a holiday with no entry (and no leave) shows as a Missed Entry (marquee, Missed Log, dashboard, e-mails); (3) the automatic / manual missed-entry e-mail also runs on holidays and lists holiday dates. Weekly offs (Sat / Sun) are unchanged. Leave and permission still cannot be applied on a holiday and holidays still never reduce leave balance. New helper is_weekly_off(); is_off() is kept for leave logic.
+  * Update206: Holidays declared by the Admin are NEVER required: no productivity entry and no leave is needed on them. They are excluded from the missed-entry calculation (marquee "Productivity entry pending", Missed Log, dashboard, Employee Info) and from the automatic / manual reminder e-mails (checked again live right before sending). missing_dates() now also checks the holiday list explicitly. Update205 (holiday entries mandatory) is withdrawn.
   * Update204: NEW \"Multiplayer Game\" (Number Rush) - a separate link on the EMPLOYEE page (left menu, employees only). Two employees play the same board online in real time: the game lobby lists the employees who are online, an employee invites an available colleague, the colleague accepts / declines, and both then race to tap the numbers 1-25 in order (the server decides who tapped first, so scores and progress are identical on both screens). Admin > Employee Info > Multiplayer Game: master Enable / Disable switch (default OFF) and a per-employee access list, saved in the Settings sheet (keys \"Multiplayer Game enabled\" / \"Multiplayer Game blocked\"); switching it off or removing someone ends running matches at once and hides the link. Live data (online lobby, invitations, matches) is kept in a small SQLite file shared by all workers (GAME_DB env var to move it) - no Google Sheets calls while playing, game polling does not reset the idle-logout timer, and nothing else in the application was changed.
   * Update201: Employee login page - the left "Employee Panel / Productivity Dashboard / Performance / Attendance / Reports" promo block is removed (the login card is centred); the Admin login page is unchanged.
   * Update202: (1) calendar status legend removed; (2) login goes straight to /admin/summary (Admin) or /employee (Employee) - welcome pages no longer shown; (3) generic \"Something went wrong...\" message removed - real errors now show a specific message (data service busy / could not save / could not reach server).
@@ -445,13 +445,6 @@ def is_off(d):
     ds = str(d)
     if ds in holiday_map(): return True
     try: return dt.date.fromisoformat(ds).weekday() in WEEKOFF
-    except ValueError: return False
-
-def is_weekly_off(d):
-    """Update205: True ONLY for weekly-off days (Sat / Sun). Declared holidays are NOT included - employees must still fill in
-    their daily productivity entry on a holiday, so for productivity / missed-entry / reminder logic a holiday is a normal working day.
-    (is_off() - weekly off AND holiday - is still used for leave, where a holiday needs no leave and never reduces the balance.)"""
-    try: return dt.date.fromisoformat(str(d)[:10]).weekday() in WEEKOFF
     except ValueError: return False
 
 # Login pictures are embedded here, so no static folder is needed.
@@ -1121,7 +1114,7 @@ def entry_metrics(date, emp_id, procs):
     targets = [round(i["hour"] * tph[i["name"]], 2) if tph.get(i["name"], 0) > 0 else "" for i in items]
     prod = sum(i["hour"] for i in items)
     avail = max(target_hours() - deduction_map(emp_id).get((_key(emp_id), str(date)), 0.0), 0.0)
-    return targets, ("" if is_weekly_off(date) else _day_pct(prod, avail, tph, items))
+    return targets, ("" if is_off(date) else _day_pct(prod, avail, tph, items))
 
 def load_subs(emp_id=None):
     """All submissions, or (emp_id given) only that employee's - far less work on a big Productivity log."""
@@ -1176,7 +1169,7 @@ def load_subs(emp_id=None):
         s["earned"] = sum(p["earned"] for p in s["procs"])     # hours' worth of standard output
         s["ded"] = ded.get((_key(s["emp_id"]), str(s["date"])), 0.0)          # approved permission / half-day leave hours that day
         s["avail"] = max(T - s["ded"], 0.0)                                   # working hours left = target hrs less those hours
-        s["off"] = is_weekly_off(s["date"])                     # Update205: weekly-off entry: saved, NOT counted (a holiday entry IS counted)
+        s["off"] = is_off(s["date"])                            # weekly-off / holiday entry: saved, NOT counted
         # Update173: productivity is NOT calculated for a weekend or a declared holiday (None = "not applicable"), never 0% / 100%
         s["pct"] = None if s["off"] else _day_pct(s["prod"], s["avail"], tph, s["procs"])      # Update137: one shared formula (also stored in the sheet)
         # Update66: Admin-set Target Count vs. what the employee completed (target pro-rated to the hours booked)
@@ -1262,6 +1255,8 @@ def parse_form(emp_id):
     tot = sum(p[1] for p in procs) + sum(n[1] for n in notes)
     half = any(num(h) <= 0 and t.strip() for t, h in zip(g("nd"), g("nh")))
     if d is None: err = "Please choose a valid date."
+    elif session.get("role") == "employee" and is_holiday(date):
+        err = f"{date} is a holiday{(' (' + holiday_name(date) + ')') if holiday_name(date) else ''}. Productivity entries cannot be submitted or updated for a holiday."
     elif session.get("role") == "employee" and join_date(emp_id) and d < join_date(emp_id):
         err = f"Productivity entry is available only from your joining date ({join_date(emp_id).strftime('%d %b %Y')}). You cannot submit an entry for {date}."
     elif not procs: err = "Add at least one process entry."
@@ -3963,7 +3958,7 @@ LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th
 <td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
 <td>{{ (s.tgt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td><td>{{ (s.cnt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td>
 <td>{% if s.tgt_state=='met' %}<span class="tg-badge met">&#9989; Achieved</span>{% elif s.tgt_state=='miss' %}<span class="tg-badge miss" title="Below target: {{s.tgt_miss|join(', ')}}">&#10060; Not Achieved</span>{% else %}-{% endif %}</td>
-<td>{{ 'Weekend - not counted' if s.off else (s.pct ~ '%') }}</td>
+<td>{{ 'Weekend / Holiday - not counted' if s.off else (s.pct ~ '%') }}</td>
 <td class="act"><a href="/entry/{{s.id}}/view{{ ('?next=' ~ (nxt|urlencode)) if nxt else '' }}">View</a><a href="/entry/{{s.id}}{{ ('?next=' ~ (nxt|urlencode)) if nxt else '' }}">Edit</a>
 <form method="post" action="/entry/{{s.id}}/delete{{ ('?next=' ~ (nxt|urlencode)) if nxt else '' }}" onsubmit="return confirm('Delete this entry?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="{{ 10 if session.role=='admin' else 8 }}">{{ empty_msg or 'Nothing yet.' }}</td></tr>{% endfor %}</table>"""
@@ -4065,7 +4060,7 @@ VIEW = """<div class="card"><h2>{{s.date}} &middot; {{s.emp_name}} ({{s.emp_id}}
 {% for p in s.procs %}<tr><td>{{p.name}}</td><td>{{p.desc}}</td><td>{{p.hour|g}}</td><td>{{ '-' if p.training else (p.count|g) }}</td><td>{{ '-' if p.training else (p.target|g) }}</td>
 <td>{{ (p.pct ~ '%') if p.pct is not none else '-' }}</td></tr>{% endfor %}</table><br>
 <table><tr><th>Notes</th><th>Hour</th></tr>{% for n in s.notes %}<tr><td>{{n.desc}}</td><td>{{n.hour|g}}</td></tr>{% endfor %}</table>
-<div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day|g}} hrs &middot; {% if s.off %}<b>Weekend entry - not counted</b>{% else %}Productivity: <b>{{s.pct}}%</b> ({{s.avail|g}} hrs = 100%{% if s.ded %} &ndash; {{target|g}}-hr day less {{s.ded|g}} hr permission / half-day leave{% endif %}){% endif %}</div>
+<div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day|g}} hrs &middot; {% if s.off %}<b>Weekend / Holiday entry - not counted</b>{% else %}Productivity: <b>{{s.pct}}%</b> ({{s.avail|g}} hrs = 100%{% if s.ded %} &ndash; {{target|g}}-hr day less {{s.ded|g}} hr permission / half-day leave{% endif %}){% endif %}</div>
 <a href="{{back}}">Back</a></div>"""
 
 # ---------------------------------------------------------------- routes: common
@@ -4310,8 +4305,8 @@ def log_report_data(period, emp_q="", on=None):
     day = lambda d: dt.date.fromisoformat(str(d)).strftime("%a") if str(d)[:4].isdigit() else ""
     summary, detail = [], []
     for s in subs:
-        pct = "Weekend - not counted" if s["off"] else s["pct"]
-        tstat = {"off": "Weekend - not counted", "none": "No target", "met": "Target met"}.get(s["tgt_state"], "Target not met")
+        pct = "Weekend / Holiday - not counted" if s["off"] else s["pct"]
+        tstat = {"off": "Weekend / Holiday - not counted", "none": "No target", "met": "Target met"}.get(s["tgt_state"], "Target not met")
         summary.append([s["date"], day(s["date"]), s["emp_id"], s["emp_name"], s["designation"], s["band"],
                         s["prod"], s["non"], s["total"], pct, s["tgt_total"], s["cnt_total"], tstat])
         base = [s["date"], day(s["date"]), s["emp_id"], s["emp_name"], s["designation"], s["band"]]
@@ -4400,7 +4395,7 @@ def admin_log_add():
             import traceback; traceback.print_exc()
             flash("The entry could not be saved right now (the data service is busy). Nothing was saved - please press Save again.", "error")
             return redirect(action)
-        flash(f"Entry for {date} added for {name}." + (f" Note: {date} is a weekly off, so it is not counted in calculations." if is_weekly_off(date) else ""))
+        flash(f"Entry for {date} added for {name}." + (f" Note: {date} is a weekly off / holiday, so it is not counted in calculations." if is_off(date) else ""))
         return redirect("/admin/log?emp=" + urllib.parse.quote(emp_id, safe=""))
     sub = dict(date=(request.args.get("date") or request.args.get("adate") or str(today_local())), band=band, designation=find_designation(emp_id, name, band),
                emp_id=emp_id, emp_name=name, procs=[{}], notes=[{}])
@@ -4435,8 +4430,8 @@ def admin_log_report():
     period = "week" if request.args.get("period") == "week" else "month"
     rep_month, on = report_scope()
     r = log_report_data(period, request.args.get("emp", ""), on)
-    tp = sum(x[6] for x in r["summary"] if x[9] != "Weekend - not counted")
-    tn = sum(x[7] for x in r["summary"] if x[9] != "Weekend - not counted")
+    tp = sum(x[6] for x in r["summary"] if x[9] != "Weekend / Holiday - not counted")
+    tn = sum(x[7] for x in r["summary"] if x[9] != "Weekend / Holiday - not counted")
     return page(LOG_REPORT, title="Productivity report", period=period, label=r["label"], emp=r["emp"],
                 summary=r["summary"], detail=r["detail"], totals=r["totals"], th=TOTAL_HEADS, rep_month=rep_month, sh=SUMMARY_HEADS, dh=DETAIL_HEADS, tp=tp, tn=tn,
                 now=now_local().strftime("%Y-%m-%d %I:%M %p"), autoprint=request.args.get("print") == "1")
@@ -4490,7 +4485,7 @@ def admin_log_export():
 
 # ---------------------------------------------------------------- admin: Leave & Permission Log (all employees)
 LP_LOG = """<div class="head"><div><h1>Leave &amp; Permission Log</h1>
-<p class="mut">{{label}} &middot; every employee's leave and permission requests with dates, duration, reason and approval status. Both leave and permission requests need admin approval - use Approve / Reject in the Action column (a decision can be changed later). Holidays declared by admin are shown here too: employees cannot apply leave or permission on a holiday and holidays never reduce leave balance, but employees MUST still fill in their daily productivity entry on a holiday - a holiday without an entry is a missed entry.</p></div></div>
+<p class="mut">{{label}} &middot; every employee's leave and permission requests with dates, duration, reason and approval status. Both leave and permission requests need admin approval - use Approve / Reject in the Action column (a decision can be changed later). Holidays declared by admin are shown here too: employees cannot submit leave or productivity entries on a holiday, and holidays never reduce leave balance or count as missed entries.</p></div></div>
 <div class="card no-print"><h2>&#127774; Mark a Holiday</h2>
 <form method="post" action="/admin/leave-permission/holiday" class="grid">
 <input type="hidden" name="next" value="{{here}}">
@@ -4516,9 +4511,9 @@ LP_LOG = """<div class="head"><div><h1>Leave &amp; Permission Log</h1>
 <th>Reason</th><th>Applied at</th><th>Status</th><th>Reviewed</th><th class="no-print">Action</th></tr>
 {% for r in rows %}{% if r.type=='Holiday' %}<tr style="background:rgba(245,158,11,.12)"><td><span class="pill act">&#127774; Holiday</span></td>
 <td colspan="3"><b>{{r.name}}</b> &middot; all employees</td>
-<td>{{r.start}}</td><td>{{r.end}}</td><td>1 day</td><td>Declared holiday - no leave / permission; productivity entry still required; leave balance unaffected</td><td>-</td>
+<td>{{r.start}}</td><td>{{r.end}}</td><td>1 day</td><td>Declared holiday - no leave / productivity entries; leave balance unaffected</td><td>-</td>
 <td><span class="pill act">Holiday</span></td><td>-</td>
-<td class="act no-print"><form method="post" action="/admin/leave-permission/holiday/delete" onsubmit="return confirm('Remove this holiday? The date will become a normal day again.')"><input type="hidden" name="date" value="{{r.start}}"><input type="hidden" name="next" value="{{here}}"><button class="danger">Remove</button></form></td></tr>
+<td class="act no-print"><form method="post" action="/admin/leave-permission/holiday/delete" onsubmit="return confirm('Remove this holiday? Employees will be able to submit entries for this date again.')"><input type="hidden" name="date" value="{{r.start}}"><input type="hidden" name="next" value="{{here}}"><button class="danger">Remove</button></form></td></tr>
 {% else %}<tr><td><span class="pill {{'act' if r.type=='Permission' else ''}}">{{r.type}}</span></td>
 <td><a href="/admin/employee-info/{{r.eid|urlencode}}?tab=leave">{{r.eid}} &middot; {{r.name}}</a></td><td>{{r.desig}}</td><td>{{r.band}}</td>
 <td>{{r.start}}</td><td>{{r.end}}</td><td>{{r.dur}}</td><td>{{r.reason}}</td><td>{{r.applied|t12}}</td>
@@ -4631,7 +4626,7 @@ def admin_leave_permission():
 @app.route("/admin/leave-permission/holiday", methods=["POST"])
 @need("admin")
 def admin_holiday_add():
-    """Mark one date (or a range) as a holiday. Employees can no longer apply leave / permission for it (the productivity entry is still required)."""
+    """Mark one date (or a range) as a holiday. Employees can no longer submit leave / productivity for it."""
     nxt = request.form.get("next", "")
     back = nxt if nxt.startswith("/admin/") else "/admin/leave-permission"
     d1 = (request.form.get("d1") or "").strip(); d2 = (request.form.get("d2") or "").strip() or d1
@@ -6459,14 +6454,14 @@ def _employee_save_impl():
         return redirect("/employee")
     # ---- the data is saved from here on: nothing below may turn a successful save into an error page ----
     session["saved_anim"] = True       # Update95: 3-second 3D "Saved successfully" animation, shown on the same page after the data is saved
-    flash("Saved." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_weekly_off(date) else ""))
+    flash("Saved." + (f" Note: {date} is a weekly off / holiday, so this entry is not counted in calculations." if is_off(date) else ""))
     try: log_change(SEC_PROD, "Added", entry_added_details(date, procs, notes))
     except Exception as ex: print("log_change failed:", ex)
     try:
-        miss = [] if is_weekly_off(date) else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
+        miss = [] if is_off(date) else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
         if miss: flash(target_alert_text(miss), "error")           # employee is told straight away that the target was missed
         # Update94: 100% = not a weekly off, every Admin target met, and all required working hours logged -> flower animation (3 s)
-        if not is_weekly_off(date) and not miss and sum(p_[1] for p_ in procs) + sum(n_[1] for n_ in notes) + 1e-9 >= required_hours(session["emp_id"], date):
+        if not is_off(date) and not miss and sum(p_[1] for p_ in procs) + sum(n_[1] for n_ in notes) + 1e-9 >= required_hours(session["emp_id"], date):
             session["bloom"] = True
     except Exception as ex:
         print("post-save checks failed:", ex)
@@ -6492,8 +6487,8 @@ def entry_edit(sid):
             delete_rows(old)
             write_sub(sid, date, (s["band"], s["emp_id"], s["emp_name"]), procs, notes)
         if changed: log_change(SEC_PROD, "Updated", changed)
-        flash("Updated." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_weekly_off(date) else ""))
-        miss = [] if is_weekly_off(date) or session.get("role") != "employee" else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
+        flash("Updated." + (f" Note: {date} is a weekly off / holiday, so this entry is not counted in calculations." if is_off(date) else ""))
+        miss = [] if is_off(date) or session.get("role") != "employee" else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
         if miss: flash(target_alert_text(miss), "error")
         return redirect(next_url() or home())
     nx = next_url()
@@ -6522,7 +6517,7 @@ app.jinja_env.filters["tone"] = lambda v: "" if v >= 90 else ("a" if v >= 75 els
 def workdays(start, end):          # Mon-Sat (Sunday = weekly off)
     n, d = 0, start
     while d <= end:
-        n += not is_weekly_off(d)   # Update205: only weekly offs are not working days - a holiday still needs a productivity entry
+        n += not is_off(d)          # weekly offs AND holidays are not working days
         d += dt.timedelta(days=1)
     return n
 
@@ -6547,7 +6542,7 @@ def report(employees, subs, leaves, start, end):
         wd_i = 0 if ea > b else (workdays(dt.date.fromisoformat(ea), end) if ea != a else wd)
         mine = [s for s in subs if _key(s["emp_id"]) == ek and ea <= s["date"] <= b and not s["off"]]
         days = {s["date"] for s in mine}
-        mylv = [l for l in leaves if _key(l["Employee ID"]) == ek and ea <= l["Date"] <= b and not is_weekly_off(l["Date"])]
+        mylv = [l for l in leaves if _key(l["Employee ID"]) == ek and ea <= l["Date"] <= b and not is_off(l["Date"])]
         lv = {l["Date"] for l in mylv if not leave_is_half(l)} - days   # Update170: a full-day leave date that also has a productivity entry is a day WORKED - counted once (Present), not twice
         half = {l["Date"] for l in mylv if leave_is_half(l)}            # half-day leave: 4 hrs still have to be worked
         perm_hrs = sum(num(r.get("Hours")) for r in perms
@@ -6569,7 +6564,7 @@ def report(employees, subs, leaves, start, end):
         full = days - half                                              # worked days that are not half-day-leave days
         today_s = str(today_local())
         # today is still running: with no entry / leave yet it is "not marked" - it is NOT counted as Absent until the day is over
-        pending_today = 1 if (ea <= today_s <= b and not is_weekly_off(today_s) and today_s not in (days | lv | half)) else 0
+        pending_today = 1 if (ea <= today_s <= b and not is_off(today_s) and today_s not in (days | lv | half)) else 0
         wd_e = wd_i - pending_today                                       # working days that have a status so far
         credit = len(full) + 0.5 * len(half)                            # Present 1 + Half day 0.5 + Absent 0
         present_n = credit
@@ -6699,7 +6694,7 @@ app.jinja_env.filters["ppill"] = permission_pill
 PROD_TRACKING_START = dt.date(2026, 10, 1)              # Update165: Productivity tracking began in October 2026 - no date before this is ever "missed" (log, dashboard, reports, reminder e-mails)
 
 def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
-    """Working days (weekly offs excluded; HOLIDAYS ARE INCLUDED - an entry is mandatory on a holiday too) in start..end with no entry and no leave."""
+    """Working days (weekly offs and holidays excluded) in start..end with no entry and no leave."""
     eid = str(eid)
     if is_view_only(eid): return []                    # Update105: no Missed Productivity Entry for View-Only designations
     if start < PROD_TRACKING_START: start = PROD_TRACKING_START      # Update165: never flag September 2026 or earlier as missing
@@ -6710,7 +6705,7 @@ def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
            {norm_date(l["Date"]) for l in leaves if _key(l["Employee ID"]) == _key(eid) and not leave_is_half(l)}      # a half-day leave still needs an entry (4 hrs)
     out, d = [], start
     while d <= end:
-        if not is_weekly_off(d) and str(d) not in done:      # d is a date -> "YYYY-MM-DD"
+        if not is_off(d) and not is_holiday(d) and str(d) not in done:      # Update206: weekly offs AND every admin-declared holiday (e.g. Gandhi Jayanti, Ayudha Pooja, Deepavali) are never "missed"
             out.append(d.strftime(fmt))
         d += dt.timedelta(days=1)
     return out
@@ -6851,7 +6846,7 @@ LEAVE_EMP = """<style>
 <label>Day type<select name="daytype"><option value="Full day">Full day</option><option value="Half day">Half day (4 hrs)</option></select></label>
 <label>Reason<input name="reason" size="30" placeholder="Reason"></label>
 <button class="primary">Submit leave</button></form></div>
-{% if hols %}<p class="mut">&#127774; <b>Upcoming holidays</b> (no leave or permission needed - the daily productivity entry must still be filled in): {% for d,n in hols %}{{d}}{% if n %} - {{n}}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+{% if hols %}<p class="mut">&#127774; <b>Upcoming holidays</b> (no leave, permission or productivity entry needed): {% for d,n in hols %}{{d}}{% if n %} - {{n}}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
 <h2>My leave days</h2><table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
 {% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}{% if r|lhalf %} <span class="pill act">Half day</span>{% endif %}</td><td>{{r['Applied at']|t12}}</td>
 <td><span class="pill {{st|ppill}}">{{st}}</span></td>
@@ -6992,7 +6987,7 @@ def admin_summary_check():
     a, b = str(start), str(end); view = []
     for s in sorted(subs_all, key=lambda x: x["date"]):
         if not (a <= s["date"] <= b): continue
-        why = "No - weekly off" if s["off"] else ("No - before joining date" if (join_date(s["emp_id"]) and s["date"] < str(join_date(s["emp_id"]))) else "Yes")
+        why = "No - weekly off / holiday" if s["off"] else ("No - before joining date" if (join_date(s["emp_id"]) and s["date"] < str(join_date(s["emp_id"]))) else "Yes")
         view.append(dict(s, why=why))
     lv = [l for l in live_leaves(leaves) if _key(l["Employee ID"]) == _key(eid) and a <= l["Date"] <= b]
     return page(CHECK_PAGE, title="Overview check", r=r, subs=view, leaves=lv, label=label, month=month)
@@ -7401,7 +7396,7 @@ AUD_PROD = """<div class="totals">Working days: <b>{{k.wd}}</b> &middot; Present
 <h2>Daily entries</h2>
 <table><tr><th>Date</th><th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Productivity</th></tr>
 {% for s in subs %}<tr><td>{{s.date}}</td><td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
-<td>{{ 'Weekend - not counted' if s.off else (s.pct ~ '%') }}</td></tr>
+<td>{{ 'Weekend / Holiday - not counted' if s.off else (s.pct ~ '%') }}</td></tr>
 {% else %}<tr><td colspan="5">No productivity entries for this period.</td></tr>{% endfor %}</table>"""
 
 AUD_ATT = """<div class="totals">Working days: <b>{{k.wd}}</b> &middot; Present: <b>{{k.present}}</b> &middot; Leave: <b>{{k.leave}}</b>
@@ -7459,8 +7454,8 @@ def _aud_att_days(eid, subs, sess, start, end):
         if ds in half_days and not is_off(d): st = "Half day"
         elif ds in present: st = "Present"
         elif ds in leave: st, note = "Leave", leave[ds] + " leave"
-        elif ds in holiday_map(): st, note = ("Absent" if d < today_local() else "-"), (holiday_name(ds) + " (holiday - entry required)")
-        elif is_weekly_off(d): st = "Weekly off"
+        elif ds in holiday_map(): st, note = "Holiday", holiday_name(ds)
+        elif is_off(d): st = "Weekly off"
         elif d < today_local(): st = "Absent"
         else: st = "-"
         if ds in half_days: note = (note + " · " if note else "") + "Half-day leave (4 hrs)"
@@ -9144,7 +9139,7 @@ def admin_missed_send():
 
 # ---------------------------------------------------------------- Update93: MISSED ENTRIES LOG (separate Admin page)
 MLOG = '''<div class="head"><div><h1>Missed Entries Log</h1>
-<p class="mut">{{label}} &middot; Every employee with working days (weekly off excluded; holidays included) that have no productivity entry and no leave. Today is not included.</p></div>
+<p class="mut">{{label}} &middot; Every employee with working days (weekly off / holidays excluded) that have no productivity entry and no leave. Today is not included.</p></div>
 <form class="grid no-print" method="get"><input type="month" name="month" value="{{month if month!='all' else ''}}">
 <input name="emp" placeholder="Employee ID / name" value="{{emp}}">
 <button class="primary">Show</button><a href="/admin/missed-log">Reset</a><a href="/admin/missed-log?month=all">All time</a></form></div>
@@ -9319,8 +9314,8 @@ def run_auto_missed_mail(force=False):
         global _holidays_cache
         _holidays_cache = None                               # Update177: never judge a working day from a stale holiday list
         today = today_local()
-        if is_weekly_off(today):                             # Update205: no reminder e-mails on weekly offs (holidays are working days for productivity entries)
-            print("Automatic missed-entry e-mail skipped: today is a weekly off."); return None
+        if is_off(today):                                    # Update160: NO reminder e-mails on weekends / public holidays (also for "send now")
+            print("Automatic missed-entry e-mail skipped: today is a weekly off / holiday."); return None
         if not force and not _auto_claim_run(today): return "busy"
         end = today - dt.timedelta(days=1); start = today.replace(day=1)      # Update178: ONLY the CURRENT month is checked (never a previous month)
         if end < start: print("Automatic missed-entry e-mail: nothing to check yet (first day of the month)."); return (0, 0)
@@ -9362,7 +9357,7 @@ def run_auto_missed_mail(force=False):
                 print("Automatic missed-entry e-mail: live re-check failed - this batch is NOT sent, it is retried in the next slot:", repr(ex)); failed += len(chunk); continue
             keep = []
             for emp, pend in chunk:
-                left = [d for d in pend if d not in covered.get(_key(emp["eid"]), set()) and not is_weekly_off(d)]
+                left = [d for d in pend if d not in covered.get(_key(emp["eid"]), set()) and d not in hol and not is_off(d)]
                 if len(left) != len(pend): print(f"Automatic missed-entry e-mail: {emp['eid']} - {len(pend) - len(left)} date(s) SKIPPED (entry / leave / holiday found at send time)")
                 skipped += len(pend) - len(left)
                 if left: keep.append((emp, missed_message(emp, left), ", ".join(left), len(left)))
@@ -9384,7 +9379,7 @@ def _auto_mail_loop():
         try:
             now = now_local()
             if _auto_tries[1] != now.date(): _auto_tries[0], _auto_tries[1] = 0, now.date()
-            if _auto_done_day[0] != now.date() and _auto_tries[0] < 8 and now.time() >= _auto_time() and not is_weekly_off(now.date()) and auto_mail_on():
+            if _auto_done_day[0] != now.date() and _auto_tries[0] < 8 and now.time() >= _auto_time() and not is_off(now.date()) and auto_mail_on():
                 res = run_auto_missed_mail()
                 if res == "busy":                                             # Update159: another worker is running / ran this slot - look again in the next slot, not every minute
                     time.sleep(1500)
@@ -9403,7 +9398,7 @@ def admin_email_controls_run_now():
     """Update157: Admin-only - run the automatic missed-entry e-mail right now (same job, same rules: every still-missing date of this month, to each employee's own Office Email ID)."""
     _admin_only_mail()
     if not MAIL_READY: flash("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST, and MAIL_FROM).", "error"); return redirect("/admin/email-controls")
-    if is_weekly_off(today_local()): flash("Nothing was sent: today is a weekly off - reminder e-mails are not sent on weekly offs.", "error"); return redirect("/admin/email-controls")
+    if is_off(today_local()): flash("Nothing was sent: today is a weekly off / holiday - reminder e-mails are not sent on those days.", "error"); return redirect("/admin/email-controls")
     res = run_auto_missed_mail(force=True)
     if res is None: flash("Nothing was sent: e-mail is not fully configured on the server (sender e-mail / BREVO_API_KEY).", "error")
     else: flash(f"Automatic e-mail run finished: {res[0]} e-mail(s) sent (one per missed date), {res[1]} failed. See the status board below.")
@@ -9434,7 +9429,7 @@ EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
 <label>Send time<input type="time" name="auto_time" value="{{auto_time_val}}" required></label>
 <button class="primary sm">Save</button></form>
 <form method="post" action="/admin/email-controls/run-now" style="margin:8px 0" onsubmit="return confirm('Send the missed-entry e-mails to all employees with missingsed dates now?')"><button class="primary sm">&#9993; Send automatic e-mails now</button></form>
-<p class="mut">Status: <b style="color:{{'#15803d' if auto_on else '#991b1b'}}">{{'ENABLED' if auto_on else 'DISABLED'}}</b>. When enabled, every day at <b>{{auto_time}}</b> (the time set here by the Admin) each employee with a pending (missed, not yet submitted) Productivity Entry receives ONE SEPARATE e-mail for EACH missed date, with their name, that date and the Productivity Tracker login link. No e-mails are sent on weekly offs (holidays are working days for productivity entries). A date keeps being reminded every working day until the entry is submitted (or leave is approved) - then its reminders stop automatically. Last automatic run: <b>{{auto_last or 'never'}}</b>. Only Admin can change this.</p></div>
+<p class="mut">Status: <b style="color:{{'#15803d' if auto_on else '#991b1b'}}">{{'ENABLED' if auto_on else 'DISABLED'}}</b>. When enabled, every day at <b>{{auto_time}}</b> (the time set here by the Admin) each employee with a pending (missed, not yet submitted) Productivity Entry receives ONE SEPARATE e-mail for EACH missed date, with their name, that date and the Productivity Tracker login link. No e-mails are sent on weekly offs or public holidays. A date keeps being reminded every working day until the entry is submitted (or leave is approved) - then its reminders stop automatically. Last automatic run: <b>{{auto_last or 'never'}}</b>. Only Admin can change this.</p></div>
 
 <details class="card" id="ec-send-win" open><summary style="cursor:pointer"><h2 style="display:inline">1. Send a reminder manually</h2></summary>
 <form method="post" action="/admin/email-controls/send" id="ec-form" onsubmit="return ecCheck()">
@@ -10204,7 +10199,7 @@ def admin_mn_template():
 
 # ---------------------------------------------------------------- Update99: "Missed Entries" section below the Productivity log
 LOG_MISSED = """<div class="card" id="missed-entries" style="margin-top:22px"><h2>Missed Entries</h2>
-<p class="mut">Working days (weekly off excluded; holidays included) with no productivity entry and no leave &middot; today is not included. Same data as Employee Info &rarr; Missed Entries, for all employees. The Employee filter above also applies here.</p>
+<p class="mut">Working days (weekly off / holidays excluded) with no productivity entry and no leave &middot; today is not included. Same data as Employee Info &rarr; Missed Entries, for all employees. The Employee filter above also applies here.</p>
 <form class="grid no-print" method="get" action="/admin/log#missed-entries">
 <input type="hidden" name="date" value="{{request.args.get('date','')}}"><input type="hidden" name="emp" value="{{request.args.get('emp','')}}">
 <label>Month<input type="month" name="mmonth" value="{{mmonth if mmonth!='all' else ''}}"></label><button class="primary">Show</button>

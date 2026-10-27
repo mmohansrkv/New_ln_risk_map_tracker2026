@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update207: Employee sidebar Calendar summary now also shows "Permission" - the number of APPROVED permissions in the month shown (Present / Absent / Leave / Permission). Display only.
   * Update206: Holidays declared by the Admin are NEVER required: no productivity entry and no leave is needed on them. They are excluded from the missed-entry calculation (marquee "Productivity entry pending", Missed Log, dashboard, Employee Info) and from the automatic / manual reminder e-mails (checked again live right before sending). missing_dates() now also checks the holiday list explicitly. Update205 (holiday entries mandatory) is withdrawn.
   * Update204: NEW \"Multiplayer Game\" (Number Rush) - a separate link on the EMPLOYEE page (left menu, employees only). Two employees play the same board online in real time: the game lobby lists the employees who are online, an employee invites an available colleague, the colleague accepts / declines, and both then race to tap the numbers 1-25 in order (the server decides who tapped first, so scores and progress are identical on both screens). Admin > Employee Info > Multiplayer Game: master Enable / Disable switch (default OFF) and a per-employee access list, saved in the Settings sheet (keys \"Multiplayer Game enabled\" / \"Multiplayer Game blocked\"); switching it off or removing someone ends running matches at once and hides the link. Live data (online lobby, invitations, matches) is kept in a small SQLite file shared by all workers (GAME_DB env var to move it) - no Google Sheets calls while playing, game polling does not reset the idle-logout timer, and nothing else in the application was changed.
   * Update201: Employee login page - the left "Employee Panel / Productivity Dashboard / Performance / Attendance / Reports" promo block is removed (the login card is centred); the Admin login page is unchanged.
@@ -2796,7 +2797,7 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .cal-g .t{background:linear-gradient(180deg,#6d70f5,#4f46e5);color:#fff;font-weight:700;box-shadow:0 2px 0 #3730a3,0 0 10px #6d70f588}
 .cal-at{margin:6px 0 2px;padding:5px 6px;border-radius:7px;background:#4f46e533;color:#fff;font-size:11px;font-weight:700;line-height:1.3;text-align:center}
 .cal-ct{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin:4px 0 2px;font-size:10px;color:#c9d0ee}
-.cal-ct b.cp{color:#4ade80}.cal-ct b.ca{color:#f87171}.cal-ct b.cl{color:#60a5fa}
+.cal-ct b.cp{color:#4ade80}.cal-ct b.ca{color:#f87171}.cal-ct b.cl{color:#60a5fa}.cal-ct b.cm{color:#fbbf24}
 .cal-g .p{background:#16a34a40;color:#bbf7d0;box-shadow:inset 0 0 0 1px #22c55e99;font-weight:600}
 .cal-g .a{background:#dc262640;color:#fecaca;box-shadow:inset 0 0 0 1px #f87171aa;font-weight:600}
 .cal-g .l{background:#2563eb40;color:#bfdbfe;box-shadow:inset 0 0 0 1px #60a5facc;font-weight:600}
@@ -3128,28 +3129,29 @@ body .app.emp3d .site-ftr,body .app.emp3d .pg-ftr,html.fit188 .app.emp3d .site-f
 </aside>
 <main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></main></div>
 {% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}<div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></div>{% endif %}
-{% if att_json %}<script>window.ATT={{att_json|safe}};window.HOL={{hol_json|safe}};window.SRVTODAY="{{srv_today}}";</script>{% endif %}
+{% if att_json %}<script>window.ATT={{att_json|safe}};window.HOL={{hol_json|safe}};window.PRM={{prm_json|safe}};window.SRVTODAY="{{srv_today}}";</script>{% endif %}
 {% if session.role and not bare %}<script>
 (function(){var g=document.getElementById('cal_g');if(!g)return;var d=document.getElementById('cal');
 var M=['January','February','March','April','May','June','July','August','September','October','November','December'],W=['S','M','T','W','T','F','S'];
 var now=new Date();if(window.SRVTODAY){var sp=window.SRVTODAY.split('-');now=new Date(+sp[0],+sp[1]-1,+sp[2])}var y=now.getFullYear(),m=now.getMonth(),NH='';
-var HL=window.HOL||{},A=window.ATT||null,FM=['January','February','March','April','May','June','July','August','September','October','November','December'];
+var HL=window.HOL||{},PRM=window.PRM||{},A=window.ATT||null,FM=['January','February','March','April','May','June','July','August','September','October','November','December'];
 if((window.matchMedia&&window.matchMedia('(min-width:801px)').matches)||A)d.open=true;
 function z(n){return(n<10?'0':'')+n}
 function iso(d){return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())}
 function nextHol(){var tk=iso(now),ks=Object.keys(HL).filter(function(k){return k>=tk}).sort();return ks.length?ks[0]:''}
 function draw(){NH=nextHol();var h='',i,first=new Date(y,m,1).getDay(),n=new Date(y,m+1,0).getDate(),pn=new Date(y,m,0).getDate();
 document.getElementById('cal_t').textContent=M[m].slice(0,3)+' '+y;
-var np=0,na=0,nl=0;
+var np=0,na=0,nl=0,nm=0;
 for(i=0;i<7;i++)h+='<span class="w">'+W[i]+'</span>';
 for(i=first-1;i>=0;i--)h+='<span class="o">'+(pn-i)+'</span>';
 for(i=1;i<=n;i++){var t=(i===now.getDate()&&m===now.getMonth()&&y===now.getFullYear()),k=y+'-'+z(m+1)+'-'+z(i),st=A?A[k]:'',c=t?'t':'e',tt='';
 if(st==='P'){c+=t?' sp':' p';np++;tt='Present'}else if(st==='A'){c+=t?' sa':' a';na++;tt='Absent'}else if(st==='L'){c+=t?' sl':' l';nl++;tt='Leave'}else if(st==='H'){c+=t?' sl':' l';nl+=.5;np+=.5;tt='Half day'}else if(st==='O'){c+=t?' sho':' ho';tt='Holiday'+(HL[k]?' - '+HL[k]:'')}else if(st==='W'){c+=t?' sw':' f';tt='Weekly off'}else if(t&&A){tt='Today'}
+if(PRM[k]){nm++;tt=(tt?tt+' + ':'')+'Permission'}
 if(k===NH){c+=' nh';tt=(tt||'Holiday')+' (next holiday)'}
 h+='<span class="'+c+'"'+(t?' aria-current="date"':'')+(tt?' title="'+i+' '+M[m].slice(0,3)+': '+tt+'"':'')+'>'+i+'</span>'}
 var tail=(7-(first+n)%7)%7;for(i=1;i<=tail;i++)h+='<span class="o">'+i+'</span>';g.innerHTML=h;
 if(A){
-var ct=document.getElementById('cal_ct');ct.hidden=false;ct.innerHTML='<span><b class="cp">'+np+'</b> Present</span><span><b class="ca">'+na+'</b> Absent</span><span><b class="cl">'+nl+'</b> Leave</span>'}}
+var ct=document.getElementById('cal_ct');ct.hidden=false;ct.innerHTML='<span><b class="cp">'+np+'</b> Present</span><span><b class="ca">'+na+'</b> Absent</span><span><b class="cl">'+nl+'</b> Leave</span><span><b class="cm">'+nm+'</b> Permission</span>'}}
 function side(){var u=document.getElementById('cal_up');if(!u||!A)return;
 var tk=iso(now),ks=Object.keys(HL).filter(function(k){return k>=tk}).sort(),DN=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 function P(k){var p=k.split('-');return new Date(+p[0],+p[1]-1,+p[2])}
@@ -3160,7 +3162,7 @@ if(!ks.length){var e=document.createElement('div');e.textContent='None announced
 ks.slice(0,5).forEach(function(k){var dd=P(k),r=document.createElement('div'),a=document.createElement('span'),c=document.createElement('span'),n=Math.round((dd-P(tk))/864e5);
 a.textContent=DN[dd.getDay()]+', '+dd.getDate()+' '+M[dd.getMonth()].slice(0,3);c.textContent=HL[k]+' ('+(n===0?'today':n===1?'tomorrow':n+'d')+')';r.appendChild(a);r.appendChild(c);r.onclick=function(){go(k)};u.appendChild(r)})}
 var _d=draw;draw=function(){_d();side()};
-function refresh(){if(!window.fetch)return;fetch('/employee/calendar-data',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(j){if(!j||!j.att)return;A=j.att;HL=j.hol||{};if(j.today){var q=j.today.split('-');now=new Date(+q[0],+q[1]-1,+q[2])}draw()}).catch(function(){})}
+function refresh(){if(!window.fetch)return;fetch('/employee/calendar-data',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(j){if(!j||!j.att)return;A=j.att;HL=j.hol||{};PRM=j.prm||{};if(j.today){var q=j.today.split('-');now=new Date(+q[0],+q[1]-1,+q[2])}draw()}).catch(function(){})}
 setInterval(refresh,120000);
 document.addEventListener('visibilitychange',function(){if(!document.hidden)refresh()});
 (function(){var t=iso(new Date());setInterval(function(){var n=iso(new Date());if(n!==t){t=n;refresh()}},60000)})();
@@ -3729,15 +3731,16 @@ def page(body, title="Productivity Tracker", **ctx):
         except Exception:
             _g = ""
         side_avatar = render_fast(AVATAR3D, gender=_g, initials=initials_of(session.get("name", "")))
-    att_json, hol_json = "", "{}"                              # Update158: attendance for the sidebar calendar (employees only)
+    att_json, hol_json, prm_json = "", "{}", "{}"              # Update158: attendance for the sidebar calendar (employees only)
     if session.get("role") == "employee" and not ctx.get("bare"):
         try:
             import json as _json
             att_json = _json.dumps(employee_att_map(session.get("emp_id", "")), separators=(",", ":"))
             hol_json = employee_holiday_json()
+            prm_json = _json.dumps(employee_perm_map(session.get("emp_id", "")), separators=(",", ":"))
         except Exception as ex: print("attendance calendar error:", repr(ex))
     return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, srv_today=str(today_local()))
+                                  side_avatar=side_avatar, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, srv_today=str(today_local()))
 
 
 LOGIN = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i><i></i><i></i></div>
@@ -6285,6 +6288,15 @@ def employee_att_map(eid, months=13):
         d += dt.timedelta(days=1)
     return out
 
+def employee_perm_map(eid):
+    """Update207: {'YYYY-MM-DD': hours} of this employee's APPROVED permissions - the sidebar calendar counts them per month ("Permission")."""
+    k = _key(eid); out = {}
+    for r in rows("Permissions"):
+        if _key(r.get("Employee ID", "")) != k or str(r.get("Status", "")).strip() != "Approved": continue
+        d = norm_date(r.get("Date", ""))
+        if d: out[d] = out.get(d, 0) + num(r.get("Hours"))
+    return out
+
 def employee_holiday_json():
     """Update172: {'YYYY-MM-DD': name} of every holiday from 1 month ago to 12 months ahead, as JSON that is safe inside a <script> tag."""
     today = today_local(); lo, hi = str(today - dt.timedelta(days=31)), str(today + dt.timedelta(days=366))
@@ -6295,7 +6307,7 @@ def employee_holiday_json():
 @need("employee")
 def employee_calendar_data():
     """Update200: live calendar data (status per date, holiday names, server today) - polled by the sidebar calendar so it stays current."""
-    resp = jsonify(att=employee_att_map(session.get("emp_id", "")), hol=json.loads(employee_holiday_json()), today=str(today_local()))
+    resp = jsonify(att=employee_att_map(session.get("emp_id", "")), prm=employee_perm_map(session.get("emp_id", "")), hol=json.loads(employee_holiday_json()), today=str(today_local()))
     resp.headers["Cache-Control"] = "no-store"
     return resp
 

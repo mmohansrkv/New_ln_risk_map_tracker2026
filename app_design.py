@@ -1,5 +1,6 @@
 """Productivity Tracker - Flask + Google Sheets.
-  * Update205: NEW \"Multiplayer Game\" (Number Rush) - ONE shared online session for ANY number of employees. It is reachable ONLY by the direct URL /employee/game: there is no menu item, button or link for it anywhere in the Employee panel (a logged-out visitor who opens the URL signs in and is brought straight back to it). Everybody who is online is listed; employees press Join, anyone who joined can start a round (2+ players), the board grows with the number of players, and all players race to tap 1, 2, 3 ... in order - the server decides who tapped first, so scores / progress are identical on every screen in real time. Admin > Employee Info > Multiplayer Game: master Enable / Disable switch (default OFF), per-employee access list (saved in the Settings sheet keys \"Multiplayer Game enabled\" / \"Multiplayer Game blocked\"), the direct URL to copy, a live player table and Reset session. Live data lives in a small SQLite file shared by all workers (GAME_DB env var to move it): no Google Sheets calls while playing, game polling does not reset the idle-logout timer, and the rest of the application is unchanged.
+  * Update205: Employees MUST fill in their daily productivity entry even on a declared HOLIDAY. (1) The holiday block on the entry form is removed (employees can submit / edit an entry for a holiday); (2) a holiday is now a normal working day for productivity: the entry counts in productivity %, reports and working days, and a holiday with no entry (and no leave) shows as a Missed Entry (marquee, Missed Log, dashboard, e-mails); (3) the automatic / manual missed-entry e-mail also runs on holidays and lists holiday dates. Weekly offs (Sat / Sun) are unchanged. Leave and permission still cannot be applied on a holiday and holidays still never reduce leave balance. New helper is_weekly_off(); is_off() is kept for leave logic.
+  * Update204: NEW \"Multiplayer Game\" (Number Rush) - a separate link on the EMPLOYEE page (left menu, employees only). Two employees play the same board online in real time: the game lobby lists the employees who are online, an employee invites an available colleague, the colleague accepts / declines, and both then race to tap the numbers 1-25 in order (the server decides who tapped first, so scores and progress are identical on both screens). Admin > Employee Info > Multiplayer Game: master Enable / Disable switch (default OFF) and a per-employee access list, saved in the Settings sheet (keys \"Multiplayer Game enabled\" / \"Multiplayer Game blocked\"); switching it off or removing someone ends running matches at once and hides the link. Live data (online lobby, invitations, matches) is kept in a small SQLite file shared by all workers (GAME_DB env var to move it) - no Google Sheets calls while playing, game polling does not reset the idle-logout timer, and nothing else in the application was changed.
   * Update201: Employee login page - the left "Employee Panel / Productivity Dashboard / Performance / Attendance / Reports" promo block is removed (the login card is centred); the Admin login page is unchanged.
   * Update202: (1) calendar status legend removed; (2) login goes straight to /admin/summary (Admin) or /employee (Employee) - welcome pages no longer shown; (3) generic \"Something went wrong...\" message removed - real errors now show a specific message (data service busy / could not save / could not reach server).
   * Update200: Employee Panel calendar - every date is marked Present / Absent / Leave (approved leave only) / Holiday / Weekly Off in its own colour; the NEXT upcoming holiday date is highlighted with a gold pulsing ring (days left shown in the Upcoming holidays list); the calendar re-reads attendance, approved leave, holidays and weekly offs automatically (new /employee/calendar-data, refreshed every 2 minutes, when the tab is shown again and at midnight). Display only - no sheet, e-mail or tracking code changed.
@@ -446,6 +447,13 @@ def is_off(d):
     try: return dt.date.fromisoformat(ds).weekday() in WEEKOFF
     except ValueError: return False
 
+def is_weekly_off(d):
+    """Update205: True ONLY for weekly-off days (Sat / Sun). Declared holidays are NOT included - employees must still fill in
+    their daily productivity entry on a holiday, so for productivity / missed-entry / reminder logic a holiday is a normal working day.
+    (is_off() - weekly off AND holiday - is still used for leave, where a holiday needs no leave and never reduces the balance.)"""
+    try: return dt.date.fromisoformat(str(d)[:10]).weekday() in WEEKOFF
+    except ValueError: return False
+
 # Login pictures are embedded here, so no static folder is needed.
 PHOTOS = {
     "admin": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBAUEBAYFBQUGBgYHCQ4JCQgICRINDQoOFRIWFhUSFBQXGiEcFxgfGRQUHScdHyIjJSUlFhwpLCgkKyEkJST/2wBDAQYGBgkICREJCREkGBQYJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCT/wAARCAFoAWgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD6pooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKTdQWA60ALRSbxjOeKC2CPfvQAtFNEinJyMCl3CgBaKTPGcGgMMc8fWgBaKQMD0OaXIoAKKAc0UAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABQaKKAGMOck4xVbUdQt9Ns5Lu5bEKDJPpVkgPkehrzz41a4mm+FLi0B5nUj5e1ROXLG6Kpx5pKJ2Gia/Y+ILI3OnyrJHnjnrUmp6vFpelz6hcMsaQozkMcZwK+Xvhv4qvdAhiihvX4J+Qng11njW/wBa8bRrGbwwWxXDIh4audYi8TslhLT30PXPAPjW38caJ/asEYjt2dlU+uDWrP4g0uKQI94isvbNeB+HH1jwroY0nT5dsCk7QD69ajmgvpZBNNK7Mfvc1H1ppaIf1OLlue/ReJtImOVv4+uPvVdi1C1uMCK4jkz6HNfNjQMpIVpFX+8CaktNT1LR5VeC9lI7Amj6076oqWBXSR9LAhPlC8e1OAA5FeW+EfiReNEkGoFXYt97PavTLW6jvYVlQ5B54rrjNSWhwzpuDsydCxHzUtA6UVZAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFAEef3nbb3rw345QahZOzlGktJuh6ha9xaMHK44Pes/XPD9p4g05rG9jDRnocciokrxsXSnySufEsNyLKXCORtNdTp3iiZohGsvPTrW740+FM8GpakNLgMsNs2Cw615XdaZqGnynKTR4PdSK82ULM9mMlNcx3h8XXdpOUcblXvWvZePLeVQsgAPvXlCa7cofJmTIH8XrQ16GO5HA/GhRdxNpo9fuPEEUse+DaRWLdeJ0f5JFx71wNvrUtucGYbfTNWU120mJEzgNScWOEkjsYNdaFw8EhABzXsfwx8ei5C2txJz05NfNiahEJAqScMeK1NG8STaZqkUsEh2Iw3HPSnTqOErBWpxqR03PtmI7lDZyDyKfXM+BdfXXtBhnD7mCj8q6QMMgZ616iaex4jVnYdRQCDRTEFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFAAaRjjH1pCwHJPFMndVjLMwCgZY+g9aAOes7Hbf6tI5AWZ8jIrnNe8G6dqaFZYo2+i1zviD4/adpWr3WnW+nyXkcT7fNUcPW34N+KWh+Mbw2dvEYLkDlG6ivJxFnK6Z6VDnpq7WhxF58F9Ju2Z0XZuPT0qiP2e7GZs+cVFe4CBEzvUE8kt04rJbxf4WSYQvqsaSE7cZ71neXc6XVj0R5UP2cdNBy1wTSn9nnSYuTNmvaLO70y/j3Wd3FOB1IcUXCRBW4PAyaUuZLcUKibs0fMfxG+G9v4XFq1q+UZ+tcotlHb3BXdklc17d8a4kbSLNlHPmcD1rxWQ5lZ2BDY2ge9VHVXZo9JWR9Afs66s93ptxauxPlnA+lezAfvB7CvBv2az++vARg7Tx717wpyxNenR+FHj4jSbJAKWkXOOaWtjEKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACijcM4zTd6jPNArjqKbvUY560uQKHoO4tFFFAELZMmPMAH93FR3MSziRJRtjZChJOOtTkEHIx+Vcx8Rba7vPDhgtmkRnkUPIhxsXual7DW5wWs6Z4ZsbiaCKxjkMLYeTAOc+9N8JeFvDMOtf2rp0oWfHKKa5Tx/Lc+EvCl2bBzeqOk/Xf61xnwe8cPJcq91MUfd827oK8qcN2j2oTfKkfRmptJe2lxbkNbvMpVJM14jD8EtRhmuvtHiFZGZyyjPIzXqt34q0/cZkvY55I14RT3rzbxN4xWytxf30rJK7HMCnBC1jG7dja0YopR/CjxHoT/btE16WZ7f52hEmd3tXrfgjxHqeveHxPq9sYJ4z5ZUjrjvXk3hXxyLkw3OkSyCGR8BXbJc9xXqreJ9NtLEXd3dQ26qMsnvVTi46Epwm7nO/GCyluvCYkiPz27+afYV4M10TIszOuwJuP1r2rxt4907UdAvrOyBuxNFjzFHArhPBfw5s7+2S41G48u3kHVj+lOGkbsclzS909T/AGcNKeLSbnUTysrcGvaUPUnjmuA8G6jo3h3SU0uxlQKhwP8AaruoZhcQRyJyDzXpYerGSsjyMVRnCV5E655+tLSDjOaXNbnMFFG4GjIzjNMAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACg0UGgCNnC/MeKgnaVPuPGM+tZXie6mtrAOrcg9q5i38W2xvIYb0zR/Woi+dyjHoU4uKUmjp5/EENrbPNKRuQ4qfQtZTWoGkXIArldavdND+R5infyBnnFaOg6tZaZEIyBGjd/WvKePVKv7Oc1Y73hk6POlqdivQUtULbVLSdwkdzGzHooPNXN4bIBBI6ivWUlJXR57i1uO61BdwrdW0kMn3GGD7ipgckUhXIIPQ0+gI8h8S6BPCJreS2+2WLE7Yoxyorg7DwHZ32pi3trM2kZb5lC4Nex65qT6RPc+chaMH5AvUiqVv4m+y2P2uDTY5HP+z81eHUlHns2e7S9oqK5UeceLPhpHozLc6Yt1vGC+W4Ncv4x8Kf8Jjp8SQSYuIlwyjgmvYLXxONe1LypLeWItw4fpTdX8Kae6PIM2zf3k4qOZt3RvGNn7x4p8PPAWqeGry2l1BhHYBmKxN95T612mlfDVb2eS7vrmWSB5SwRjxtrtdM8N6SmJJb57pR03NnmtW81G2EPlx+WkeNuKp1pJXuTGmm9EcnN4Q0yCwuLOKJFVl4YDFZ66NHa6ZDaIxIDdBXT6dZXPiK5CQIwt87TJ2rtdL8HWVguJlEp9TRSw9StqVVxlKh7vU810Pw1O+oxmAlov4j6GvZLC3FtaJGTzimWemWliD5MQUE5q18pOTxXpYbCqirs8fGY329orYcBt+lJkE/Kc0wPktk4VayrvXFLvDYIZ3U4bb/Ca6J1FBXZyRpuWxrhmzzgUu455Fc482qqC7qc9lFRQ+JpYZvJu4miwcZavN/tSnGX71OK7vY6FhJP4WdRH1NPqK3lWWMOpyG71LketepF3VzmYUUAg0VQgooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACijNJuHrQAtITQelR7wxIVgT7UAc94yQnTUJWRxu58vrXMzWejlYLiYMjL/z1ruL7SVvofKlmljHqtYdz4BsrobZbmeQejGuWTqU6jlCKd+7sdEY0pwSnNr0VzxbxNfyDxupilbyVAIUHjFW7rxhLcXCoiN5cR5rp/Evwe1CbVm1S1mQpGuBH3IFcmPBviC6v9sdlLEhOCzLgV8njMPW9o7x3dz9Ew2JwNWnFRknyQ69zb8LajdXHiq03SbY3YHGe1e4O4V9oQ5bqwrybw74Ik8P6lBfX1ykpUg7VOcV6Xp+si980sm1FPGepr6TAKVOnaZ8JmM41anNA1BhRj0oYFhxxTY5VlUMBwaf9DXopp7HnGB4o0Yaja7lXLR8n3rjRqEUMD25XymTivTNwYt3x1rjvGPhiDUIWuoJo7d1GSCcZrhxWFc/egtT0MHi4xXsqjsji01OCOYsIn35+8KsySjUo9sssqr6Zrlbi4lhnNt+8Mo6IvU/Sqtzr/wBjizL59cFp/Dy6nqLka5ubQ6WS1s9LVyly3yjKrnqaueHdD1TxS63Dp5Nuh6n+IV5ld65c6ng20cgiz99+31rtPhh8WTp+o/2Fq+DE3CSp90GuvD5fKo+d7HFiswUFywPctP02DTrdIoUWNVHIXoT61aIDCoYHSWEOj7o25De1TDCr1r0klHRHkttu7IXcb9jEgAZz2rH1bxZYaMhEj+Yw7Csj4pa7eaFoPn2hUbmwT3ryiHxjuMX2qLzmk5J614Gb5rUwz9lRjq+rPeynJZYuDqyenY9M1j4j276RceSpjmdCEz61H4J8SWFnosQum2XkpzIe5Nec3Ws2uoP5MsWwo29SOmB2rQi1HTLgqv3GYcE9q8GGd4qElUkr2PcqZDSVL2fK1c9mj1axuGwtwuRzkmue8etANM+2wSKzl1HFcXDJERiK9TI4PzU27+03MDWn2jegYEc9a0xOfPEUpUq1LRr8TzqOSxoVYzjJ6M9Z0Pc2lWrE87ATV8sAM/rXAafql/b26R+cAirjrSXXjp7FIoch5C+CM816mG4hw7UaUk09jyquWVnKTgehJ1Ip9V7WQyxxynjegOKsV9JHVXPKCiiiqAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAG4+YH0poGS2V4JoU8sOmK5vxdq99pnkm3Rip6kdKic+VXZVODnKyN5yXcx7yBWU9tLHeERXDCubm8X3cce8BGbH8JzVH/AITSa3bzpY/m9O9c0cZHqdTwM0dffXs9oUW2mMxJ5D1a+1XvlI8yImRnINefz+PrOdkMyNDz1UVrN410e5hREviTjoapYmD2Zm8LVW6N+28VxTySx+TJ8nGcVW17xLDBp42mQMT6VlaNqkJmlAmUhuRiq+vSQtGvmSMAT3Fa89zNwaZkR6vcXshkSMhQep710UXieC1sgSoEqiucjulKMkBRVHcnGawdUuLmTMMQJ3cb16VzV5czOyjBdT1TwRr0muRXLt0R8CumGd249K4D4QEppl3G/Miyc+9dJ4k1wadCqxsC56gdRXXhqbqJRicWKkoSbGa/4hjsI5IoGUSAEsfSvNZNZPiCG4ja9ceWckg9K5/4g+MDbQXbxyES4Oa5n4beIVl8PajM5jmkkDYIbpX0VCjToyiup5E5Sq6nfaDYG10vW9fl3XTW+FtZCM/WszRpdN8Sz3VnOwSW3HmfnXV6VN9h+DW9kUTThjt9TmsX4aeGLK80aS6mOL+ZuWHQj0r5PESdTHOMXpFH0mGioYDnktWzmvEUUkenTDT7RvIOV3BeprjtIgiWHbMs0cwbIwK9l+IE9rpSW9jaybFONyAd/WvOdXvLfTrtDu3MRnpX0mCpKNO7PBxFW8uXqeieA/Hd3YoLe9d5bQKFXf1FetadqEWpWi3UeNnoK+bfDepPqatI2DGG2gDtXqPw/wBXurfxBJpUr5tjD5i+maWMwsXH2kQoVZKXKzW+LtvHdeD5XI+62RXgFrI3kK6/wcV798XpvK8FytjALYr58tJR5axgjDV+e56r1o+h+m8LSth2vM0AHf58/ep6tt+9zUEbspZcggHFTIw714LPrIyJVnWM/LuH0qwt/cAgR3DL+NQKyhThAfrSxqHHKqKmya1KdpaNGnaaxfI2xrlnDep6Vc0tXv8AXbLe24yvj8qw4Y0SUFs89MV0nh2NY/E+kqvIV81pQjH2kbd1+aPOxlOFOnOUV0f5Hu8ChQi4+6gFWB0qJBipR0r9IPyO99WAooFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRmig9DQAzOCc4x2rC1i7EcpW7jBtjxzV7VdVi0ize6lOVFeV6/48mvmdjs8gZ2qT1rjxmKp0I3md+X4Gri52pHRXei6PP5zwz/AGUj7pTmsW8stN0OCOe8uJLqVzhQy1yejfEWzuku7W8QafJEww2c5ruI/DieJ7aw1cas0ttGCShXrXPRr06/wI68Vg62Df77QydZ8Kx6kyvpUgPyhih965648PWsD+Vd/wCjTnjcDW9JfsdVuJYZDbpENox0OK57xZNLPLbXLvvUt16VrSo0qk+VnPVq1oQ5osjn0rU7Fd9reOgHQock1k3mq6zJ+6ub64cejLirEWpXFqSYbwp7Hmp11vzD/paLcj6YraeWr7EjOOZP7cSpotpcyTkS6hJMr/wHjHtXU65ejT9FjtIAEfOc96p2mvaPbiNpbIQ5bGRzV3Vl07VbmN7aYMu3OCcVj9TrQVos2+u0Zu8lY1fhxrEWg6HevdSn7ZO+YgRWJ4g8W3CGSRyDKuQ5J+/71JNbzQ6W4MSG4P8AqtrZwnrXlfiJdR8W61D4csjcQ3bjYr7Dgg9819Lg6UMLQ5pbnz+Jm8RWfL8Jk6qNc+JniaLw/osLskrjzpl+6q9+a9O8ZfD/AEz4Z6bpWmaYpTzY83Up/ibFeq/C74a2vw58N29nEiTakRme4I5JPvWD+0XYCbwgNQJwlqwDEdcnpXJDEOVZTZpKmlDlj5GHcayJ/AWl26DAwwxWh8O5vsukIhfbsLMa4Kx1Cb/hEbTzhhol6e1bPh7WoIfD1zM77cKevFfN5bP22LqVGfTZlT9hg6VNddSh4v1+O61q5uJGBWPhD6mvMNa8SNPFNMw+fOBUet65JqM0tvbPlYnLE+tcpqt7K0cbgcbtpHrX2M6ijHkR8nGDfvHt3wrhz4cW5Iw0sleh+H3MHjq0t/8AYDVzfw30oxeGLZSuPlEmK6HwpKL34kueohtgcjoK1xErYZIype9iDrfjbJ5fgic/7VfOGnSg26mvoX46SE/D6Vx3YdK+a9NnxZodw/E1+fZzG9SLP0vhptYd+p0ccgqxHJxWXBLuXOQfxqyko7so/GvnnE+shK5oq4NTK2azvMYdjU0c3/66zsaKRqWp/fLXR+FF3eKtN/3zXL2Lbpa6zwaN3ijTf941thY/voev+RxZlL/Z5+h7r6U8dKYaeOlfoaPyQBRQKKACiiigAooooAKKKKACiiigAooooAKKKD0oABxTXyQRilzgVG8yqDk9KmUrBa+hzXj6PPh6QAYReTXgWvz6M+ntIbhkkXPAPevoHWpRqUDWn2UvG3XLYryfxJoXhu0kazm0pnkbnIbvXz2Y0/rFVckj6rIsXSwlNymnzeXY5nwz4G03WtJTULy6FyjMGCA4PFew3GrWOi+Fl+yq8ELqIwirnnpXm+n6vonhm1jSPTXlkTPyb+Ko698aLqS3jsdNtI7aRCfkddwrroulhqdupzY+eIx1fne3Qo61rGr6Hqkltd2hjSX51OeoNR3HiSHV7ZIApZozyOlc1c6hruu3qahcXH2vccbcdParFtb3kUkrNAYSR1xXnQxfLiVyvS52zwl8M+Za2NGRwMU0zALVOSc4AJyaYZCR1r7DmufH2NAXTADv9aPtT/3iPoazfOb1o89qnmFym3Frl2hAt5GBRcHcc1r+HPGMo1608+KIOML5mwZ/OuLM+Qd7bMdMVJa3TQNbyuPkEyjd361FVynTlAqnFKSPqa316ABFll3SFcgCvMfj3430oeGI9Bdwt3qMinb6YNbV272elw3tkonlKApz14r5p8e6H4z1fxpFq+t2Mq2jP+4I5CivAw9evGbjUkkopnsVMJD3ZJXu0dlrdwbbSorWBtzbFyw6Hiue8Qa6+n+HFtVbc78ECoLfWpLnVH0d1YGIDlhiodXksIbgWrkyTdgBnFdWR4eVJ3etzXiHEqpNQjpyqxycUh+eM/uZWGS571b8LeF7/wAU6xFbpGxSJwS2ODXYaD8Nb3xZNFJdqbeyU/K+ME17Dofh/TPB9v8AuUT5F+/3NfWQwjnL3tlqfIzxCirRLamPRtGhiixHJHHskz6AVH8FFF/f6zrgObLBgBPdvauK8Q+JZvEmox6JYHZcXT+XkHtXs+geF7Xw54Si0jSGUsuGn56yd6xzTFJU3ClG7NMDSfN7SWiZhfHW6K/D2IRPtMjhAgGc14hY2+kaGlvpOqRedcXMfnrKD9wf3TX0Rq2gTa1ZwW+pWweKNg2c9K8P+L3hax8K+JrWGC4Lx3UfmFsZ8v8A2a+F9vWqt1akNF3Pt8rdP/dnN3fYdo2l2fiTVI7PRrdvKVcyv2FejaZ8F7C4iWa5uNo/hGehrmvgtqQt7S90+1tlN077t5H8HevW4PKs7GS5vrhljb/VqMn5q5/Ze1qJxXyNsbj61C9OMmku+7PJ9Y8G3Wj6+unyTKIJPuk9xXPeIbKLTdR/skSH9/hmYdsV1fjq/upvEWkQSFzMyM4OOCBUNl4dl8QPLqU8PIB2lj6VvisHSp00krNseAzSqqzdR3ilqc9pmY7zb5u8AYA9K7jwIN3im2/3q4ezWBdTlSHhlOGFdz8Pv+Rnt/rXj4WNsTCPmfS4+fPg5y/untv8VSCogfnYVKOlffrQ/KgFFIKWmAUUUUAFFFFABRRRQAUUUUAFFFFABQaKKAGAcMM1ga/cmCePkgd8VupkBvrXPeKEHmJ7ivPzF/7PI68EoyqrmM29uft0JSJmU46g4rz7W/CepyztLC7PnuTzXbEmMYXg0kdwY8+awxXyVRSfvQlZn0VJuEXGOx5Df+BtUvQQrsvvnmodO+FzRvvu2LN6969kdLWU/fCUyTTuMxfPXBiMXi0vfZvTrU49LHE2fg+3s4QEAHpgVbk8PJJBt2jODziuka1RDg0jRADC+leb9Ynzcx0fWOZWPA7zFveSW56pIapi6wjrn+Kr3j2FtN8XXUQ6bN9c2LnHPrX6xhqqnShNdUfE1octSS8zW+0D1o88HvWP9t5NPF3xWykZuJqrKMknmnCUOdp6Z6VmR3BY9aljkKtRcLWOx8Ja5fm/W2l1YfZ4zhImPIr1l0j1K3SPzIXbHG4g18zaioM6yrI6kHnYcGpX8Ravpey7026nAj672yK8TFZOqsnLmPXo5pyJK2x75cfCiz1aaa7lVEv/AOCRBgGjSPgva+H4pNRvXiub5ucMM8V5r4T/AGlriCWGx1oKVbh7gDAFdXL+0X4XSaYPeiZVX92fU1eCo1MFrD/MjFSjin7zNq+8TabZWzMFWHZ8vl9MEe1eX+LfiFcXe+KBiIvUVxuoeOL7xh4mnLxm3jkbCRjgY7Gu0074Y3WpwKzEBGHXcK9zGZ/HDxip9tTy8Jkkqzk4WsjI+GUx1HxsZRIT5Kh93oa9/h1OaOctG7bX44Neb+Hfhg/he/e8gbKSrsz7111tP9lBikb5kOawwOLpYpudHYrF4edBKEjr45pJVYGZzJGN4Xd1rhfEt9pWvXdzY3+nv532dpFkPY+1dFBqEbRNJu2ylcbs9q5yWZ/NllJjlZjsBA5xWWcYqnh8O5zVzXJ8NOrXSpux594X1LVPDWrRz2a7lCEfQe9egQ/FeSK2ISNJd5+cMMhTWYdMtYy5aJ8sCCV4wK5q58MxrOqaZFLLBIf3rbvu18vlOPo+1vNWR9VnOEnVinDVndl/E/iaWO+0/Tor+2iGCVYAp7Zp0+k+JJI2/tCdNDtVH3SwOfyrl9M0m60Xz7RNRvIrWcgny5SMVumKyuLT7Gl3d3DEfemk3V6ONxmDa5+a9jycFhMU1ytHLI8UGo3CxP5iof8AWj/lpXdfDS4WPXxPIhAHc1jWPgxUkzLKCucqBXdaJp62z+XFEBgda+UhjYwrKaPrsdWh9WdG+6PTormG4XdG4OamGR1rjLJHt4wVmOd3IzWkPEawYjJyelfV4fPKU2ozR8FUwUl8B0SgZzTqgtJvtESyYxmp696LTV0cTVtAooopiCiiigAooooAKKKKACiiigAooooAYfvVz/in7qHvmugP3hXP+KfurXn5h/u8jqwX8ZHOE5bmoefMPGcc1I2SxxTY5kiYh+/Ga+VUbux9N8KImaOM+dKhy3AA6URzvASd7YbkCua8U+INS0ULJDaGe2ByXxnFXtP1231PS11InbtHK1M6el0XFJ7m4L6C64kXYRxU8dgLjHktn8a5az1tNWBMUeAD1qxH4gaxfYrc0qWXRqTvUWhnOFl+7djgfjn4RuDqUWp24J2qA23v9a8ckuJCzPPE67ewr6am1WHV4S19tZM4+asPVvBOl6mFa2t0Ib0Fd1LOlh37GK0RhLK/aLmbszwBLnjcHDZ5CjqKlW4B6qyD1Nei6v8ACS3BdrSTynz36Vyeo+CNZ0oFhGbtR2QZr18PnOHrbOx59bKq8NVqZ8UxAB5IPerkMm7kHmszdd2JP2yAxL/dI5FTRTxSfPG9elGsnszgnRlHSRNqQmjAfC4PpVCV2ni2qSM9u1ak8SyQI4k3lv4c1Uk05lHmS5iT1qroy5WtDCm0iCX5ZVXd34qW18OafH83kpIfTFayXFlCx8lftT/3VGSav6b4a8R+IJh9l0yS1jPR2XArCpiaVDWcrHRTw1Sr8KMWexVPLljP2eQ8OzHkCpNI1vVNH3DRdSvNQdm+ZNxOOe1emaV8DPNdLzWL9nn/AIkU/KRXb2HhLS9Fi+z2GlwxuR/rSnJrxcZxFh0nGMeb1PSw+TzunKVvQs+HftXiDRLW/MxsX8sK1tMfm3etNuPCetzSNJCRN7r3rI1K8vNLucNDI8aj76jipbXxlbYAkvLmD6HFezlmbQqUFHlUTzsxyuUK3MrtFuLwj4nnJjZ0to88q/U1oReG10uPbcTq8nfFU38W6eI8xalPM5H8TZNZ1lrD6hdtukbbnqTV5pi4ToOnBJtiy/CT9spybSRo3en+arLHKFz1z3rnrrw7qRytlc7D6DgGt271q10pgSySk84rKvPHtwjA21mu0nrivz2nhcRGVmfbSrwce5k/8I74wnVozLHtHcjmun8N+Db22jD30qlvar+kate6n5fmxEFhkbKqprN8mv8A2E7wM9DXZLDuXuz6GHtuX4Tp7SxgtgwwSf8Aaq0s/l/c4+lREkna+AQKULisFQhF6K5m7y1ZIZnZDksKiJJWI5Od3WnM+UI9KaPuRf71axWuxDikek2H/HrD/uCrNV7Ef6JD/uCrFffU/hR8bP4mFFFFWSFFFFABRRRQAUUUUAFFFFABQelFB6UAR9zWB4vwLNW6HPWt/uawPF4zaRj1Irix6/cTOrCfxonOxIJDHjgHvXF+KbzWND1xJbKBrqFjhkxkYrulQSRbE4x3pCixxlyqysO/XFeLSoxjGx9A5O5534i+IMen6XMjabOrOn3Jl4zXmfhLWLq7vJ5nllETNn7Op+XFe6az4Wg1223SMryt2kryTxD4PtND1HaL17eUnISI9TVwowUeVIh1Huzfi8S232nbaRvbKBghuOaG1NJZmkD+YfavPbuDUri+K3V1HHgcKjckU6w1W7tbhrVUYDpvbvWfsPZ6xZr7VTXKz0TTLxRuVxuUnODWvbXZRgUcqvYCuH07UNv3zzW/YXJdsk/LXzGJpyVRs9ulKMoo6yK4iuRiVFPuaZNpccx/csF+lUYJFc4JwKtxTNCfkbdXJz9ypQ/lMrVPCttcKRLaRTM3UstctqPwctb9S8ExgY/wpxXpdtqKk4lQH1q9FBbTHfE+W/u10UsZXpO9NnDWjBr95E8Kn+Bev3JRLS/REXpk8/jWtZfATU2KDUtTZ4x1UHivb7O3SFtzjaW9asySCHnMb56AmvRjmmMqQtzHlSp0lP3YHB6D8MNF0OONY7SGQp/y0YcmuvgsEiQJEiqo7AcVLJqMZXaYgCOw6VA16wXCDFcbw1eo7zkdV522sPkse5VcUxkjUfOc4qu9zKy5Z8H0qu9wcc81pHAR+0yoqXUfdNabChiV19xXK6tBp2T/AKFD+VbktwuD8prndXmXB+WtnRjSXuHRTjfc56++yxFmito1G3sKzv7SNtcRsGKrt5FS6ncAqVUYrmbqd7jzQv8AyzQ1thVJzuyq3LGOh2kejy+JbQNHcRRIXAO4/MfpXXQfDtLCGM2vm3EmMnfytcR4ULPpNvLISCBw1dx4B1vUJ9UmjkllkgUYGegr1nFORwcz5dDW07w7qMGxrmWND/AIew962LXTbeKUySxI8398jmrS53NICCr0QoZXZiavkRnzPqZ1wQLhzTPMxTL2VUuWUUisCua8jEq09Dvp6xH78giltzuliB5G7pUWcE0+1/10Wf71YxV5Cq/Az1C14hiA6bBU1QWv+pi/3BU9ffw+FHxMt2FFFFUIKKKKACiiigAooooAKKKKACg8iignAJoAjwPug81zXjC6RLdYc5bNdKSOGx1rzDxjrTW2ttFKuFI4zXJjHanY68DG9W5dhuSsKxg/O3OaWWYCdRGdoUfMB3rHs9UjaL7QTxEMGmw6h9qjklQ8OeK8k9wtvP8Av5nLbVijZ8/QV5JLqUevq2rSRBmaRkUntg12HxC1qTRvC9wYsie5dUU+x61x80MWm20NtEP3ZUP+J61dtCZPU5S8txeeKbQoNoU5cDvWjqDKL1o2UENwvtVF5vK8V24XpLxVzXF8q7Vu6HJpVdkOjq2VjM9vIMniuo0S8aRQTyK47UJd8PmBq1vCt0ZExurx8dQ05j0sNPXlPQLWTdjNaETDjFYtnIflrUhc8V85UietEuJjccirVu3ltlDtPqKoxtk1Zibmpp6MirG6NgTSSIu9y1J9aihOUFSNwK+hpfCeTKMbvQczHGaheQgdeaR5gFwapz3Sgdac5pIuCbCe4xnJqpJfhB1qpeXygnmsS71IAHmuN1tfdOlUlbU2Z9TJ43LtHXnmsLV79HRt/mRjscVmXGqmNZZCoAK4V885rq/C/huyi05Na8S3x+zNykUnAatI80lqY1qio2b1PO9UvolgEsUyFQ20hz8xqnoarcreXbITGEK47Zrf8T+NfDepXUlpZ+GrdESTasxOCfeqGqeTpWkGGJzEbn5wg9K7cNGzSZhUqqpG6Viz4MvDc6PcRghhHJhfYV6D4Ska2nCINu7rjvXlngK4DWl3EgCHzecHrXqHhhWW9Tca9CatPQ5oawO6CssmAMKR0qWD92AcdahMjAuOpxxS28rpEC4PXvWhG5z+rP5ethOiv2p/mbJSlR65Gf7XjmPQVH5wklMnYV5GL+No7sP8JOJcEipbGTdd2o6gyYNURMGbdVrSGDanZr/00rGmvej6oqr8D9Get24AjQegqWmR9APan196tj4hhRRRTEFFFFABRRRQAUUUUAFFFFABQehooPSgCMnaOnAFePeJNWtr3VrtLiESOkmxX/uivYJASGAP8Jr521a72eJNThlIwZcVxY74D0MtXvNljUC9hpdytrL5u9wBirWhXMsXkQXCmMHtXN313JbhIbZt4Dgmugi1ITSCWePHlqMYHevMPWW5zPxD1Qal4qstO3k29sCZY+xPasW9vUaTmYlI+APSob201K48RajfzDAlICZ9KYNDlCyG4lVd3PJrUysY9yw/t7T7lH4V61vF7lJI5o04f7x9ay9ZFnZrbtHMpZWHet3XSDoyy7c4QHNE46Dpy95nNspkgbPC4zirXhKURSuM7gO1ZMty8luf4flqTwfMUnkOd3NcWLh+5OzDT/eWPU7CXcoOa2LZ8jrXOadLuUGtu0f5DXylWJ7sDSibmrUJ5rPhertucmsYoJmpE2FFOaQ+tQq2FFNd8V7lP4UedJasjumYBjmsaa7IDbmzWjdy/I1c/cyjDc1x4i7lY6qS0M7UtSVCQpZ5P7grKNrreqHbDYFFP8VOurmSC9DxqpGe9d5ofiDZBGs6KB7Ck7043sY1qjT0OMtfh1q1w0Mt3IQgfLJ2xXf6x4fi1mwtbK4fzbaEDEYOMVvRtFqULGCTAZcDtzRp/huaKFzLN1PGaweIqy0icU6sb3kefal8PtKDC4kUiVBhI1HGK5bXfC+r6iVP2SQxRDCMB0Fe9x6ZDCoEjK3uacbqCIbEww/3a1oYqrB+8ZSrp7I+efDWhHSzMT5i5b5t645rvNAilW8gdpmIJAPFQfGy/wD7M+wNaCOMyEA4wM1m+Gtbu/MjRlDEMK+goVJVIqb6hGXu2R6/PYs2TFJsyBz6VTmjmtWQPP5y+lUDq9/cO0PllV45q8kZiCM7bya6zKJQ8SXEYSEiP5m6+1YMEmcgSEZ7GtrxJb3d1JbJZQl2J5wOlNsPh3r92ytcERRn35xXBVw1WrVfIjoWIpUo++zK8zyz+9ZUUfd2nJJqzoE8kuo2BWNj++5bHau10/4ZadbsHmmaZh1B7V0Vpoum2IRYLdQYzkHHeuvD5PV51Ko9jjxOb0uVxprc0k+8PpUlRpyxcVJX0i2PnAooopgFFFFABRRRQAUUUUAFFFFABQelFBoAjPDgY4I5r5/+Knhm80XxBLqVvA7Ws53ORzj3r6AUEBgOvY1Vv7CDUbJra9iSVHG0gisqtJVI2NaNZ0pXR8tWM5FwHkP7kn5Jf79bkmpGNJAwGWQkR+vvWh8Qvhrqfhi6a+0eNrrTuS0QH+rFcTFqPnQydfK2kMx6qfSvKnSlFnt060ZrQhh1CW+tybifcQxxjtVS9iN4n72VmA6YNVrULFbtgnqTTZroJH1NKxVzA17TUihWT5sqwI5rtXlNzoUaE5PlgVxWv30f2YBpFHI6muq0u5WSyiUfMPL7fSqa90mLSk7HIX93tguQ6+VsXC/Wp/BxwolQcn72e9O0vwxr3ifVjp9pp8s8U8pX7ZtIVK6XUPhV4m+H8we/ge7sepuYxwn4VniqUnRdkXh6sfbas6DT5xgcYzW5bSHHDAVzenOrhCh3KR8p9RW9bRs2ADivkK1N3Po4TRqwEk1oW/WqFuuAB6Veh4NZRp2KlIv78KKY7jHWo3fAqCWXAr04/Cjje5BezEKRmudvpAqnBxWteSZUk1gX8g2nmueqveNqexzGrSE3ifMRk9M11tgSsMW3pgVxOqyf6bH6Zrs9Pk/cxfQVtWj7iOWrLU6nTdQlidAXOfau2TUPMtF3MTxXAWYVyje9dhCF+ypz2rz1HU5qsEy292MBRk5pvmyMSuQFx6VHmNEAPJqIzEynBwMVqSlY8Y+OmZdb0+J3Yxqu7Ge9R+E7oLJC4Pzl1BNSfGhVfWrMlhnZWN4clMNxb/8AXRa+hwv8CJmviZ9BxMdp6AOAT70JMqygdcVVWcSJEemFGab9piWTqM10IGzr/CrpJdTDaOfWuqBOwmuF8GXnm6m6jFd2R8pFevhP4Z4OO/jMMZpQgXoBQKWuuxyCBACSB1paKKACiiigAooooAKKKKACiiigAooooAKDyKKKAEK5GKa0asu0g4p9FAEEiJJGY5Yw0bDBB5zXkvxB+DEN48mpeHV+z3RUsyfwN+Fevkbh8wpMDbgGs5wU9zSnUcNj4xfRvEUExs/7AuJpckADvWvpvwa+IGvna1kdKjP8UvNfV6WVsH89LePzP723mpQxCk7i5HZawjhIrdnTLGzeyPA9I/ZV0+4tCPE1+11N/CYjtwaz9R+AfiLTZ9mjXK/ZVICq3JxX0dknGVNLjBzuwK0eHi1YxjiakZXMbw1olvpekWkH2SGOSKMByqYJbua0ZraG7haO5iWWM9VcZFWiOOO9AUBcVrbSxjd3ueXeJvhFZzCS68Pj7LM5LMrdCfYdq4OSyutHlNrf27rKOPNxxX0UydNpwRWfq2h2GsQmO9gUj+9jmvKxuU063vQ0Z6mEzWdJ2lqjw6CTYQJCAp6N61eXehDAgp61u658PL3S3efTwbqDOVTuorlxcCC5EUquk4OPLNfMYnBzovlknf8AA+loYqFdc0GrF2WUkEqhK9jVKW4YnHSkup5kld5HCKf4PSsy41CJiQoZj7URTtZ6lNpu60H3coOVVw7DqnpXP6jKQCCQrdlrdh0vVtXUJa2Mjxt90qMN+NbWn/BTXNSG67uVt4j/AAuPmreGCq1WnFGFTG06StKR43qkpjvYy/JB5jHUV2djIxgilHyx4HHcV6rY/AfQ7GwcO5a+b/lvJyK4TWPh/rXhaSRpraW9ticiSL7qiunFZfVhTTaOGGPpVZ8qLFi/3NrhlPNddBLm3UE9q4PS5kkZfLYFQcH2PpXWNOqW64bnFeFytPY6p6miZ8Ng88cVBJck852npmsttQjjk2uWMhGQB6VNa22pagcQWzkE9cVpGjVk7RjcydSMXqx2sfCCy+IloL6O5MV5D8qselcNcfB7xb4UvEaRhfwhsr5Yr6C8G6Tdabpskd2hV3bcMV0TLkAYDD/ar7PC4OPsIxktTxKmNnGo7bHkul6Frup20ReAwMAAciuk0z4dICJNRmLn0Xiu3Ax0AyOuKCquepyK6YYOnFamVXHVJbaGVpfhnTNLnMtrCyv6k1sYpAMUtdMYqKtE5JScneQYoooqhBRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAGKTaKWigBvljcDkjHbtS7QOgApaKAEC4pcUUUAGKMUUUAIVBFJsGMHn606iiwEbx4GBnHpWJrnhDTtbjOYUjl/56KMGt7OMk9KaQrcg4NTOEZq0lcqEnB80NGebR/Cfzbhlu7gtADxzyRXSaT8PNB0kgx23mN6yc5rpNoX5i1O4YcGsKWDo09YxSOipjK1RWlJkcFpBbriKCOMD+4oFSlc96BkUtdK02OV67jPLUjBGfY0kkMcqFJFDIRgqRxUlFFr7gcJrvwt0y8me709fs1wedo4Un1xWdpvwxu5HxqNwNg7JXpTLzu70gyw5zXFPAYeUuZxVzojjKyjy3Of0rwPo+mrxF5zZ+9JzW7HaQQriOFEA/ujFSIAo4p1dFOjTp6QVjF1JS+JjBGMg5PFO2jOeaWitSbBgUbRRRQAYxRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABjr70YHpRRQAhUHqKNoxgcUtFAABgYzmiiigAooooAKTHOc0tFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQB/9k=",
@@ -722,8 +730,6 @@ def _role_wall():
     if role == area:
         return
     if not role:
-        if request.path.rstrip("/") == "/employee/game":          # Update205: direct game URL opened while signed out -> sign in, then come straight back
-            resp = redirect(LOGIN_URL[area]); resp.set_cookie("gm_next", "1", max_age=900, httponly=True, samesite="Lax"); return resp
         return redirect(LOGIN_URL[area])
     return _wrong_area(area)
 
@@ -1115,7 +1121,7 @@ def entry_metrics(date, emp_id, procs):
     targets = [round(i["hour"] * tph[i["name"]], 2) if tph.get(i["name"], 0) > 0 else "" for i in items]
     prod = sum(i["hour"] for i in items)
     avail = max(target_hours() - deduction_map(emp_id).get((_key(emp_id), str(date)), 0.0), 0.0)
-    return targets, ("" if is_off(date) else _day_pct(prod, avail, tph, items))
+    return targets, ("" if is_weekly_off(date) else _day_pct(prod, avail, tph, items))
 
 def load_subs(emp_id=None):
     """All submissions, or (emp_id given) only that employee's - far less work on a big Productivity log."""
@@ -1170,7 +1176,7 @@ def load_subs(emp_id=None):
         s["earned"] = sum(p["earned"] for p in s["procs"])     # hours' worth of standard output
         s["ded"] = ded.get((_key(s["emp_id"]), str(s["date"])), 0.0)          # approved permission / half-day leave hours that day
         s["avail"] = max(T - s["ded"], 0.0)                                   # working hours left = target hrs less those hours
-        s["off"] = is_off(s["date"])                            # weekly-off / holiday entry: saved, NOT counted
+        s["off"] = is_weekly_off(s["date"])                     # Update205: weekly-off entry: saved, NOT counted (a holiday entry IS counted)
         # Update173: productivity is NOT calculated for a weekend or a declared holiday (None = "not applicable"), never 0% / 100%
         s["pct"] = None if s["off"] else _day_pct(s["prod"], s["avail"], tph, s["procs"])      # Update137: one shared formula (also stored in the sheet)
         # Update66: Admin-set Target Count vs. what the employee completed (target pro-rated to the hours booked)
@@ -1256,8 +1262,6 @@ def parse_form(emp_id):
     tot = sum(p[1] for p in procs) + sum(n[1] for n in notes)
     half = any(num(h) <= 0 and t.strip() for t, h in zip(g("nd"), g("nh")))
     if d is None: err = "Please choose a valid date."
-    elif session.get("role") == "employee" and is_holiday(date):
-        err = f"{date} is a holiday{(' (' + holiday_name(date) + ')') if holiday_name(date) else ''}. Productivity entries cannot be submitted or updated for a holiday."
     elif session.get("role") == "employee" and join_date(emp_id) and d < join_date(emp_id):
         err = f"Productivity entry is available only from your joining date ({join_date(emp_id).strftime('%d %b %Y')}). You cannot submit an entry for {date}."
     elif not procs: err = "Add at least one process entry."
@@ -1563,7 +1567,7 @@ def online_set(att_id, emp_id, name, active=None):
         cur = _online.get(att_id) or {"since": now}
         cur.update(eid=str(emp_id), name=str(name or ""), seen=now, active=active or now)
         _online[att_id] = cur
-    try: gm_touch_app(str(emp_id), str(name or ""))      # Update205: Multiplayer Game - who is online in the app (throttled, shared by all workers)
+    try: gm_touch_app(str(emp_id), str(name or ""))      # Update204: Multiplayer Game lobby - who is online in the app (throttled, shared by all workers)
     except Exception: pass
 
 def online_drop(att_id):
@@ -3697,6 +3701,10 @@ def page(body, title="Productivity Tracker", **ctx):
             if mz_active(session.get("emp_id", "")): items.append(("/employee/mahizhchi", MZ_TITLE))
         except Exception as e:
             print("Mahizhchi menu check failed (are the Mahizhchi sheets created? restart the app once):", e)
+        try:      # Update204: Multiplayer Game link - Employee page only, and only while the Admin has enabled it for this employee
+            if gm_allowed(session.get("emp_id", "")): items.append(("/employee/game", GM_TITLE))
+        except Exception as e:
+            print("Multiplayer Game menu check failed:", repr(e))
     nav = [(h, l, p == h or (h != "/employee" and p.startswith(h + "/")), []) for h, l in items]
     if session.get("role") == "admin":      # Update66: Employee Info expands to Employees / Notifications / Mahizhchi
         view = request.args.get("view", "")
@@ -3955,7 +3963,7 @@ LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th
 <td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
 <td>{{ (s.tgt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td><td>{{ (s.cnt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td>
 <td>{% if s.tgt_state=='met' %}<span class="tg-badge met">&#9989; Achieved</span>{% elif s.tgt_state=='miss' %}<span class="tg-badge miss" title="Below target: {{s.tgt_miss|join(', ')}}">&#10060; Not Achieved</span>{% else %}-{% endif %}</td>
-<td>{{ 'Weekend / Holiday - not counted' if s.off else (s.pct ~ '%') }}</td>
+<td>{{ 'Weekend - not counted' if s.off else (s.pct ~ '%') }}</td>
 <td class="act"><a href="/entry/{{s.id}}/view{{ ('?next=' ~ (nxt|urlencode)) if nxt else '' }}">View</a><a href="/entry/{{s.id}}{{ ('?next=' ~ (nxt|urlencode)) if nxt else '' }}">Edit</a>
 <form method="post" action="/entry/{{s.id}}/delete{{ ('?next=' ~ (nxt|urlencode)) if nxt else '' }}" onsubmit="return confirm('Delete this entry?')"><button class="danger">Delete</button></form></td></tr>
 {% else %}<tr><td colspan="{{ 10 if session.role=='admin' else 8 }}">{{ empty_msg or 'Nothing yet.' }}</td></tr>{% endfor %}</table>"""
@@ -4057,7 +4065,7 @@ VIEW = """<div class="card"><h2>{{s.date}} &middot; {{s.emp_name}} ({{s.emp_id}}
 {% for p in s.procs %}<tr><td>{{p.name}}</td><td>{{p.desc}}</td><td>{{p.hour|g}}</td><td>{{ '-' if p.training else (p.count|g) }}</td><td>{{ '-' if p.training else (p.target|g) }}</td>
 <td>{{ (p.pct ~ '%') if p.pct is not none else '-' }}</td></tr>{% endfor %}</table><br>
 <table><tr><th>Notes</th><th>Hour</th></tr>{% for n in s.notes %}<tr><td>{{n.desc}}</td><td>{{n.hour|g}}</td></tr>{% endfor %}</table>
-<div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day|g}} hrs &middot; {% if s.off %}<b>Weekend / Holiday entry - not counted</b>{% else %}Productivity: <b>{{s.pct}}%</b> ({{s.avail|g}} hrs = 100%{% if s.ded %} &ndash; {{target|g}}-hr day less {{s.ded|g}} hr permission / half-day leave{% endif %}){% endif %}</div>
+<div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day|g}} hrs &middot; {% if s.off %}<b>Weekend entry - not counted</b>{% else %}Productivity: <b>{{s.pct}}%</b> ({{s.avail|g}} hrs = 100%{% if s.ded %} &ndash; {{target|g}}-hr day less {{s.ded|g}} hr permission / half-day leave{% endif %}){% endif %}</div>
 <a href="{{back}}">Back</a></div>"""
 
 # ---------------------------------------------------------------- routes: common
@@ -4302,8 +4310,8 @@ def log_report_data(period, emp_q="", on=None):
     day = lambda d: dt.date.fromisoformat(str(d)).strftime("%a") if str(d)[:4].isdigit() else ""
     summary, detail = [], []
     for s in subs:
-        pct = "Weekend / Holiday - not counted" if s["off"] else s["pct"]
-        tstat = {"off": "Weekend / Holiday - not counted", "none": "No target", "met": "Target met"}.get(s["tgt_state"], "Target not met")
+        pct = "Weekend - not counted" if s["off"] else s["pct"]
+        tstat = {"off": "Weekend - not counted", "none": "No target", "met": "Target met"}.get(s["tgt_state"], "Target not met")
         summary.append([s["date"], day(s["date"]), s["emp_id"], s["emp_name"], s["designation"], s["band"],
                         s["prod"], s["non"], s["total"], pct, s["tgt_total"], s["cnt_total"], tstat])
         base = [s["date"], day(s["date"]), s["emp_id"], s["emp_name"], s["designation"], s["band"]]
@@ -4392,7 +4400,7 @@ def admin_log_add():
             import traceback; traceback.print_exc()
             flash("The entry could not be saved right now (the data service is busy). Nothing was saved - please press Save again.", "error")
             return redirect(action)
-        flash(f"Entry for {date} added for {name}." + (f" Note: {date} is a weekly off / holiday, so it is not counted in calculations." if is_off(date) else ""))
+        flash(f"Entry for {date} added for {name}." + (f" Note: {date} is a weekly off, so it is not counted in calculations." if is_weekly_off(date) else ""))
         return redirect("/admin/log?emp=" + urllib.parse.quote(emp_id, safe=""))
     sub = dict(date=(request.args.get("date") or request.args.get("adate") or str(today_local())), band=band, designation=find_designation(emp_id, name, band),
                emp_id=emp_id, emp_name=name, procs=[{}], notes=[{}])
@@ -4427,8 +4435,8 @@ def admin_log_report():
     period = "week" if request.args.get("period") == "week" else "month"
     rep_month, on = report_scope()
     r = log_report_data(period, request.args.get("emp", ""), on)
-    tp = sum(x[6] for x in r["summary"] if x[9] != "Weekend / Holiday - not counted")
-    tn = sum(x[7] for x in r["summary"] if x[9] != "Weekend / Holiday - not counted")
+    tp = sum(x[6] for x in r["summary"] if x[9] != "Weekend - not counted")
+    tn = sum(x[7] for x in r["summary"] if x[9] != "Weekend - not counted")
     return page(LOG_REPORT, title="Productivity report", period=period, label=r["label"], emp=r["emp"],
                 summary=r["summary"], detail=r["detail"], totals=r["totals"], th=TOTAL_HEADS, rep_month=rep_month, sh=SUMMARY_HEADS, dh=DETAIL_HEADS, tp=tp, tn=tn,
                 now=now_local().strftime("%Y-%m-%d %I:%M %p"), autoprint=request.args.get("print") == "1")
@@ -4482,7 +4490,7 @@ def admin_log_export():
 
 # ---------------------------------------------------------------- admin: Leave & Permission Log (all employees)
 LP_LOG = """<div class="head"><div><h1>Leave &amp; Permission Log</h1>
-<p class="mut">{{label}} &middot; every employee's leave and permission requests with dates, duration, reason and approval status. Both leave and permission requests need admin approval - use Approve / Reject in the Action column (a decision can be changed later). Holidays declared by admin are shown here too: employees cannot submit leave or productivity entries on a holiday, and holidays never reduce leave balance or count as missed entries.</p></div></div>
+<p class="mut">{{label}} &middot; every employee's leave and permission requests with dates, duration, reason and approval status. Both leave and permission requests need admin approval - use Approve / Reject in the Action column (a decision can be changed later). Holidays declared by admin are shown here too: employees cannot apply leave or permission on a holiday and holidays never reduce leave balance, but employees MUST still fill in their daily productivity entry on a holiday - a holiday without an entry is a missed entry.</p></div></div>
 <div class="card no-print"><h2>&#127774; Mark a Holiday</h2>
 <form method="post" action="/admin/leave-permission/holiday" class="grid">
 <input type="hidden" name="next" value="{{here}}">
@@ -4508,9 +4516,9 @@ LP_LOG = """<div class="head"><div><h1>Leave &amp; Permission Log</h1>
 <th>Reason</th><th>Applied at</th><th>Status</th><th>Reviewed</th><th class="no-print">Action</th></tr>
 {% for r in rows %}{% if r.type=='Holiday' %}<tr style="background:rgba(245,158,11,.12)"><td><span class="pill act">&#127774; Holiday</span></td>
 <td colspan="3"><b>{{r.name}}</b> &middot; all employees</td>
-<td>{{r.start}}</td><td>{{r.end}}</td><td>1 day</td><td>Declared holiday - no leave / productivity entries; leave balance unaffected</td><td>-</td>
+<td>{{r.start}}</td><td>{{r.end}}</td><td>1 day</td><td>Declared holiday - no leave / permission; productivity entry still required; leave balance unaffected</td><td>-</td>
 <td><span class="pill act">Holiday</span></td><td>-</td>
-<td class="act no-print"><form method="post" action="/admin/leave-permission/holiday/delete" onsubmit="return confirm('Remove this holiday? Employees will be able to submit entries for this date again.')"><input type="hidden" name="date" value="{{r.start}}"><input type="hidden" name="next" value="{{here}}"><button class="danger">Remove</button></form></td></tr>
+<td class="act no-print"><form method="post" action="/admin/leave-permission/holiday/delete" onsubmit="return confirm('Remove this holiday? The date will become a normal day again.')"><input type="hidden" name="date" value="{{r.start}}"><input type="hidden" name="next" value="{{here}}"><button class="danger">Remove</button></form></td></tr>
 {% else %}<tr><td><span class="pill {{'act' if r.type=='Permission' else ''}}">{{r.type}}</span></td>
 <td><a href="/admin/employee-info/{{r.eid|urlencode}}?tab=leave">{{r.eid}} &middot; {{r.name}}</a></td><td>{{r.desig}}</td><td>{{r.band}}</td>
 <td>{{r.start}}</td><td>{{r.end}}</td><td>{{r.dur}}</td><td>{{r.reason}}</td><td>{{r.applied|t12}}</td>
@@ -4623,7 +4631,7 @@ def admin_leave_permission():
 @app.route("/admin/leave-permission/holiday", methods=["POST"])
 @need("admin")
 def admin_holiday_add():
-    """Mark one date (or a range) as a holiday. Employees can no longer submit leave / productivity for it."""
+    """Mark one date (or a range) as a holiday. Employees can no longer apply leave / permission for it (the productivity entry is still required)."""
     nxt = request.form.get("next", "")
     back = nxt if nxt.startswith("/admin/") else "/admin/leave-permission"
     d1 = (request.form.get("d1") or "").strip(); d2 = (request.form.get("d2") or "").strip() or d1
@@ -5002,8 +5010,6 @@ def employee_login():
                                designation=str(e.get("Designation", "")))
                 track_login(session["emp_id"], session["name"], session["band"])
                 _bg(warm_employee_cache)                  # dashboard data loads while the welcome animation plays
-                if request.cookies.get("gm_next") == "1":             # Update205: came from the direct game URL
-                    resp = redirect("/employee/game"); resp.delete_cookie("gm_next"); return resp
                 return redirect("/employee")                  # Update202: straight to the Employee Panel (no welcome page)
         flash("Wrong username or password.")
     return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee",
@@ -6453,14 +6459,14 @@ def _employee_save_impl():
         return redirect("/employee")
     # ---- the data is saved from here on: nothing below may turn a successful save into an error page ----
     session["saved_anim"] = True       # Update95: 3-second 3D "Saved successfully" animation, shown on the same page after the data is saved
-    flash("Saved." + (f" Note: {date} is a weekly off / holiday, so this entry is not counted in calculations." if is_off(date) else ""))
+    flash("Saved." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_weekly_off(date) else ""))
     try: log_change(SEC_PROD, "Added", entry_added_details(date, procs, notes))
     except Exception as ex: print("log_change failed:", ex)
     try:
-        miss = [] if is_off(date) else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
+        miss = [] if is_weekly_off(date) else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
         if miss: flash(target_alert_text(miss), "error")           # employee is told straight away that the target was missed
         # Update94: 100% = not a weekly off, every Admin target met, and all required working hours logged -> flower animation (3 s)
-        if not is_off(date) and not miss and sum(p_[1] for p_ in procs) + sum(n_[1] for n_ in notes) + 1e-9 >= required_hours(session["emp_id"], date):
+        if not is_weekly_off(date) and not miss and sum(p_[1] for p_ in procs) + sum(n_[1] for n_ in notes) + 1e-9 >= required_hours(session["emp_id"], date):
             session["bloom"] = True
     except Exception as ex:
         print("post-save checks failed:", ex)
@@ -6486,8 +6492,8 @@ def entry_edit(sid):
             delete_rows(old)
             write_sub(sid, date, (s["band"], s["emp_id"], s["emp_name"]), procs, notes)
         if changed: log_change(SEC_PROD, "Updated", changed)
-        flash("Updated." + (f" Note: {date} is a weekly off / holiday, so this entry is not counted in calculations." if is_off(date) else ""))
-        miss = [] if is_off(date) or session.get("role") != "employee" else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
+        flash("Updated." + (f" Note: {date} is a weekly off, so this entry is not counted in calculations." if is_weekly_off(date) else ""))
+        miss = [] if is_weekly_off(date) or session.get("role") != "employee" else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
         if miss: flash(target_alert_text(miss), "error")
         return redirect(next_url() or home())
     nx = next_url()
@@ -6516,7 +6522,7 @@ app.jinja_env.filters["tone"] = lambda v: "" if v >= 90 else ("a" if v >= 75 els
 def workdays(start, end):          # Mon-Sat (Sunday = weekly off)
     n, d = 0, start
     while d <= end:
-        n += not is_off(d)          # weekly offs AND holidays are not working days
+        n += not is_weekly_off(d)   # Update205: only weekly offs are not working days - a holiday still needs a productivity entry
         d += dt.timedelta(days=1)
     return n
 
@@ -6541,7 +6547,7 @@ def report(employees, subs, leaves, start, end):
         wd_i = 0 if ea > b else (workdays(dt.date.fromisoformat(ea), end) if ea != a else wd)
         mine = [s for s in subs if _key(s["emp_id"]) == ek and ea <= s["date"] <= b and not s["off"]]
         days = {s["date"] for s in mine}
-        mylv = [l for l in leaves if _key(l["Employee ID"]) == ek and ea <= l["Date"] <= b and not is_off(l["Date"])]
+        mylv = [l for l in leaves if _key(l["Employee ID"]) == ek and ea <= l["Date"] <= b and not is_weekly_off(l["Date"])]
         lv = {l["Date"] for l in mylv if not leave_is_half(l)} - days   # Update170: a full-day leave date that also has a productivity entry is a day WORKED - counted once (Present), not twice
         half = {l["Date"] for l in mylv if leave_is_half(l)}            # half-day leave: 4 hrs still have to be worked
         perm_hrs = sum(num(r.get("Hours")) for r in perms
@@ -6563,7 +6569,7 @@ def report(employees, subs, leaves, start, end):
         full = days - half                                              # worked days that are not half-day-leave days
         today_s = str(today_local())
         # today is still running: with no entry / leave yet it is "not marked" - it is NOT counted as Absent until the day is over
-        pending_today = 1 if (ea <= today_s <= b and not is_off(today_s) and today_s not in (days | lv | half)) else 0
+        pending_today = 1 if (ea <= today_s <= b and not is_weekly_off(today_s) and today_s not in (days | lv | half)) else 0
         wd_e = wd_i - pending_today                                       # working days that have a status so far
         credit = len(full) + 0.5 * len(half)                            # Present 1 + Half day 0.5 + Absent 0
         present_n = credit
@@ -6693,7 +6699,7 @@ app.jinja_env.filters["ppill"] = permission_pill
 PROD_TRACKING_START = dt.date(2026, 10, 1)              # Update165: Productivity tracking began in October 2026 - no date before this is ever "missed" (log, dashboard, reports, reminder e-mails)
 
 def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
-    """Working days (weekly offs and holidays excluded) in start..end with no entry and no leave."""
+    """Working days (weekly offs excluded; HOLIDAYS ARE INCLUDED - an entry is mandatory on a holiday too) in start..end with no entry and no leave."""
     eid = str(eid)
     if is_view_only(eid): return []                    # Update105: no Missed Productivity Entry for View-Only designations
     if start < PROD_TRACKING_START: start = PROD_TRACKING_START      # Update165: never flag September 2026 or earlier as missing
@@ -6704,7 +6710,7 @@ def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
            {norm_date(l["Date"]) for l in leaves if _key(l["Employee ID"]) == _key(eid) and not leave_is_half(l)}      # a half-day leave still needs an entry (4 hrs)
     out, d = [], start
     while d <= end:
-        if not is_off(d) and str(d) not in done:      # d is a date -> "YYYY-MM-DD"
+        if not is_weekly_off(d) and str(d) not in done:      # d is a date -> "YYYY-MM-DD"
             out.append(d.strftime(fmt))
         d += dt.timedelta(days=1)
     return out
@@ -6845,7 +6851,7 @@ LEAVE_EMP = """<style>
 <label>Day type<select name="daytype"><option value="Full day">Full day</option><option value="Half day">Half day (4 hrs)</option></select></label>
 <label>Reason<input name="reason" size="30" placeholder="Reason"></label>
 <button class="primary">Submit leave</button></form></div>
-{% if hols %}<p class="mut">&#127774; <b>Upcoming holidays</b> (no leave, permission or productivity entry needed): {% for d,n in hols %}{{d}}{% if n %} - {{n}}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+{% if hols %}<p class="mut">&#127774; <b>Upcoming holidays</b> (no leave or permission needed - the daily productivity entry must still be filled in): {% for d,n in hols %}{{d}}{% if n %} - {{n}}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
 <h2>My leave days</h2><table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
 {% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}{% if r|lhalf %} <span class="pill act">Half day</span>{% endif %}</td><td>{{r['Applied at']|t12}}</td>
 <td><span class="pill {{st|ppill}}">{{st}}</span></td>
@@ -6986,7 +6992,7 @@ def admin_summary_check():
     a, b = str(start), str(end); view = []
     for s in sorted(subs_all, key=lambda x: x["date"]):
         if not (a <= s["date"] <= b): continue
-        why = "No - weekly off / holiday" if s["off"] else ("No - before joining date" if (join_date(s["emp_id"]) and s["date"] < str(join_date(s["emp_id"]))) else "Yes")
+        why = "No - weekly off" if s["off"] else ("No - before joining date" if (join_date(s["emp_id"]) and s["date"] < str(join_date(s["emp_id"]))) else "Yes")
         view.append(dict(s, why=why))
     lv = [l for l in live_leaves(leaves) if _key(l["Employee ID"]) == _key(eid) and a <= l["Date"] <= b]
     return page(CHECK_PAGE, title="Overview check", r=r, subs=view, leaves=lv, label=label, month=month)
@@ -7395,7 +7401,7 @@ AUD_PROD = """<div class="totals">Working days: <b>{{k.wd}}</b> &middot; Present
 <h2>Daily entries</h2>
 <table><tr><th>Date</th><th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Productivity</th></tr>
 {% for s in subs %}<tr><td>{{s.date}}</td><td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
-<td>{{ 'Weekend / Holiday - not counted' if s.off else (s.pct ~ '%') }}</td></tr>
+<td>{{ 'Weekend - not counted' if s.off else (s.pct ~ '%') }}</td></tr>
 {% else %}<tr><td colspan="5">No productivity entries for this period.</td></tr>{% endfor %}</table>"""
 
 AUD_ATT = """<div class="totals">Working days: <b>{{k.wd}}</b> &middot; Present: <b>{{k.present}}</b> &middot; Leave: <b>{{k.leave}}</b>
@@ -7453,8 +7459,8 @@ def _aud_att_days(eid, subs, sess, start, end):
         if ds in half_days and not is_off(d): st = "Half day"
         elif ds in present: st = "Present"
         elif ds in leave: st, note = "Leave", leave[ds] + " leave"
-        elif ds in holiday_map(): st, note = "Holiday", holiday_name(ds)
-        elif is_off(d): st = "Weekly off"
+        elif ds in holiday_map(): st, note = ("Absent" if d < today_local() else "-"), (holiday_name(ds) + " (holiday - entry required)")
+        elif is_weekly_off(d): st = "Weekly off"
         elif d < today_local(): st = "Absent"
         else: st = "-"
         if ds in half_days: note = (note + " · " if note else "") + "Half-day leave (4 hrs)"
@@ -9138,7 +9144,7 @@ def admin_missed_send():
 
 # ---------------------------------------------------------------- Update93: MISSED ENTRIES LOG (separate Admin page)
 MLOG = '''<div class="head"><div><h1>Missed Entries Log</h1>
-<p class="mut">{{label}} &middot; Every employee with working days (weekly off / holidays excluded) that have no productivity entry and no leave. Today is not included.</p></div>
+<p class="mut">{{label}} &middot; Every employee with working days (weekly off excluded; holidays included) that have no productivity entry and no leave. Today is not included.</p></div>
 <form class="grid no-print" method="get"><input type="month" name="month" value="{{month if month!='all' else ''}}">
 <input name="emp" placeholder="Employee ID / name" value="{{emp}}">
 <button class="primary">Show</button><a href="/admin/missed-log">Reset</a><a href="/admin/missed-log?month=all">All time</a></form></div>
@@ -9313,8 +9319,8 @@ def run_auto_missed_mail(force=False):
         global _holidays_cache
         _holidays_cache = None                               # Update177: never judge a working day from a stale holiday list
         today = today_local()
-        if is_off(today):                                    # Update160: NO reminder e-mails on weekends / public holidays (also for "send now")
-            print("Automatic missed-entry e-mail skipped: today is a weekly off / holiday."); return None
+        if is_weekly_off(today):                             # Update205: no reminder e-mails on weekly offs (holidays are working days for productivity entries)
+            print("Automatic missed-entry e-mail skipped: today is a weekly off."); return None
         if not force and not _auto_claim_run(today): return "busy"
         end = today - dt.timedelta(days=1); start = today.replace(day=1)      # Update178: ONLY the CURRENT month is checked (never a previous month)
         if end < start: print("Automatic missed-entry e-mail: nothing to check yet (first day of the month)."); return (0, 0)
@@ -9356,7 +9362,7 @@ def run_auto_missed_mail(force=False):
                 print("Automatic missed-entry e-mail: live re-check failed - this batch is NOT sent, it is retried in the next slot:", repr(ex)); failed += len(chunk); continue
             keep = []
             for emp, pend in chunk:
-                left = [d for d in pend if d not in covered.get(_key(emp["eid"]), set()) and d not in hol and not is_off(d)]
+                left = [d for d in pend if d not in covered.get(_key(emp["eid"]), set()) and not is_weekly_off(d)]
                 if len(left) != len(pend): print(f"Automatic missed-entry e-mail: {emp['eid']} - {len(pend) - len(left)} date(s) SKIPPED (entry / leave / holiday found at send time)")
                 skipped += len(pend) - len(left)
                 if left: keep.append((emp, missed_message(emp, left), ", ".join(left), len(left)))
@@ -9378,7 +9384,7 @@ def _auto_mail_loop():
         try:
             now = now_local()
             if _auto_tries[1] != now.date(): _auto_tries[0], _auto_tries[1] = 0, now.date()
-            if _auto_done_day[0] != now.date() and _auto_tries[0] < 8 and now.time() >= _auto_time() and not is_off(now.date()) and auto_mail_on():
+            if _auto_done_day[0] != now.date() and _auto_tries[0] < 8 and now.time() >= _auto_time() and not is_weekly_off(now.date()) and auto_mail_on():
                 res = run_auto_missed_mail()
                 if res == "busy":                                             # Update159: another worker is running / ran this slot - look again in the next slot, not every minute
                     time.sleep(1500)
@@ -9397,7 +9403,7 @@ def admin_email_controls_run_now():
     """Update157: Admin-only - run the automatic missed-entry e-mail right now (same job, same rules: every still-missing date of this month, to each employee's own Office Email ID)."""
     _admin_only_mail()
     if not MAIL_READY: flash("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST, and MAIL_FROM).", "error"); return redirect("/admin/email-controls")
-    if is_off(today_local()): flash("Nothing was sent: today is a weekly off / holiday - reminder e-mails are not sent on those days.", "error"); return redirect("/admin/email-controls")
+    if is_weekly_off(today_local()): flash("Nothing was sent: today is a weekly off - reminder e-mails are not sent on weekly offs.", "error"); return redirect("/admin/email-controls")
     res = run_auto_missed_mail(force=True)
     if res is None: flash("Nothing was sent: e-mail is not fully configured on the server (sender e-mail / BREVO_API_KEY).", "error")
     else: flash(f"Automatic e-mail run finished: {res[0]} e-mail(s) sent (one per missed date), {res[1]} failed. See the status board below.")
@@ -9428,7 +9434,7 @@ EMAIL_CONTROLS = """<div class="head"><div><h1>Email Controls</h1>
 <label>Send time<input type="time" name="auto_time" value="{{auto_time_val}}" required></label>
 <button class="primary sm">Save</button></form>
 <form method="post" action="/admin/email-controls/run-now" style="margin:8px 0" onsubmit="return confirm('Send the missed-entry e-mails to all employees with missingsed dates now?')"><button class="primary sm">&#9993; Send automatic e-mails now</button></form>
-<p class="mut">Status: <b style="color:{{'#15803d' if auto_on else '#991b1b'}}">{{'ENABLED' if auto_on else 'DISABLED'}}</b>. When enabled, every day at <b>{{auto_time}}</b> (the time set here by the Admin) each employee with a pending (missed, not yet submitted) Productivity Entry receives ONE SEPARATE e-mail for EACH missed date, with their name, that date and the Productivity Tracker login link. No e-mails are sent on weekly offs or public holidays. A date keeps being reminded every working day until the entry is submitted (or leave is approved) - then its reminders stop automatically. Last automatic run: <b>{{auto_last or 'never'}}</b>. Only Admin can change this.</p></div>
+<p class="mut">Status: <b style="color:{{'#15803d' if auto_on else '#991b1b'}}">{{'ENABLED' if auto_on else 'DISABLED'}}</b>. When enabled, every day at <b>{{auto_time}}</b> (the time set here by the Admin) each employee with a pending (missed, not yet submitted) Productivity Entry receives ONE SEPARATE e-mail for EACH missed date, with their name, that date and the Productivity Tracker login link. No e-mails are sent on weekly offs (holidays are working days for productivity entries). A date keeps being reminded every working day until the entry is submitted (or leave is approved) - then its reminders stop automatically. Last automatic run: <b>{{auto_last or 'never'}}</b>. Only Admin can change this.</p></div>
 
 <details class="card" id="ec-send-win" open><summary style="cursor:pointer"><h2 style="display:inline">1. Send a reminder manually</h2></summary>
 <form method="post" action="/admin/email-controls/send" id="ec-form" onsubmit="return ecCheck()">
@@ -10198,7 +10204,7 @@ def admin_mn_template():
 
 # ---------------------------------------------------------------- Update99: "Missed Entries" section below the Productivity log
 LOG_MISSED = """<div class="card" id="missed-entries" style="margin-top:22px"><h2>Missed Entries</h2>
-<p class="mut">Working days (weekly off / holidays excluded) with no productivity entry and no leave &middot; today is not included. Same data as Employee Info &rarr; Missed Entries, for all employees. The Employee filter above also applies here.</p>
+<p class="mut">Working days (weekly off excluded; holidays included) with no productivity entry and no leave &middot; today is not included. Same data as Employee Info &rarr; Missed Entries, for all employees. The Employee filter above also applies here.</p>
 <form class="grid no-print" method="get" action="/admin/log#missed-entries">
 <input type="hidden" name="date" value="{{request.args.get('date','')}}"><input type="hidden" name="emp" value="{{request.args.get('emp','')}}">
 <label>Month<input type="month" name="mmonth" value="{{mmonth if mmonth!='all' else ''}}"></label><button class="primary">Show</button>
@@ -10293,26 +10299,27 @@ def admin_work_time_access_remove(): return _wts_one(False)
 
 
 
-# ================================================================ Multiplayer Game "Number Rush"  - Update205
-# ONE shared game session for any number of employees. Everybody who joins sees the SAME board and races to tap the numbers in order
-# (1, 2, 3 ...): whoever taps the current number first scores it. The SERVER decides who was first, so every screen agrees and scores /
-# progress stay synchronized. The board grows with the number of players. Highest score wins the round; anyone who joined can start the next one.
-#   * There is NO menu item, button or link anywhere in the Employee panel. Employees open the game only by the direct URL /employee/game.
+# ================================================================ Multiplayer Game "Number Rush"  - Update204
+# Two employees play the SAME board at the SAME time and race to tap the numbers 1..25 in order; whoever taps the current number first
+# scores it. The SERVER decides who was first, so both screens always agree and scores / progress stay synchronized.
 #   * Admin > Employee Info > Multiplayer Game: master Enable / Disable switch + per-employee access (stored in the Settings sheet).
-#   * Live state (who is online, the session, scores) lives in a small SQLite file shared by ALL server workers (gunicorn -w 4 safe, no Google
-#     Sheets calls while playing, so the main application is never slowed down). It is temporary data: a restart only ends the running round.
-import sqlite3, tempfile, math
+#   * Employees open it from their own left menu ("Multiplayer Game"); the link exists only for employees and only while the Admin allows it.
+#   * Lobby: lists the employees who are online (green = in the game lobby and can be invited), invite -> accept / decline -> match.
+#   * Live state (presence, invites, matches) lives in a small SQLite file shared by ALL server workers (gunicorn -w 4 safe, no Google Sheets
+#     calls while playing, so the main application is never slowed down). It is temporary data: a restart only ends running matches.
+import sqlite3, tempfile
 
 GM_DB = os.getenv("GAME_DB", os.path.join(tempfile.gettempdir(), "pt_multiplayer_game.db"))
 GM_ON_KEY, GM_BLOCK_KEY = "Multiplayer Game enabled", "Multiplayer Game blocked"        # rows in the Settings sheet (Yes / No, comma separated Employee IDs)
 GM_TITLE = "Multiplayer Game"
-GM_MIN_PLAYERS = 2          # a round needs at least this many joined players
-GM_MAX_TILES = 100          # the board grows with the players: 25 numbers up to 100
-GM_COUNTDOWN = 3.5          # seconds between "Start" and the first tap
+GM_TILES = 25               # numbers 1..25 on the board
+GM_MATCH_SEC = 90           # a match ends after this many seconds (or when all numbers are taken)
+GM_COUNTDOWN = 3.5          # seconds between "accepted" and the first tap
 GM_WRONG_LOCK = 1.0         # a wrong tap freezes that player's board for this long (stops button mashing)
 GM_LOBBY_TTL = 10           # game page not polled for this long -> no longer "in the lobby"
 GM_APP_TTL = 90             # same meaning as the main app's online list
-GM_PLAYER_TTL = 15          # a player silent this long has left the session
+GM_INVITE_TTL = 30          # an invitation waits this long for an answer
+GM_PLAYER_TTL = 15          # a player silent this long during a match forfeits it
 
 _gm_ready, _gm_init_lock = False, threading.Lock()
 _gm_cfg_cache = (0.0, None)
@@ -10331,11 +10338,17 @@ def _gm_conn():
                     c.executescript("""
                     CREATE TABLE IF NOT EXISTS cfg(k TEXT PRIMARY KEY, v TEXT);
                     CREATE TABLE IF NOT EXISTS presence(eid TEXT PRIMARY KEY, name TEXT, app_seen REAL DEFAULT 0, game_seen REAL DEFAULT 0);
-                    CREATE TABLE IF NOT EXISTS gm_room(id INTEGER PRIMARY KEY, status TEXT, round_no INTEGER, start_at REAL, layout TEXT, claimed TEXT,
-                                                       nxt INTEGER, total INTEGER, cols INTEGER, secs INTEGER, last_n INTEGER, last_by TEXT, reason TEXT, updated REAL);
-                    INSERT OR IGNORE INTO gm_room VALUES(1,'lobby',0,0,'[]','{}',1,25,5,85,0,'','',0);
-                    CREATE TABLE IF NOT EXISTS gm_players(eid TEXT PRIMARY KEY, name TEXT, joined INTEGER DEFAULT 0, in_round INTEGER DEFAULT 0,
-                                                          score INTEGER DEFAULT 0, wins INTEGER DEFAULT 0, lock REAL DEFAULT 0, seen REAL DEFAULT 0);
+                    CREATE TABLE IF NOT EXISTS invites(id INTEGER PRIMARY KEY AUTOINCREMENT, frm TEXT, frm_name TEXT, to_id TEXT, to_name TEXT,
+                                                       status TEXT, created REAL, match_id TEXT);
+                    CREATE TABLE IF NOT EXISTS matches(id TEXT PRIMARY KEY, p1 TEXT, p1n TEXT, p2 TEXT, p2n TEXT, s1 INTEGER, s2 INTEGER,
+                                                       w1 INTEGER, w2 INTEGER, layout TEXT, claimed TEXT, nxt INTEGER, start_at REAL, status TEXT,
+                                                       winner TEXT, reason TEXT, last_n INTEGER, last_by INTEGER, lock1 REAL, lock2 REAL,
+                                                       rm1 INTEGER, rm2 INTEGER, gone1 INTEGER, gone2 INTEGER, seen1 REAL, seen2 REAL,
+                                                       created REAL, updated REAL);
+                    CREATE INDEX IF NOT EXISTS ix_inv_to ON invites(to_id, status);
+                    CREATE INDEX IF NOT EXISTS ix_inv_frm ON invites(frm, status);
+                    CREATE INDEX IF NOT EXISTS ix_m_p1 ON matches(p1, status);
+                    CREATE INDEX IF NOT EXISTS ix_m_p2 ON matches(p2, status);
                     """)
                     c.commit()
                 finally: c.close()
@@ -10412,163 +10425,217 @@ def gm_touch_app(eid, name):
     finally: c.close()
 
 
-# ---------------------------------------------------------------- session engine
-def _gm_room(c): return c.execute("SELECT * FROM gm_room WHERE id=1").fetchone()
+# ---------------------------------------------------------------- match engine
+def _gm_active(c, eid):
+    return c.execute("SELECT 1 FROM matches WHERE (p1=? OR p2=?) AND status IN ('countdown','live') LIMIT 1", (eid, eid)).fetchone() is not None
 
-def _gm_finish(c, now, reason, award):
-    """End the running round once (guarded UPDATE: two workers can never finish it twice). The top score(s) get a round win."""
-    if c.execute("UPDATE gm_room SET status='done', reason=?, updated=? WHERE id=1 AND status IN ('countdown','live')", (reason, now)).rowcount != 1: return
-    if award:
-        top = c.execute("SELECT MAX(score) m FROM gm_players WHERE in_round=1").fetchone()["m"]
-        if top: c.execute("UPDATE gm_players SET wins=wins+1 WHERE in_round=1 AND score=?", (top,))
+def _gm_my_match(c, eid, now):
+    return c.execute("SELECT * FROM matches WHERE ((p1=? AND gone1=0) OR (p2=? AND gone2=0)) AND (status!='done' OR updated>?) ORDER BY created DESC LIMIT 1",
+                     (eid, eid, now - 600)).fetchone()
 
-def _gm_advance(c, now):
-    """Time based changes, done lazily by whoever polls first: players that went silent leave, countdown -> live, time up."""
-    c.execute("UPDATE gm_players SET joined=0 WHERE joined=1 AND seen<?", (now - GM_PLAYER_TTL,))
-    r = _gm_room(c)
-    if r["status"] in ("countdown", "live"):
-        if c.execute("SELECT COUNT(*) FROM gm_players WHERE in_round=1 AND joined=1").fetchone()[0] < GM_MIN_PLAYERS:
-            _gm_finish(c, now, "Not enough players left", r["status"] == "live"); return _gm_room(c)
-        if r["status"] == "countdown" and now >= r["start_at"]:
-            c.execute("UPDATE gm_room SET status='live', updated=? WHERE id=1 AND status='countdown'", (now,)); r = _gm_room(c)
-        if r["status"] == "live" and now > r["start_at"] + r["secs"]:
-            _gm_finish(c, now, "Time is up", True); r = _gm_room(c)
-    return r
+def _gm_get(c, mid): return c.execute("SELECT * FROM matches WHERE id=?", (mid,)).fetchone()
 
-def _gm_reset(c, now):
-    c.execute("UPDATE gm_room SET status='lobby', round_no=round_no, claimed='{}', layout='[]', nxt=1, reason='', updated=? WHERE id=1", (now,))
-    c.execute("UPDATE gm_players SET joined=0, in_round=0, score=0, lock=0")
+def _gm_finish(c, mid, winner, reason, now):
+    """winner: '1' / '2' / '0' (draw) / '-' (nobody). Series wins are kept on the match row and carried into a rematch."""
+    c.execute("UPDATE matches SET status='done', winner=?, reason=?, updated=?, w1=w1+?, w2=w2+? WHERE id=? AND status IN ('countdown','live')",
+              (winner, reason, now, 1 if winner == "1" else 0, 1 if winner == "2" else 0, mid))
+
+def _gm_by_score(m): return "1" if m["s1"] > m["s2"] else ("2" if m["s2"] > m["s1"] else "0")
+
+def _gm_advance(c, m, eid, now):
+    """Time based transitions (countdown -> live, time up, a player disappeared). Runs on every poll of either player."""
+    if m["status"] not in ("countdown", "live"): return m
+    me = 1 if m["p1"] == eid else 2; op = 3 - me
+    stale_me, stale_op = now - m["seen%d" % me] > GM_PLAYER_TTL, now - m["seen%d" % op] > GM_PLAYER_TTL
+    c.execute("UPDATE matches SET seen%d=? WHERE id=?" % me, (now, m["id"]))
+    if stale_op:
+        if stale_me or m["status"] == "countdown": _gm_finish(c, m["id"], "-", "Match cancelled - a player left", now)
+        else: _gm_finish(c, m["id"], str(me), "Opponent left the match", now)
+        return _gm_get(c, m["id"])
+    if m["status"] == "countdown" and now >= m["start_at"]:
+        c.execute("UPDATE matches SET status='live', updated=? WHERE id=? AND status='countdown'", (now, m["id"]))
+        m = _gm_get(c, m["id"])
+    if m["status"] == "live" and now > m["start_at"] + GM_MATCH_SEC:
+        _gm_finish(c, m["id"], _gm_by_score(m), "Time is up", now)
+        m = _gm_get(c, m["id"])
+    return m
+
+def _gm_create_match(c, a, an, b, bn, now, w1=0, w2=0):
+    lay = list(range(1, GM_TILES + 1)); random.shuffle(lay)
+    for x in (a, b):                                     # a finished match still open on someone's screen is closed for them
+        c.execute("UPDATE matches SET gone1=1 WHERE p1=? AND status='done'", (x,)); c.execute("UPDATE matches SET gone2=1 WHERE p2=? AND status='done'", (x,))
+    mid = uuid.uuid4().hex[:12]
+    c.execute("""INSERT INTO matches(id,p1,p1n,p2,p2n,s1,s2,w1,w2,layout,claimed,nxt,start_at,status,winner,reason,last_n,last_by,lock1,lock2,rm1,rm2,gone1,gone2,seen1,seen2,created,updated)
+                 VALUES(:id,:a,:an,:b,:bn,0,0,:w1,:w2,:lay,'{}',1,:st,'countdown','','',0,0,0,0,0,0,0,0,:now,:now,:now,:now)""",
+              dict(id=mid, a=a, an=an, b=b, bn=bn, w1=w1, w2=w2, lay=json.dumps(lay), st=now + GM_COUNTDOWN, now=now))
+    c.execute("UPDATE invites SET status='cancelled' WHERE status='pending' AND (frm IN (?,?) OR to_id IN (?,?))", (a, b, a, b))
+    return mid
+
+def _gm_view(m, eid, now):
+    me = 1 if m["p1"] == eid else 2; op = 3 - me
+    cl = {k: ("me" if v == me else "opp") for k, v in json.loads(m["claimed"] or "{}").items()}
+    w = None
+    if m["status"] == "done":
+        w = "none" if m["winner"] in ("-", "", None) else ("draw" if m["winner"] == "0" else ("me" if m["winner"] == str(me) else "opp"))
+    return {"id": m["id"], "status": m["status"], "me": {"name": m["p%dn" % me], "score": m["s%d" % me], "wins": m["w%d" % me]},
+            "opp": {"name": m["p%dn" % op], "score": m["s%d" % op], "wins": m["w%d" % op]},
+            "layout": json.loads(m["layout"]), "claimed": cl, "nxt": m["nxt"], "total": GM_TILES, "secs": GM_MATCH_SEC,
+            "start_in": round(max(0.0, m["start_at"] - now), 2),
+            "left": round(max(0.0, m["start_at"] + GM_MATCH_SEC - now), 2) if m["status"] != "done" else 0,
+            "winner": w, "reason": m["reason"] or "", "last_n": m["last_n"], "last_by": ("me" if m["last_by"] == me else "opp") if m["last_by"] else "",
+            "lock_left": round(max(0.0, m["lock%d" % me] - now), 2), "rm_me": bool(m["rm%d" % me]), "rm_opp": bool(m["rm%d" % op]), "opp_gone": bool(m["gone%d" % op])}
 
 def _gm_purge(c, now):
     if now - _gm_last_purge[0] < 300: return
     _gm_last_purge[0] = now
-    c.execute("DELETE FROM gm_players WHERE joined=0 AND in_round=0 AND seen<?", (now - 3600,))
+    c.execute("DELETE FROM matches WHERE updated<?", (now - 3600,)); c.execute("DELETE FROM invites WHERE created<?", (now - 3600,))
     c.execute("DELETE FROM presence WHERE app_seen<? AND game_seen<?", (now - 86400, now - 86400))
 
+
+# ---------------------------------------------------------------- the snapshot every screen polls
 def gm_snapshot(eid, name):
     now = time.time()
     if not gm_allowed(eid): return {"ok": False, "disabled": True, "now": now}
-    blocked = gm_cfg()[1]
-    with _gm_tx() as c:
+    c = _gm_conn()
+    try:
         c.execute("INSERT INTO presence(eid,name,app_seen,game_seen) VALUES(?,?,?,?) ON CONFLICT(eid) DO UPDATE SET name=excluded.name, app_seen=excluded.app_seen, game_seen=excluded.game_seen",
                   (eid, name, now, now))
+        c.execute("UPDATE invites SET status='expired' WHERE status='pending' AND created<?", (now - GM_INVITE_TTL,))
         _gm_purge(c, now)
-        r0 = _gm_room(c); me = c.execute("SELECT * FROM gm_players WHERE eid=?", (eid,)).fetchone()
-        if me and (me["joined"] or (me["in_round"] and r0["status"] in ("countdown", "live"))):      # a refreshed / briefly throttled tab simply carries on
-            c.execute("UPDATE gm_players SET joined=1, seen=?, name=? WHERE eid=?", (now, name, eid))
-        r = _gm_advance(c, now)
-        pl = {p["eid"]: p for p in c.execute("SELECT * FROM gm_players WHERE joined=1 OR in_round=1")}
-        pres = c.execute("SELECT eid,name,game_seen FROM presence WHERE game_seen>? OR app_seen>? LIMIT 600", (now - GM_LOBBY_TTL, now - GM_APP_TTL)).fetchall()
-        active = r["status"] in ("countdown", "live")
-        out, seen = [], set()
-        for p in pl.values():
-            if _key(p["eid"]) in blocked: continue
-            seen.add(p["eid"])
-            st = ("playing" if active else "joined") if p["joined"] and p["in_round"] else ("joined" if p["joined"] else "left")
-            out.append({"id": p["eid"], "name": p["name"], "state": st, "score": p["score"] if p["in_round"] else 0, "wins": p["wins"],
-                        "in_round": bool(p["in_round"]), "me": p["eid"] == eid})
-        for q in pres:
-            if q["eid"] in seen or _key(q["eid"]) in blocked: continue
-            out.append({"id": q["eid"], "name": q["name"], "state": "lobby" if now - q["game_seen"] <= GM_LOBBY_TTL else "app", "score": 0, "wins": 0,
-                        "in_round": False, "me": q["eid"] == eid})
-        rank = {"playing": 0, "joined": 0, "left": 1, "lobby": 2, "app": 3}
-        out.sort(key=lambda o: (rank[o["state"]], -o["score"] if o["in_round"] else 0, -o["wins"], str(o["name"]).lower()))
-        mine = pl.get(eid)
-        top = max((p["score"] for p in pl.values() if p["in_round"]), default=0)
-        room = {"status": r["status"], "round": r["round_no"], "start_in": round(max(0.0, r["start_at"] - now), 2),
-                "left": round(max(0.0, r["start_at"] + r["secs"] - now), 2) if r["status"] == "live" else (r["secs"] if r["status"] == "countdown" else 0),
-                "secs": r["secs"], "total": r["total"], "cols": r["cols"], "nxt": r["nxt"], "layout": json.loads(r["layout"] or "[]"),
-                "claimed": json.loads(r["claimed"] or "{}"), "last_n": r["last_n"], "last_by": r["last_by"], "reason": r["reason"] or "",
-                "winners": [p["name"] for p in pl.values() if r["status"] == "done" and p["in_round"] and top and p["score"] == top]}
-        return {"ok": True, "now": now, "me": {"id": eid, "name": name, "joined": bool(mine and mine["joined"]), "in_round": bool(mine and mine["in_round"]),
-                "lock_left": round(max(0.0, mine["lock"] - now), 2) if mine else 0}, "room": room, "players": out}
+        m = _gm_my_match(c, eid, now)
+        if m: m = _gm_advance(c, m, eid, now)
+        busy = {x for r in c.execute("SELECT p1,p2 FROM matches WHERE status IN ('countdown','live')") for x in (r["p1"], r["p2"])}
+        pend = {r["to_id"] for r in c.execute("SELECT to_id FROM invites WHERE frm=? AND status='pending'", (eid,))}
+        blocked = gm_cfg()[1]
+        online = []
+        for r in c.execute("SELECT eid,name,game_seen FROM presence WHERE eid!=? AND (game_seen>? OR app_seen>?) LIMIT 400", (eid, now - GM_LOBBY_TTL, now - GM_APP_TTL)):
+            if _key(r["eid"]) in blocked: continue
+            st = "playing" if r["eid"] in busy else ("available" if now - r["game_seen"] <= GM_LOBBY_TTL else "app")
+            online.append({"id": r["eid"], "name": r["name"], "state": st, "pending": r["eid"] in pend})
+        rank = {"available": 0, "playing": 1, "app": 2}
+        online.sort(key=lambda o: (rank[o["state"]], str(o["name"]).lower()))
+        incoming = []
+        if not (m and m["status"] in ("countdown", "live")):
+            incoming = [{"id": r["id"], "name": r["frm_name"], "left": round(max(0.0, GM_INVITE_TTL - (now - r["created"])), 1), "ttl": GM_INVITE_TTL}
+                        for r in c.execute("SELECT * FROM invites WHERE to_id=? AND status='pending' ORDER BY id", (eid,))]
+        o = c.execute("SELECT * FROM invites WHERE frm=? AND created>? AND status IN ('pending','declined','expired') ORDER BY id DESC LIMIT 1", (eid, now - GM_INVITE_TTL - 15)).fetchone()
+        return {"ok": True, "now": now, "me": {"id": eid, "name": name}, "online": online, "incoming": incoming,
+                "outgoing": ({"id": o["id"], "name": o["to_name"], "status": o["status"]} if o else None), "match": _gm_view(m, eid, now) if m else None}
+    finally: c.close()
 
 
-# ---------------------------------------------------------------- actions (None = OK, or a short message shown on the screen)
-def gm_join(eid, name):
-    now = time.time()
+# ---------------------------------------------------------------- actions (each returns None = OK, or a short message for the screen)
+def gm_invite(eid, name, to):
+    now, to = time.time(), str(to)
+    if not gm_allowed(to): return "That employee cannot play right now."
+    if to == eid: return "You cannot invite yourself."
     with _gm_tx() as c:
-        r = _gm_advance(c, now)
-        c.execute("INSERT INTO gm_players(eid,name,joined,in_round,score,seen) VALUES(?,?,1,0,0,?) ON CONFLICT(eid) DO UPDATE SET name=excluded.name, joined=1, seen=excluded.seen",
-                  (eid, name, now))
+        c.execute("UPDATE invites SET status='expired' WHERE status='pending' AND created<?", (now - GM_INVITE_TTL,))
+        if _gm_active(c, eid): return "You are already in a match."
+        p = c.execute("SELECT * FROM presence WHERE eid=?", (to,)).fetchone()
+        if not p or now - p["game_seen"] > GM_LOBBY_TTL: return "That employee is not in the game lobby right now."
+        if _gm_active(c, to): return "%s is already playing." % p["name"]
+        rev = c.execute("SELECT id FROM invites WHERE frm=? AND to_id=? AND status='pending'", (to, eid)).fetchone()
+        if rev:                                           # they had already invited me -> simply start
+            _gm_create_match(c, to, p["name"], eid, name, now); return None
+        c.execute("UPDATE invites SET status='cancelled' WHERE frm=? AND status='pending'", (eid,))
+        c.execute("INSERT INTO invites(frm,frm_name,to_id,to_name,status,created) VALUES(?,?,?,?,'pending',?)", (eid, name, to, p["name"], now))
     return None
 
-def gm_leave(eid):
-    with _gm_tx() as c:
-        c.execute("UPDATE gm_players SET joined=0, in_round=0, score=0 WHERE eid=?", (eid,))
-        _gm_advance(c, time.time())
-
-def gm_start(eid):
+def gm_respond(eid, name, inv_id, accept):
     now = time.time()
     with _gm_tx() as c:
-        r = _gm_advance(c, now)
-        if r["status"] in ("countdown", "live"): return "A round is already running."
-        me = c.execute("SELECT joined FROM gm_players WHERE eid=?", (eid,)).fetchone()
-        if not me or not me["joined"]: return "Join the game first."
-        n = c.execute("SELECT COUNT(*) FROM gm_players WHERE joined=1").fetchone()[0]
-        if n < GM_MIN_PLAYERS: return "At least %d players must join before a round can start." % GM_MIN_PLAYERS
-        cols = int(math.ceil(math.sqrt(min(GM_MAX_TILES, max(25, 8 * n))))); total = cols * cols
-        lay = list(range(1, total + 1)); random.shuffle(lay)
-        c.execute("UPDATE gm_players SET in_round=joined, score=0, lock=0")
-        c.execute("UPDATE gm_room SET status='countdown', round_no=round_no+1, start_at=?, layout=?, claimed='{}', nxt=1, total=?, cols=?, secs=?, last_n=0, last_by='', reason='', updated=? WHERE id=1",
-                  (now + GM_COUNTDOWN, json.dumps(lay), total, cols, 60 + total, now))
+        inv = c.execute("SELECT * FROM invites WHERE id=? AND to_id=? AND status='pending' AND created>=?", (inv_id, eid, now - GM_INVITE_TTL)).fetchone()
+        if not inv: return "That invitation is no longer available."
+        if not accept:
+            c.execute("UPDATE invites SET status='declined' WHERE id=?", (inv["id"],)); return None
+        p = c.execute("SELECT game_seen FROM presence WHERE eid=?", (inv["frm"],)).fetchone()
+        if _gm_active(c, eid) or _gm_active(c, inv["frm"]) or not p or now - p["game_seen"] > GM_LOBBY_TTL:
+            c.execute("UPDATE invites SET status='cancelled' WHERE id=?", (inv["id"],)); return "%s is no longer available." % inv["frm_name"]
+        mid = _gm_create_match(c, inv["frm"], inv["frm_name"], eid, name, now)
+        c.execute("UPDATE invites SET status='accepted', match_id=? WHERE id=?", (mid, inv["id"]))
     return None
+
+def gm_cancel(eid):
+    with _gm_tx() as c: c.execute("UPDATE invites SET status='cancelled' WHERE frm=? AND status='pending'", (eid,))
 
 def gm_tap(eid, n):
     now = time.time()
     try: n = int(n)
     except Exception: return "bad"
     with _gm_tx() as c:
-        r = _gm_advance(c, now)
-        if r["status"] == "done": return "over"
-        if r["status"] != "live" or now < r["start_at"]: return "early"
-        p = c.execute("SELECT * FROM gm_players WHERE eid=?", (eid,)).fetchone()
-        if not p or not p["in_round"]: return "watching"
-        c.execute("UPDATE gm_players SET joined=1, seen=? WHERE eid=?", (now, eid))
-        if p["lock"] > now: return "locked"
-        if n != r["nxt"]:
-            if 1 <= n < r["nxt"]: return "taken"
-            c.execute("UPDATE gm_players SET lock=? WHERE eid=?", (now + GM_WRONG_LOCK, eid)); return "wrong"
-        claimed = json.loads(r["claimed"] or "{}"); claimed[str(n)] = eid
-        c.execute("UPDATE gm_players SET score=score+1 WHERE eid=?", (eid,))
-        c.execute("UPDATE gm_room SET claimed=?, nxt=nxt+1, last_n=?, last_by=?, updated=? WHERE id=1", (json.dumps(claimed), n, eid, now))
-        if n >= r["total"]: _gm_finish(c, now, "All numbers taken", True)
+        m = _gm_my_match(c, eid, now)
+        if not m: return "nomatch"
+        m = _gm_advance(c, m, eid, now)
+        if m["status"] == "done": return "over"
+        if m["status"] != "live" or now < m["start_at"]: return "early"
+        me = 1 if m["p1"] == eid else 2
+        if m["lock%d" % me] > now: return "locked"
+        if n != m["nxt"]:
+            if 1 <= n < m["nxt"]: return "taken"
+            c.execute("UPDATE matches SET lock%d=?, updated=? WHERE id=?" % me, (now + GM_WRONG_LOCK, now, m["id"]))
+            return "wrong"
+        claimed = json.loads(m["claimed"] or "{}"); claimed[str(n)] = me
+        c.execute("UPDATE matches SET claimed=?, s%d=s%d+1, nxt=nxt+1, last_n=?, last_by=?, updated=? WHERE id=?" % (me, me), (json.dumps(claimed), n, me, now, m["id"]))
+        if n >= GM_TILES: _gm_finish(c, m["id"], _gm_by_score(_gm_get(c, m["id"])), "All numbers taken", now)
         return "ok"
 
-def gm_bye(eid):
-    """Tab closed / page left: gone from the lobby list at once; a short grace keeps a plain refresh in the session."""
+def gm_leave(eid):
     now = time.time()
+    with _gm_tx() as c:
+        c.execute("UPDATE invites SET status='cancelled' WHERE frm=? AND status='pending'", (eid,))
+        m = _gm_my_match(c, eid, now)
+        if m:
+            me = 1 if m["p1"] == eid else 2
+            if m["status"] == "live": _gm_finish(c, m["id"], str(3 - me), "Opponent left the match", now)
+            elif m["status"] == "countdown": _gm_finish(c, m["id"], "-", "Match cancelled - a player left", now)
+            c.execute("UPDATE matches SET gone%d=1 WHERE id=?" % me, (m["id"],))
+
+def gm_rematch(eid, name):
+    now = time.time()
+    with _gm_tx() as c:
+        m = _gm_my_match(c, eid, now)
+        if not m or m["status"] != "done": return "Nothing to replay."
+        me = 1 if m["p1"] == eid else 2; op = 3 - me
+        opid = m["p%d" % op]
+        p = c.execute("SELECT game_seen FROM presence WHERE eid=?", (opid,)).fetchone()
+        if m["gone%d" % op] or not p or now - p["game_seen"] > GM_LOBBY_TTL or not gm_allowed(opid): return "Your opponent has left."
+        if _gm_active(c, opid): return "Your opponent is already in another match."
+        c.execute("UPDATE matches SET rm%d=1 WHERE id=?" % me, (m["id"],))
+        m = _gm_get(c, m["id"])
+        if m["rm1"] and m["rm2"]:
+            _gm_create_match(c, m["p1"], m["p1n"], m["p2"], m["p2n"], now, m["w1"], m["w2"])
+    return None
+
+def gm_bye(eid):
+    """Tab closed / left the page: the employee leaves the lobby at once (a running match is NOT ended, a refresh can rejoin it)."""
     with _gm_tx() as c:
         c.execute("UPDATE presence SET game_seen=0 WHERE eid=?", (eid,))
-        c.execute("UPDATE gm_players SET seen=? WHERE eid=? AND joined=1", (now - GM_PLAYER_TTL + 4, eid))
+        c.execute("UPDATE invites SET status='cancelled' WHERE frm=? AND status='pending'", (eid,))
 
-def gm_reset_all():
-    """Admin switched the game off / pressed Reset: the session ends for everybody."""
-    with _gm_tx() as c: _gm_reset(c, time.time())
-
-def gm_remove(ids):
-    """Admin took access away from these employees: they leave the session at once."""
-    keys = {_key(x) for x in ids}
+def gm_end_matches(ids=None, reason="Ended by Admin"):
+    """Admin switched the game off / took access away: running matches stop at once. ids=None -> everybody."""
+    now, keys = time.time(), (None if ids is None else {_key(x) for x in ids})
     with _gm_tx() as c:
-        for r in c.execute("SELECT eid FROM gm_players WHERE joined=1 OR in_round=1").fetchall():
-            if _key(r["eid"]) in keys: c.execute("UPDATE gm_players SET joined=0, in_round=0, score=0 WHERE eid=?", (r["eid"],))
-        _gm_advance(c, time.time())
+        for r in c.execute("SELECT id,p1,p2 FROM matches WHERE status IN ('countdown','live')").fetchall():
+            if keys is None or _key(r["p1"]) in keys or _key(r["p2"]) in keys: _gm_finish(c, r["id"], "-", reason, now)
+        for r in c.execute("SELECT id,frm,to_id FROM invites WHERE status='pending'").fetchall():
+            if keys is None or _key(r["frm"]) in keys or _key(r["to_id"]) in keys: c.execute("UPDATE invites SET status='cancelled' WHERE id=?", (r["id"],))
 
 def gm_admin_live():
-    now = time.time()
-    with _gm_tx() as c:
-        r = _gm_advance(c, now)
-        pl = c.execute("SELECT * FROM gm_players WHERE joined=1 OR in_round=1 ORDER BY score DESC, name").fetchall()
+    now = time.time(); c = _gm_conn()
+    try:
+        ms = c.execute("SELECT * FROM matches WHERE status IN ('countdown','live') ORDER BY created DESC").fetchall()
+        busy = {x for m in ms for x in (m["p1"], m["p2"])}
         status = {}
-        for q in c.execute("SELECT eid,game_seen,app_seen FROM presence WHERE game_seen>? OR app_seen>?", (now - GM_LOBBY_TTL, now - GM_APP_TTL)):
-            status[_key(q["eid"])] = "In game lobby" if now - q["game_seen"] <= GM_LOBBY_TTL else "Online"
-        for p in pl:
-            if p["joined"]: status[_key(p["eid"])] = "Playing" if p["in_round"] and r["status"] in ("countdown", "live") else "Joined the game"
-        return {"status": status, "online": len(status), "joined": sum(1 for p in pl if p["joined"]), "round": r["round_no"], "state": r["status"],
-                "players": [{"name": p["name"], "score": p["score"] if p["in_round"] else 0, "wins": p["wins"], "here": bool(p["joined"])} for p in pl]}
+        for r in c.execute("SELECT eid,game_seen,app_seen FROM presence WHERE game_seen>? OR app_seen>?", (now - GM_LOBBY_TTL, now - GM_APP_TTL)):
+            status[_key(r["eid"])] = "In a match" if r["eid"] in busy else ("In game lobby" if now - r["game_seen"] <= GM_LOBBY_TTL else "Online")
+        return {"status": status, "lobby": sum(1 for v in status.values() if v == "In game lobby"), "online": len(status),
+                "matches": [{"a": m["p1n"], "b": m["p2n"], "sa": m["s1"], "sb": m["s2"], "state": m["status"]} for m in ms]}
+    finally: c.close()
 
 
-# ---------------------------------------------------------------- employee routes (no menu / button / link points here: direct URL only)
+# ---------------------------------------------------------------- employee routes
 def _gm_who(): return str(session.get("emp_id", "")), str(session.get("name", ""))
 
 @app.route("/employee/game")
@@ -10576,7 +10643,7 @@ def _gm_who(): return str(session.get("emp_id", "")), str(session.get("name", ""
 def employee_game():
     eid, _n = _gm_who()
     if not gm_allowed(eid):
-        flash("The multiplayer game is not available for you right now. Please contact the Admin.", "error")
+        flash("The multiplayer game is not available right now. Please contact the Admin.", "error")
         return redirect("/employee")
     return page(GM_PAGE, title=GM_TITLE, eid=eid)
 
@@ -10599,26 +10666,35 @@ def _gm_act(fn):
         snap = gm_snapshot(eid, name)
     except Exception as e:
         print("Multiplayer Game action error:", repr(e)); return jsonify({"ok": False, "error": "Game server busy - please try again."}), 503
-    if isinstance(msg, str):
+    if isinstance(msg, str) and msg not in ("ok",):
         snap["tap"] = msg
-        if msg not in ("ok", "wrong", "locked", "early", "taken", "over", "watching", "bad"): snap["error"] = msg
+        if msg not in ("wrong", "locked", "early", "taken", "over", "nomatch", "bad"): snap["error"] = msg
+    elif msg == "ok": snap["tap"] = "ok"
     return jsonify(snap)
 
-@app.route("/employee/game/join", methods=["POST"])
+@app.route("/employee/game/invite", methods=["POST"])
 @need("employee")
-def gm_join_api(): return _gm_act(lambda e, n, b: gm_join(e, n))
+def gm_invite_api(): return _gm_act(lambda e, n, b: gm_invite(e, n, str(b.get("to", ""))))
+
+@app.route("/employee/game/respond", methods=["POST"])
+@need("employee")
+def gm_respond_api(): return _gm_act(lambda e, n, b: gm_respond(e, n, int(b.get("id", 0) or 0), bool(b.get("accept"))))
+
+@app.route("/employee/game/cancel", methods=["POST"])
+@need("employee")
+def gm_cancel_api(): return _gm_act(lambda e, n, b: gm_cancel(e))
+
+@app.route("/employee/game/tap", methods=["POST"])
+@need("employee")
+def gm_tap_api(): return _gm_act(lambda e, n, b: gm_tap(e, b.get("n")))
 
 @app.route("/employee/game/leave", methods=["POST"])
 @need("employee")
 def gm_leave_api(): return _gm_act(lambda e, n, b: gm_leave(e))
 
-@app.route("/employee/game/start", methods=["POST"])
+@app.route("/employee/game/rematch", methods=["POST"])
 @need("employee")
-def gm_start_api(): return _gm_act(lambda e, n, b: gm_start(e))
-
-@app.route("/employee/game/tap", methods=["POST"])
-@need("employee")
-def gm_tap_api(): return _gm_act(lambda e, n, b: gm_tap(e, b.get("n")))
+def gm_rematch_api(): return _gm_act(lambda e, n, b: gm_rematch(e, n))
 
 @app.route("/employee/game/bye", methods=["POST"])
 @need("employee")
@@ -10635,27 +10711,21 @@ def gm_bye_api():
 def admin_game():
     on, blocked = gm_cfg()
     try: live = gm_admin_live()
-    except Exception as e: print("Multiplayer Game live view error:", repr(e)); live = {"status": {}, "online": 0, "joined": 0, "round": 0, "state": "lobby", "players": []}
+    except Exception as e: print("Multiplayer Game live view error:", repr(e)); live = {"status": {}, "lobby": 0, "online": 0, "matches": []}
     emps = []
     for r in rows("Employees"):
         eid = str(r.get("Employee ID", "")).strip()
         if eid: emps.append({"id": eid, "name": str(r.get("Name", "")).strip(), "allowed": _key(eid) not in blocked, "live": live["status"].get(_key(eid), "")})
     emps.sort(key=lambda x: (x["name"].lower(), x["id"]))
-    return page(GM_ADMIN, title=GM_TITLE, on=on, emps=emps, live=live, n_allowed=sum(1 for x in emps if x["allowed"]), url=request.url_root.rstrip("/") + "/employee/game")
+    return page(GM_ADMIN, title=GM_TITLE, on=on, emps=emps, live=live, n_allowed=sum(1 for x in emps if x["allowed"]))
 
 @app.route("/admin/game/toggle", methods=["POST"])
 @need("admin")
 def admin_game_toggle():
     on = request.form.get("enabled") == "1"
     gm_set_cfg(on=on)
-    if not on: gm_reset_all()
-    flash("Multiplayer Game %s." % ("enabled - allowed employees can open the direct game URL" if on else "disabled - nobody can open the game and the running session was ended"))
-    return redirect("/admin/game")
-
-@app.route("/admin/game/reset", methods=["POST"])
-@need("admin")
-def admin_game_reset():
-    gm_reset_all(); flash("Game session reset - everybody has to join again.")
+    if not on: gm_end_matches(None, "Multiplayer Game was switched off by the Admin")
+    flash("Multiplayer Game %s." % ("enabled - employees can now see the game link" if on else "disabled - the link is hidden and running matches were ended"))
     return redirect("/admin/game")
 
 @app.route("/admin/game/access", methods=["POST"])
@@ -10667,7 +10737,7 @@ def admin_game_access():
     old = gm_cfg()[1]
     gm_set_cfg(blocked=blocked)
     newly = [x for x in blocked if x not in old]
-    if newly: gm_remove(newly)
+    if newly: gm_end_matches(newly, "Access was removed by the Admin")
     flash("Multiplayer Game access saved - %d employee(s) allowed, %d blocked." % (len(all_ids) - len(blocked), len(blocked)))
     return redirect("/admin/game")
 
@@ -10675,35 +10745,37 @@ def admin_game_access():
 # ---------------------------------------------------------------- employee screen (everything between {% raw %} is plain CSS / JS, untouched by the template engine)
 GM_PAGE = r"""<div id="gm" class="gm" data-me="{{eid}}">
 <div class="gm-head"><div><h1>Multiplayer Game <span class="gm-tag">Number Rush</span></h1>
-<p class="mut">Everyone who joins plays the same board at the same time. Tap the highlighted number before the others do.</p></div>
+<p class="mut">Invite an online colleague and race to tap the numbers 1 to 25 in order. The first to tap the current number scores it.</p></div>
 <span id="gm-conn" class="gm-conn ok"><i></i><b>Live</b></span></div>
 <div id="gm-note" class="gm-note" role="status" aria-live="polite"></div>
 <div class="gm-grid">
-<aside class="gm-card gm-lobby"><div class="gm-ct"><h2 id="gm-lt">Online employees</h2><span class="gm-count" id="gm-count">0</span></div>
-<p class="mut" style="margin:0 0 8px" id="gm-lh">Everyone who is online right now.</p>
+<aside class="gm-card gm-lobby"><div class="gm-ct"><h2>Online employees</h2><span class="gm-count" id="gm-count">0</span></div>
+<p class="mut" style="margin:0 0 8px">Green = in the game lobby, ready to be invited.</p>
 <ul id="gm-list" class="gm-list"></ul></aside>
 <section class="gm-card gm-arena">
-<div id="gm-join" class="gm-center"><div class="gm-ico">&#127918;</div><h2 id="gm-jt">Join the game</h2>
-<p class="mut" id="gm-jp">Press <b>Join game</b> to enter the shared session. Any number of colleagues can play together.</p>
-<div class="gm-ra"><button type="button" class="primary" id="gm-joinb">Join game</button></div>
-<div class="gm-rules"><span>&#9312; Join the session</span><span>&#9313; Anyone starts a round (2+ players)</span><span>&#9314; Tap the current number first</span><span>&#9315; A wrong tap freezes you for 1 s</span></div>
-<p class="mut" style="margin-top:14px">Invite colleagues by sharing this page address: <a href="#" id="gm-copy" style="font-weight:600">copy link</a></p></div>
-<div id="gm-wait" class="gm-center" hidden><div class="gm-ico gm-spin">&#128101;</div><h2 id="gm-wt">Waiting room</h2>
-<p class="mut" id="gm-wp"></p><div class="gm-chips" id="gm-chips"></div>
-<div class="gm-ra"><button type="button" class="primary" id="gm-startb">Start round</button><button type="button" id="gm-leaveb">Leave game</button></div></div>
+<div id="gm-idle" class="gm-center"><div class="gm-ico">&#127918;</div><h2>Ready to play?</h2>
+<p class="mut">Pick an available colleague on the left and press <b>Invite</b>.<br>When they accept, both of you see the same board and the scores update live.</p>
+<div class="gm-rules"><span>&#9312; Find the highlighted number</span><span>&#9313; Tap it before your opponent</span><span>&#9314; A wrong tap freezes your board for 1 s</span></div></div>
+<div id="gm-wait" class="gm-center" hidden><div class="gm-ico gm-spin">&#9203;</div><h2>Waiting for <span id="gm-wait-name"></span>...</h2>
+<p class="mut">The invitation expires in 30 seconds.</p><button type="button" id="gm-cancel">Cancel invitation</button></div>
 <div id="gm-match" hidden>
-<div class="gm-score"><div class="gm-p me"><div class="gm-pn" id="gm-n1"></div><div class="gm-ps" id="gm-s1">0</div></div>
-<div class="gm-mid"><div class="gm-timer" id="gm-timer">-</div><div class="gm-series" id="gm-series"></div></div>
-<div class="gm-p opp"><div class="gm-pn">Leading</div><div class="gm-ps gm-lead" id="gm-lead">-</div></div></div>
+<div class="gm-score">
+<div class="gm-p me"><div class="gm-pn" id="gm-n1"></div><div class="gm-ps" id="gm-s1">0</div><div class="gm-bar"><i id="gm-b1"></i></div></div>
+<div class="gm-mid"><div class="gm-timer" id="gm-timer">90</div><div class="gm-series" id="gm-series"></div></div>
+<div class="gm-p opp"><div class="gm-pn" id="gm-n2"></div><div class="gm-ps" id="gm-s2">0</div><div class="gm-bar"><i id="gm-b2"></i></div></div></div>
 <div class="gm-target" id="gm-target"></div>
-<div class="gm-watch" id="gm-watch" hidden>You joined during a round - you can watch now and you play in the next one.</div>
 <div class="gm-boardwrap"><div class="gm-board" id="gm-board"></div></div>
 <div id="gm-result" class="gm-result" hidden><div class="gm-rt" id="gm-rt"></div><div class="gm-rs" id="gm-rs"></div>
-<div class="gm-ra"><button type="button" class="primary" id="gm-again">Start next round</button><button type="button" id="gm-leave2">Leave game</button></div></div>
-<div class="gm-foot" id="gm-foot"><button type="button" id="gm-quit">Leave round</button></div>
-</div></section></div></div>
+<div class="gm-ra"><button type="button" class="primary" id="gm-again">Play again</button><button type="button" id="gm-back">Back to lobby</button></div></div>
+<div class="gm-foot" id="gm-foot"><button type="button" id="gm-quit">Leave match</button></div>
+</div></section></div>
+<div id="gm-modal" class="gm-modal" hidden><div class="gm-mbox" role="dialog" aria-modal="true" aria-labelledby="gm-inv-t">
+<div class="gm-ico">&#128276;</div><h3 id="gm-inv-t"><span id="gm-inv-name"></span> invited you to play!</h3><p class="mut">Number Rush &middot; 2 players &middot; 90 seconds</p>
+<div class="gm-tbar"><i id="gm-inv-bar"></i></div>
+<div class="gm-ra"><button type="button" class="primary" id="gm-acc">Accept</button><button type="button" id="gm-dec">Decline</button></div></div></div>
+</div>
 {% raw %}<style>
-.gm{max-width:1120px;margin:0 auto}
+.gm{max-width:1080px;margin:0 auto}
 .gm-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap}
 .gm-head h1{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .gm-tag{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#fff;background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:3px 10px;border-radius:99px}
@@ -10711,173 +10783,176 @@ GM_PAGE = r"""<div id="gm" class="gm" data-me="{{eid}}">
 .gm-conn i{width:8px;height:8px;border-radius:50%;background:#10b981;box-shadow:0 0 0 0 #10b98180;animation:gmPulse 1.8s infinite}
 .gm-conn.bad{background:#fef2f2;color:#b91c1c;border-color:#fecaca}.gm-conn.bad i{background:#ef4444;animation:none}
 @keyframes gmPulse{70%{box-shadow:0 0 0 7px #10b98100}100%{box-shadow:0 0 0 0 #10b98100}}
-.gm-note{height:0;overflow:hidden;opacity:0;padding:0 14px;border-radius:10px;font-size:13px;font-weight:600;background:#eef2ff;color:#3730a3;transition:all .25s ease}
-.gm-note.show{height:auto;opacity:1;padding:9px 14px;margin-bottom:10px}.gm-note.bad{background:#fef2f2;color:#b91c1c}
-.gm-grid{display:grid;grid-template-columns:300px minmax(0,1fr);gap:14px;align-items:start}
+.gm-note{min-height:0;height:0;overflow:hidden;opacity:0;margin:0 0 0;padding:0 14px;border-radius:10px;font-size:13px;font-weight:600;background:#eef2ff;color:#3730a3;transition:all .25s ease}
+.gm-note.show{height:auto;opacity:1;padding:9px 14px;margin-bottom:10px}.gm-note.bad{background:#fef2f2;color:#b91c1c}.gm-note.good{background:#ecfdf5;color:#047857}
+.gm-grid{display:grid;grid-template-columns:290px minmax(0,1fr);gap:14px;align-items:start}
 @media(max-width:860px){.gm-grid{grid-template-columns:1fr}}
 .gm-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 1px 2px #0f172a0a,0 12px 28px -14px #0f172a30}
 .gm-ct{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}.gm-ct h2{margin:0;font-size:15px}
 .gm-count{min-width:24px;text-align:center;font-size:12px;font-weight:700;background:#eef2ff;color:#4338ca;border-radius:99px;padding:2px 8px}
-.gm-list{list-style:none;margin:0;padding:0;max-height:460px;overflow:auto;display:flex;flex-direction:column;gap:6px}
-.gm-row{display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid #edf0f8;border-radius:12px;background:#fafbff}
-.gm-row.in{background:#f3fff8;border-color:#bbf7d0}.gm-row.dim{opacity:.62}.gm-row.you{border-color:#c7d2fe;background:#eef2ff}
-.gm-av{flex:none;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-size:11.5px;font-weight:700;color:#fff;position:relative}
+.gm-list{list-style:none;margin:0;padding:0;max-height:430px;overflow:auto;display:flex;flex-direction:column;gap:6px}
+.gm-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #edf0f8;border-radius:12px;background:#fafbff}
+.gm-row.av{background:#f3fff8;border-color:#bbf7d0}.gm-row.dim{opacity:.62}
+.gm-av{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;background:linear-gradient(135deg,#6366f1,#8b5cf6);position:relative}
 .gm-av::after{content:"";position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;border-radius:50%;border:2px solid #fff;background:#cbd5e1}
-.gm-row.in .gm-av::after{background:#10b981}.gm-row.lob .gm-av::after{background:#60a5fa}
+.gm-row.av .gm-av::after{background:#10b981}.gm-row.pl .gm-av::after{background:#f59e0b}
 .gm-info{min-width:0;flex:1}.gm-nm{font-size:13.5px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gm-st{font-size:11.5px;color:var(--mut)}.gm-sc{flex:none;font-size:18px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+.gm-st{font-size:11.5px;color:var(--mut)}
+.gm-row button{flex:none;margin:0;padding:6px 12px;font-size:12.5px;font-weight:600;border-radius:9px}
 .gm-empty{padding:18px 8px;text-align:center;color:var(--mut);font-size:13px}
-.gm-center{text-align:center;padding:30px 12px}.gm-center h2{margin:6px 0 4px;font-size:20px}
-.gm-ico{font-size:40px;line-height:1}.gm-spin{animation:gmSpin 2.4s ease-in-out infinite}@keyframes gmSpin{50%{transform:scale(1.12)}}
-.gm-rules,.gm-chips{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:14px}
-.gm-rules span,.gm-chips span{font-size:12px;background:#f1f3fb;border-radius:99px;padding:5px 12px;color:#475069}.gm-chips span{background:#ecfdf5;color:#047857;font-weight:600}
-.gm-score{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center;margin-bottom:8px}
-.gm-p{border-radius:14px;padding:10px 14px;color:#fff;min-width:0}.gm-p.me{background:linear-gradient(135deg,#6366f1,#4f46e5)}.gm-p.opp{background:linear-gradient(135deg,#334155,#0f172a);text-align:right}
-.gm-pn{font-size:12.5px;font-weight:600;opacity:.95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gm-ps{font-size:32px;font-weight:800;line-height:1.1}
-.gm-lead{font-size:18px;line-height:2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gm-center{text-align:center;padding:34px 12px}.gm-center h2{margin:6px 0 4px;font-size:20px}
+.gm-ico{font-size:40px;line-height:1}.gm-spin{animation:gmSpin 2.2s ease-in-out infinite}@keyframes gmSpin{50%{transform:rotate(180deg)}}
+.gm-rules{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:16px}
+.gm-rules span{font-size:12px;background:#f1f3fb;border-radius:99px;padding:5px 12px;color:#475069}
+.gm-score{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center;margin-bottom:10px}
+.gm-p{border-radius:14px;padding:10px 14px;color:#fff}.gm-p.me{background:linear-gradient(135deg,#6366f1,#4f46e5)}.gm-p.opp{background:linear-gradient(135deg,#fb923c,#ea580c);text-align:right}
+.gm-pn{font-size:12.5px;font-weight:600;opacity:.95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gm-ps{font-size:34px;font-weight:800;line-height:1.1}
+.gm-bar{height:5px;border-radius:9px;background:#ffffff40;overflow:hidden}.gm-bar i{display:block;height:100%;width:0;background:#fff;border-radius:9px;transition:width .3s ease}
 .gm-mid{text-align:center}.gm-timer{font-size:26px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}.gm-series{font-size:11.5px;color:var(--mut)}
-.gm-target{text-align:center;font-size:15px;font-weight:600;color:#475069;margin:6px 0 8px;min-height:44px}
+.gm-target{text-align:center;font-size:15px;font-weight:600;color:#475069;margin:6px 0 10px;min-height:44px}
 .gm-target b{display:inline-block;min-width:56px;margin-left:8px;padding:2px 14px;font-size:30px;border-radius:14px;background:linear-gradient(135deg,#eef2ff,#e0e7ff);color:#4338ca}
 .gm-target.big{font-size:54px;font-weight:800;color:#4f46e5}
-.gm-watch{text-align:center;font-size:12.5px;font-weight:600;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:6px 10px;margin:0 auto 8px;max-width:460px}
-.gm-board{display:grid;gap:7px;max-width:520px;margin:0 auto;transition:opacity .2s}
+.gm-boardwrap{position:relative}
+.gm-board{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;max-width:420px;margin:0 auto;transition:opacity .2s}
 .gm-board.lock{opacity:.45;pointer-events:none}.gm-board.off{pointer-events:none}
-.gm-tile{aspect-ratio:1;margin:0;padding:0;min-width:0;font-size:clamp(11px,2.2vw,19px);font-weight:700;line-height:1.05;border-radius:11px;border:1px solid #dfe3f3;background:linear-gradient(#fff,#f1f3fb);color:#1e2547;box-shadow:0 3px 0 #d5daee;font-variant-numeric:tabular-nums;display:flex;flex-direction:column;align-items:center;justify-content:center}
-.gm-tile small{font-size:.58em;font-weight:600;opacity:.9}
+.gm-tile{aspect-ratio:1;margin:0;padding:0;font-size:20px;font-weight:700;border-radius:12px;border:1px solid #dfe3f3;background:linear-gradient(#fff,#f1f3fb);color:#1e2547;box-shadow:0 3px 0 #d5daee;font-variant-numeric:tabular-nums}
 .gm-tile:hover{transform:translateY(-2px)}.gm-tile:active{transform:translateY(1px) scale(.96);box-shadow:0 1px 0 #d5daee}
-.gm-tile.own{pointer-events:none;color:#fff;transform:none;border-color:transparent;box-shadow:0 3px 0 #0003}
+.gm-tile.me,.gm-tile.opp{pointer-events:none;color:#fff;transform:none}
+.gm-tile.me{background:linear-gradient(#818cf8,#6366f1);border-color:#4f46e5;box-shadow:0 3px 0 #4338ca}
+.gm-tile.opp{background:linear-gradient(#fdba74,#f97316);border-color:#ea580c;box-shadow:0 3px 0 #c2410c}
 .gm-tile.pop{animation:gmPop .45s cubic-bezier(.34,1.56,.64,1)}.gm-tile.shake{animation:gmShake .35s}
 @keyframes gmPop{0%{transform:scale(.7)}100%{transform:scale(1)}}@keyframes gmShake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
-.gm-result{max-width:460px;margin:14px auto 0;text-align:center;padding:16px;border-radius:16px;background:linear-gradient(135deg,#eef2ff,#f5f3ff);border:1px solid #ddd6fe;animation:gmPop .45s cubic-bezier(.34,1.56,.64,1)}
-.gm-result.win{background:linear-gradient(135deg,#ecfdf5,#d1fae5);border-color:#6ee7b7}
+.gm-result{max-width:420px;margin:14px auto 0;text-align:center;padding:16px;border-radius:16px;background:linear-gradient(135deg,#eef2ff,#f5f3ff);border:1px solid #ddd6fe;animation:gmPop .45s cubic-bezier(.34,1.56,.64,1)}
+.gm-result.win{background:linear-gradient(135deg,#ecfdf5,#d1fae5);border-color:#6ee7b7}.gm-result.lose{background:linear-gradient(135deg,#fff7ed,#ffedd5);border-color:#fdba74}
 .gm-rt{font-size:22px;font-weight:800;color:var(--ink)}.gm-rs{font-size:13px;color:var(--mut);margin-top:4px}
 .gm-ra{display:flex;gap:8px;justify-content:center;margin-top:12px;flex-wrap:wrap}.gm-ra button{margin:0;padding:9px 18px;font-weight:600}
 .gm-foot{text-align:center;margin-top:12px}.gm-foot button{margin:0;font-size:12.5px;padding:6px 14px;color:#b91c1c;border-color:#fecaca;background:#fff}
-@media(prefers-reduced-motion:reduce){.gm *{animation:none!important;transition:none!important}}
+.gm-modal{position:fixed;inset:0;z-index:9000;display:grid;place-items:center;background:#0f172a66;backdrop-filter:blur(3px)}.gm-modal[hidden]{display:none}
+.gm-mbox{width:min(360px,92vw);background:#fff;border-radius:20px;padding:24px 22px;text-align:center;box-shadow:0 24px 60px -10px #0f172a66;animation:gmPop .4s cubic-bezier(.34,1.56,.64,1)}
+.gm-mbox h3{margin:8px 0 2px;font-size:18px}.gm-tbar{height:5px;background:#eef0f8;border-radius:9px;overflow:hidden;margin-top:12px}.gm-tbar i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#6366f1,#8b5cf6);transition:width 1s linear}
+@media(prefers-reduced-motion:reduce){.gm *,.gm-mbox{animation:none!important;transition:none!important}}
 </style>
 <script>
 (function(){
 var root=document.getElementById('gm');if(!root)return;
-var offset=0,lastNow=0,busy=false,timer=null,S=null,boardKey=null,tiles={},lockUntil=0,ref=null,listKey='',lastNxt=-1,ME=root.dataset.me,PAL=['#f97316','#10b981','#ec4899','#0ea5e9','#eab308','#8b5cf6','#ef4444','#14b8a6'];
+var offset=0,lastNow=0,busy=false,timer=null,S=null,boardId=null,tiles={},lockUntil=0,ref=null,lastListKey='',outSeen='',modalId='',lastNxt=0,lastCl=0;
 function $(i){return document.getElementById(i)}
 function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}
 function note(msg,kind){var n=$('gm-note');n.textContent=msg;n.className='gm-note show '+(kind||'');clearTimeout(note.t);note.t=setTimeout(function(){n.className='gm-note'},3600)}
 function conn(ok){var b=$('gm-conn');b.className='gm-conn '+(ok?'ok':'bad');b.lastChild.textContent=ok?'Live':'Reconnecting...'}
-function col(id){if(id===ME)return '#4f46e5';var h=0,s=String(id);for(var i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0;return PAL[h%PAL.length]}
-function initials(n){var p=String(n||'?').trim().split(/\s+/);return ((p[0]||'?')[0]+(p.length>1?p[p.length-1][0]:'')).toUpperCase()}
 function req(path,body){
   var o={credentials:'same-origin',cache:'no-store'};
   if(body){o.method='POST';o.headers={'Content-Type':'application/json'};o.body=JSON.stringify(body)}
   return fetch('/employee/game/'+path,o).then(function(r){if(r.redirected){location.href='/employee/login';throw new Error('signed out')}return r.json()});
 }
-function view(id){['gm-join','gm-wait','gm-match'].forEach(function(k){$(k).hidden=(k!==id)})}
-function nameOf(id){var f=S&&S.players.filter(function(p){return p.id===id})[0];return f?f.name:''}
+function initials(n){var p=String(n||'?').trim().split(/\s+/);return ((p[0]||'?')[0]+(p.length>1?p[p.length-1][0]:'')).toUpperCase()}
+function show(id){['gm-idle','gm-wait','gm-match'].forEach(function(k){$(k).hidden=(k!==id)})}
 
 function apply(j){
   if(!j)return;
   if(j.disabled){location.href='/employee';return}
   if(j.now){offset=j.now*1000-Date.now();if(j.now<lastNow)return;lastNow=j.now}
-  if(j.ok===false){conn(false);if(j.error)note(j.error,'bad');return}
-  conn(true);S=j;if(j.error)note(j.error,'bad');
-  renderList(j);renderArena(j);
+  if(j.ok===false){conn(false);note(j.error||'Connection problem',"bad");return}
+  conn(true);S=j;
+  if(j.error)note(j.error,'bad');
+  renderList(j);renderInvite(j);renderArena(j);
 }
 function renderList(j){
-  var r=j.room,showScore=r.status!=='lobby';
-  var key=JSON.stringify([j.players,r.status,j.me.joined]);if(key===listKey)return;listKey=key;
-  var ul=$('gm-list');ul.textContent='';$('gm-count').textContent=j.players.length;
-  $('gm-lt').textContent=showScore?'Players & scores':'Online employees';
-  $('gm-lh').textContent=showScore?'Live ranking of this round. Others online are listed below.':'Green = joined the game. Blue = on this page. Grey = online elsewhere.';
-  if(!j.players.length){ul.appendChild(el('li','gm-empty','Nobody is online right now.'));return}
-  j.players.forEach(function(o){
-    var inG=o.state==='joined'||o.state==='playing';
-    var li=el('li','gm-row '+(o.me?'you ':'')+(inG?'in':(o.state==='lobby'?'lob':'dim')));
-    var av=el('div','gm-av',initials(o.name));av.style.background=col(o.id);li.appendChild(av);
-    var info=el('div','gm-info');info.appendChild(el('div','gm-nm',o.name+(o.me?' (You)':'')));
-    var st=o.state==='playing'?'Playing':(o.state==='joined'?'Joined the game':(o.state==='left'?'Left the game':(o.state==='lobby'?'On the game page':'Online - not in the game')));
-    if(o.wins)st+=' \u00b7 '+o.wins+(o.wins===1?' round won':' rounds won');
-    info.appendChild(el('div','gm-st',st));li.appendChild(info);
-    if(showScore&&o.in_round)li.appendChild(el('div','gm-sc',o.score));
+  var key=JSON.stringify([j.online,j.match?1:0,j.outgoing&&j.outgoing.status==='pending'?j.outgoing.id:0]);
+  if(key===lastListKey)return;lastListKey=key;
+  var ul=$('gm-list');ul.textContent='';$('gm-count').textContent=j.online.length;
+  if(!j.online.length){ul.appendChild(el('li','gm-empty','No other employees are online right now.'));return}
+  var free=!j.match&&!(j.outgoing&&j.outgoing.status==='pending');
+  j.online.forEach(function(o){
+    var li=el('li','gm-row '+(o.state==='available'?'av':(o.state==='playing'?'pl':'dim')));
+    li.appendChild(el('div','gm-av',initials(o.name)));
+    var info=el('div','gm-info');info.appendChild(el('div','gm-nm',o.name));
+    info.appendChild(el('div','gm-st',o.state==='available'?'In game lobby':(o.state==='playing'?'Playing a match':'Online - not in the game')));li.appendChild(info);
+    if(o.state==='available'){
+      var b=el('button',o.pending?'':'primary',o.pending?'Invited':'Invite');b.type='button';b.disabled=!free||o.pending;
+      b.onclick=function(){b.disabled=true;b.textContent='Sending...';send('invite',{to:o.id})};li.appendChild(b);
+    }
     ul.appendChild(li);
   });
 }
+function renderInvite(j){
+  var m=$('gm-modal'),inc=j.incoming&&j.incoming[0];
+  if(!inc){m.hidden=true;modalId='';return}
+  if(modalId!==String(inc.id)){modalId=String(inc.id);$('gm-inv-name').textContent=inc.name;
+    $('gm-inv-bar').style.transition='none';$('gm-inv-bar').style.width=(inc.left/inc.ttl*100)+'%';
+    setTimeout(function(){$('gm-inv-bar').style.transition='width '+inc.left+'s linear';$('gm-inv-bar').style.width='0%'},30)}
+  m.hidden=false;
+}
 function renderArena(j){
-  var r=j.room,me=j.me;
-  if(!me.joined){
-    $('gm-jt').textContent=r.status==='live'||r.status==='countdown'?'A round is in progress':'Join the game';
-    $('gm-jp').textContent=r.status==='live'||r.status==='countdown'?'You can join now and play from the next round.':'Press Join game to enter the shared session. Any number of colleagues can play together.';
-    boardKey=null;view('gm-join');return}
-  if(r.status==='lobby'){renderWait(j);return}
-  view('gm-match');renderMatch(j);
+  var o=j.outgoing;
+  if(o&&o.status!=='pending'&&outSeen!==o.id+o.status){outSeen=o.id+o.status;
+    note(o.name+(o.status==='declined'?' declined your invitation.':' did not answer in time.'),'bad')}
+  if(j.match){show('gm-match');renderMatch(j.match);return}
+  boardId=null;ref=null;
+  if(o&&o.status==='pending'){$('gm-wait-name').textContent=o.name;show('gm-wait')}else show('gm-idle');
 }
-function renderWait(j){
-  boardKey=null;view('gm-wait');
-  var in_=j.players.filter(function(p){return p.state==='joined'||p.state==='playing'});
-  $('gm-wp').textContent=in_.length<2?'You are in. Waiting for at least one more colleague to join...':in_.length+' players are ready. Anyone can start the round.';
-  var ch=$('gm-chips');ch.textContent='';in_.forEach(function(p){ch.appendChild(el('span',null,p.name))});
-  $('gm-startb').disabled=in_.length<2;
-}
-function buildBoard(r){
-  var b=$('gm-board');b.textContent='';tiles={};b.style.gridTemplateColumns='repeat('+r.cols+',1fr)';
-  r.layout.forEach(function(n){var t=el('button','gm-tile');t.type='button';t.dataset.n=n;t.appendChild(document.createTextNode(n));
+function buildBoard(m){
+  var b=$('gm-board');b.textContent='';tiles={};
+  m.layout.forEach(function(n){var t=el('button','gm-tile',n);t.type='button';t.dataset.n=n;
     t.addEventListener('click',function(){tap(n)});b.appendChild(t);tiles[n]=t});
-  boardKey=r.round;lastNxt=-1;
+  boardId=m.id;lastNxt=0;lastCl=0;$('gm-result').hidden=true;
 }
-function renderMatch(j){
-  var r=j.room,me=j.me;
-  if(boardKey!==r.round||!Object.keys(tiles).length)buildBoard(r);
-  Object.keys(r.claimed).forEach(function(k){var t=tiles[k],o=r.claimed[k];if(!t||t.dataset.o===o)return;
-    t.dataset.o=o;t.className='gm-tile own pop';t.style.background=col(o);t.appendChild(el('small',null,initials(nameOf(o))))});
-  var mine=j.players.filter(function(p){return p.me&&p.in_round})[0],sc=mine?mine.score:0;
-  $('gm-n1').textContent=(me.in_round?'You':'You (watching)');$('gm-s1').textContent=sc;
-  var rk=j.players.filter(function(p){return p.in_round}).sort(function(a,b){return b.score-a.score}),ld=rk[0];
-  $('gm-lead').textContent=ld&&ld.score?ld.name+' \u00b7 '+ld.score:'-';
-  $('gm-series').textContent='Round '+r.round+' \u00b7 '+rk.length+' players';
-  ref={t:Date.now(),start_in:r.start_in,left:r.left};lockUntil=Date.now()+me.lock_left*1000;
-  var live=r.status==='live',done=r.status==='done',tg=$('gm-target'),bd=$('gm-board');
-  bd.classList.toggle('off',done||r.status==='countdown'||!me.in_round);$('gm-foot').hidden=done;
-  $('gm-watch').hidden=me.in_round||done;
-  if(live){tg.className='gm-target';if(lastNxt!==r.nxt){tg.textContent='Find';tg.appendChild(el('b',null,r.nxt<=r.total?r.nxt:'-'));lastNxt=r.nxt}}
-  else if(done){tg.className='gm-target';tg.textContent=r.winners.length?(r.winners.indexOf(me.name)>=0&&r.winners.length===1?'You won!':r.winners.join(' & ')+(r.winners.length>1?' tie':' wins')):'Round ended';lastNxt=-1}
-  else{tg.className='gm-target big';lastNxt=-1}
-  var res=$('gm-result');
-  if(done){var iwon=r.winners.indexOf(me.name)>=0;res.hidden=false;res.className='gm-result'+(iwon?' win':'');
-    $('gm-rt').textContent=r.winners.length?(iwon?'You win this round!':r.winners.join(' & ')+' won this round'):'Round over';
-    $('gm-rs').textContent=rk.map(function(p){return p.name+' '+p.score}).slice(0,8).join('  \u00b7  ')+(r.reason?'   ('+r.reason+')':'');
-  }else res.hidden=true;
+function renderMatch(m){
+  if(boardId!==m.id)buildBoard(m);
+  var n=0;
+  Object.keys(m.claimed).forEach(function(k){n++;var t=tiles[k];if(t&&!t.classList.contains(m.claimed[k])){t.classList.remove('shake');t.classList.add(m.claimed[k],'pop')}});
+  $('gm-n1').textContent=m.me.name+' (You)';$('gm-n2').textContent=m.opp.name;
+  $('gm-s1').textContent=m.me.score;$('gm-s2').textContent=m.opp.score;
+  $('gm-b1').style.width=(m.me.score/m.total*100)+'%';$('gm-b2').style.width=(m.opp.score/m.total*100)+'%';
+  $('gm-series').textContent=(m.me.wins||m.opp.wins)?('Series '+m.me.wins+' - '+m.opp.wins):'First to claim wins';
+  ref={t:Date.now(),start_in:m.start_in,left:m.left};lockUntil=Date.now()+m.lock_left*1000;
+  var live=m.status==='live',done=m.status==='done',tg=$('gm-target'),bd=$('gm-board');
+  bd.classList.toggle('off',done||m.status==='countdown');
+  $('gm-foot').hidden=done;
+  if(live){tg.className='gm-target';
+    if(lastNxt!==m.nxt){tg.textContent='Find';var b=el('b',null,m.nxt<=m.total?m.nxt:'-');tg.appendChild(b);lastNxt=m.nxt}}
+  else if(done){tg.className='gm-target';tg.textContent=m.winner==='me'?'You won!':(m.winner==='opp'?m.opp.name+' won':(m.winner==='draw'?'It is a draw':'Match ended'));lastNxt=0}
+  else{tg.className='gm-target big';lastNxt=0}
+  var r=$('gm-result');
+  if(done){r.hidden=false;r.className='gm-result '+(m.winner==='me'?'win':(m.winner==='opp'?'lose':''));
+    $('gm-rt').textContent=m.winner==='me'?'You win!':(m.winner==='opp'?'You lost this round':(m.winner==='draw'?'Draw':'Match cancelled'));
+    $('gm-rs').textContent=m.me.score+' - '+m.opp.score+(m.reason?'  \u00b7  '+m.reason:'');
+    var ag=$('gm-again');ag.disabled=m.opp_gone||m.rm_me;
+    ag.textContent=m.opp_gone?'Opponent left':(m.rm_me?'Waiting for opponent...':(m.rm_opp?'Accept rematch':'Play again'));
+  }else r.hidden=true;
   tick();
 }
 function tick(){
-  if(!S||!ref||S.room.status==='lobby')return;var r=S.room,dt=(Date.now()-ref.t)/1000,tg=$('gm-target');
-  if(r.status==='countdown'){var c=Math.ceil(ref.start_in-dt);tg.textContent=c>0?c:'GO!';$('gm-timer').textContent=r.secs}
-  else if(r.status==='live')$('gm-timer').textContent=Math.max(0,Math.ceil(ref.left-dt));
+  if(!S||!S.match||!ref)return;var m=S.match,dt=(Date.now()-ref.t)/1000,tg=$('gm-target');
+  if(m.status==='countdown'){var c=Math.ceil(ref.start_in-dt);tg.textContent=c>0?c:'GO!'}
+  if(m.status!=='done')$('gm-timer').textContent=m.status==='countdown'?m.secs:Math.max(0,Math.ceil(ref.left-dt));
   else $('gm-timer').textContent='-';
-  $('gm-board').classList.toggle('lock',Date.now()<lockUntil&&r.status==='live');
+  $('gm-board').classList.toggle('lock',Date.now()<lockUntil&&m.status==='live');
 }
 setInterval(tick,150);
 
-function send(path,body){return req(path,body||{}).then(function(j){apply(j);schedule();return j}).catch(function(){conn(false)})}
+function send(path,body){
+  return req(path,body||{}).then(function(j){apply(j);schedule();return j}).catch(function(){conn(false)});
+}
 function tap(n){
-  if(!S||S.room.status!=='live'||!S.me.in_round||Date.now()<lockUntil)return;
+  if(!S||!S.match||S.match.status==='done'||Date.now()<lockUntil)return;
   var t=tiles[n];
   req('tap',{n:n}).then(function(j){
     if(j&&j.tap==='wrong'){if(t){t.classList.remove('shake');void t.offsetWidth;t.classList.add('shake')}lockUntil=Date.now()+1000;note('Wrong number - wait a second!','bad')}
     apply(j);schedule();
   }).catch(function(){conn(false)});
 }
-$('gm-joinb').onclick=function(){send('join')};
-$('gm-startb').onclick=function(){send('start')};
-$('gm-again').onclick=function(){send('start')};
-$('gm-leaveb').onclick=function(){send('leave')};
-$('gm-leave2').onclick=function(){send('leave')};
-$('gm-quit').onclick=function(){if(confirm('Leave this round?'))send('leave')};
-$('gm-copy').onclick=function(e){e.preventDefault();var u=location.origin+'/employee/game';
-  (navigator.clipboard?navigator.clipboard.writeText(u):Promise.reject()).then(function(){note('Link copied - share it with your colleagues.')},function(){window.prompt('Copy this link:',u)})};
+$('gm-cancel').onclick=function(){send('cancel')};
+$('gm-acc').onclick=function(){$('gm-modal').hidden=true;send('respond',{id:+modalId,accept:true})};
+$('gm-dec').onclick=function(){$('gm-modal').hidden=true;send('respond',{id:+modalId,accept:false})};
+$('gm-quit').onclick=function(){if(confirm('Leave this match? Your opponent will win.'))send('leave')};
+$('gm-back').onclick=function(){send('leave')};
+$('gm-again').onclick=function(){send('rematch')};
 
 function delay(){
   if(document.hidden)return 4000;
-  var st=S&&S.room.status;
-  if(S&&S.me.joined&&(st==='live'||st==='countdown'))return 450;
-  if(S&&S.me.joined)return 900;
+  if(S&&S.match&&S.match.status!=='done')return 450;
+  if(S&&((S.outgoing&&S.outgoing.status==='pending')||(S.incoming&&S.incoming.length)||(S.match&&S.match.status==='done')))return 900;
   return 1800;
 }
 function schedule(){clearTimeout(timer);timer=setTimeout(poll,delay())}
@@ -10894,22 +10969,18 @@ poll();
 
 # ---------------------------------------------------------------- Admin control page
 GM_ADMIN = r"""<div class="head"><div><h1>Multiplayer Game</h1>
-<p class="mut">One shared game session for any number of employees. There is no menu item or button for it anywhere in the Employee panel &mdash; employees open it only through the direct URL below.</p></div></div>
+<p class="mut">Control the two-player game employees see on their own page. Nothing here is visible to employees except the game link itself.</p></div></div>
 <div class="card gmA-top"><div class="gmA-state"><span class="gmA-dot {{'on' if on else 'off'}}"></span>
-<div><b>{{ 'Enabled' if on else 'Disabled' }}</b><div class="mut">{% if on %}Allowed employees can open the direct URL and join the game.{% else %}Nobody can open the game URL.{% endif %}</div></div></div>
-<form method="post" action="/admin/game/toggle" {% if on %}onsubmit="return confirm('Disable the Multiplayer Game? The running session will be ended for everybody.')"{% endif %}>
+<div><b>{{ 'Enabled' if on else 'Disabled' }}</b><div class="mut">{% if on %}Allowed employees see the &ldquo;Multiplayer Game&rdquo; link in their left menu.{% else %}The link is hidden from every employee and the game cannot be opened.{% endif %}</div></div></div>
+<form method="post" action="/admin/game/toggle" {% if on %}onsubmit="return confirm('Disable the Multiplayer Game? Matches that are running now will be ended.')"{% endif %}>
 <input type="hidden" name="enabled" value="{{ '0' if on else '1' }}"><button class="primary" type="submit">{{ 'Disable game' if on else 'Enable game' }}</button></form></div>
-<div class="card"><div class="mut" style="margin-bottom:4px">Direct game URL (share it with the employees you allow below)</div>
-<div class="gmA-bar"><input id="gmA-url" value="{{url}}" readonly style="min-width:320px;flex:1"><button type="button" onclick="var i=document.getElementById('gmA-url');i.select();navigator.clipboard&&navigator.clipboard.writeText(i.value);this.textContent='Copied'">Copy</button></div></div>
 <div class="gmA-kpis"><div class="card"><div class="mut">Online in the app</div><b class="gmA-n">{{live.online}}</b></div>
-<div class="card"><div class="mut">Joined the game</div><b class="gmA-n">{{live.joined}}</b></div>
-<div class="card"><div class="mut">Session</div><b class="gmA-n" style="font-size:18px">{{ {'lobby':'Waiting room','countdown':'Starting','live':'Round '~live.round~' live','done':'Round '~live.round~' finished'}[live.state] }}</b></div>
+<div class="card"><div class="mut">In the game lobby</div><b class="gmA-n">{{live.lobby}}</b></div>
+<div class="card"><div class="mut">Matches running</div><b class="gmA-n">{{live.matches|length}}</b></div>
 <div class="card"><div class="mut">Employees allowed</div><b class="gmA-n">{{n_allowed}} / {{emps|length}}</b></div></div>
-{% if live.players %}<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">Players in the session</h2>
-<form method="post" action="/admin/game/reset" onsubmit="return confirm('Reset the session? Everybody has to join again.')" style="margin:0"><button type="submit">Reset session</button></form></div>
-<table><tr><th>Player</th><th>Score (this round)</th><th>Rounds won</th><th>Status</th></tr>
-{% for p in live.players %}<tr><td>{{p.name}}</td><td>{{p.score}}</td><td>{{p.wins}}</td><td>{{ 'In the game' if p.here else 'Left' }}</td></tr>{% endfor %}</table></div>{% endif %}
-<div class="card"><h2 style="margin-top:0">Who can play</h2><p class="mut">Tick the employees allowed to use the game. Unticked employees are refused when they open the URL and are removed from a running session. Takes effect within a few seconds.</p>
+{% if live.matches %}<div class="card"><h2 style="margin-top:0">Matches running now</h2><table><tr><th>Player 1</th><th>Score</th><th>Player 2</th><th>State</th></tr>
+{% for m in live.matches %}<tr><td>{{m.a}}</td><td>{{m.sa}} - {{m.sb}}</td><td>{{m.b}}</td><td>{{ 'Starting' if m.state=='countdown' else 'Playing' }}</td></tr>{% endfor %}</table></div>{% endif %}
+<div class="card"><h2 style="margin-top:0">Who can play</h2><p class="mut">Tick the employees allowed to use the game. Unticked employees never see the link and cannot open the page. Takes effect within a few seconds.</p>
 <form method="post" action="/admin/game/access"><div class="gmA-bar"><input id="gmA-q" placeholder="Search name or ID" autocomplete="off" style="min-width:220px">
 <button type="button" onclick="gmAll(true)">Select all</button><button type="button" onclick="gmAll(false)">Select none</button><button class="primary" type="submit">Save access</button></div>
 <table id="gmA-t"><tr><th style="width:70px">Allowed</th><th>Employee ID</th><th>Name</th><th>Right now</th></tr>

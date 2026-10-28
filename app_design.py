@@ -1,4 +1,6 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update219: Admin > Mail Notes - ATTACHMENTS (Admin only): attach PDF / Word / Excel / PowerPoint / CSV / TXT / image files (max 5, 2 MB each, 2.5 MB total; type + content checked) to a mail; stored in the new "Mail Note Files" sheet so scheduled mails keep them; sent to every recipient (Brevo + SMTP); listed in the Scheduled mails table and the Mail to Employees Log with View / Download links (/admin/mail-notes/<id>/file/<fid>, admin-only); editable while Scheduled.
+  * Update218: (1) Admin > Mail Notes: new CC field (Admin only) - add / remove one or more CC addresses (chips, validated, duplicates removed, max 20) before scheduling or sending; every employee mail carries the Cc header (Brevo + SMTP); the CC list is saved on the mail (editable while Scheduled) and shown in the Scheduled mails table and in the Mail to Employees Log (new 'CC' column, added automatically to both sheets). (2) Employee page: time-based 3D animated greeting 'Good Morning / Afternoon / Evening / Night, <name>!' (letter-by-letter 3D flip-in, floating orb, pointer tilt, theme colours per time of day) inside the existing welcome card; layout unchanged, reduced-motion respected.
   * Update217: Admin avatar (sidebar above Logout + Admin avatar spots) - the old bearded-man-with-server picture is replaced by the supplied 3D man with laptop (served at /char/a2.webp), appearance unchanged (cut out, no redraw) with 3D depth + natural motion: breathing, sway, head turn / nod, blinking, typing hand + laptop, light sweep, floor glow, pointer tilt. Size, position, layout and functionality unchanged.
   * Update216: Employee login page - the character now follows the typed username BEFORE sign-in: /login-char looks the username (Employee ID or e-mail) up and returns only m / f / n; the matching 3D male / female character fades in as soon as the username is recognised and changes when the username changes; unknown username or no Gender on file shows a neutral hologram character. Rate-limited, display only - form, layout and login checks unchanged.
   * Update215: Employee AND Admin login pages - the drawn server is replaced by the supplied server rack (separate cut-out rack + glass door, served at /char/r.webp and /char/rd.webp). The glass door swings open and closed in real CSS 3D (hinge, perspective, light sheen) on a 12 s loop with glowing data-scan, flowing data lines and blinking drive LEDs; while signing in the door stays open and the scan speeds up. Same look on both pages; form, layout, routes and login checks unchanged. Reduced-motion users get a still, open rack.
@@ -524,9 +526,11 @@ HEADERS = {
     "Missed Email Log": ["Date sent", "Employee ID", "Employee name", "Email", "Missed dates", "Count", "Sent at", "Mode", "Status", "Sent by"],
     # Update150 (Mail Notes): "Mail Notes" = one row per e-mail the Admin composed + scheduled; "Claimed by" stops two workers sending the same one.
     "Mail Notes": ["ID", "Subject", "Message", "Send at", "Status", "Recipient mode", "Recipient IDs", "Recipients", "Sent", "Failed",
-                   "Created by", "Created at", "Completed at", "Claimed by", "Detail"],
+                   "Created by", "Created at", "Completed at", "Claimed by", "Detail", "CC", "Attachments"],
     # Update150: "Mail Notes Log" = one row per employee mailed (shown as "Mail to Employees Log" on the Admin > Mail Notes page).
-    "Mail Notes Log": ["Notice ID", "Employee ID", "Employee Name", "Employee Email", "Subject", "Email Sent At", "Email Status", "Detail"],
+    "Mail Notes Log": ["Notice ID", "Employee ID", "Employee Name", "Employee Email", "Subject", "Email Sent At", "Email Status", "Detail", "CC", "Attachments"],
+    # Update219: attachment bytes of a mail note (base64, split into <=40000-char chunks because a Google Sheets cell holds 50000 characters)
+    "Mail Note Files": ["Notice ID", "File ID", "File Name", "Mime", "Size", "Chunk", "Data"],
     "Mahizhchi Connection Attempts": ["Employee ID", "Employee name", "Game", "Started at", "Closed at", "Solved", "Mistakes", "Result", "Extra seconds"],
 }
 PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
@@ -7332,9 +7336,80 @@ w.addEventListener('pointerleave',function(){A.forEach(function(x){x.classList.r
 
 ADMIN3D_HTML = ADMIN3D
 
-EMP_TOP = """<div class="head hero"><div class="welcome wflex"><div class="wtxt"><h1 class="wt"><span class="wt-hi">Hello,</span> <span class="wt-name">{{session.name}}</span></h1>
+# ---------------------------------------------------------------- Update218: Employee page - time-based 3D animated greeting
+def greet_parts(hour=None):
+    """(greeting, theme) from the app's local time: 05-11 Morning, 12-16 Afternoon, 17-20 Evening, otherwise Night."""
+    h = now_local().hour if hour is None else hour
+    if 5 <= h < 12: return "Good Morning", "m"
+    if 12 <= h < 17: return "Good Afternoon", "a"
+    if 17 <= h < 21: return "Good Evening", "e"
+    return "Good Night", "n"
+
+def greet_html():
+    """The greeting as per-letter 3D spans: 'Good Morning, <name>!'. Everything is escaped; letters get --i so CSS can stagger the flip-in."""
+    import html as _h
+    from markupsafe import Markup
+    g, th = greet_parts(); name = str(session.get("name", "")).strip()
+    def spans(t, start, cls=""):
+        out, i = [], start
+        for ch in t:
+            if ch == " ": out.append('<span class="g3-sp"> </span>')
+            else: out.append(f'<span class="g3-ch{cls}" style="--i:{i}">{_h.escape(ch)}</span>'); i += 1
+        return "".join(out), i
+    a, i = spans(g + ",", 0); b, i = spans(name, i, " g3-nm"); c, _ = spans("!", i, " g3-nm")
+    return Markup(f'<span class="g3-line" data-theme="{th}" aria-label="{_h.escape(g)}, {_h.escape(name)}!">{a}<span class="g3-sp"> </span><span class="g3-name">{b}{c}</span></span>')
+app.jinja_env.globals["greet_html"] = greet_html
+app.jinja_env.globals["greet_theme"] = lambda: greet_parts()[1]
+
+EMP_GREET_CSS = r"""<style>
+/* Update218: 3D animated welcome greeting (employee page). Transform / opacity only; decorative layers are click-through and clipped inside the existing welcome card. */
+.welcome.g3d{position:relative;overflow:hidden;perspective:900px;isolation:isolate;--g1:#4f46e5;--g2:#c026d3;--g3:#0ea5e9;--orb1:#fde68a;--orb2:#f59e0b}
+.welcome.g3d[data-theme="a"]{--g1:#0284c7;--g2:#4f46e5;--g3:#06b6d4;--orb1:#fef08a;--orb2:#f59e0b}
+.welcome.g3d[data-theme="e"]{--g1:#ea580c;--g2:#c026d3;--g3:#7c3aed;--orb1:#fdba74;--orb2:#f43f5e}
+.welcome.g3d[data-theme="n"]{--g1:#4338ca;--g2:#7c3aed;--g3:#38bdf8;--orb1:#e0e7ff;--orb2:#818cf8;background:linear-gradient(120deg,#fff 0%,#eceafe 55%,#dbe7ff 100%)}
+.g3d .g3-bg{position:absolute;inset:0;z-index:-1;pointer-events:none;overflow:hidden}
+.g3d .g3-grid{position:absolute;left:-10%;right:-10%;bottom:-40%;height:120%;opacity:.28;transform:rotateX(62deg);transform-origin:50% 100%;
+ background-image:linear-gradient(var(--g1) 1px,transparent 1px),linear-gradient(90deg,var(--g1) 1px,transparent 1px);background-size:34px 34px;
+ -webkit-mask-image:linear-gradient(to top,#000,transparent 75%);mask-image:linear-gradient(to top,#000,transparent 75%);animation:g3Grid 6s linear infinite}
+.g3d .g3-orb{position:absolute;right:26px;top:50%;width:74px;height:74px;margin-top:-37px;border-radius:50%;
+ background:radial-gradient(circle at 32% 28%,#fff 0,var(--orb1) 28%,var(--orb2) 100%);box-shadow:0 14px 30px -8px var(--orb2),inset -8px -10px 18px rgba(0,0,0,.14);
+ animation:g3Float 5s ease-in-out infinite;transform-style:preserve-3d}
+.g3d .g3-orb:before{content:"";position:absolute;inset:-14px;border-radius:50%;border:2px dashed var(--g3);opacity:.55;transform:rotateX(68deg);animation:g3Spin 7s linear infinite}
+.g3d .g3-orb:after{content:"";position:absolute;inset:-26px;border-radius:50%;border:1px solid var(--g2);opacity:.35;transform:rotateX(68deg) rotateY(25deg);animation:g3Spin 11s linear infinite reverse}
+.g3d[data-theme="n"] .g3-orb{background:radial-gradient(circle at 34% 30%,#fff 0,#e0e7ff 30%,#a5b4fc 100%);box-shadow:0 14px 30px -8px #6366f1,inset -14px -6px 0 -2px rgba(79,70,229,.35)}
+.g3d .g3-dot{position:absolute;width:9px;height:9px;border-radius:50%;background:var(--g3);opacity:.5;animation:g3Float 4s ease-in-out infinite}
+.g3d .g3-dot.d1{right:130px;top:22%;animation-delay:-.8s}.g3d .g3-dot.d2{right:96px;bottom:18%;width:6px;height:6px;background:var(--g2);animation-delay:-2s}.g3d .g3-dot.d3{right:176px;bottom:30%;width:5px;height:5px;animation-delay:-3s}
+.g3d .g3-scan{position:absolute;top:0;bottom:0;width:90px;left:-120px;background:linear-gradient(100deg,transparent,rgba(255,255,255,.75),transparent);animation:g3Scan 6s 1.4s ease-in-out infinite}
+.g3d .wtxt{position:relative;padding-right:130px;transform-style:preserve-3d;transition:transform .25s ease-out;will-change:transform}
+.g3-line{display:inline-block;transform-style:preserve-3d}
+.g3-ch{display:inline-block;transform-origin:50% 100%;background:linear-gradient(90deg,var(--g1),var(--g2));-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;
+ text-shadow:none;filter:drop-shadow(0 3px 0 rgba(79,70,229,.18)) drop-shadow(0 8px 10px rgba(79,70,229,.22));
+ animation:g3In .85s calc(var(--i)*38ms + .1s) cubic-bezier(.2,.9,.25,1.2) both}
+.g3-name{display:inline-block;white-space:nowrap}
+.g3-ch.g3-nm{background:linear-gradient(90deg,var(--g2),var(--g3),var(--g1),var(--g2));background-size:220% 100%;-webkit-background-clip:text;background-clip:text;
+ animation:g3In .85s calc(var(--i)*38ms + .1s) cubic-bezier(.2,.9,.25,1.2) both,g3Shine 3.2s linear 1.8s infinite}
+.g3-sp{display:inline-block;width:.28em}
+.g3d .wt{font-size:30px;font-weight:800;line-height:1.25}
+.g3d .wsub{transform:translateZ(14px)}
+@keyframes g3In{0%{opacity:0;transform:translate3d(0,26px,-60px) rotateX(-95deg) scale(.7)}60%{opacity:1}100%{opacity:1;transform:none}}
+@keyframes g3Shine{from{background-position:0 0}to{background-position:-220% 0}}
+@keyframes g3Float{0%,100%{transform:translate3d(0,0,0)}50%{transform:translate3d(0,-9px,0)}}
+@keyframes g3Spin{from{transform:rotateX(68deg) rotateZ(0)}to{transform:rotateX(68deg) rotateZ(360deg)}}
+@keyframes g3Grid{from{background-position:0 0}to{background-position:0 34px}}
+@keyframes g3Scan{0%{left:-120px}45%,100%{left:115%}}
+@media(max-width:640px){.g3d .wt{font-size:22px}.g3d .wtxt{padding-right:0}.g3d .g3-orb{width:44px;height:44px;margin-top:-22px;right:12px;top:30px;opacity:.7}.g3d .g3-dot{display:none}}
+@media(prefers-reduced-motion:reduce){.g3-ch,.g3-ch.g3-nm,.g3d .g3-orb,.g3d .g3-orb:before,.g3d .g3-orb:after,.g3d .g3-dot,.g3d .g3-grid,.g3d .g3-scan{animation:none!important}.g3-ch{opacity:1}.g3d .wtxt{transition:none}}
+@media print{.g3d .g3-bg{display:none}}
+</style>"""
+EMP_GREET_JS = r"""<script>(function(){var w=document.querySelector('.welcome.g3d');if(!w||(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches))return;
+var t=w.querySelector('.wtxt'),o=w.querySelector('.g3-orb'),raf=0;
+w.addEventListener('pointermove',function(e){if(e.pointerType==='touch')return;var r=w.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;
+ cancelAnimationFrame(raf);raf=requestAnimationFrame(function(){t.style.transform='rotateY('+(x*7).toFixed(2)+'deg) rotateX('+(-y*6).toFixed(2)+'deg)';if(o)o.style.marginLeft=(-x*14).toFixed(1)+'px';});},{passive:true});
+w.addEventListener('pointerleave',function(){t.style.transform='';if(o)o.style.marginLeft='';});})();</script>"""
+
+EMP_TOP = EMP_GREET_CSS + """<div class="head hero"><div class="welcome wflex g3d" data-theme="{{greet_theme()}}"><div class="g3-bg" aria-hidden="true"><span class="g3-grid"></span><span class="g3-scan"></span><span class="g3-dot d1"></span><span class="g3-dot d2"></span><span class="g3-dot d3"></span><span class="g3-orb"></span></div><div class="wtxt"><h1 class="wt">{{ greet_html() }}</h1>
 <p class="mut wsub"><span class="seg">{{today}}</span>{% if session.designation %}<span class="dot">&middot;</span><span class="seg">{{session.designation}}</span>{% endif %}<span class="dot">&middot;</span><span class="seg">Band {{session.band}}</span><span class="dot">&middot;</span><span class="seg">{{month_label}} summary</span>
-{% if today_perm %}<span class="dot">&middot;</span>Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div></div></div>""" + KPI
+{% if today_perm %}<span class="dot">&middot;</span>Permission today: <span class="pill {{today_perm['Status']|ppill}}">{{today_perm['Status']}}</span>{% endif %}</p></div></div></div>""" + EMP_GREET_JS + KPI
 
 VIEW_ONLY_CARD = """<div class="card"><h2 style="margin-top:0">Productivity &mdash; View Only</h2>
 <p class="mut">Your designation ({{session.designation}}) has <b>View Only</b> access to Productivity. Daily productivity entry is not required,
@@ -9408,6 +9483,8 @@ def _brevo_send(messages):
             if plain: payload["textContent"] = plain.get_content()
             _cc = [a for _n, a in __import__("email.utils", fromlist=["getaddresses"]).getaddresses([str(m["Cc"])]) if a] if m["Cc"] else []      # Update189
             if _cc: payload["cc"] = [{"email": a} for a in _cc]
+            _at = [{"name": p.get_filename() or "attachment", "content": __import__("base64").b64encode(p.get_payload(decode=True) or b"").decode("ascii")} for p in m.iter_attachments()]      # Update219
+            if _at: payload["attachment"] = _at
             req = urllib.request.Request("https://api.brevo.com/v3/smtp/email", data=json.dumps(payload).encode("utf-8"), method="POST",
                                          headers={"api-key": BREVO_API_KEY, "content-type": "application/json", "accept": "application/json"})
             with urllib.request.urlopen(req, timeout=30) as r: r.read()
@@ -10280,13 +10357,94 @@ def mail_note_html(subject, message):
     vals = {"subject": _h.escape(str(subject)), "message": _mn_body_html(message)}
     return re.sub(r"\{\{(\w+)\}\}", lambda m: vals.get(m.group(1), m.group(0)), MAIL_NOTE_HTML)      # one pass: typed text is never re-expanded
 
-def mail_note_message(emp, rec):
+_MN_CC_MAX = 20
+def _mn_parse_cc(raw):
+    """Update218: Admin CC field -> (valid unique addresses, invalid entries). Separators: comma, semicolon, space or new line."""
+    ok, bad, seen = [], [], set()
+    for x in re.split(r"[,;\s]+", str(raw or "")):
+        x = x.strip().strip("<>")
+        if not x: continue
+        if not EMAIL_RE.match(x): bad.append(x); continue
+        if x.lower() in seen: continue
+        seen.add(x.lower()); ok.append(x)
+    return ok, bad
+
+def _mn_cc_list(rec, to_email=""):
+    """CC addresses saved on a mail note, without the recipient's own address."""
+    return [a for a in _mn_parse_cc(str(rec.get("CC", "")).replace("|", ","))[0] if a.lower() != str(to_email or "").strip().lower()]
+
+# ---- Update219: attachments (Admin only). Bytes live in the "Mail Note Files" sheet so a SCHEDULED mail still has them when the server restarts.
+MN_FILES = "Mail Note Files"
+_MN_ATT_EXT = {"pdf": "application/pdf", "xls": "application/vnd.ms-excel", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+               "csv": "text/csv", "doc": "application/msword", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+               "ppt": "application/vnd.ms-powerpoint", "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "txt": "text/plain",
+               "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
+_MN_ATT_VIEW = {"pdf", "png", "jpg", "jpeg", "gif", "webp", "txt"}          # opened in the browser; everything else downloads
+_MN_ATT_MAX_FILES, _MN_ATT_MAX_EACH, _MN_ATT_MAX_TOTAL, _MN_CHUNK = 5, 2 * 1024 * 1024, 2_500_000, 40000
+
+def _mn_att_list(rec):
+    try: out = json.loads(str(rec.get("Attachments", "") or "[]"))
+    except Exception: out = []
+    return [a for a in out if isinstance(a, dict) and a.get("id") and a.get("name")] if isinstance(out, list) else []
+
+def _mn_att_names(rec): return "; ".join(a["name"] for a in _mn_att_list(rec))
+
+def _mn_att_clean_name(n):
+    n = re.sub(r"[\x00-\x1f\\/:*?\"<>|]+", "_", str(n or "").replace("\\", "/").split("/")[-1]).strip(" .")
+    return n[:100] or "attachment"
+
+def _mn_att_check(fs):
+    """Uploaded FileStorage list -> ([(name, ext, bytes)], error text). Extension allow-list + simple content check + size limits."""
+    out, total = [], 0
+    for f in fs:
+        if not f or not f.filename: continue
+        name = _mn_att_clean_name(f.filename); ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        if ext not in _MN_ATT_EXT: return None, f"'{name}' is not an allowed file type. Allowed: PDF, Word, Excel, PowerPoint, CSV, TXT and images (PNG, JPG, GIF, WEBP)."
+        data = f.read(_MN_ATT_MAX_EACH + 1)
+        if not data: return None, f"'{name}' is empty."
+        if len(data) > _MN_ATT_MAX_EACH: return None, f"'{name}' is larger than 2 MB."
+        h = data[:8]
+        ok = {"pdf": h.startswith(b"%PDF"), "png": h.startswith(b"\x89PNG"), "jpg": h[:3] == b"\xff\xd8\xff", "jpeg": h[:3] == b"\xff\xd8\xff", "gif": h[:4] == b"GIF8",
+              "webp": data[:4] == b"RIFF" and data[8:12] == b"WEBP", "docx": h[:2] == b"PK", "xlsx": h[:2] == b"PK", "pptx": h[:2] == b"PK",
+              "doc": h[:4] == b"\xd0\xcf\x11\xe0", "xls": h[:4] == b"\xd0\xcf\x11\xe0", "ppt": h[:4] == b"\xd0\xcf\x11\xe0"}.get(ext, True)
+        if not ok: return None, f"'{name}' does not look like a real .{ext} file."
+        total += len(data); out.append((name, ext, data))
+    return out, ""
+
+def _mn_att_store(mid, items):
+    """Save new attachments -> list of {id,name,size}. One batched append."""
+    import base64
+    meta, rows_ = [], []
+    for name, ext, data in items:
+        fid = uuid.uuid4().hex[:10]; b64 = base64.b64encode(data).decode("ascii")
+        for i in range(0, len(b64), _MN_CHUNK): rows_.append([mid, fid, name, _MN_ATT_EXT[ext], len(data), i // _MN_CHUNK, b64[i:i + _MN_CHUNK]])
+        meta.append({"id": fid, "name": name, "size": len(data)})
+    if rows_:
+        ws_of(MN_FILES).append_rows(rows_, value_input_option="RAW"); invalidate_cache(MN_FILES)
+    return meta
+
+def _mn_att_load(mid, only=None):
+    """-> {file id: (name, mime, bytes)} for a mail note (live read)."""
+    import base64
+    parts = {}
+    for r in _with_retry(ws_of(MN_FILES).get_all_values)[1:]:
+        r = list(r) + [""] * 7
+        if r[0] != str(mid) or (only and r[1] not in only): continue
+        parts.setdefault(r[1], dict(name=r[2], mime=r[3], ch={}))["ch"][int(r[5] or 0)] = r[6]
+    return {fid: (p["name"], p["mime"], base64.b64decode("".join(p["ch"][k] for k in sorted(p["ch"])))) for fid, p in parts.items()}
+
+def mail_note_message(emp, rec, atts=None):
     """The mail for ONE employee: the Admin's subject + message inside the dedicated HTML design."""
     msg = EmailMessage()
     msg["Subject"] = re.sub(r"[\r\n]+", " ", str(rec["Subject"])).strip()
     msg["From"] = formataddr(mail_sender()); msg["To"] = emp["email"]
+    _cc = _mn_cc_list(rec, emp["email"])                        # Update218: Admin-entered CC recipients
+    if _cc: msg["Cc"] = ", ".join(_cc)
     msg.set_content(f"{_mn_plain(rec['Message'])}\n\nThis is an automated email. Please do not reply to this email.\n\nThanks,\nProductivity Tracker (LN_Map)")
     msg.add_alternative(mail_note_html(rec["Subject"], rec["Message"]), subtype="html")
+    for name, mime, data in (atts or []):                      # Update219
+        mt, st = (mime.split("/", 1) + ["octet-stream"])[:2]
+        msg.add_attachment(data, maintype=mt, subtype=st, filename=name)
     return msg
 
 def _mn_ids(rec): return [x.strip() for x in str(rec.get("Recipient IDs", "")).split("|") if x.strip()]
@@ -10349,17 +10507,23 @@ def run_mail_note(mid):
             emps = [e for e in emps if _key(e.get("Employee ID", "")) in want]
         sender = mail_sender(fresh=True)[1]
         ws = ws_of(MN_LOG)
+        att_meta = _mn_att_list(rec); atts = []
+        if att_meta:                                           # Update219: load the attachment bytes ONCE for this run
+            have = _mn_att_load(rec["ID"], {a["id"] for a in att_meta})
+            missing = [a["name"] for a in att_meta if a["id"] not in have]
+            if missing: raise RuntimeError("Attachment data missing: " + ", ".join(missing)[:150])
+            atts = [have[a["id"]] for a in att_meta]
         sent = failed = 0; why = ""; ready = []; out_rows = []
         done_before = {(str(r.get("Notice ID", "")), _key(r.get("Employee ID", ""))) for r in _fetch_rows(MN_LOG) if str(r.get("Email Status", "")) == "Sent"}      # Update174: a retried mail never mails anyone twice
         all_n = len(emps)
         emps = [e for e in emps if (str(rec["ID"]), _key(e.get("Employee ID", ""))) not in done_before]
         sent = all_n - len(emps)
         def logrow(emp, status, detail=""):
-            return [str(rec["ID"]), emp["eid"], emp["name"], emp["email"], str(rec["Subject"]), stamp(), status, detail[:200]]
+            return [str(rec["ID"]), emp["eid"], emp["name"], emp["email"], str(rec["Subject"]), stamp(), status, detail[:200], "; ".join(_mn_cc_list(rec, emp["email"])), _mn_att_names(rec)]
         for e in emps:
             emp = dict(eid=str(e.get("Employee ID", "")).strip(), name=str(e.get("Name", "")), email=employee_office_email(e))
             if not EMAIL_RE.match(emp["email"]): out_rows.append(logrow(emp, "Failed", "No valid Office Email ID")); failed += 1; continue
-            ready.append((emp, mail_note_message(emp, rec)))
+            ready.append((emp, mail_note_message(emp, rec, atts)))
         if out_rows: ws.append_rows(out_rows, value_input_option="RAW")
         for i in range(0, len(ready), 5):
             batch = ready[i:i + 5]
@@ -10412,7 +10576,7 @@ threading.Thread(target=_mn_loop, daemon=True).start()
 MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
 <p class="mut">Write an e-mail, choose who receives it and when it is sent. Format the message with the toolbar (colour, size, bold, italic, underline, alignment, lists); your subject and message are placed in one professional e-mail design (see the live preview). Scheduled mails are sent automatically. All times are {{tz}} time. Only Admin can open this page.</p></div></div>
 {% if not mail_ok %}<div class="warn"><b>&#9888; E-mail service is not set up on the server.</b> Add <code>BREVO_API_KEY</code> (or <code>SMTP_HOST</code>) in the Render Environment settings and redeploy. Nothing can be scheduled until then.</div>{% endif %}
-<form method="post" action="/admin/mail-notes/schedule" id="mn-form" onsubmit="return mnCheck()">
+<form method="post" action="/admin/mail-notes/schedule" id="mn-form" enctype="multipart/form-data" onsubmit="return mnCheck()">
 <input type="hidden" name="mid" value="{{form.mid}}">
 <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start">
 <div class="card" style="flex:1 1 400px;min-width:0">
@@ -10478,6 +10642,42 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
 <span>{{e.id}} &middot; {{e.name}} &middot; <span class="mut">{{e.email or 'no valid Office Email ID'}}</span></span></label>
 {% else %}<p class="mut">No employees found.</p>{% endfor %}</div></div></div>
 
+<h3 style="margin:18px 0 6px">Attachments <span class="mut" style="font-weight:400">(optional, Admin only)</span></h3>
+<div style="border:1px solid #d0d5dd;border-radius:10px;padding:10px 14px">
+{% for a in form.atts %}<label style="display:flex;gap:8px;align-items:center;margin:3px 0"><input type="checkbox" name="keep_att" value="{{a.id}}" checked> &#128206; {{a.name}} <span class="mut">({{a.size}}) &mdash; untick to remove</span></label>{% endfor %}
+<input type="file" name="attach" id="mn-att" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.txt,.png,.jpg,.jpeg,.gif,.webp">
+<p class="mut" style="margin:6px 0 0">PDF, Word, Excel, PowerPoint, CSV, TXT or images. Up to 5 files, 2 MB each, 2.5 MB in total. Sent with the e-mail to every recipient.{% if form.mid %} Files you choose again are added to the ones kept above.{% endif %}</p></div>
+
+<h3 style="margin:18px 0 6px">CC &mdash; copy this e-mail to <span class="mut" style="font-weight:400">(optional, Admin only)</span></h3>
+<style>.cc-box{display:flex;flex-wrap:wrap;gap:6px;align-items:center;border:1px solid #d0d5dd;border-radius:10px;padding:6px 8px;background:#fff}
+.cc-box:focus-within{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+.cc-chip{display:inline-flex;align-items:center;gap:6px;background:#dbeafe;color:#1e40af;border-radius:99px;padding:3px 6px 3px 11px;font-size:14px}
+.cc-chip.bad{background:#fee2e2;color:#991b1b}
+.cc-chip button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:16px;line-height:1;padding:0 4px}
+#cc-in{flex:1 1 220px;min-width:180px;border:0;outline:0;padding:6px 4px;font:inherit;background:transparent}</style>
+<div class="cc-box" id="cc-box"><input id="cc-in" type="text" placeholder="Type an e-mail, press Enter or comma" autocomplete="off" aria-label="CC e-mail addresses"></div>
+<input type="hidden" name="cc" id="cc-val" value="{{form.cc}}">
+<p class="mut" style="margin:4px 0 0">Every CC address receives a copy of the mail sent to each employee. Remove a chip with &times; to take that person off before sending.</p>
+<script>
+(function(){var box=document.getElementById('cc-box'),inp=document.getElementById('cc-in'),val=document.getElementById('cc-val'),form=document.getElementById('mn-form'),
+ RE=/^[^@\s,;<>"]+@[^@\s,;<>"]+\.[^@\s,;<>"]+$/,list=[];
+ function sync(){val.value=list.join(', ');}
+ function draw(){box.querySelectorAll('.cc-chip').forEach(function(c){c.remove();});
+  list.forEach(function(a,i){var c=document.createElement('span');c.className='cc-chip';c.appendChild(document.createTextNode(a));
+   var b=document.createElement('button');b.type='button';b.setAttribute('aria-label','Remove '+a);b.innerHTML='&times;';
+   b.onclick=function(){list.splice(i,1);sync();draw();};c.appendChild(b);box.insertBefore(c,inp);});}
+ function add(t){var bad=[];t.split(/[,;\s]+/).forEach(function(x){x=x.replace(/^<|>$/g,'');if(!x)return;
+   if(!RE.test(x)){bad.push(x);return;}
+   if(list.some(function(y){return y.toLowerCase()===x.toLowerCase();}))return;list.push(x);});
+  sync();draw();inp.value=bad.join(' ');inp.style.color=bad.length?'#b91c1c':'';return !bad.length;}
+ inp.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===','||e.key===';'||e.key===' '){if(inp.value.trim()){e.preventDefault();add(inp.value);}else if(e.key==='Enter')e.preventDefault();}
+  else if(e.key==='Backspace'&&!inp.value&&list.length){list.pop();sync();draw();}});
+ inp.addEventListener('blur',function(){if(inp.value.trim())add(inp.value);});
+ inp.addEventListener('paste',function(){setTimeout(function(){add(inp.value);},0);});
+ form.addEventListener('submit',function(e){if(inp.value.trim()&&!add(inp.value)){e.preventDefault();alert('Please correct the invalid CC e-mail address.');}},true);
+ add(val.value);})();
+</script>
+
 <h3 style="margin:18px 0 6px">Date &amp; time to send</h3>
 <div style="border:1px solid #d0d5dd;border-radius:10px;padding:10px 14px">
 <p style="margin:4px 0"><label style="display:inline-flex;gap:6px;align-items:center"><input type="radio" name="mode" value="later" {{'checked' if form.mode!='now' else ''}}> Send automatically on</label>
@@ -10494,8 +10694,8 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
 </div></form>
 
 <div class="card"><h2>Scheduled mails</h2>
-<table><tr><th>Subject</th><th>Send at</th><th>Recipients</th><th>Status</th><th>Sent / Failed</th><th>Created by</th><th class="no-print">Action</th></tr>
-{% for n in notices %}<tr><td>{{n.subject}}</td><td>{{n.send_at|t12}}</td><td>{{n.who}}</td>
+<table><tr><th>Subject</th><th>Send at</th><th>Recipients</th><th>CC</th><th>Attachments</th><th>Status</th><th>Sent / Failed</th><th>Created by</th><th class="no-print">Action</th></tr>
+{% for n in notices %}<tr><td>{{n.subject}}</td><td>{{n.send_at|t12}}</td><td>{{n.who}}</td><td>{{n.cc or "-"}}</td><td>{% for a in n.atts %}<div>&#128206; {{a.name}} <small>{% if a.view %}<a href="/admin/mail-notes/{{a.mid}}/file/{{a.id}}" target="_blank" rel="noopener">View</a> &middot; {% endif %}<a href="/admin/mail-notes/{{a.mid}}/file/{{a.id}}?dl=1">Download</a></small></div>{% else %}-{% endfor %}</td>
 <td><span style="padding:2px 9px;border-radius:99px;font-weight:600;{{ n.badge }}">{{n.status}}</span>{% if n.detail %}<br><small class="mut">{{n.detail}}</small>{% endif %}</td>
 <td>{{n.sent}} / {{n.failed}}</td><td>{{n.by}}<br><small class="mut">{{n.created|t12}}</small></td>
 <td class="act no-print"><a href="/admin/mail-notes/{{n.id}}/preview" target="_blank">Preview</a>
@@ -10503,7 +10703,7 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
 <form method="post" action="/admin/mail-notes/{{n.id}}/send-now" style="display:inline" onsubmit="return confirm('Send this e-mail to its recipients right now?')"><button class="primary sm">Send now</button></form>
 <form method="post" action="/admin/mail-notes/{{n.id}}/cancel" style="display:inline" onsubmit="return confirm('Cancel this scheduled e-mail?')"><button class="sm">Cancel</button></form>
 {% elif n.status in ('Sending','Failed','Partly sent') %}<form method="post" action="/admin/mail-notes/{{n.id}}/retry" style="display:inline" onsubmit="return confirm('Retry sending this e-mail? Employees who already received it are skipped.')"><button class="primary sm">Retry</button></form>{% endif %}</td></tr>
-{% else %}<tr><td colspan="7">No mail has been scheduled yet.</td></tr>{% endfor %}</table>
+{% else %}<tr><td colspan="9">No mail has been scheduled yet.</td></tr>{% endfor %}</table>
 <p class="mut">The server checks for due mails every 30 seconds.</p></div>
 
 <div class="card"><h2>Mail to Employees Log</h2>
@@ -10511,11 +10711,11 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
 <form method="get" class="grid no-print" style="align-items:end">
 <label>Status<select name="status"><option value="">All</option>{% for x in ['Sent','Failed'] %}<option{{' selected' if status==x else ''}}>{{x}}</option>{% endfor %}</select></label>
 <input name="q" placeholder="Employee name / email / subject" value="{{q}}"><button class="primary sm">Show</button><a href="/admin/mail-notes">Reset</a></form>
-<div style="overflow-x:auto"><table><tr><th>Employee Name</th><th>Employee Email</th><th>Subject</th><th>Email Sent Date &amp; Time</th><th>Email Status</th></tr>
-{% for h in log %}<tr><td>{{h['Employee Name']}}</td><td>{{h['Employee Email']}}</td><td>{{h['Subject']}}</td><td>{{h['Email Sent At']|t12}}</td>
+<div style="overflow-x:auto"><table><tr><th>Employee Name</th><th>Employee Email</th><th>CC</th><th>Attachments</th><th>Subject</th><th>Email Sent Date &amp; Time</th><th>Email Status</th></tr>
+{% for h in log %}<tr><td>{{h['Employee Name']}}</td><td>{{h['Employee Email']}}</td><td>{% for a in att_map.get(h['Notice ID'], []) %}<div>&#128206; {{a.name}} <small>{% if a.view %}<a href="/admin/mail-notes/{{a.mid}}/file/{{a.id}}" target="_blank" rel="noopener">View</a> &middot; {% endif %}<a href="/admin/mail-notes/{{a.mid}}/file/{{a.id}}?dl=1">Download</a></small></div>{% else %}{{h['Attachments'] or '-'}}{% endfor %}</td><td>{{h['Subject']}}</td><td>{{h['Email Sent At']|t12}}</td>
 <td><span style="padding:2px 9px;border-radius:99px;font-weight:600;{{ 'background:#dcfce7;color:#166534' if h['Email Status']=='Sent' else 'background:#fee2e2;color:#991b1b' }}">{{h['Email Status']}}</span>
 {% if h['Email Status']!='Sent' and h['Detail'] %}<br><small class="mut">{{h['Detail']}}</small>{% endif %}</td></tr>
-{% else %}<tr><td colspan="5">No e-mail has been sent yet{{' for this filter' if status or q else ''}}.</td></tr>{% endfor %}</table></div>
+{% else %}<tr><td colspan="7">No e-mail has been sent yet{{' for this filter' if status or q else ''}}.</td></tr>{% endfor %}</table></div>
 <p class="mut">Latest {{log|length}} of {{log_total}} shown.</p></div>
 <script>
 (function(){
@@ -10600,6 +10800,11 @@ def _mn_badge(st):
     return {"Sent": "background:#dcfce7;color:#166534", "Scheduled": "background:#dbeafe;color:#1e40af", "Sending": "background:#fef3c7;color:#92400e",
             "Partly sent": "background:#fef3c7;color:#92400e", "Failed": "background:#fee2e2;color:#991b1b"}.get(st, "background:#eef0f6;color:#5b6280")
 
+def _mn_att_view(rec):
+    mid = str(rec.get("ID", ""))
+    return [dict(id=a["id"], name=a["name"], size=f"{max(1, int(a.get('size', 0) or 0) // 1024)} KB", mid=mid,
+                 view=a["name"].rsplit(".", 1)[-1].lower() in _MN_ATT_VIEW) for a in _mn_att_list(rec)]
+
 def _mn_render(form=None, edit=None):
     prefetch(MN_SHEET, MN_LOG, "Employees")
     emps = []
@@ -10607,13 +10812,13 @@ def _mn_render(form=None, edit=None):
         mail = employee_office_email(e)
         emps.append(dict(id=str(e["Employee ID"]), name=str(e.get("Name", "")), email=mail if EMAIL_RE.match(mail) else ""))
     if form is None:
-        form = dict(mid="", subject="", message="", mode="later", sdate="", stime="09:00", rmode="all", eids=[])
+        form = dict(mid="", subject="", message="", mode="later", sdate="", stime="09:00", rmode="all", eids=[], cc="", atts=[])
         if edit:
             r = _mn_get(edit, fresh=False)
             if r and r.get("Status") == "Scheduled":
                 sa = str(r.get("Send at", ""))
                 form.update(mid=r["ID"], subject=r["Subject"], message=r["Message"], sdate=sa[:10], stime=sa[11:16] or "09:00",
-                            rmode="selected" if r.get("Recipient mode") == "selected" else "all", eids=_mn_ids(r))
+                            rmode="selected" if r.get("Recipient mode") == "selected" else "all", eids=_mn_ids(r), cc=", ".join(_mn_cc_list(r)), atts=_mn_att_view(r))
             else: flash("Only a Scheduled e-mail can be edited.", "error")
     form = dict(form); form["message_html"] = _mn_editor_html(form.get("message", ""))
     notices = []
@@ -10621,14 +10826,15 @@ def _mn_render(form=None, edit=None):
         st = str(r.get("Status", ""))
         notices.append(dict(id=r.get("ID", ""), subject=r.get("Subject", ""), send_at=r.get("Send at", ""), status=st, badge=_mn_badge(st),
                             detail=str(r.get("Detail", ""))[:200], sent=r.get("Sent", "") or 0, failed=r.get("Failed", "") or 0, who=_mn_who(r),
-                            by=r.get("Created by", ""), created=r.get("Created at", "")))
+                            by=r.get("Created by", ""), created=r.get("Created at", ""), cc="; ".join(_mn_cc_list(r)), atts=_mn_att_view(r)))
     status = request.args.get("status", "").strip(); q = request.args.get("q", "").strip().lower()
     allog = rows(MN_LOG)
     counts = {"Sent": sum(1 for r in allog if r.get("Email Status") == "Sent"), "Failed": sum(1 for r in allog if r.get("Email Status") != "Sent")}
     flt = [r for r in allog if (not status or (r.get("Email Status") == "Sent") == (status == "Sent"))
            and (not q or q in str(r.get("Employee Name", "")).lower() or q in str(r.get("Employee Email", "")).lower() or q in str(r.get("Subject", "")).lower())]
     flt.sort(key=lambda r: str(r.get("Email Sent At", "")), reverse=True)
-    return page(MN_PAGE, title="Mail Notes", mail_ok=MAIL_READY, form=form, notices=notices, emps=emps, log=flt[:200], log_total=len(flt), counts=counts,
+    att_map = {str(r.get("ID", "")): _mn_att_view(r) for r in rows(MN_SHEET) if _mn_att_list(r)}
+    return page(MN_PAGE, title="Mail Notes", att_map=att_map, mail_ok=MAIL_READY, form=form, notices=notices, emps=emps, log=flt[:200], log_total=len(flt), counts=counts,
                 status=status, q=request.args.get("q", ""), today=today_local().isoformat(), tz=os.getenv("APP_TZ", "Asia/Kolkata"),
                 n_recipients=sum(1 for e in emps if e["email"]), template=MAIL_NOTE_HTML)
 
@@ -10647,15 +10853,29 @@ def admin_maintenance_email_old(): return redirect("/admin/mail-notes")         
 def admin_mn_schedule():
     _admin_only_mail()
     f = request.form
-    form = dict(mid=(f.get("mid") or "").strip(), subject=re.sub(r"[\r\n]+", " ", f.get("subject", "")).strip()[:150],
+    form = dict(atts=[], mid=(f.get("mid") or "").strip(), subject=re.sub(r"[\r\n]+", " ", f.get("subject", "")).strip()[:150],
                 message=_mn_posted_message(f),
                 mode="now" if f.get("mode") == "now" else "later", sdate=(f.get("sdate") or "").strip(), stime=(f.get("stime") or "").strip() or "09:00",
-                rmode="selected" if f.get("rmode") == "selected" else "all", eids=[x.strip() for x in f.getlist("eids") if x.strip()])
+                rmode="selected" if f.get("rmode") == "selected" else "all", eids=[x.strip() for x in f.getlist("eids") if x.strip()],
+                cc=(f.get("cc") or "").strip())
     def bad(text): flash(text, "error"); return _mn_render(form)
     if not MAIL_READY: return bad("E-mail is not set up on the server (BREVO_API_KEY or SMTP_HOST).")
     if not form["subject"]: return bad("Enter the email subject.")
     if not form["message"]: return bad("Enter the email message.")
     if len(form["message"]) > _MN_RICH_MAX: return bad("The message is too long. Shorten it or remove some formatting.")
+    cc_ok, cc_bad = _mn_parse_cc(form["cc"])                  # Update218: CC (Admin only - this route is admin-only)
+    if cc_bad: return bad("Invalid CC e-mail address: " + ", ".join(cc_bad[:5]) + ". Fix or remove it.")
+    if len(cc_ok) > _MN_CC_MAX: return bad(f"At most {_MN_CC_MAX} CC addresses are allowed.")
+    form["cc"] = ", ".join(cc_ok)
+    # Update219: attachments - keep the ticked existing ones, add the newly chosen ones (validated before anything is saved)
+    old_rec = _mn_get(form["mid"]) if form["mid"] else None
+    if form["mid"] and (not old_rec or old_rec.get("Status") != "Scheduled"): return bad("Only a Scheduled e-mail can be edited.")
+    keep_ids = set(f.getlist("keep_att")); keep = [a for a in (_mn_att_list(old_rec) if old_rec else []) if a["id"] in keep_ids]
+    form["atts"] = _mn_att_view(dict(ID=form["mid"], Attachments=json.dumps(keep)))
+    new_items, att_err = _mn_att_check(request.files.getlist("attach"))
+    if att_err: return bad(att_err)
+    if len(keep) + len(new_items) > _MN_ATT_MAX_FILES: return bad(f"At most {_MN_ATT_MAX_FILES} attachments per e-mail.")
+    if sum(a.get("size", 0) for a in keep) + sum(len(d) for _n, _e, d in new_items) > _MN_ATT_MAX_TOTAL: return bad("The attachments together are larger than 2.5 MB.")
     now = now_local()
     if form["mode"] == "now": send_at = now.replace(second=0, microsecond=0)
     else:
@@ -10668,13 +10888,16 @@ def admin_mn_schedule():
         for x in form["eids"]:
             if _key(x) in valid and valid[_key(x)] not in ids: ids.append(valid[_key(x)])
         if not ids: return bad("Tick at least one employee (with a valid Office Email ID), or choose All employees.")
-    fields = {"Subject": form["subject"], "Message": form["message"], "Send at": send_at.strftime(_MN_FMT), "Recipient mode": form["rmode"], "Recipient IDs": "|".join(ids)}
+    fields = {"Subject": form["subject"], "Message": form["message"], "Send at": send_at.strftime(_MN_FMT), "Recipient mode": form["rmode"], "Recipient IDs": "|".join(ids), "CC": "; ".join(cc_ok)}
+    new_id = f"MN{now:%Y%m%d%H%M%S}{uuid.uuid4().hex[:3]}"; mid_ = form["mid"] or new_id
+    try: fields["Attachments"] = json.dumps(keep + _mn_att_store(mid_, new_items)) if (keep or new_items) else ""
+    except Exception as ex_: print("attachment save error:", ex_); return bad("The attachments could not be saved. Try again.")
     if form["mid"]:                                           # editing a Scheduled mail
         rec = _mn_get(form["mid"])
         if not rec or rec.get("Status") != "Scheduled": return bad("Only a Scheduled e-mail can be edited.")
         rec.update(fields); _mn_save(rec)
     else:
-        rec = {"ID": f"MN{now:%Y%m%d%H%M%S}{uuid.uuid4().hex[:3]}", "Status": "Scheduled", "Recipients": "", "Sent": "", "Failed": "",
+        rec = {"ID": new_id, "Status": "Scheduled", "Recipients": "", "Sent": "", "Failed": "",
                "Created by": session.get("name", "Admin"), "Created at": now.strftime("%Y-%m-%d %H:%M:%S"), "Completed at": "", "Claimed by": "", "Detail": ""}
         rec.update(fields)
         ws_of(MN_SHEET).append_row([rec.get(h, "") for h in HEADERS[MN_SHEET]], value_input_option="RAW")
@@ -10686,6 +10909,24 @@ def admin_mn_schedule():
     else:
         flash(f"E-mail {'updated' if form['mid'] else 'scheduled'}: it will be sent to {who} on {send_at.strftime('%d %b %Y')} at {_t12s(send_at.time())}.")
     return redirect("/admin/mail-notes")
+
+@app.route("/admin/mail-notes/<mid>/file/<fid>")
+@need("admin")
+def admin_mn_file(mid, fid):
+    """Update219: view / download one attachment of a mail note (Admin only). ?dl=1 forces a download; only PDF / images / TXT open in the browser."""
+    _admin_only_mail()
+    rec = _mn_get(mid)
+    if not rec or fid not in {a["id"] for a in _mn_att_list(rec)}: abort(404)
+    got = _mn_att_load(mid, {fid}).get(fid)
+    if not got: abort(404)
+    name, mime, data = got; ext = name.rsplit(".", 1)[-1].lower()
+    inline = ext in _MN_ATT_VIEW and request.args.get("dl") != "1"
+    from urllib.parse import quote
+    r = Response(data, mimetype=mime if inline else "application/octet-stream")
+    r.headers["Content-Disposition"] = ("inline" if inline else "attachment") + "; filename*=UTF-8''" + quote(name)
+    r.headers["X-Content-Type-Options"] = "nosniff"; r.headers["Content-Security-Policy"] = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'"
+    r.headers["Cache-Control"] = "private, no-store"
+    return r
 
 @app.route("/admin/mail-notes/<mid>/cancel", methods=["POST"])
 @need("admin")

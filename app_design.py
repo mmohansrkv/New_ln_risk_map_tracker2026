@@ -3793,8 +3793,7 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"), 
               ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log"),
-              ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes"),
-              ("/admin/theme", "Theme & Layout")],
+              ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes")],   # Update211: Theme & Layout is link-only (/admin/theme), not in the menu
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
@@ -3831,8 +3830,7 @@ def page(body, title="Productivity Tracker", **ctx):
         view = request.args.get("view", "")
         kids = [("/admin/employee-info", "Employees", p.startswith("/admin/employee-info") and view != "notifications"),
                 ("/admin/employee-info?view=notifications", "Notifications", p == "/admin/employee-info" and view == "notifications"),
-                ("/admin/mahizhchi", "Mahizhchi", p.startswith("/admin/mahizhchi")),
-                ("/admin/game", "Multiplayer Game", p.startswith("/admin/game"))]
+                ("/admin/mahizhchi", "Mahizhchi", p.startswith("/admin/mahizhchi"))]      # Update211: Multiplayer Game / Game Log is link-only (/admin/game)
         nav = [(h, l, on or any(k[2] for k in kids), kids) if h == "/admin/employee-info" else (h, l, on, [])
                for h, l, on, _k in nav]
         # Update103: Productivity Log / Leave & Permission Log / Audit Log / Email Controls are grouped under one expandable "Log" menu.
@@ -3844,7 +3842,7 @@ def page(body, title="Productivity Tracker", **ctx):
         by_h = {n[0]: n for n in nav}
         nav = [by_h["/admin/summary"], by_h["/admin/processes"],
                ("/admin/log", "Log", any(k[2] for k in log_kids), log_kids),
-               by_h["/admin/employee-info"], by_h["/admin/theme"]]      # Update209
+               by_h["/admin/employee-info"]]      # Update211: Theme & Layout removed from the menu
     side_avatar = ""
     if session.get("role") == "admin":
         side_avatar = ADMIN_AVATAR
@@ -4100,6 +4098,16 @@ LOGIN_NEW_HEAD = r"""<style>
 @keyframes lxF{50%{transform:translateY(-16px) rotate(225deg)}}
 @media(max-width:860px){.lx-body{flex-direction:column;justify-content:flex-start;min-height:0;padding:8px 12px 20px}.lx-art{position:relative;top:0;margin:0 0 -4px}.lx-floor{display:none}.lx-cap{position:static;margin-top:14px}.lx-bar .lx-chip{font-size:11px}}
 @media(prefers-reduced-motion:reduce){.lx *{animation:none!important}.lx-pk{display:none!important}.lx-art{transition:none}}
+/* Update211: stable layout + FTE / Boss labels */
+html{scrollbar-gutter:stable}
+.lg{min-height:100vh}.lx{contain:layout style}.lx-body{height:560px;min-height:560px}.lx-card{flex:0 0 auto}
+.lx-card input{border-width:1px!important}.lx-card input:focus{border-width:1px!important}
+.lx.act .lx-ln{stroke-width:1.8}
+.lx-role rect{fill:#0b1226;stroke:var(--c1);stroke-width:2}.lx-role text{font:800 20px Poppins,system-ui,sans-serif;fill:#fff;text-anchor:middle;letter-spacing:.08em}
+.lx-role{animation:lxRl 2.4s ease-in-out infinite;filter:drop-shadow(0 0 8px var(--c1))}
+.lx.act .lx-role{animation-duration:.9s}
+@keyframes lxRl{50%{filter:drop-shadow(0 0 16px var(--c1))}}
+@media(max-width:860px){.lx-body{height:auto;min-height:0}}
 </style>
 {% macro person(fem) %}<g class="lx-bob"><ellipse cx="110" cy="288" rx="96" ry="9" fill="#000" opacity=".3"/>
 <path d="M18 286C18 216 58 186 110 186s92 30 92 100z" fill="url(#lxJk{{ 'F' if fem else 'M' }})"/>
@@ -4127,7 +4135,7 @@ LOGIN_NEW_HEAD = r"""<style>
 {% for i in range(5) %}<g transform="translate(16 {{ 53 + i*40 }})"><rect width="98" height="32" rx="5" fill="#0d1a3f" stroke="#2f4fb0"/><path d="M8 7v18M14 7v18M20 7v18M26 7v18" stroke="#7aa2ff" stroke-opacity=".55" stroke-width="2.2"/><circle class="lx-led" cx="78" cy="10" r="3" style="animation-delay:{{ i*0.35 }}s"/><circle class="lx-led g" cx="88" cy="10" r="3" style="animation-delay:{{ i*0.5 }}s"/><rect x="54" y="20" width="36" height="4" rx="2" fill="#1c2f6e"/></g>{% endfor %}
 <ellipse class="lx-ring" cx="70" cy="292" rx="64" ry="9" fill="none" stroke="var(--c1)" stroke-width="2"/></g>{% endmacro %}
 <div class="lx {{ 'adm' if role=='admin' else 'emp' }}" data-role="{{role}}">
-<div class="lx-bar"><i></i><i></i><i></i><div class="lx-chip"><b></b><span data-go="Signing in...">{{ 'Receiving from server' if role=='admin' else 'Sending to server' }}</span></div></div>
+<div class="lx-bar"><i></i><i></i><i></i><div class="lx-chip"><b></b><span data-go="{{ 'Boss' if role=='admin' else 'FTE' }} · Signing in...">{{ 'Boss · Receiving from server' if role=='admin' else 'FTE · Sending to server' }}</span></div></div>
 <div class="lx-body"><div class="scene lx-scene" aria-hidden="true"><div class="lx-floor"></div>
 <i class="lx-d" style="--c:var(--c1);left:6%;top:18%"></i><i class="lx-d" style="--c:var(--c2);left:22%;top:8%;--t:7s"></i><i class="lx-d" style="--c:var(--c3);left:44%;top:6%;--t:8s"></i><i class="lx-d" style="--c:var(--c4);right:22%;top:10%;--t:6.5s"></i><i class="lx-d" style="--c:var(--c5);right:7%;top:20%;--t:7.5s"></i><i class="lx-d" style="--c:var(--c2);right:30%;bottom:16%;--t:9s"></i></div>
 <svg class="lx-art" viewBox="0 0 1000 400" aria-hidden="true" focusable="false"><defs>
@@ -4142,8 +4150,10 @@ LOGIN_NEW_HEAD = r"""<style>
 <linearGradient id="lxSd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4b5fc4"/><stop offset="1" stop-color="#1b2461"/></linearGradient></defs>
 {% if role=='admin' %}<g transform="translate(66 62)">{{ server() }}</g><g transform="translate(742 70)">{{ person(true) }}</g>
 <text class="lx-lb" x="150" y="392">Server</text><text class="lx-lb" x="852" y="392">Admin system</text>
+<g class="lx-role"><rect x="802" y="34" width="100" height="34" rx="17"/><text x="852" y="58">Boss</text></g>
 {% else %}<g transform="translate(34 70)">{{ person(false) }}</g><g transform="translate(772 62)">{{ server() }}</g>
-<text class="lx-lb" x="144" y="392">Employee system</text><text class="lx-lb" x="852" y="392">Server</text>{% endif %}
+<text class="lx-lb" x="144" y="392">Employee system</text><text class="lx-lb" x="852" y="392">Server</text>
+<g class="lx-role"><rect x="94" y="34" width="100" height="34" rx="17"/><text x="144" y="58">FTE</text></g>{% endif %}
 {% set P = ["M250 150C400 70 600 230 750 140","M250 185C420 150 580 260 750 175","M250 220C400 190 600 170 750 210","M250 255C430 300 570 200 750 245","M250 290C400 340 600 260 750 280"] %}
 {% for i in range(5) %}<path id="lxp{{i}}" class="lx-ln" d="{{ P[i] }}" stroke="var(--c{{ i+1 }})" style="animation-delay:-{{ i*0.3 }}s"/>{% endfor %}
 {% for i in range(5) %}{% for k in range(2) %}<g class="lx-pk" style="color:var(--c{{ i+1 }})"><circle r="9" fill="currentColor" opacity=".28"/><rect x="-6" y="-4" width="12" height="8" rx="2" fill="currentColor"/><animateMotion dur="{{ 3.6 + i*0.4 }}s" begin="-{{ k*1.9 + i*0.55 }}s" repeatCount="indefinite" rotate="auto"><mpath href="#lxp{{i}}"/></animateMotion></g>{% endfor %}{% endfor %}
@@ -4158,13 +4168,14 @@ LOGIN_NEW_JS = r"""<script>
 (function(){
   var lx = document.querySelector('.lx'); if (!lx) return;
   var art = lx.querySelector('.lx-art'), fm = lx.querySelector('form'), chip = lx.querySelector('.lx-chip span'); var orig = chip ? chip.textContent : '';
-  function on(){ lx.classList.add('act'); }
+  function on(){ lx.classList.add('act'); if (art) art.style.transform = ''; }
   function off(){ if (!lx.classList.contains('go') && !lx.querySelector('input:focus')) lx.classList.remove('act'); }
   lx.querySelectorAll('input').forEach(function(i){ i.addEventListener('focus', on); i.addEventListener('input', on); i.addEventListener('blur', function(){ setTimeout(off, 60); }); });
   if (fm) fm.addEventListener('submit', function(){ lx.classList.add('act', 'go'); if (chip) chip.textContent = chip.getAttribute('data-go'); });
   if (art && window.matchMedia('(hover:hover) and (pointer:fine)').matches && !window.matchMedia('(prefers-reduced-motion:reduce)').matches) {
     var raf = 0, px = 0, py = 0;
     lx.addEventListener('mousemove', function(e){
+      if (lx.querySelector('input:focus')) return;
       var r = lx.getBoundingClientRect(); px = ((e.clientX - r.left) / r.width - .5) * 14; py = ((e.clientY - r.top) / r.height - .5) * 8;
       if (!raf) raf = requestAnimationFrame(function(){ raf = 0; art.style.transform = 'translate(' + px.toFixed(1) + 'px,' + py.toFixed(1) + 'px)'; });
     }, {passive: true});

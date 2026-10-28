@@ -4066,8 +4066,8 @@ LOGIN_NEW_HEAD = r"""<style>
 .lx-d{position:absolute;width:9px;height:9px;background:var(--c);box-shadow:0 0 12px var(--c);transform:rotate(45deg);animation:lxF var(--t,6s) ease-in-out infinite}
 .lx-art{position:absolute;left:0;top:14px;width:100%;height:auto;aspect-ratio:1000/400;z-index:1;transition:transform .25s ease-out;pointer-events:none}
 .lx-ln{fill:none;stroke-width:1.8;stroke-dasharray:2 9;stroke-linecap:round;opacity:.8;animation:lxDs 1.4s linear infinite}
-.lx.act .lx-ln{animation-duration:.5s;opacity:1;stroke-width:2.5}
-.lx-pk.b{display:none}.lx.act .lx-pk.b{display:inline}
+.lx.lxon .lx-ln{animation-duration:.5s;opacity:1;stroke-width:2.5}
+.lx-pk.b{display:none}.lx.lxon .lx-pk.b{display:inline}
 .lx-bob{animation:lxBob 4s ease-in-out infinite}.lx-bob2{animation:lxBob 5s ease-in-out -1.5s infinite}
 .lx-head{transform-box:fill-box;transform-origin:50% 96%;animation:lxHd 6s ease-in-out infinite}
 .lx-eye{transform-box:fill-box;transform-origin:center;animation:lxBk 5s infinite}
@@ -4102,10 +4102,10 @@ LOGIN_NEW_HEAD = r"""<style>
 html{scrollbar-gutter:stable}
 .lg{min-height:100vh}.lx{contain:layout style}.lx-body{height:560px;min-height:560px}.lx-card{flex:0 0 auto}
 .lx-card input{border-width:1px!important}.lx-card input:focus{border-width:1px!important}
-.lx.act .lx-ln{stroke-width:1.8}
+.lx.lxon .lx-ln{stroke-width:1.8}
 .lx-role rect{fill:#0b1226;stroke:var(--c1);stroke-width:2}.lx-role text{font:800 20px Poppins,system-ui,sans-serif;fill:#fff;text-anchor:middle;letter-spacing:.08em}
 .lx-role{animation:lxRl 2.4s ease-in-out infinite;filter:drop-shadow(0 0 8px var(--c1))}
-.lx.act .lx-role{animation-duration:.9s}
+.lx.lxon .lx-role{animation-duration:.9s}
 @keyframes lxRl{50%{filter:drop-shadow(0 0 16px var(--c1))}}
 @media(max-width:860px){.lx-body{height:auto;min-height:0}}
 </style>
@@ -4168,10 +4168,10 @@ LOGIN_NEW_JS = r"""<script>
 (function(){
   var lx = document.querySelector('.lx'); if (!lx) return;
   var art = lx.querySelector('.lx-art'), fm = lx.querySelector('form'), chip = lx.querySelector('.lx-chip span'); var orig = chip ? chip.textContent : '';
-  function on(){ lx.classList.add('act'); if (art) art.style.transform = ''; }
-  function off(){ if (!lx.classList.contains('go') && !lx.querySelector('input:focus')) lx.classList.remove('act'); }
+  function on(){ lx.classList.add('lxon'); if (art) art.style.transform = ''; }
+  function off(){ if (!lx.classList.contains('go') && !lx.querySelector('input:focus')) lx.classList.remove('lxon'); }
   lx.querySelectorAll('input').forEach(function(i){ i.addEventListener('focus', on); i.addEventListener('input', on); i.addEventListener('blur', function(){ setTimeout(off, 60); }); });
-  if (fm) fm.addEventListener('submit', function(){ lx.classList.add('act', 'go'); if (chip) chip.textContent = chip.getAttribute('data-go'); });
+  if (fm) fm.addEventListener('submit', function(){ lx.classList.add('lxon', 'go'); if (chip) chip.textContent = chip.getAttribute('data-go'); });
   if (art && window.matchMedia('(hover:hover) and (pointer:fine)').matches && !window.matchMedia('(prefers-reduced-motion:reduce)').matches) {
     var raf = 0, px = 0, py = 0;
     lx.addEventListener('mousemove', function(e){
@@ -4182,7 +4182,7 @@ LOGIN_NEW_JS = r"""<script>
     lx.addEventListener('mouseleave', function(){ art.style.transform = ''; });
   }
   document.addEventListener('visibilitychange', function(){ if (art && art.pauseAnimations) { if (document.hidden) art.pauseAnimations(); else art.unpauseAnimations(); } });
-  window.addEventListener('pageshow', function(e){ if (e.persisted) { lx.classList.remove('go', 'act'); if (chip) chip.textContent = orig; } });
+  window.addEventListener('pageshow', function(e){ if (e.persisted) { lx.classList.remove('go', 'lxon'); if (chip) chip.textContent = orig; } });
 })();
 </script>
 """

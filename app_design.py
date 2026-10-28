@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update210: NEW Admin and Employee login pages. Employee page = an animated 3D-style employee sends glowing data packets along network lines TO a 3D server; Admin page = the server sends data packets TO the animated admin (headset) - same design, distinct animation direction / colours. Packets speed up when the user types or signs in; light mouse parallax; paused when the tab is hidden; off for reduced-motion. Light SVG + CSS only (no images / libraries). The sign-in fields, password Show/Hide, screen-lock prompt and logo are unchanged; the old template is kept as LOGIN_CLASSIC (the Welcome scene still uses it).
   * Update209: NEW Admin > "Theme & Layout" page. The Admin picks one of 6 themes (Indigo Night = current look, Ocean Teal, Ember, Forest, Porcelain, Rose Quartz), a Panel layout (Sidebar / Top bar) and a Login page layout (Window with scene / Centered card), with a live mini preview. Saved in the Settings sheet (ui_theme, ui_panel_layout, ui_login_layout) and applied to the Admin AND Employee login pages and panels through one stylesheet injected last in <head> (no other page, route or calculation changed). Defaults = the existing design.
   * Update208: An entry submitted or updated AFTER its own date (e.g. the 27 Oct entry saved on 28 Oct) is shown in RED in Employee > Productivity Info and Admin > Productivity Log (uses the "Submitted at" column; display only).
   * Update207: Employee sidebar Calendar summary now also shows "Permission" - the number of APPROVED permissions in the month shown (Present / Absent / Leave / Permission). Display only.
@@ -3866,7 +3867,7 @@ def page(body, title="Productivity Tracker", **ctx):
                                   side_avatar=side_avatar, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, srv_today=str(today_local()), theme_css=_theme_css())
 
 
-LOGIN = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i><i></i><i></i></div>
+LOGIN_CLASSIC = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i><i></i><i></i></div>
 <div class="wbody"><div class="scene admin" aria-hidden="true"><div class="sheen"></div>{% if role=='admin' %}<div class="lgx rx"><div class="ep"><div class="mon"></div><em>ADMIN</em></div><div class="lns"><div class="ln" style="--c:#22d3ee;--d:3.2s;--z:12px;top:10%"><i></i><i></i><b></b></div><div class="ln zg" style="--c:#f472b6;--d:2.1s;--z:8px;top:27%"><i></i><i></i><b></b></div><div class="ln" style="--c:#fbbf24;--d:4.4s;--z:16px;top:44%"><i></i><i></i><b></b></div><div class="ln zg" style="--c:#a3e635;--d:2.7s;--z:9px;top:61%"><i></i><i></i><b></b></div><div class="ln" style="--c:#a78bfa;--d:3.7s;--z:13px;top:78%"><i></i><i></i><b></b></div></div><div class="sv"><div class="sv3"><u class="f"></u><u class="r"></u><u class="t"></u></div><em class="adm">ADMIN &middot; SERVER</em></div><span class="lab">&larr; DATA RECEIVED FROM SERVER</span></div>{% else %}<div class="lgx"><div class="ep"><div class="mon"></div><em>EMPLOYEE</em></div><div class="lns"><div class="ln" style="--c:#22d3ee;--d:3.2s;--z:12px;top:10%"><i></i><i></i><b></b></div><div class="ln zg" style="--c:#f472b6;--d:2.1s;--z:8px;top:27%"><i></i><i></i><b></b></div><div class="ln" style="--c:#fbbf24;--d:4.4s;--z:16px;top:44%"><i></i><i></i><b></b></div><div class="ln zg" style="--c:#a3e635;--d:2.7s;--z:9px;top:61%"><i></i><i></i><b></b></div><div class="ln" style="--c:#a78bfa;--d:3.7s;--z:13px;top:78%"><i></i><i></i><b></b></div></div><div class="sv"><div class="sv3"><u class="f"></u><u class="r"></u><u class="t"></u></div><em>SERVER</em></div><span class="lab">EMPLOYEE DATA &rarr; SERVER</span></div>{% endif %}
 <div class="gfw"><div class="gf"></div></div>
 <div class="fl" style="left:5%;top:12%;--s:62px;--bt:8s"><div class="cube" style="--s:62px;--t:18s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
@@ -4042,6 +4043,139 @@ LOGIN = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i>
 })();
 </script>
 """
+
+# ---------------------------------------------------------------- Update210: NEW Admin + Employee login pages (AI / 3D data-flow scene)
+# Employee page: the employee's system sends data streams TO the server.  Admin page: the server sends data streams TO the admin's system.
+# The sign-in form, password toggle and screen-lock prompt script are reused unchanged from the classic template (LOGIN_CLASSIC).
+_LC = LOGIN_CLASSIC
+_LOGIN_FORM = _LC[_LC.index('<form method="post">'):_LC.index("{% endif %}", _LC.index('class="fgt"')) + len("{% endif %}")]
+_LOGIN_WT = _LC[_LC.index("{% if role=='employee' and WT_LOGIN_PROMPT %}<script>"):_LC.index("</script>{% endif %}") + len("</script>{% endif %}")]
+_m0 = _LC.index("<script>\n(function(){\n  var u = document.getElementById('login_u')")
+_LOGIN_MAIN = _LC[_m0:_LC.index("</script>", _m0) + len("</script>")]
+LOGIN_NEW_HEAD = r"""<style>
+.lg{background:radial-gradient(1100px 520px at 50% -12%,#1b2a6b 0,transparent 70%),#050a1e!important}
+.lg .blob{display:none}.lg .site-foot{color:#8ea0d6!important;opacity:.85}
+.lx{--c1:#22d3ee;--c2:#f472b6;--c3:#fbbf24;--c4:#a3e635;--c5:#a78bfa;--b1:#6d70f5;--b2:#4f46e5;--bd:#3730a3;--ac:#4f46e5;position:relative;z-index:1;width:min(960px,100%);border-radius:18px;background:#070d26;overflow:hidden;color:#e8ecff;font-family:Poppins,system-ui,-apple-system,"Segoe UI",sans-serif;box-shadow:0 44px 80px -26px #000d,0 0 0 1px #ffffff1a}
+.lx.adm{--c1:#34d399;--c2:#60a5fa;--c3:#c084fc;--c4:#22d3ee;--c5:#fbbf24;--b1:#2dd4bf;--b2:#0d9488;--bd:#0f766e;--ac:#0d9488}
+.lx-bar{height:34px;display:flex;align-items:center;gap:7px;padding:0 14px;background:linear-gradient(#1a2350,#10173b);border-bottom:1px solid #2a3570}
+.lx-bar i{width:9px;height:9px;border-radius:50%;background:#ef6a6a}.lx-bar i:nth-child(2){background:#f2c25b}.lx-bar i:nth-child(3){background:#5fd39a}
+.lx-chip{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:#c3cdf7}
+.lx-chip b{width:8px;height:8px;border-radius:50%;background:var(--c1);box-shadow:0 0 10px var(--c1);animation:lxBl 1.4s infinite}
+.lx-body{position:relative;min-height:540px;display:flex;align-items:center;justify-content:center;padding:30px 16px}
+.lx.emp .lx-body{background:radial-gradient(700px 360px at 15% 25%,#0ea5e944,transparent 65%),radial-gradient(600px 340px at 88% 75%,#be123c55,transparent 65%),linear-gradient(160deg,#0a0d24,#1a1038 55%,#2a0f3a)}
+.lx.adm .lx-body{background:radial-gradient(700px 360px at 85% 25%,#10b98133,transparent 65%),radial-gradient(600px 340px at 12% 78%,#3b82f655,transparent 65%),linear-gradient(160deg,#04132a,#0b2250 55%,#0f3a6a)}
+.lx-floor{position:absolute;left:-10%;right:-10%;bottom:-6%;height:44%;background:repeating-linear-gradient(90deg,#ffffff18 0 1px,transparent 1px 48px),repeating-linear-gradient(0deg,#ffffff18 0 1px,transparent 1px 38px);transform:perspective(420px) rotateX(62deg);transform-origin:50% 100%;-webkit-mask:linear-gradient(transparent,#000 70%);mask:linear-gradient(transparent,#000 70%);animation:lxGr 5s linear infinite}
+.lx-d{position:absolute;width:9px;height:9px;background:var(--c);box-shadow:0 0 12px var(--c);transform:rotate(45deg);animation:lxF var(--t,6s) ease-in-out infinite}
+.lx-art{position:absolute;left:0;top:14px;width:100%;height:auto;aspect-ratio:1000/400;z-index:1;transition:transform .25s ease-out;pointer-events:none}
+.lx-ln{fill:none;stroke-width:1.8;stroke-dasharray:2 9;stroke-linecap:round;opacity:.8;animation:lxDs 1.4s linear infinite}
+.lx.act .lx-ln{animation-duration:.5s;opacity:1;stroke-width:2.5}
+.lx-pk.b{display:none}.lx.act .lx-pk.b{display:inline}
+.lx-bob{animation:lxBob 4s ease-in-out infinite}.lx-bob2{animation:lxBob 5s ease-in-out -1.5s infinite}
+.lx-head{transform-box:fill-box;transform-origin:50% 96%;animation:lxHd 6s ease-in-out infinite}
+.lx-eye{transform-box:fill-box;transform-origin:center;animation:lxBk 5s infinite}
+.lx-led{fill:#22d3ee;animation:lxBl 1.2s infinite}.lx-led.g{fill:#34d399}
+.lx-ring{transform-box:fill-box;transform-origin:center;animation:lxRg 2.4s ease-out infinite}
+.lx-ai{animation:lxBl 2s ease-in-out infinite}
+.lx-lb{font:600 12px Poppins,system-ui,sans-serif;fill:#c3cdf7;text-anchor:middle}
+.lx-card{position:relative;z-index:2;width:min(340px,100%);padding:22px 24px 20px;border-radius:18px;text-align:left;color:#1c2340;background:linear-gradient(180deg,#fff,#eef1ff);box-shadow:0 1px 0 #fff inset,0 6px 0 #c9d0f3,0 36px 50px -16px #000d}
+.lx-card,.lx-card *{box-sizing:border-box}
+.lx-card img{display:block;width:150px;height:auto;margin:0 0 4px}
+.lx-card h2{margin:6px 0 2px;font:700 22px/1.2 Poppins,system-ui,sans-serif;color:#1c2340}
+.lx-card p{margin:0 0 12px;font-size:12.5px;color:#6b7390}
+.lx-card .field{position:relative;margin:9px 0}
+.lx-card input{width:100%;padding:11px 12px;border:1px solid #cfd5ee;border-radius:10px;background:#fff;color:#1c2340;font:inherit;font-size:14px;box-shadow:inset 0 2px 4px #1c23400d;transition:border-color .15s,box-shadow .15s}
+.lx-card input:focus{outline:0;border-color:var(--ac);box-shadow:0 0 0 4px #4f46e533}
+.lx-card .field.pw input{padding-right:78px}
+.lx-card .pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:inline-flex;align-items:center;gap:5px;width:auto;margin:0;padding:5px 8px;border:0;border-radius:8px;background:transparent;color:var(--ac);font:600 12px Poppins,system-ui,sans-serif;cursor:pointer}
+.lx-card .pw-toggle:hover{background:#eef0ff}.lx-card .pw-toggle:focus-visible,.lx-card form>button:focus-visible{outline:3px solid var(--ac);outline-offset:2px}
+.lx-card form>button:not(.pw-toggle){width:100%;margin-top:14px;padding:12px;border:0;border-radius:12px;color:#fff;font:700 14.5px Poppins,system-ui,sans-serif;background:linear-gradient(180deg,var(--b1),var(--b2));box-shadow:0 5px 0 var(--bd),0 14px 20px -8px var(--b2),inset 0 1px 0 #ffffff66;cursor:pointer;transition:transform .12s,box-shadow .12s}
+.lx-card form>button:not(.pw-toggle):active{transform:translateY(4px);box-shadow:0 1px 0 var(--bd),0 4px 8px -4px var(--b2),inset 0 1px 0 #ffffff44}
+.lx-card form>button:disabled{opacity:.75;cursor:progress}
+.lx-card .fgt{display:block;text-align:center;margin-top:12px;font-size:12px;color:#8a91ad}
+.lx-cap{position:absolute;left:0;right:0;bottom:14px;z-index:2;text-align:center;font-size:12px;color:#b8c4f5}
+.lx-cap span{display:inline-block;padding:5px 14px;border-radius:999px;background:#ffffff14;border:1px solid #ffffff22}
+@keyframes lxBl{50%{opacity:.25}}@keyframes lxBob{50%{transform:translateY(-5px)}}@keyframes lxHd{0%,100%{transform:rotate(-1.6deg)}50%{transform:rotate(1.8deg)}}
+@keyframes lxBk{0%,93%,100%{transform:scaleY(1)}96%{transform:scaleY(.08)}}@keyframes lxDs{to{stroke-dashoffset:-22}}
+@keyframes lxRg{0%{transform:scale(.6);opacity:.9}100%{transform:scale(1.5);opacity:0}}@keyframes lxGr{to{background-position:0 0,0 38px}}
+@keyframes lxF{50%{transform:translateY(-16px) rotate(225deg)}}
+@media(max-width:860px){.lx-body{flex-direction:column;justify-content:flex-start;min-height:0;padding:8px 12px 20px}.lx-art{position:relative;top:0;margin:0 0 -4px}.lx-floor{display:none}.lx-cap{position:static;margin-top:14px}.lx-bar .lx-chip{font-size:11px}}
+@media(prefers-reduced-motion:reduce){.lx *{animation:none!important}.lx-pk{display:none!important}.lx-art{transition:none}}
+</style>
+{% macro person(fem) %}<g class="lx-bob"><ellipse cx="110" cy="288" rx="96" ry="9" fill="#000" opacity=".3"/>
+<path d="M18 286C18 216 58 186 110 186s92 30 92 100z" fill="url(#lxJk{{ 'F' if fem else 'M' }})"/>
+{% if fem %}<path d="M86 188l24 36 24-36z" fill="#f6f7ff"/>{% else %}<path d="M92 187l18 36 18-36z" fill="#f8fafc"/><path d="M104 198h12l4 28-10 9-10-9z" fill="#4f46e5"/>{% endif %}
+<g class="lx-head"><rect x="95" y="152" width="30" height="42" rx="11" fill="#d29a74"/>
+{% if fem %}<path d="M50 112C38 50 78 28 110 28s72 22 60 84c-2 36 6 64 14 86-22 6-42-6-48-26H96c-6 20-26 32-48 26 8-22 16-50 2-86z" fill="url(#lxHrF)"/>{% endif %}
+<ellipse cx="62" cy="110" rx="7" ry="11" fill="#e3a47c"/><ellipse cx="158" cy="110" rx="7" ry="11" fill="#e3a47c"/>
+<ellipse cx="110" cy="105" rx="47" ry="55" fill="url(#lxSk)"/>
+{% if fem %}<path d="M60 106C54 56 86 36 112 36s56 20 48 70c-6-28-22-42-44-44-8 18-30 38-56 44z" fill="url(#lxHrF)"/>{% else %}<path d="M60 100C54 50 88 34 112 34c30 0 52 20 48 66-8-22-26-34-50-34S68 78 60 100z" fill="url(#lxHrM)"/>{% endif %}
+<g class="lx-eye"><ellipse cx="91" cy="108" rx="9" ry="6.6" fill="#fff"/><circle cx="91" cy="108.5" r="4.7" fill="{{ '#2f5d50' if fem else '#4a3320' }}"/><circle cx="91" cy="108.5" r="2.2" fill="#0c0805"/><circle cx="89.3" cy="106.6" r="1.4" fill="#fff"/></g>
+<g class="lx-eye"><ellipse cx="129" cy="108" rx="9" ry="6.6" fill="#fff"/><circle cx="129" cy="108.5" r="4.7" fill="{{ '#2f5d50' if fem else '#4a3320' }}"/><circle cx="129" cy="108.5" r="2.2" fill="#0c0805"/><circle cx="127.3" cy="106.6" r="1.4" fill="#fff"/></g>
+<path d="M80 95q11-7 22-2M118 93q11-5 22 2" stroke="#2a1b10" stroke-width="{{ 2.8 if fem else 3.8 }}" fill="none" stroke-linecap="round"/>
+<path d="M110 112c-5 12-6 15 0 17" stroke="#b9714a" stroke-opacity=".55" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+<circle cx="80" cy="128" r="9" fill="#f87171" opacity=".22"/><circle cx="140" cy="128" r="9" fill="#f87171" opacity=".22"/>
+<path d="M94 138q16 14 32 0" stroke="{{ '#b4233f' if fem else '#a03a3a' }}" stroke-width="{{ 4 if fem else 3.2 }}" fill="none" stroke-linecap="round"/><path d="M98 140q12 9 24 0q-12 3-24 0z" fill="#fff"/>
+<ellipse cx="94" cy="76" rx="26" ry="14" fill="url(#lxHl)"/>
+{% if fem %}<path d="M56 110a54 58 0 0 1 108 0" stroke="#cbd5e1" stroke-width="5" fill="none"/><rect x="50" y="100" width="12" height="26" rx="6" fill="#64748b"/><rect x="158" y="100" width="12" height="26" rx="6" fill="#64748b"/><path d="M58 124q4 30 40 34" stroke="#94a3b8" stroke-width="3" fill="none"/><circle cx="102" cy="158" r="5" fill="var(--c1)"/>{% endif %}</g>
+<path d="M44 222h132a8 8 0 0 1 8 8v52H36v-52a8 8 0 0 1 8-8z" fill="url(#lxLp)"/><rect x="82" y="240" width="56" height="30" rx="7" fill="#0b1226" stroke="var(--c1)" stroke-width="1.5"/><text class="lx-ai" x="110" y="261" text-anchor="middle" font-size="19" font-weight="800" fill="var(--c1)" font-family="Poppins,system-ui,sans-serif">AI</text>
+<path d="M22 284h176l10 10H12z" fill="#9aa4c8"/><circle cx="58" cy="222" r="11" fill="#e3a47c"/><circle cx="162" cy="222" r="11" fill="#e3a47c"/>
+<g transform="translate(-14 70)"><path d="M0 0l26-9 26 9v26c0 20-14 30-26 36C14 56 0 46 0 26z" fill="url(#lxSd)" stroke="var(--c1)" stroke-width="2"/><path d="M14 26l9 9 16-18" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></g>
+<ellipse class="lx-ring" cx="110" cy="290" rx="80" ry="9" fill="none" stroke="var(--c1)" stroke-width="2"/></g>{% endmacro %}
+{% macro server() %}<g class="lx-bob2"><ellipse cx="86" cy="298" rx="86" ry="9" fill="#000" opacity=".32"/>
+<path d="M0 36L34 8h126l-30 28z" fill="#2f4390"/><path d="M130 36l30-28v228l-30 30z" fill="#0d1737"/>
+<rect x="0" y="36" width="130" height="230" rx="9" fill="url(#lxRk)" stroke="#3b82f6" stroke-opacity=".55"/><rect x="10" y="46" width="110" height="210" rx="6" fill="#050b1f"/>
+{% for i in range(5) %}<g transform="translate(16 {{ 53 + i*40 }})"><rect width="98" height="32" rx="5" fill="#0d1a3f" stroke="#2f4fb0"/><path d="M8 7v18M14 7v18M20 7v18M26 7v18" stroke="#7aa2ff" stroke-opacity=".55" stroke-width="2.2"/><circle class="lx-led" cx="78" cy="10" r="3" style="animation-delay:{{ i*0.35 }}s"/><circle class="lx-led g" cx="88" cy="10" r="3" style="animation-delay:{{ i*0.5 }}s"/><rect x="54" y="20" width="36" height="4" rx="2" fill="#1c2f6e"/></g>{% endfor %}
+<ellipse class="lx-ring" cx="70" cy="292" rx="64" ry="9" fill="none" stroke="var(--c1)" stroke-width="2"/></g>{% endmacro %}
+<div class="lx {{ 'adm' if role=='admin' else 'emp' }}" data-role="{{role}}">
+<div class="lx-bar"><i></i><i></i><i></i><div class="lx-chip"><b></b><span data-go="Signing in...">{{ 'Receiving from server' if role=='admin' else 'Sending to server' }}</span></div></div>
+<div class="lx-body"><div class="scene lx-scene" aria-hidden="true"><div class="lx-floor"></div>
+<i class="lx-d" style="--c:var(--c1);left:6%;top:18%"></i><i class="lx-d" style="--c:var(--c2);left:22%;top:8%;--t:7s"></i><i class="lx-d" style="--c:var(--c3);left:44%;top:6%;--t:8s"></i><i class="lx-d" style="--c:var(--c4);right:22%;top:10%;--t:6.5s"></i><i class="lx-d" style="--c:var(--c5);right:7%;top:20%;--t:7.5s"></i><i class="lx-d" style="--c:var(--c2);right:30%;bottom:16%;--t:9s"></i></div>
+<svg class="lx-art" viewBox="0 0 1000 400" aria-hidden="true" focusable="false"><defs>
+<radialGradient id="lxSk" cx=".36" cy=".3" r=".85"><stop offset="0" stop-color="#ffe3cb"/><stop offset=".55" stop-color="#f0b48c"/><stop offset="1" stop-color="#c98a62"/></radialGradient>
+<radialGradient id="lxHl" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff" stop-opacity=".5"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+<linearGradient id="lxHrM" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3a2a1e"/><stop offset="1" stop-color="#0f0a07"/></linearGradient>
+<linearGradient id="lxHrF" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5a3320"/><stop offset="1" stop-color="#1c0f08"/></linearGradient>
+<linearGradient id="lxJkM" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3556c8"/><stop offset="1" stop-color="#172554"/></linearGradient>
+<linearGradient id="lxJkF" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7c5cff"/><stop offset="1" stop-color="#34208f"/></linearGradient>
+<linearGradient id="lxLp" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c5cbe3"/><stop offset="1" stop-color="#8e97bd"/></linearGradient>
+<linearGradient id="lxRk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#26397a"/><stop offset="1" stop-color="#0f1a40"/></linearGradient>
+<linearGradient id="lxSd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4b5fc4"/><stop offset="1" stop-color="#1b2461"/></linearGradient></defs>
+{% if role=='admin' %}<g transform="translate(66 62)">{{ server() }}</g><g transform="translate(742 70)">{{ person(true) }}</g>
+<text class="lx-lb" x="150" y="392">Server</text><text class="lx-lb" x="852" y="392">Admin system</text>
+{% else %}<g transform="translate(34 70)">{{ person(false) }}</g><g transform="translate(772 62)">{{ server() }}</g>
+<text class="lx-lb" x="144" y="392">Employee system</text><text class="lx-lb" x="852" y="392">Server</text>{% endif %}
+{% set P = ["M250 150C400 70 600 230 750 140","M250 185C420 150 580 260 750 175","M250 220C400 190 600 170 750 210","M250 255C430 300 570 200 750 245","M250 290C400 340 600 260 750 280"] %}
+{% for i in range(5) %}<path id="lxp{{i}}" class="lx-ln" d="{{ P[i] }}" stroke="var(--c{{ i+1 }})" style="animation-delay:-{{ i*0.3 }}s"/>{% endfor %}
+{% for i in range(5) %}{% for k in range(2) %}<g class="lx-pk" style="color:var(--c{{ i+1 }})"><circle r="9" fill="currentColor" opacity=".28"/><rect x="-6" y="-4" width="12" height="8" rx="2" fill="currentColor"/><animateMotion dur="{{ 3.6 + i*0.4 }}s" begin="-{{ k*1.9 + i*0.55 }}s" repeatCount="indefinite" rotate="auto"><mpath href="#lxp{{i}}"/></animateMotion></g>{% endfor %}{% endfor %}
+{% for i in range(5) %}<g class="lx-pk b" style="color:var(--c{{ i+1 }})"><circle r="9" fill="currentColor" opacity=".3"/><rect x="-6" y="-4" width="12" height="8" rx="2" fill="currentColor"/><animateMotion dur="2.2s" begin="-{{ i*0.45 }}s" repeatCount="indefinite" rotate="auto"><mpath href="#lxp{{i}}"/></animateMotion></g>{% endfor %}
+</svg>
+<div class="lx-card"><img src="/logo.png" alt="Mobius Technologies and Services" width="150" height="78"><h2>Welcome back</h2><p>{{title}}</p>
+"""
+LOGIN_NEW_MID = r"""</div>
+<div class="lx-cap"><span>{{ 'Server data flows to the admin dashboard' if role=='admin' else 'Employee data flows to the server' }}</span></div></div></div>
+"""
+LOGIN_NEW_JS = r"""<script>
+(function(){
+  var lx = document.querySelector('.lx'); if (!lx) return;
+  var art = lx.querySelector('.lx-art'), fm = lx.querySelector('form'), chip = lx.querySelector('.lx-chip span'); var orig = chip ? chip.textContent : '';
+  function on(){ lx.classList.add('act'); }
+  function off(){ if (!lx.classList.contains('go') && !lx.querySelector('input:focus')) lx.classList.remove('act'); }
+  lx.querySelectorAll('input').forEach(function(i){ i.addEventListener('focus', on); i.addEventListener('input', on); i.addEventListener('blur', function(){ setTimeout(off, 60); }); });
+  if (fm) fm.addEventListener('submit', function(){ lx.classList.add('act', 'go'); if (chip) chip.textContent = chip.getAttribute('data-go'); });
+  if (art && window.matchMedia('(hover:hover) and (pointer:fine)').matches && !window.matchMedia('(prefers-reduced-motion:reduce)').matches) {
+    var raf = 0, px = 0, py = 0;
+    lx.addEventListener('mousemove', function(e){
+      var r = lx.getBoundingClientRect(); px = ((e.clientX - r.left) / r.width - .5) * 14; py = ((e.clientY - r.top) / r.height - .5) * 8;
+      if (!raf) raf = requestAnimationFrame(function(){ raf = 0; art.style.transform = 'translate(' + px.toFixed(1) + 'px,' + py.toFixed(1) + 'px)'; });
+    }, {passive: true});
+    lx.addEventListener('mouseleave', function(){ art.style.transform = ''; });
+  }
+  document.addEventListener('visibilitychange', function(){ if (art && art.pauseAnimations) { if (document.hidden) art.pauseAnimations(); else art.unpauseAnimations(); } });
+  window.addEventListener('pageshow', function(e){ if (e.persisted) { lx.classList.remove('go', 'act'); if (chip) chip.textContent = orig; } });
+})();
+</script>
+"""
+LOGIN = LOGIN_NEW_HEAD + _LOGIN_FORM + LOGIN_NEW_MID + _LOGIN_WT + _LOGIN_MAIN + LOGIN_NEW_JS
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}{% if h=='Target count / hour' %} (count in 1 hr, e.g. 1000){% endif %}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
@@ -5160,7 +5294,7 @@ def initials_of(name):
     return "".join(p[0] for p in parts[:2]).upper() or "?"
 
 
-WL_SCENE = re.sub(r"\{% if role=='admin' %\}<div class=\"adp\".*?\{% endif %\}", "", LOGIN[LOGIN.index('<div class="scene '):LOGIN.index('<div class="lcard">')], flags=re.S)   # Update110: the Admin Panel / Productivity Dashboard text belongs to the login page only   # same 3D scene + data-packet flow as the login pages
+WL_SCENE = re.sub(r"\{% if role=='admin' %\}<div class=\"adp\".*?\{% endif %\}", "", LOGIN_CLASSIC[LOGIN_CLASSIC.index('<div class="scene '):LOGIN_CLASSIC.index('<div class="lcard">')], flags=re.S)   # Update110: the Admin Panel / Productivity Dashboard text belongs to the login page only   # same 3D scene + data-packet flow as the login pages
 WELCOME = """<style>
 .wl{position:fixed;inset:0;z-index:9999;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
 .wl.admin{background:radial-gradient(900px 420px at 20% 0%,#3b5bdb55,transparent 60%),linear-gradient(120deg,#0b1230 0%,#182a6b 48%,#4f46e5 100%)}

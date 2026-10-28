@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update208: An entry submitted or updated AFTER its own date (e.g. the 27 Oct entry saved on 28 Oct) is shown in RED in Employee > Productivity Info and Admin > Productivity Log (uses the "Submitted at" column; display only).
   * Update207: Employee sidebar Calendar summary now also shows "Permission" - the number of APPROVED permissions in the month shown (Present / Absent / Leave / Permission). Display only.
   * Update206: Holidays declared by the Admin are NEVER required: no productivity entry and no leave is needed on them. They are excluded from the missed-entry calculation (marquee "Productivity entry pending", Missed Log, dashboard, Employee Info) and from the automatic / manual reminder e-mails (checked again live right before sending). missing_dates() now also checks the holiday list explicitly. Update205 (holiday entries mandatory) is withdrawn.
   * Update204: NEW \"Multiplayer Game\" (Number Rush) - a separate link on the EMPLOYEE page (left menu, employees only). Two employees play the same board online in real time: the game lobby lists the employees who are online, an employee invites an available colleague, the colleague accepts / declines, and both then race to tap the numbers 1-25 in order (the server decides who tapped first, so scores and progress are identical on both screens). Admin > Employee Info > Multiplayer Game: master Enable / Disable switch (default OFF) and a per-employee access list, saved in the Settings sheet (keys \"Multiplayer Game enabled\" / \"Multiplayer Game blocked\"); switching it off or removing someone ends running matches at once and hides the link. Live data (online lobby, invitations, matches) is kept in a small SQLite file shared by all workers (GAME_DB env var to move it) - no Google Sheets calls while playing, game polling does not reset the idle-logout timer, and nothing else in the application was changed.
@@ -1145,8 +1146,9 @@ def load_subs(emp_id=None):
         s = subs.setdefault((sid_, _key(eid_)), dict(
             id=sid_, date=date_, band=g_("band"), emp_id=eid_,
             emp_name=g_("employeename"), designation=dm.get(_key(eid_), ""),
-            procs=[], notes=[], rows=[]))
+            procs=[], notes=[], rows=[], subat=""))
         s["rows"].append(r0["_row"])
+        s["subat"] = max(s["subat"], str(g_("submittedat")).strip())      # Update208: latest save time of this entry
         h = num(g_("hour", "hours"))
         typ_ = str(g_("type")).strip().lower()
         name_ = g_("processdescription", "process")
@@ -1171,6 +1173,7 @@ def load_subs(emp_id=None):
         s["ded"] = ded.get((_key(s["emp_id"]), str(s["date"])), 0.0)          # approved permission / half-day leave hours that day
         s["avail"] = max(T - s["ded"], 0.0)                                   # working hours left = target hrs less those hours
         s["off"] = is_off(s["date"])                            # weekly-off / holiday entry: saved, NOT counted
+        sd_ = norm_date(s["subat"]); s["late"] = bool(sd_ and s["date"] and sd_ > str(s["date"]))      # Update208: submitted / updated AFTER its own entry date -> shown in red
         # Update173: productivity is NOT calculated for a weekend or a declared holiday (None = "not applicable"), never 0% / 100%
         s["pct"] = None if s["off"] else _day_pct(s["prod"], s["avail"], tph, s["procs"])      # Update137: one shared formula (also stored in the sheet)
         # Update66: Admin-set Target Count vs. what the employee completed (target pro-rated to the hours booked)
@@ -2798,6 +2801,7 @@ body .app .site-ftr{font-size:10px;margin-top:12px}
 .cal-at{margin:6px 0 2px;padding:5px 6px;border-radius:7px;background:#4f46e533;color:#fff;font-size:11px;font-weight:700;line-height:1.3;text-align:center}
 .cal-ct{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin:4px 0 2px;font-size:10px;color:#c9d0ee}
 .cal-ct b.cp{color:#4ade80}.cal-ct b.ca{color:#f87171}.cal-ct b.cl{color:#60a5fa}.cal-ct b.cm{color:#fbbf24}
+tr.late-row td{color:#dc2626 !important;font-weight:700;background:#fef2f2 !important}tr.late-row td a{color:#dc2626}
 .cal-g .p{background:#16a34a40;color:#bbf7d0;box-shadow:inset 0 0 0 1px #22c55e99;font-weight:600}
 .cal-g .a{background:#dc262640;color:#fecaca;box-shadow:inset 0 0 0 1px #f87171aa;font-weight:600}
 .cal-g .l{background:#2563eb40;color:#bfdbfe;box-shadow:inset 0 0 0 1px #60a5facc;font-weight:600}
@@ -3957,7 +3961,7 @@ SAVED_ANIM = """{% if saved_anim %}<script>window.__cmSaved={{ session.name|tojs
 
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th><th>Designation</th>{% endif %}
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Target count</th><th>Completed</th><th>Target status</th><th>Productivity</th><th></th></tr>
-{% for s in subs %}<tr><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; {{s.emp_name}}</td><td>{{s.designation}}</td>{% endif %}
+{% for s in subs %}<tr{% if s.late %} class="late-row" title="Submitted / updated on {{s.subat}} - after the entry date"{% endif %}><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; {{s.emp_name}}</td><td>{{s.designation}}</td>{% endif %}
 <td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
 <td>{{ (s.tgt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td><td>{{ (s.cnt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td>
 <td>{% if s.tgt_state=='met' %}<span class="tg-badge met">&#9989; Achieved</span>{% elif s.tgt_state=='miss' %}<span class="tg-badge miss" title="Below target: {{s.tgt_miss|join(', ')}}">&#10060; Not Achieved</span>{% else %}-{% endif %}</td>

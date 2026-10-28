@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update209: NEW Admin > "Theme & Layout" page. The Admin picks one of 6 themes (Indigo Night = current look, Ocean Teal, Ember, Forest, Porcelain, Rose Quartz), a Panel layout (Sidebar / Top bar) and a Login page layout (Window with scene / Centered card), with a live mini preview. Saved in the Settings sheet (ui_theme, ui_panel_layout, ui_login_layout) and applied to the Admin AND Employee login pages and panels through one stylesheet injected last in <head> (no other page, route or calculation changed). Defaults = the existing design.
   * Update208: An entry submitted or updated AFTER its own date (e.g. the 27 Oct entry saved on 28 Oct) is shown in RED in Employee > Productivity Info and Admin > Productivity Log (uses the "Submitted at" column; display only).
   * Update207: Employee sidebar Calendar summary now also shows "Permission" - the number of APPROVED permissions in the month shown (Present / Absent / Leave / Permission). Display only.
   * Update206: Holidays declared by the Admin are NEVER required: no productivity entry and no leave is needed on them. They are excluded from the missed-entry calculation (marquee "Productivity entry pending", Missed Log, dashboard, Employee Info) and from the automatic / manual reminder e-mails (checked again live right before sending). missing_dates() now also checks the holiday list explicitly. Update205 (holiday entries mandatory) is withdrawn.
@@ -3119,7 +3120,7 @@ body .app.emp3d .site-ftr,body .app.emp3d .pg-ftr,html.fit188 .app.emp3d .site-f
 @keyframes lgBl{50%{opacity:.2}}
 @media(max-width:800px){.lgx{display:none}}
 @media(prefers-reduced-motion:reduce){.lgx .ln i,.lgx .ln b,.sv3 .f::before{animation:none}}
-</style></head><body>
+</style>{% if theme_css %}<style id="uitheme">{{ theme_css|safe }}</style>{% endif %}</head><body>
 {% if bare %}{{body|safe}}
 {% elif session.role %}<div class="app{{' emp3d' if session.role=='employee' else ''}}">{% if session.role=='employee' %}<script>document.documentElement.classList.add('fit188')</script><div id="fly3d" aria-hidden="true"><div class="fo" style="--s:64px;--x0:-12vw;--y0:78vh;--x1:112vw;--y1:-14vh;--z0:-380px;--z1:160px;--d:46s;--dl:0s;--c1:#6366f1;--c2:#a78bfa;--t:24s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:44px;--x0:110vw;--y0:64vh;--x1:-14vw;--y1:20vh;--z0:-120px;--z1:220px;--d:38s;--dl:-9s;--c1:#ec4899;--c2:#f9a8d4;--t:21s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:86px;--x0:-10vw;--y0:22vh;--x1:112vw;--y1:88vh;--z0:-420px;--z1:-60px;--d:58s;--dl:-21s;--c1:#06b6d4;--c2:#67e8f9;--t:28s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:52px;--x0:30vw;--y0:112vh;--x1:70vw;--y1:-16vh;--z0:-200px;--z1:240px;--d:34s;--dl:-14s;--c1:#f59e0b;--c2:#fcd34d;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:72px;--x0:112vw;--y0:92vh;--x1:-12vw;--y1:40vh;--z0:-340px;--z1:120px;--d:52s;--dl:-30s;--c1:#8b5cf6;--c2:#c4b5fd;--t:26s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:38px;--x0:-10vw;--y0:48vh;--x1:110vw;--y1:6vh;--z0:-60px;--z1:260px;--d:30s;--dl:-4s;--c1:#10b981;--c2:#6ee7b7;--t:20s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:58px;--x0:60vw;--y0:-14vh;--x1:16vw;--y1:114vh;--z0:-260px;--z1:180px;--d:44s;--dl:-26s;--c1:#3b82f6;--c2:#93c5fd;--t:23s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:48px;--x0:88vw;--y0:112vh;--x1:40vw;--y1:-14vh;--z0:-160px;--z1:200px;--d:36s;--dl:-17s;--c1:#f43f5e;--c2:#fda4af;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:90px;--x0:-14vw;--y0:60vh;--x1:112vw;--y1:20vh;--z0:-300px;--z1:140px;--d:50s;--dl:-6s;--c1:#6366f1;--c2:#6366f1;--t:29s"><div class="fr"></div></div><div class="fo" style="--s:64px;--x0:112vw;--y0:18vh;--x1:-14vw;--y1:80vh;--z0:-180px;--z1:200px;--d:42s;--dl:-19s;--c1:#ec4899;--c2:#ec4899;--t:24s"><div class="fr"></div></div><div class="fo" style="--s:110px;--x0:20vw;--y0:114vh;--x1:84vw;--y1:-18vh;--z0:-400px;--z1:60px;--d:60s;--dl:-33s;--c1:#06b6d4;--c2:#06b6d4;--t:32s"><div class="fr"></div></div><div class="fo" style="--s:56px;--x0:80vw;--y0:-14vh;--x1:6vw;--y1:100vh;--z0:-100px;--z1:240px;--d:40s;--dl:-12s;--c1:#f59e0b;--c2:#f59e0b;--t:23s"><div class="fr"></div></div><div class="fo" style="--s:54px;--x0:-12vw;--y0:34vh;--x1:112vw;--y1:70vh;--z0:-240px;--z1:180px;--d:48s;--dl:-2s;--c1:#6366f1;--c2:#22d3ee;--t:23s"><div class="ft"></div></div><div class="fo" style="--s:40px;--x0:112vw;--y0:50vh;--x1:-12vw;--y1:8vh;--z0:-80px;--z1:240px;--d:34s;--dl:-23s;--c1:#ec4899;--c2:#f59e0b;--t:20s"><div class="ft"></div></div><div class="fo" style="--s:70px;--x0:46vw;--y0:-14vh;--x1:92vw;--y1:114vh;--z0:-320px;--z1:100px;--d:54s;--dl:-36s;--c1:#8b5cf6;--c2:#06b6d4;--t:25s"><div class="ft"></div></div><div class="fo" style="--s:46px;--x0:-12vw;--y0:104vh;--x1:114vw;--y1:30vh;--z0:-140px;--z1:220px;--d:40s;--dl:-28s;--c1:#10b981;--c2:#3b82f6;--t:21s"><div class="ft"></div></div></div>{% endif %}<aside class="emp">
 <div class="panel-ttl">{{ 'Admin Panel' if session.role=='admin' else 'Employee Panel' }}</div>
@@ -3670,11 +3671,129 @@ setInterval(function(){location.reload()},120000);
 </script>{% endif %}
 </body></html>"""
 
+# ---------------------------------------------------------------- Update209: Theme & Layout (Admin controls the look of every login page and panel)
+# Colours: pri/pri2 = accent pair, s1-s3 = sidebar / top bar gradient, t1/t2/base = page background, l1-l3 = login background.
+THEMES = [
+    dict(id="indigo",    name="Indigo Night", note="Current look", pri="#6366f1", pri2="#8b5cf6", s1="#0f1535", s2="#1a2050", s3="#2a2a73", t1="#e6e3ff", t2="#dff3ff", base="#f5f7fc", l1="#0b1230", l2="#182a6b", l3="#4f46e5"),
+    dict(id="ocean",     name="Ocean Teal",   note="Cool and calm", pri="#0e7490", pri2="#0891b2", s1="#04202a", s2="#0a3a48", s3="#0e6378", t1="#cdf3fb", t2="#d9f7ee", base="#f2fafc", l1="#04202a", l2="#0a4a5e", l3="#0891b2"),
+    dict(id="ember",     name="Ember",        note="Warm and bold", pri="#ea580c", pri2="#f97316", s1="#2a0f12", s2="#4a1a14", s3="#7a2e12", t1="#ffe5d1", t2="#fff1c9", base="#fff8f3", l1="#2a0f12", l2="#7a2e12", l3="#f97316"),
+    dict(id="forest",    name="Forest",       note="Fresh and natural", pri="#15803d", pri2="#65a30d", s1="#07180f", s2="#0f3a24", s3="#1a5a38", t1="#d9f7e3", t2="#ecf8c9", base="#f4faf5", l1="#07180f", l2="#145a37", l3="#65a30d"),
+    dict(id="porcelain", name="Porcelain",    note="Clean and bright", pri="#3b82f6", pri2="#1d4ed8", s1="#0c1f4a", s2="#14337a", s3="#1d4ed8", t1="#d7e6ff", t2="#e4efff", base="#f3f7fd", l1="#0c1f4a", l2="#1d4ed8", l3="#60a5fa"),
+    dict(id="rose",      name="Rose Quartz",  note="Soft and friendly", pri="#db2777", pri2="#be185d", s1="#2e0e25", s2="#5b1a45", s3="#8a2a62", t1="#fbd5e5", t2="#ffe4ee", base="#fff6f9", l1="#2e0e25", l2="#7d1442", l3="#f0468d"),
+]
+PANEL_LAYOUTS = [("0", "Sidebar", "Menu on the left (current)"), ("1", "Top bar", "Menu across the top, more room for tables")]
+LOGIN_LAYOUTS = [("0", "Window with scene", "Animated 3D scene beside the form (current)"), ("1", "Centered card", "Clean, single card in the middle")]
+
+from functools import lru_cache
+
+@lru_cache(maxsize=32)
+def _theme_css_for(tid, panel_b, login_b):
+    t = next((x for x in THEMES if x["id"] == tid), THEMES[0]); P, P2 = t["pri"], t["pri2"]; css = []
+    if t["id"] != "indigo":          # Indigo Night IS the existing design - no colour override needed
+        css.append(
+            f'.app{{--pri:{P};--pri2:{P2};background:radial-gradient(900px 420px at 92% -8%,{t["t1"]} 0,transparent 62%),radial-gradient(700px 380px at -6% 105%,{t["t2"]} 0,transparent 60%),{t["base"]}}}'
+            f'body .app aside{{background:linear-gradient(185deg,{t["s1"]} 0%,{t["s2"]} 55%,{t["s3"]} 100%)}}'
+            f'body .app aside a.on{{background:linear-gradient(135deg,{P},{P2});box-shadow:0 8px 18px -6px {P}99}}'
+            f'.app .primary,.app .btnl{{box-shadow:0 8px 18px -8px {P}cc}}'
+            f'.app .primary:hover,.app .btnl:hover{{background:linear-gradient(135deg,{P2},{P})}}'
+            f'.app input:focus,.app select:focus,.app textarea:focus{{border-color:{P};box-shadow:0 0 0 4px {P}26}}'
+            f'.app .welcome{{background:linear-gradient(120deg,#fff 0%,{t["t1"]} 70%,{t["t2"]} 100%);border-color:{t["t1"]}}}'
+            f'body .win.admin .wbody{{background:radial-gradient(700px 380px at 15% 10%,{P}44,transparent 60%),radial-gradient(500px 300px at 90% 100%,{P2}33,transparent 60%),linear-gradient(135deg,{t["l1"]} 0%,{t["l2"]} 55%,{t["l3"]} 100%)}}'
+            f'body .win.admin .wbar{{background:linear-gradient(180deg,{t["s2"]},{t["s1"]});border-bottom-color:{t["s3"]}}}'
+            f'body .win.admin .lcard button{{background:linear-gradient(135deg,{P},{P2})!important;box-shadow:0 5px 0 {t["s3"]},0 12px 18px -6px {P}88}}'
+            f'body .win.admin .lcard input:focus{{outline-color:{P}88;border-color:{P}}}')
+    if panel_b:       # Layout B: the menu becomes a top bar (wide screens only - phones already use a horizontal menu)
+        css.append(
+            '@media(min-width:801px){body .app{flex-direction:column}'
+            f'body .app aside{{width:auto;height:auto;position:sticky;top:0;z-index:30;flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 18px;overflow:visible;box-shadow:0 10px 30px -12px #0f172a66}}'
+            'body .app aside .panel-ttl,body .app aside .av3d{display:none}'
+            'body .app aside .me{order:99;margin:0 0 0 auto;border:0;padding:0}'
+            'body .app aside .brand{padding:0 12px 0 0}body .app aside .ng{position:relative}'
+            f'body .app aside .ng .kids{{position:absolute;top:100%;left:0;min-width:210px;z-index:40;background:{t["s2"]};border-radius:12px;padding:6px;box-shadow:0 20px 40px -12px #000a}}'
+            f'body .app aside details.cal[open]{{position:fixed;right:18px;top:60px;width:270px;z-index:50;background:{t["s2"]};padding:10px;border-radius:14px;max-height:80vh;overflow:auto;box-shadow:0 24px 50px -12px #000a}}'
+            'body .app main{padding:24px 28px}}')
+    if login_b:       # Layout B: one centered card, no side scene
+        css.append(
+            'body .win.admin{width:min(480px,100%)}body .win.admin .wbar{display:none}'
+            'body .win.admin .wbody{justify-content:center;border-radius:16px;min-height:0;padding:34px 20px}'
+            'body .win.admin .scene{border-radius:16px}body .win.admin .adp,body .win.admin .lgx,body .win.admin .dp{display:none}'
+            'body .win.admin .lcard{width:min(360px,100%)}')
+    return "".join(css)
+
+def theme_choice():
+    """-> (theme id, panel layout '0'/'1', login layout '0'/'1') as saved by the Admin; defaults = the current design."""
+    try:
+        tid = _setting("ui_theme") or "indigo"; pl = _setting("ui_panel_layout") or "0"; ll = _setting("ui_login_layout") or "0"
+    except Exception as ex:
+        print("theme settings read error:", repr(ex)); return "indigo", "0", "0"
+    return (tid if any(x["id"] == tid for x in THEMES) else "indigo"), ("1" if pl == "1" else "0"), ("1" if ll == "1" else "0")
+
+def _theme_css():
+    try:
+        tid, pl, ll = theme_choice(); return _theme_css_for(tid, pl == "1", ll == "1")
+    except Exception as ex:
+        print("theme css error:", repr(ex)); return ""
+
+THEME_PAGE = """<style>
+.tp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin:10px 0 22px}
+.tp-card{position:relative;display:block;cursor:pointer;border:2px solid var(--line);border-radius:16px;padding:10px;background:#fff}
+.tp-card input{position:absolute;opacity:0;width:1px;height:1px}
+.tp-card:has(input:checked){border-color:var(--pri);box-shadow:0 12px 26px -10px var(--pri)}
+.tp-card:has(input:focus-visible){outline:3px solid var(--pri);outline-offset:2px}
+.tp-sw{display:block;height:74px;border-radius:12px;position:relative;box-shadow:inset 0 -10px 18px #0004,0 10px 18px -8px #0006}
+.tp-sw i{position:absolute;right:12px;bottom:12px;width:44px;height:22px;border-radius:8px;box-shadow:0 4px 0 #0005}
+.tp-card b{display:block;margin-top:8px}.tp-card small{color:var(--mut)}
+.tp-opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:10px 0 18px}
+#tpv{--a:#6366f1;--b:#8b5cf6;--s1:#0f1535;--s3:#2a2a73;display:flex;height:150px;max-width:460px;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:#f5f7fc;box-shadow:0 18px 30px -14px #0006;margin:8px 0 18px}
+#tpv[data-p="1"]{flex-direction:column}
+#tpv .m{background:linear-gradient(185deg,var(--s1),var(--s3));width:64px;padding:10px 8px;flex:none}
+#tpv[data-p="1"] .m{width:auto;height:30px;padding:6px 10px;display:flex;gap:6px}
+#tpv .m i{display:block;height:9px;border-radius:5px;background:#ffffff40;margin-bottom:7px}
+#tpv[data-p="1"] .m i{width:44px;margin:0}#tpv .m i.on{background:linear-gradient(135deg,var(--a),var(--b))}
+#tpv .c{flex:1;padding:12px;display:flex;gap:8px;align-items:flex-start}
+#tpv .c u{flex:1;height:46px;border-radius:10px;background:#fff;box-shadow:0 6px 12px -6px #0004;text-decoration:none}
+#tpv .c em{align-self:flex-end;width:54px;height:20px;border-radius:7px;background:linear-gradient(135deg,var(--a),var(--b));box-shadow:0 4px 0 var(--s3)}
+</style>
+<div class="head"><div><h1>Theme &amp; Layout</h1><p class="mut">Choose how every Employee and Admin login page and panel looks. The change applies to everyone right after you save.</p></div></div>
+<form method="post" id="tpf">
+<h2>Theme</h2>
+<div class="tp-grid">{% for t in themes %}<label class="tp-card"><input type="radio" name="theme" value="{{t.id}}" {{'checked' if t.id==cur[0] else ''}} data-a="{{t.pri}}" data-b="{{t.pri2}}" data-s1="{{t.s1}}" data-s3="{{t.s3}}"><span class="tp-sw" style="background:linear-gradient(135deg,{{t.s1}},{{t.s3}})"><i style="background:linear-gradient(135deg,{{t.pri}},{{t.pri2}})"></i></span><b>{{t.name}}</b><small>{{t.note}}</small></label>{% endfor %}</div>
+<div class="tp-opts"><div><h2>Panel layout</h2>{% for v,n,d in panels %}<label class="tp-card" style="margin:8px 0"><input type="radio" name="panel" value="{{v}}" {{'checked' if v==cur[1] else ''}}><b>{{n}}</b><small>{{d}}</small></label>{% endfor %}</div>
+<div><h2>Login page layout</h2>{% for v,n,d in logins %}<label class="tp-card" style="margin:8px 0"><input type="radio" name="login" value="{{v}}" {{'checked' if v==cur[2] else ''}}><b>{{n}}</b><small>{{d}}</small></label>{% endfor %}</div></div>
+<h2>Preview</h2>
+<div id="tpv" data-p="{{cur[1]}}"><div class="m"><i class="on"></i><i></i><i></i><i></i></div><div class="c"><u></u><u></u><em></em></div></div>
+<button class="primary" type="submit">Save theme &amp; layout</button>
+</form>
+<script>
+(function(){var f=document.getElementById('tpf'),v=document.getElementById('tpv');
+function up(){var t=f.querySelector('input[name=theme]:checked'),p=f.querySelector('input[name=panel]:checked');
+if(t){v.style.setProperty('--a',t.dataset.a);v.style.setProperty('--b',t.dataset.b);v.style.setProperty('--s1',t.dataset.s1);v.style.setProperty('--s3',t.dataset.s3)}
+if(p)v.dataset.p=p.value}
+f.addEventListener('change',up);up()})();
+</script>"""
+
+@app.route("/admin/theme", methods=["GET", "POST"])
+@need("admin")
+def admin_theme():
+    if request.method == "POST":
+        tid = request.form.get("theme", "indigo"); pl = request.form.get("panel", "0"); ll = request.form.get("login", "0")
+        if not any(x["id"] == tid for x in THEMES) or pl not in ("0", "1") or ll not in ("0", "1"):
+            flash("Please pick a theme and a layout.", "error"); return redirect("/admin/theme")
+        try:
+            _set_setting("ui_theme", tid); _set_setting("ui_panel_layout", pl); _set_setting("ui_login_layout", ll)
+        except Exception as ex:
+            print("theme save error:", repr(ex)); flash("Could not save the theme. Please try again.", "error"); return redirect("/admin/theme")
+        flash("Theme and layout saved - every login page and panel now uses it.")
+        return redirect("/admin/theme")
+    prefetch("Settings")
+    return page(THEME_PAGE, title="Theme & Layout", themes=THEMES, panels=PANEL_LAYOUTS, logins=LOGIN_LAYOUTS, cur=theme_choice())
+
 NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"), 
               ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log"),
-              ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes")],
+              ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes"),
+              ("/admin/theme", "Theme & Layout")],
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
@@ -3724,7 +3843,7 @@ def page(body, title="Productivity Tracker", **ctx):
         by_h = {n[0]: n for n in nav}
         nav = [by_h["/admin/summary"], by_h["/admin/processes"],
                ("/admin/log", "Log", any(k[2] for k in log_kids), log_kids),
-               by_h["/admin/employee-info"]]
+               by_h["/admin/employee-info"], by_h["/admin/theme"]]      # Update209
     side_avatar = ""
     if session.get("role") == "admin":
         side_avatar = ADMIN_AVATAR
@@ -3744,7 +3863,7 @@ def page(body, title="Productivity Tracker", **ctx):
             prm_json = _json.dumps(employee_perm_map(session.get("emp_id", "")), separators=(",", ":"))
         except Exception as ex: print("attendance calendar error:", repr(ex))
     return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, srv_today=str(today_local()))
+                                  side_avatar=side_avatar, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, srv_today=str(today_local()), theme_css=_theme_css())
 
 
 LOGIN = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i><i></i><i></i></div>

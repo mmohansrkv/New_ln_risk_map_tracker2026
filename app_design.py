@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update213: after Employee login a 2-second \"Loading Your Workspace...\" page shows the employee's OWN photo (employee_photos/<Employee ID>.jpg or a Photo link column) in a 3D tilt + scan + particle animation; no photo -> 3D male / female avatar; then opens the panel.
   * Update212: Employee login - character follows the employee gender (remembered per browser as m/f after a login), loading + idle messages (Connecting to Server / Loading Employee Data / Preparing Your Workspace), glowing particles, progress line.
   * Update210: NEW Admin and Employee login pages. Employee page = an animated 3D-style employee sends glowing data packets along network lines TO a 3D server; Admin page = the server sends data packets TO the animated admin (headset) - same design, distinct animation direction / colours. Packets speed up when the user types or signs in; light mouse parallax; paused when the tab is hidden; off for reduced-motion. Light SVG + CSS only (no images / libraries). The sign-in fields, password Show/Hide, screen-lock prompt and logo are unchanged; the old template is kept as LOGIN_CLASSIC (the Welcome scene still uses it).
   * Update209: NEW Admin > "Theme & Layout" page. The Admin picks one of 6 themes (Indigo Night = current look, Ocean Teal, Ember, Forest, Porcelain, Rose Quartz), a Panel layout (Sidebar / Top bar) and a Login page layout (Window with scene / Centered card), with a live mini preview. Saved in the Settings sheet (ui_theme, ui_panel_layout, ui_login_layout) and applied to the Admin AND Employee login pages and panels through one stylesheet injected last in <head> (no other page, route or calculation changed). Defaults = the existing design.
@@ -735,7 +736,7 @@ def _role_wall():
 def _no_store_private(resp):
     """Signed-in pages must not be kept by the browser/proxies, so the Back button after logout
     cannot show an Admin or Employee page."""
-    if session.get("role") and request.endpoint not in ("static", "photo"):
+    if session.get("role") and request.endpoint not in ("static", "photo", "employee_photo"):
         resp.headers["Cache-Control"] = "no-store"
     return resp
 
@@ -5302,7 +5303,7 @@ def employee_login():
                                designation=str(e.get("Designation", "")))
                 track_login(session["emp_id"], session["name"], session["band"])
                 _bg(warm_employee_cache)                  # dashboard data loads while the welcome animation plays
-                resp = redirect("/employee")                  # Update202: straight to the Employee Panel (no welcome page)
+                resp = redirect("/employee/welcome")          # Update213: 2-second "Loading Your Workspace" animation with the employee's own face, then the panel
                 try:      # Update212: remember only "m" / "f" so the next login page on this browser shows the matching character
                     _g = gender_of(e)
                     if _g: resp.set_cookie("lxg", "f" if _g == "female" else "m", max_age=31536000, samesite="Lax", httponly=True, secure=request.is_secure)
@@ -6611,15 +6612,93 @@ def employee_calendar_data():
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
+# ---------------------------------------------------------------- Update213: 2-second loading animation after Employee login
+# Photo source (first match wins, always the LOGGED-IN employee's own - the route takes no id):
+#   1) a file  <EMP_PHOTO_DIR>/<Employee ID>.jpg|.jpeg|.png|.webp   (folder "employee_photos" next to this file, or env EMP_PHOTO_DIR)
+#   2) an http(s) image link in an optional "Photo" column of the Employees sheet
+# No photo -> the 3D male / female avatar (by the Gender column; initials if gender is not set).
+EMP_PHOTO_DIR = os.environ.get("EMP_PHOTO_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "employee_photos")
+_PHOTO_EXT = (".jpg", ".jpeg", ".png", ".webp")
+
+def _emp_photo_file(emp_id):
+    key = re.sub(r"[^A-Za-z0-9._-]", "_", str(emp_id or "").strip())
+    if not key or key.startswith("."): return None
+    for ext in _PHOTO_EXT:
+        for k in dict.fromkeys((key, key.lower(), key.upper())):
+            p = os.path.join(EMP_PHOTO_DIR, k + ext)
+            try:
+                if os.path.isfile(p) and os.path.getsize(p) <= 3 * 1024 * 1024: return p
+            except OSError: pass
+    return None
+
+def _emp_photo_src(emp):
+    p = _emp_photo_file(emp.get("Employee ID", ""))
+    if p:
+        try: return "/employee/photo?v=%d" % int(os.path.getmtime(p))
+        except OSError: return "/employee/photo"
+    u = str(emp.get("Photo", "") or "").strip()
+    return u if re.match(r"^https?://[^\s\"'<>]+$", u, re.I) else ""
+
+@app.route("/employee/photo")
+@need("employee")
+def employee_photo():
+    p = _emp_photo_file(session.get("emp_id", ""))          # only the signed-in employee's own file - no id in the URL
+    if not p: abort(404)
+    resp = send_file(p, conditional=True)
+    resp.headers["Cache-Control"] = "private, max-age=3600"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+LOADING_EMP = """<style>
+.lw{position:fixed;inset:0;z-index:9999;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#e8ecff;font-family:Poppins,system-ui,-apple-system,"Segoe UI",sans-serif;
+ background:radial-gradient(700px 360px at 15% 25%,#0ea5e944,transparent 65%),radial-gradient(600px 340px at 88% 75%,#be123c55,transparent 65%),linear-gradient(160deg,#0a0d24,#1a1038 55%,#2a0f3a)}
+.lw-floor{position:absolute;left:-10%;right:-10%;bottom:-6%;height:44%;background:repeating-linear-gradient(90deg,#ffffff18 0 1px,transparent 1px 48px),repeating-linear-gradient(0deg,#ffffff18 0 1px,transparent 1px 38px);transform:perspective(420px) rotateX(62deg);transform-origin:50% 100%;-webkit-mask:linear-gradient(transparent,#000 70%);mask:linear-gradient(transparent,#000 70%);animation:lwGr 5s linear infinite}
+.lw-d{position:absolute;width:9px;height:9px;background:var(--c);box-shadow:0 0 12px var(--c);transform:rotate(45deg);animation:lwF var(--t,6s) ease-in-out infinite}
+.lw-stage{position:relative;width:min(210px,52vw);height:min(210px,52vw);perspective:700px;z-index:2}
+.lw-ring{position:absolute;inset:-14px;border-radius:50%;background:conic-gradient(#22d3ee,#f472b6,#fbbf24,#a3e635,#22d3ee);-webkit-mask:radial-gradient(circle,transparent 63%,#000 65%);mask:radial-gradient(circle,transparent 63%,#000 65%);animation:lwSp 2s linear infinite;filter:drop-shadow(0 0 14px #22d3ee88)}
+.lw-orb{position:absolute;inset:-22px;animation:lwSp 1.6s linear infinite}.lw-orb:nth-of-type(2){animation-duration:2.4s;animation-direction:reverse;inset:-30px}
+.lw-orb i{position:absolute;left:50%;top:0;width:10px;height:10px;margin-left:-5px;border-radius:2px;background:#22d3ee;box-shadow:0 0 12px #22d3ee}.lw-orb:nth-of-type(2) i{background:#f472b6;box-shadow:0 0 12px #f472b6}
+.lw-face{position:absolute;inset:0;border-radius:50%;overflow:hidden;background:#101636;box-shadow:0 0 0 3px #ffffff33,0 24px 40px -10px #000c,inset 0 -18px 30px #0007;animation:lwHd 3.2s ease-in-out infinite;transform-style:preserve-3d}
+.lw-face img{display:block;width:100%;height:100%;object-fit:cover}
+.lw-face::after{content:"";position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 32% 22%,#ffffff55,transparent 45%)}
+.lw-scan{position:absolute;left:0;right:0;top:-35%;height:35%;background:linear-gradient(transparent,#22d3ee66,transparent);animation:lwSc 1.4s ease-in-out infinite;z-index:2}
+.lw-ph{position:absolute;inset:0}.lw-ph .av3d{position:relative;width:100%;height:100%;margin:0;perspective:520px}.lw-ph .av3d::after{display:none}
+.lw-ph .av-stage{position:relative;width:100%;height:100%;transform-style:preserve-3d;animation:lwHd 3.2s ease-in-out infinite}.lw-ph .av3d.live .av-stage{animation:none;transform:rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));transition:transform .14s linear}
+.lw-ph .av-l{position:absolute;inset:0;width:100%;height:100%;transform:translateZ(var(--z,0px));pointer-events:none}.lw-ph .av-l:first-child{border-radius:50%;box-shadow:0 12px 22px -8px #4f46e577,0 0 0 3px #ffffff55}
+.lw-stage.has .lw-ph{display:none}.lw-stage.has.bad .lw-ph{display:block}.lw-stage.has.bad .lw-face{display:none}
+.lw-hi{position:relative;z-index:2;margin:44px 0 4px;font:600 15px/1.2 Poppins,system-ui,sans-serif;color:#c3cdf7}
+.lw-msg{position:relative;z-index:2;margin:0 0 14px;font:700 22px/1.2 Poppins,system-ui,sans-serif;text-align:center;padding:0 16px}
+.lw-bar{position:relative;z-index:2;width:min(300px,70vw);height:6px;border-radius:4px;background:#ffffff1f;overflow:hidden}
+.lw-bar i{display:block;height:100%;width:100%;border-radius:4px;background:linear-gradient(90deg,#22d3ee,#f472b6);transform-origin:left;transform:scaleX(0);animation:lwFill 2s linear forwards}
+.lw-st{position:relative;z-index:2;margin-top:10px;font:600 10px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;color:#8ea0d6}
+@keyframes lwSp{to{transform:rotate(360deg)}}@keyframes lwFill{to{transform:scaleX(1)}}
+@keyframes lwHd{0%,100%{transform:rotateY(-9deg) rotateX(2deg)}50%{transform:rotateY(9deg) rotateX(-2deg) translateY(-3px)}}
+@keyframes lwSc{0%{top:-35%}100%{top:100%}}@keyframes lwGr{to{background-position:0 0,0 38px}}@keyframes lwF{50%{transform:translateY(-16px) rotate(225deg)}}
+@media(prefers-reduced-motion:reduce){.lw *{animation:none!important}.lw-bar i{transform:scaleX(1)}}
+</style>
+<div class="lw" id="lw" role="status" aria-live="polite"><div class="lw-floor"></div>
+<i class="lw-d" style="--c:#22d3ee;left:8%;top:18%"></i><i class="lw-d" style="--c:#f472b6;left:22%;top:70%;--t:7s"></i><i class="lw-d" style="--c:#fbbf24;left:44%;top:8%;--t:8s"></i><i class="lw-d" style="--c:#a3e635;right:20%;top:14%;--t:6.5s"></i><i class="lw-d" style="--c:#a78bfa;right:8%;top:52%;--t:7.5s"></i><i class="lw-d" style="--c:#f472b6;right:30%;bottom:18%;--t:9s"></i>
+<div class="lw-stage{{ ' has' if lw_photo else '' }}" id="lwst"><div class="lw-orb"><i></i></div><div class="lw-orb"><i></i></div><div class="lw-ring"></div>
+{% if lw_photo %}<div class="lw-face"><img src="{{ lw_photo }}" alt="" referrerpolicy="no-referrer" decoding="async" onerror="document.getElementById('lwst').classList.add('bad')"><div class="lw-scan"></div></div>{% endif %}
+<div class="lw-ph">{{ lw_avatar|safe }}</div></div>
+<div class="lw-hi">Welcome{{ ', ' ~ lw_first if lw_first else '' }}</div>
+<div class="lw-msg">Loading Your Workspace&hellip;</div>
+<div class="lw-bar"><i></i></div><div class="lw-st">SYNCING EMPLOYEE DATA</div></div>
+<script>setTimeout(function(){ window.location.replace("/employee") }, 2000);</script>
+<noscript><meta http-equiv="refresh" content="3;url=/employee"></noscript>"""
+
 @app.route("/employee/welcome")
 @need("employee")
 def employee_welcome():
-    return redirect("/employee")                          # Update202: the welcome page is no longer shown (old bookmarks go to the panel)
     try:
-        g = gender_of(my_emp_row())
-    except Exception:
-        g = ""
-    return page(WELCOME, title="Welcome", wl_gender=g or "male", bare=True)
+        e = my_emp_row()
+        g = gender_of(e)
+        nm = str(session.get("name", "")).strip()
+        ini = initials_of(nm)
+        return page(LOADING_EMP, title="Loading", bare=True, lw_photo=_emp_photo_src(e), lw_first=(nm.split() or [""])[0],
+                    lw_avatar=render_fast(AVATAR3D, gender=g, initials=ini))
+    except Exception as ex:
+        print("loading page error:", repr(ex)); return redirect("/employee")
 
 @app.route("/employee")
 @need("employee")

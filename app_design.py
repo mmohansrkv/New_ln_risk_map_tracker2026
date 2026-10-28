@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update212: Employee login - character follows the employee gender (remembered per browser as m/f after a login), loading + idle messages (Connecting to Server / Loading Employee Data / Preparing Your Workspace), glowing particles, progress line.
   * Update210: NEW Admin and Employee login pages. Employee page = an animated 3D-style employee sends glowing data packets along network lines TO a 3D server; Admin page = the server sends data packets TO the animated admin (headset) - same design, distinct animation direction / colours. Packets speed up when the user types or signs in; light mouse parallax; paused when the tab is hidden; off for reduced-motion. Light SVG + CSS only (no images / libraries). The sign-in fields, password Show/Hide, screen-lock prompt and logo are unchanged; the old template is kept as LOGIN_CLASSIC (the Welcome scene still uses it).
   * Update209: NEW Admin > "Theme & Layout" page. The Admin picks one of 6 themes (Indigo Night = current look, Ocean Teal, Ember, Forest, Porcelain, Rose Quartz), a Panel layout (Sidebar / Top bar) and a Login page layout (Window with scene / Centered card), with a live mini preview. Saved in the Settings sheet (ui_theme, ui_panel_layout, ui_login_layout) and applied to the Admin AND Employee login pages and panels through one stylesheet injected last in <head> (no other page, route or calculation changed). Defaults = the existing design.
   * Update208: An entry submitted or updated AFTER its own date (e.g. the 27 Oct entry saved on 28 Oct) is shown in RED in Employee > Productivity Info and Admin > Productivity Log (uses the "Submitted at" column; display only).
@@ -4108,6 +4109,15 @@ html{scrollbar-gutter:stable}
 .lx.lxon .lx-role{animation-duration:.9s}
 @keyframes lxRl{50%{filter:drop-shadow(0 0 16px var(--c1))}}
 @media(max-width:860px){.lx-body{height:auto;min-height:0}}
+/* Update212: loading / idle animation (Employee page) - overlay only, no layout change */
+.lx-bar{position:relative}
+.lx-bar::after{content:"";position:absolute;left:0;bottom:-1px;height:2px;width:100%;background:linear-gradient(90deg,transparent,var(--c1),var(--c2));transform-origin:0 50%;transform:scaleX(0);opacity:0;pointer-events:none}
+.lx.lxload .lx-bar::after,.lx.lxidle .lx-bar::after{opacity:1;animation:lxPg 1.6s ease-in-out infinite}
+.lx-chip span{min-width:178px;text-align:right}
+.lx-xd{display:none}.lx.lxload .lx-xd,.lx.lxidle .lx-xd{display:block}
+.lx.lxidle .lx-head{animation:lxHd2 5s ease-in-out infinite}.lx.lxidle .lx-d{filter:brightness(1.45)}
+@keyframes lxPg{0%{transform:scaleX(0)}100%{transform:scaleX(1)}}
+@keyframes lxHd2{0%,100%{transform:rotate(-3deg) translateY(0)}50%{transform:rotate(3.2deg) translateY(-3px)}}
 </style>
 {% macro person(fem) %}<g class="lx-bob"><ellipse cx="110" cy="288" rx="96" ry="9" fill="#000" opacity=".3"/>
 <path d="M18 286C18 216 58 186 110 186s92 30 92 100z" fill="url(#lxJk{{ 'F' if fem else 'M' }})"/>
@@ -4137,7 +4147,7 @@ html{scrollbar-gutter:stable}
 <div class="lx {{ 'adm' if role=='admin' else 'emp' }}" data-role="{{role}}">
 <div class="lx-bar"><i></i><i></i><i></i><div class="lx-chip"><b></b><span data-go="{{ 'Boss' if role=='admin' else 'FTE' }} · Signing in...">{{ 'Boss · Receiving from server' if role=='admin' else 'FTE · Sending to server' }}</span></div></div>
 <div class="lx-body"><div class="scene lx-scene" aria-hidden="true"><div class="lx-floor"></div>
-<i class="lx-d" style="--c:var(--c1);left:6%;top:18%"></i><i class="lx-d" style="--c:var(--c2);left:22%;top:8%;--t:7s"></i><i class="lx-d" style="--c:var(--c3);left:44%;top:6%;--t:8s"></i><i class="lx-d" style="--c:var(--c4);right:22%;top:10%;--t:6.5s"></i><i class="lx-d" style="--c:var(--c5);right:7%;top:20%;--t:7.5s"></i><i class="lx-d" style="--c:var(--c2);right:30%;bottom:16%;--t:9s"></i></div>
+<i class="lx-d" style="--c:var(--c1);left:6%;top:18%"></i><i class="lx-d" style="--c:var(--c2);left:22%;top:8%;--t:7s"></i><i class="lx-d" style="--c:var(--c3);left:44%;top:6%;--t:8s"></i><i class="lx-d" style="--c:var(--c4);right:22%;top:10%;--t:6.5s"></i><i class="lx-d" style="--c:var(--c5);right:7%;top:20%;--t:7.5s"></i><i class="lx-d" style="--c:var(--c2);right:30%;bottom:16%;--t:9s"></i><i class="lx-d lx-xd" style="--c:var(--c3);left:14%;top:44%;--t:5s"></i><i class="lx-d lx-xd" style="--c:var(--c4);left:33%;top:70%;--t:6.5s"></i><i class="lx-d lx-xd" style="--c:var(--c1);left:41%;top:24%;--t:7s"></i><i class="lx-d lx-xd" style="--c:var(--c5);right:36%;top:62%;--t:5.5s"></i><i class="lx-d lx-xd" style="--c:var(--c2);right:14%;top:50%;--t:8s"></i><i class="lx-d lx-xd" style="--c:var(--c3);right:42%;top:12%;--t:6s"></i></div>
 <svg class="lx-art" viewBox="0 0 1000 400" aria-hidden="true" focusable="false"><defs>
 <radialGradient id="lxSk" cx=".36" cy=".3" r=".85"><stop offset="0" stop-color="#ffe3cb"/><stop offset=".55" stop-color="#f0b48c"/><stop offset="1" stop-color="#c98a62"/></radialGradient>
 <radialGradient id="lxHl" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff" stop-opacity=".5"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
@@ -4151,7 +4161,7 @@ html{scrollbar-gutter:stable}
 {% if role=='admin' %}<g transform="translate(66 62)">{{ server() }}</g><g transform="translate(742 70)">{{ person(true) }}</g>
 <text class="lx-lb" x="150" y="392">Server</text><text class="lx-lb" x="852" y="392">Admin system</text>
 <g class="lx-role"><rect x="802" y="34" width="100" height="34" rx="17"/><text x="852" y="58">Boss</text></g>
-{% else %}<g transform="translate(34 70)">{{ person(false) }}</g><g transform="translate(772 62)">{{ server() }}</g>
+{% else %}<g transform="translate(34 70)">{{ person(lxg=='f') }}</g><g transform="translate(772 62)">{{ server() }}</g>
 <text class="lx-lb" x="144" y="392">Employee system</text><text class="lx-lb" x="852" y="392">Server</text>
 <g class="lx-role"><rect x="94" y="34" width="100" height="34" rx="17"/><text x="144" y="58">FTE</text></g>{% endif %}
 {% set P = ["M250 150C400 70 600 230 750 140","M250 185C420 150 580 260 750 175","M250 220C400 190 600 170 750 210","M250 255C430 300 570 200 750 245","M250 290C400 340 600 260 750 280"] %}
@@ -4168,10 +4178,11 @@ LOGIN_NEW_JS = r"""<script>
 (function(){
   var lx = document.querySelector('.lx'); if (!lx) return;
   var art = lx.querySelector('.lx-art'), fm = lx.querySelector('form'), chip = lx.querySelector('.lx-chip span'); var orig = chip ? chip.textContent : '';
+  var lxStop = null;
   function on(){ lx.classList.add('lxon'); if (art) art.style.transform = ''; }
   function off(){ if (!lx.classList.contains('go') && !lx.querySelector('input:focus')) lx.classList.remove('lxon'); }
   lx.querySelectorAll('input').forEach(function(i){ i.addEventListener('focus', on); i.addEventListener('input', on); i.addEventListener('blur', function(){ setTimeout(off, 60); }); });
-  if (fm) fm.addEventListener('submit', function(){ lx.classList.add('lxon', 'go'); if (chip) chip.textContent = chip.getAttribute('data-go'); });
+  if (fm) fm.addEventListener('submit', function(){ if (lxStop) lxStop(); lx.classList.add('lxon', 'go'); if (chip) chip.textContent = chip.getAttribute('data-go'); });
   if (art && window.matchMedia('(hover:hover) and (pointer:fine)').matches && !window.matchMedia('(prefers-reduced-motion:reduce)').matches) {
     var raf = 0, px = 0, py = 0;
     lx.addEventListener('mousemove', function(e){
@@ -4180,6 +4191,21 @@ LOGIN_NEW_JS = r"""<script>
       if (!raf) raf = requestAnimationFrame(function(){ raf = 0; art.style.transform = 'translate(' + px.toFixed(1) + 'px,' + py.toFixed(1) + 'px)'; });
     }, {passive: true});
     lx.addEventListener('mouseleave', function(){ art.style.transform = ''; });
+  }
+  /* Update212: Employee page only - "Connecting to Server..." messages while the page loads, and again after 10 s of no activity. Any key / click / mouse move stops it. */
+  if (chip && lx.classList.contains('emp')) {
+    var MSG = ['Connecting to Server\u2026', 'Loading Employee Data\u2026', 'Preparing Your Workspace\u2026'], tm = 0, mi = 0, last = Date.now(), IDLE = 10000;
+    lxStop = function(){ if (tm) clearInterval(tm); tm = 0; lx.classList.remove('lxload', 'lxidle'); if (!lx.classList.contains('go')) chip.textContent = orig; };
+    var cycle = function(cls, ms){ lxStop(); lx.classList.add(cls); mi = 0; chip.textContent = MSG[0]; tm = setInterval(function(){ mi = (mi + 1) % MSG.length; if (cls === 'lxload' && mi === 0) { lxStop(); return; } chip.textContent = MSG[mi]; }, ms); };
+    var act = function(e){ last = Date.now(); if (lx.classList.contains('lxidle') || (lx.classList.contains('lxload') && e && (e.type === 'keydown' || e.type === 'input' || e.type === 'mousedown'))) lxStop(); };
+    ['mousemove', 'keydown', 'mousedown', 'touchstart', 'input', 'focusin'].forEach(function(ev){ document.addEventListener(ev, act, {passive: true}); });
+    cycle('lxload', 1100);
+    setInterval(function(){
+      if (document.hidden || lx.classList.contains('go') || lx.classList.contains('lxload') || lx.classList.contains('lxidle')) return;
+      if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+      if (Date.now() - last >= IDLE) cycle('lxidle', 2600);
+    }, 1000);
+    document.addEventListener('visibilitychange', function(){ if (document.hidden && !lx.classList.contains('go')) lxStop(); });
   }
   document.addEventListener('visibilitychange', function(){ if (art && art.pauseAnimations) { if (document.hidden) art.pauseAnimations(); else art.unpauseAnimations(); } });
   window.addEventListener('pageshow', function(e){ if (e.persisted) { lx.classList.remove('go', 'lxon'); if (chip) chip.textContent = orig; } });
@@ -5268,7 +5294,7 @@ def employee_login():
             if u in (str(e["Employee ID"]).lower(), str(e["Email"]).lower()) and eq(request.form["p"], e["Password"]):
                 if emp_locked(e):                                   # Update96: locked accounts cannot log in
                     flash("Your account is locked. Please contact the Admin to unlock it.", "error")
-                    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee",
+                    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee", lxg=request.cookies.get("lxg", ""),
                 admin_avatar=render_fast(AVATAR3D, gender="male", initials="E"))
                 track_logout(auto=True, reason="New login")      # closes a previous session in this browser, if any
                 session.clear()
@@ -5276,9 +5302,15 @@ def employee_login():
                                designation=str(e.get("Designation", "")))
                 track_login(session["emp_id"], session["name"], session["band"])
                 _bg(warm_employee_cache)                  # dashboard data loads while the welcome animation plays
-                return redirect("/employee")                  # Update202: straight to the Employee Panel (no welcome page)
+                resp = redirect("/employee")                  # Update202: straight to the Employee Panel (no welcome page)
+                try:      # Update212: remember only "m" / "f" so the next login page on this browser shows the matching character
+                    _g = gender_of(e)
+                    if _g: resp.set_cookie("lxg", "f" if _g == "female" else "m", max_age=31536000, samesite="Lax", httponly=True, secure=request.is_secure)
+                    else: resp.delete_cookie("lxg")
+                except Exception: pass
+                return resp
         flash("Wrong username or password.")
-    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee",
+    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee", lxg=request.cookies.get("lxg", ""),
                 admin_avatar=render_fast(AVATAR3D, gender="male", initials="E"))
 
 def form_page(sub, action, heading):

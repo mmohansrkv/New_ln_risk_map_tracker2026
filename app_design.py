@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update235: Admin > Employee Info > clicking the name of an employee whose Designation is Associate Manager / Team Lead / Senior Team Lead opens ONLY their detailed Productivity Log (/admin/employee-info/<id>/productivity-log): process-wise summary (days, hours, target count, completed count, Achieved / Not Achieved, productivity %), every daily process line with the same details, non-productive time, month filter. Read-only; no Daily Entry or Productivity Info sections. Other designations unchanged.
   * Update234: Managers & Team Leads (Designation Associate Manager / Manager / Team Lead / Senior Team Lead, matched live). (1) Admin > Employee Info has a new tab "Managers & Leads": each of these employees with month entries, productivity %, missed entries + dates and links to their Productivity Log and Missed Entries Log. (2) When they log in, their panel gets a read-only "Team Logs" menu: Productivity Log and Missed Entries Log of all employees (month + search filters; no edit / delete / e-mail actions). Other employees get 403 on those URLs and see no menu item. Nothing else changed.
   * Update233: (1) Employee LOGIN page - NO name / nickname is shown any more (the display, its script and the name returned by /login-char are removed; the lookup now returns only m / f / n for the character, so the page and the server stay light). The old "Employee system" caption stays as before. (2) Employee panel - the name above the Logout button keeps the 3D letter animation, now in LIGHT colours (white / pale blue letters with depth and glow). Nothing else changed.
   * Update232: Employee panel name under the avatar - bolder gold 3D letters (extruded depth + glow), springy letter-by-letter flip-in, continuous 3D swing and a moving light sheen. Layout unchanged.
@@ -5382,7 +5383,7 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <form class="grid no-print" method="get"><input type="hidden" name="view" value="productivity"><input type="month" name="month" value="{{month}}"><button class="primary">Show</button><a href="/admin/employee-info?view=productivity">This month</a></form>
 <p class="mut">{{label}} &middot; working days are counted from each employee's joining date (a new joiner is counted only from that day; existing employees are unchanged). Weekly offs and holidays are excluded.</p>
 <table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Joining date</th><th>Tracking from</th><th>Working days</th><th>Entries</th><th>Missed</th><th>Attendance</th><th>Productivity</th></tr>
-{% for p in prows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
+{% for p in prows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
 <td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}} <span class="pill act">New joiner</span>{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td>
 <td>{{p.pstart.strftime('%d %b %Y')}}</td>
 {% if not p.active %}<td colspan="5" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
@@ -5393,10 +5394,10 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <form class="grid no-print" method="get"><input type="hidden" name="view" value="leads"><input type="month" name="month" value="{{month}}"><button class="primary">Show</button><a href="/admin/employee-info?view=leads">This month</a></form>
 <p class="mut">{{label}} &middot; Associate Managers, Managers, Team Leads and Senior Team Leads: their own Productivity Log and Missed Entries Log. These employees also see the read-only <b>Team Logs</b> (Productivity Log + Missed Entries Log of all employees) in their own panel when they log in. Access follows the Designation automatically.</p>
 <table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Entries</th><th>Productivity</th><th>Missed entries</th><th>Missed dates</th><th>Logs</th></tr>
-{% for p in lrows %}<tr><td>{{p.e['Employee ID']}}</td><td><b>{{p.e['Name']}}</b></td><td>{{p.e['Designation'] or '-'}}</td>
+{% for p in lrows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
 {% if not p.active %}<td colspan="3" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>{% elif p.vo %}<td colspan="3" class="mut">View only</td>{% else %}<td>{{p.entries}}</td><td><b>{{p.pct}}%</b></td><td>{{p.missed|length}}</td>{% endif %}
 <td>{{p.missed|join(', ') or '-'}}</td>
-<td><a href="/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}">Productivity Log</a> &middot; <a href="/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=missed&amp;month={{month}}">Missed Entries Log</a></td></tr>
+<td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}{% endif %}">Productivity Log</a> &middot; <a href="/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=missed&amp;month={{month}}">Missed Entries Log</a></td></tr>
 {% else %}<tr><td colspan="8">No employee with the designation Associate Manager, Manager, Team Lead or Senior Team Lead.</td></tr>{% endfor %}</table>
 {% elif view=='notifications' %}
 <table><tr><th>Employee Name</th><th>Date &amp; Time</th><th>Section / Log</th><th>Action</th><th>Details</th><th>Summary</th></tr>
@@ -5615,6 +5616,8 @@ def admin_set_joining(eid):
 @need("admin")
 def admin_employee_detail(eid):
     emp = emp_or_404(eid); eid = str(emp["Employee ID"])
+    if "tab" not in request.args and desig_view_only(emp.get("Designation", "")):      # Update235: Associate Manager / Team Lead / Senior Team Lead -> name click opens ONLY the detailed Productivity Log
+        return redirect("/admin/employee-info/%s/productivity-log" % urllib.parse.quote(eid, safe=""))
     tab = request.args.get("tab", "personal")
     if tab not in dict(TABS): tab = "personal"
     today = today_local()
@@ -5690,6 +5693,80 @@ def admin_employee_detail(eid):
             _notif_cache[1] = None
         body = T_NOTIF; ctx["data"] = data
     return page(EMP_HEAD + body, title=emp["Name"], **ctx)
+
+# ---------------------------------------------------------------- Update235: detailed Productivity Log of Associate Manager / Team Lead / Senior Team Lead
+# Admin > Employee Info > click the employee's name. Shows ONLY the Productivity Log details (no Daily Entry, no Productivity Info). Read-only.
+app.jinja_env.globals["is_plog_desig"] = lambda d: desig_view_only(d)
+
+T_PLOG = """<div class="head"><div><h1>{{emp['Name']}} &mdash; Productivity Log</h1>
+<p class="mut">{{emp['Employee ID']}} &middot; {{emp['Designation'] or 'No designation'}} &middot; Band {{emp['Band']}} &middot; {{label}}</p></div>
+<a href="/admin/employee-info">&larr; All employees</a></div>
+<form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><button class="primary">Show month</button>
+<a href="/admin/employee-info/{{emp['Employee ID']|urlencode}}/productivity-log">All time</a>
+<a href="/admin/employee-info/{{emp['Employee ID']|urlencode}}?tab=personal">Personal details</a></form>
+<div class="kpis"><div class="kpi"><span>Entries (days)</span><b>{{n_days}}</b></div><div class="kpi"><span>Processes worked</span><b>{{procsum|length}}</b></div>
+<div class="kpi"><span>Target count</span><b>{{tot_t|cnt}}</b></div><div class="kpi"><span>Completed count</span><b>{{tot_c|cnt}}</b></div>
+<div class="kpi"><span>Targets achieved</span><b>{{n_met}}</b></div><div class="kpi"><span>Targets not achieved</span><b>{{n_miss}}</b></div>
+<div class="kpi"><span>Productive hrs</span><b>{{tot_h|g}}</b></div><div class="kpi"><span>Non-productive hrs</span><b>{{tot_n|g}}</b></div>
+<div class="kpi"><span>Avg. day productivity</span><b>{{avg_pct}}</b></div></div>
+<h2>Process-wise summary</h2>
+<p class="mut">Weekly-off / holiday entries are shown in the daily log below but are not counted here.</p>
+<div style="overflow-x:auto"><table><tr><th>Process</th><th>Days worked</th><th>Hours</th><th>Target count</th><th>Completed count</th><th>Target status</th><th>Productivity %</th></tr>
+{% for p in procsum %}<tr><td><b>{{p.name}}</b></td><td>{{p.days}}</td><td>{{p.hour|g}}</td><td>{{ (p.target|cnt) if p.rate else '-' }}</td><td>{{ p.count|cnt }}</td>
+<td>{% if not p.rate %}-{% elif p.met %}<span class="tg-badge met">&#9989; Achieved</span>{% else %}<span class="tg-badge miss">&#10060; Not Achieved</span>{% endif %}</td>
+<td>{{ (p.pct ~ '%') if p.pct is not none else '-' }}</td></tr>
+{% else %}<tr><td colspan="7">No process entries in the Productivity Log for this period.</td></tr>{% endfor %}</table></div>
+<h2>Detailed log</h2>
+<div style="overflow-x:auto"><table><tr><th>Date</th><th>Day</th><th>Process</th><th>Description</th><th>Hours</th><th>Target count</th><th>Completed count</th><th>Target status</th><th>Productivity % (process)</th><th>Day productivity %</th><th>Submitted at</th></tr>
+{% for r in lines %}<tr{% if r.late %} class="late-row" title="Submitted / updated after the entry date"{% endif %}>
+<td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.name}}</td><td>{{r.desc or '-'}}</td><td>{{r.hour|g}}</td>
+<td>{{ (r.target|cnt) if r.rate else '-' }}</td><td>{{ r.count|cnt }}</td>
+<td>{% if r.off %}<span class="mut">Off / holiday</span>{% elif not r.rate %}-{% elif r.met %}<span class="tg-badge met">&#9989; Achieved</span>{% else %}<span class="tg-badge miss">&#10060; Not Achieved</span>{% endif %}</td>
+<td>{{ (r.pct ~ '%') if (r.pct is not none and not r.off) else '-' }}</td><td>{{ 'Weekend / Holiday - not counted' if r.off else ((r.day_pct ~ '%') if r.day_pct is not none else '-') }}</td><td>{{r.subat or '-'}}</td></tr>
+{% else %}<tr><td colspan="11">No Productivity Log entries for this period.</td></tr>{% endfor %}</table></div>
+{% if notes %}<h2>Non-productive / other time</h2>
+<div style="overflow-x:auto"><table><tr><th>Date</th><th>Details</th><th>Hours</th></tr>
+{% for n in notes %}<tr><td>{{n.date}}</td><td>{{n.desc or '-'}}</td><td>{{n.hour|g}}</td></tr>{% endfor %}</table></div>{% endif %}"""
+
+@app.route("/admin/employee-info/<eid>/productivity-log")
+@need("admin")
+def admin_employee_plog(eid):
+    emp = emp_or_404(eid); eid = str(emp["Employee ID"])
+    if not desig_view_only(emp.get("Designation", "")): abort(404)      # only Associate Manager / Team Lead / Senior Team Lead
+    month = request.args.get("month", "").strip()
+    subs = load_subs(eid)
+    label = "All time"
+    if month:
+        try: m0, m1 = month_range(month); month = m0.strftime("%Y-%m"); label = m0.strftime("%B %Y")
+        except Exception: month = ""
+        else: subs = [x for x in subs if str(m0) <= str(x["date"]) <= str(m1)]
+    tph = process_rates()
+    lines, notes, agg = [], [], {}
+    tot_h = tot_n = tot_t = tot_c = 0.0; n_met = n_miss = 0; pcts = []
+    for x in sorted(subs, key=lambda z: str(z["date"]), reverse=True):
+        try: dname = dt.date.fromisoformat(str(x["date"])).strftime("%a")
+        except ValueError: dname = ""
+        for p in x["procs"]:
+            rate = tph.get(p["name"], 0) or 0; tgt = p["hour"] * rate
+            met = bool(rate) and p["count"] + 1e-9 >= tgt
+            lines.append(dict(date=x["date"], day=dname, name=p["name"], desc=p.get("desc", ""), hour=p["hour"], rate=rate, target=round(tgt, 2),
+                              count=p["count"], met=met, pct=p["pct"], day_pct=x["pct"], off=x["off"], late=x["late"], subat=x["subat"]))
+            if x["off"]: continue
+            a = agg.setdefault(p["name"], dict(name=p["name"], days=set(), hour=0.0, target=0.0, count=0.0, rate=0))
+            a["days"].add(x["date"]); a["hour"] += p["hour"]; a["count"] += p["count"]; a["rate"] = a["rate"] or rate
+            if rate: a["target"] += tgt; tot_t += tgt; tot_c += p["count"]; n_met += met; n_miss += (not met)
+        for n in x["notes"]: notes.append(dict(date=x["date"], desc=n["desc"], hour=n["hour"]))
+        if not x["off"]:
+            tot_h += x["prod"]; tot_n += x["non"]
+            if x["pct"] is not None: pcts.append(x["pct"])
+    procsum = []
+    for a in sorted(agg.values(), key=lambda z: z["name"].lower()):
+        a["days"] = len(a["days"]); a["met"] = bool(a["rate"]) and a["count"] + 1e-9 >= a["target"]
+        a["pct"] = round(a["count"] / a["target"] * 100) if a["target"] else None
+        procsum.append(a)
+    avg = ("%d%%" % round(sum(pcts) / len(pcts))) if pcts else "-"
+    return page(T_PLOG, title=emp["Name"] + " - Productivity Log", emp=emp, month=month, label=label, lines=lines, notes=notes, procsum=procsum,
+                n_days=len([x for x in subs if not x["off"]]), tot_h=tot_h, tot_n=tot_n, tot_t=tot_t, tot_c=tot_c, n_met=n_met, n_miss=n_miss, avg_pct=avg)
 
 @app.route("/admin/employee-info/<eid>/leave", methods=["POST"])
 @need("admin")

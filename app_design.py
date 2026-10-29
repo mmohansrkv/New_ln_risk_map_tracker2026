@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update226: Employee panel - after login the nickname (saved Profile Name, else full name) under the 3D avatar is shown with animated 3D text: letters flip in one by one, then a gentle wave with a gold gradient and depth shadow (CSS transform / opacity only; still text for reduced-motion users). Layout and functionality unchanged.
   * Update225b: AUTOMATIC Missed Entries SUMMARY e-mail to every Manager / Associate Manager / Senior Team Lead / Team Lead (by Designation; sent with the daily automatic run, once per day per recipient, logged as Mode "Manager Summary"): one table of all employees who still have missed entries - Date(s), Employee ID . Name, Missed Entries - plus totals. Weekly offs, holidays, approved leave, dates before the joining date and already-submitted dates are excluded (live re-check before sending). Nothing is sent when nobody has missed entries. Employee reminder e-mails unchanged.
   * Update225: Employee login - the employee's display name is shown directly below the 3D character: the saved "Profile Name" (new field in Personal details, optional, max 40 chars, Employee + Admin can edit; new sheet column added automatically), or the full Name when it is blank. It follows the typed username (Employee ID / e-mail) and changes when a different username is entered. /login-char returns only the display name + m/f/n (no ID, e-mail or other details), still rate-limited; name is written with textContent. Layout, animations and login checks unchanged.
   * Update224: Productivity start date for NEW employees. (1) Admin adds a new employee (Employee Info > Employee Login Access > Add employee login, or Admin > Employees > Add) and chooses the JOINING DATE (default today): productivity entries, missed-entry reminders (manual + automatic e-mail) and every productivity / attendance report start from that date - earlier dates are never required, missed or counted. (2) Existing employees are NOT changed: a row without a Joining date keeps exactly the old behaviour and no existing row / productivity record is written or migrated; adding a login to an existing Employee ID does not touch its joining date. (3) Only the Admin can add employees (server-side check). (4) New 'Productivity' section in the Admin employee log: Employee Info > Productivity (all employees, month filter, counted from each joining date) and a Productivity tab on every employee page (joining date, tracking-from date, month-by-month figures, daily entries with a Counted column, missed dates). report(): approved permission hours also start at the joining date.
@@ -2481,6 +2482,16 @@ aside.emp{position:sticky;top:0;height:100vh;overflow-y:auto;align-self:flex-sta
 .prof-info{min-width:0;text-align:left}
 .prof .av3d{width:84px;height:84px;margin:0 0 6px}
 .prof-name{font-size:14.5px;font-weight:600;color:#fff;letter-spacing:.2px;text-shadow:0 2px 6px #0006;word-break:break-word;line-height:1.25}
+/* Update226: employee nickname (Profile Name, else full name) under the 3D avatar - letter-by-letter 3D flip-in, then a slow wave + gold sheen. Transform / opacity only. */
+.nm3d{display:inline-block;perspective:520px}
+.nm3d .w{display:inline-block;white-space:nowrap}
+.nm3d i{font-style:normal;display:inline-block;font-weight:800;letter-spacing:.4px;transform-origin:50% 100%;opacity:0;
+  background:linear-gradient(180deg,#ffffff 0%,#fff1b8 45%,#f5b83a 100%);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;
+  filter:drop-shadow(0 1px 0 #92400e) drop-shadow(0 2px 0 #6b3306) drop-shadow(0 4px 5px #0009);
+  animation:nm3In .75s cubic-bezier(.2,.9,.25,1.15) forwards,nm3Wave 4s ease-in-out infinite;animation-delay:calc(var(--i)*60ms + .15s),calc(var(--i)*110ms + 1.4s)}
+@keyframes nm3In{0%{opacity:0;transform:translateY(16px) rotateX(-95deg) scale(.7)}60%{opacity:1}100%{opacity:1;transform:none}}
+@keyframes nm3Wave{0%,100%{transform:translateY(0) rotateY(0)}50%{transform:translateY(-2px) rotateY(14deg)}}
+@media(prefers-reduced-motion:reduce){.nm3d i{animation:none;opacity:1}}
 .prof-sub{font-size:12px;color:#9aa3c7;line-height:1.4;margin-top:2px;word-break:break-word}
 .prof-out{display:block;text-align:center;padding:6px 18px;color:#fff;background:#2b3560;border-radius:7px;font-size:13px;transition:background .2s ease,transform .15s ease}
 .prof-out:hover{background:#e5484d;transform:translateY(-1px)}@media print{.prof{display:none!important}}
@@ -3229,7 +3240,7 @@ html body .app.emp3d table tbody tr:hover td{background:#f4f3ff}
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
 <details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-up" id="cal_up" hidden></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
-<div class="prof{{' prof-emp' if session.role=='employee' else ''}}"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name" title="{{session.name}}">{{session.name}}</div></div></div>
+<div class="prof{{' prof-emp' if session.role=='employee' else ''}}"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name" title="{{side_name or session.name}}">{% if side_name_html %}{{side_name_html|safe}}{% else %}{{session.name}}{% endif %}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
 <main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></main></div>
@@ -3952,6 +3963,23 @@ def page(body, title="Productivity Tracker", **ctx):
         except Exception:
             _g = ""
         side_avatar = render_fast(AVATAR3D, gender=_g, initials=initials_of(session.get("name", "")))
+    side_name, side_name_html = "", ""
+    if session.get("role") == "employee":                      # Update226: nickname (saved Profile Name, else full name) with the animated 3D text
+        try:
+            _e = my_emp_row()
+            side_name = (str(_e.get("Profile Name", "") or "").strip() or str(_e.get("Name", "") or "").strip() or str(session.get("name", ""))).strip()[:40]
+        except Exception:
+            side_name = str(session.get("name", ""))
+        if side_name:
+            import html as _hh
+            _i = 0; _w = []
+            for _word in side_name.split():
+                _l = []
+                for _ch in _word:
+                    _l.append(f'<i style="--i:{_i}" aria-hidden="true">{_hh.escape(_ch)}</i>'); _i += 1
+                _w.append('<span class="w">' + "".join(_l) + '</span>')
+                _i += 1
+            side_name_html = f'<span class="nm3d" role="text" aria-label="{_hh.escape(side_name)}">' + " ".join(_w) + '</span>'
     att_json, hol_json, prm_json = "", "{}", "{}"              # Update158: attendance for the sidebar calendar (employees only)
     if session.get("role") == "employee" and not ctx.get("bare"):
         try:
@@ -3961,7 +3989,7 @@ def page(body, title="Productivity Tracker", **ctx):
             prm_json = _json.dumps(employee_perm_map(session.get("emp_id", "")), separators=(",", ":"))
         except Exception as ex: print("attendance calendar error:", repr(ex))
     return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, srv_today=str(today_local()), theme_css=_theme_css())
+                                  side_avatar=side_avatar, side_name=side_name, side_name_html=side_name_html, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, srv_today=str(today_local()), theme_css=_theme_css())
 
 
 LOGIN_CLASSIC = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i><i></i><i></i></div>
@@ -11010,7 +11038,7 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
  var ed=document.getElementById('mn-ed'), bar=document.getElementById('mn-tb'), rich=document.getElementById('mn-rich'),
      sizeSel=document.getElementById('mn-size'), colorIn=document.getElementById('mn-color'), saved=null, pendingPx=16, clean='', tmr=null, seq=0;
  var PH='<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>';
- function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
+ function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
  function paint(){
   var v={subject:esc(sub.value.trim())||'Your subject appears here', message:(hasText()&&clean)?clean:PH};
   frame.srcdoc=T.replace(/[{][{](\w+)[}][}]/g,function(m,k){return (k in v)?v[k]:m;});}

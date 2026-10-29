@@ -4734,7 +4734,7 @@ SAVED_ANIM = """{% if saved_anim %}<script>window.__cmSaved={{ session.name|tojs
 
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th><th>Designation</th>{% endif %}
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Target count</th><th>Completed</th><th>Target status</th><th>Productivity</th><th></th></tr>
-{% for s in subs %}<tr{% if s.late %} class="late-row" title="Submitted / updated on {{s.subat}} - after the entry date"{% endif %}><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; <a href="/admin/employee-info/{{s.emp_id|urlencode}}/productivity-log" title="Open this employee's complete Productivity Log"><b>{{s.emp_name}}</b></a></td><td>{{s.designation}}</td>{% endif %}
+{% for s in subs %}<tr{% if s.late %} class="late-row" title="Submitted / updated on {{s.subat}} - after the entry date"{% endif %}><td>{{s.date}}</td>{% if session.role=='admin' %}<td><a href="/admin/employee-info/{{s.emp_id|urlencode}}/productivity-log" title="Open this employee's complete Productivity Log"><b>{{s.emp_id}}</b></a></td><td>{{s.designation}}</td>{% endif %}
 <td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
 <td>{{ (s.tgt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td><td>{{ (s.cnt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td>
 <td>{% if s.tgt_state=='met' %}<span class="tg-badge met">&#9989; Achieved</span>{% elif s.tgt_state=='miss' %}<span class="tg-badge miss" title="Below target: {{s.tgt_miss|join(', ')}}">&#10060; Not Achieved</span>{% else %}-{% endif %}</td>

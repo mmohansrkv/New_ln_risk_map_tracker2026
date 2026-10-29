@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update243: Associate Manager / Team Lead / Senior Team Lead ONLY (live Designation, same test as the hidden Daily entry): Team Logs (Attendance column removed), Employee Details, Personal Details, Leave & Permission (Status columns removed) and the sidebar Employee Calendar no longer show Present / Absent / Leave / Permission status; the Calendar shows declared Holidays only (no Present / Absent / Leave / Half day / Weekly off marks, no counts row, no permission mark). Every other designation and all data, routes and calculations are unchanged.
   * Update242: Employee login page - the two characters now animate: eyes open / close naturally (random single and occasional double blinks) on BOTH pictures, the left character's thumbs-up hand wiggles, the right (clipboard) character's raised fist waves and the hand holding the clipboard adjusts its grip. CSS layers + one tiny script, no new images / libraries; login form, lookup and every route unchanged; reduced-motion users get still pictures.
   * Update241: Employee login page - for Associate Manager / Team Lead / Senior Team Lead (recognised from the typed username, same lookup as the character) the server picture on the right is replaced by the supplied clipboard picture (/char/tl.webp) with 3D depth (shadow layer behind, pointer parallax), 3D sway, floating, breathing, light sweep, aura and floor ring. Login form / logic and every other designation's login page unchanged.
   * Update240: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the female picture is removed; the supplied male picture (glasses, white suit, thumbs-up; /char/lm.webp) is shown above the login box once the username is typed, with the same tilt / breathing / floating / shine animation. Employee panel picture and all other designations / pages unchanged.
@@ -3292,7 +3293,7 @@ html body .app.emp3d table tbody tr:hover td{background:#f4f3ff}
 </aside>
 <main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></main></div>
 {% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}<div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></div>{% endif %}
-{% if att_json %}<script>window.ATT={{att_json|safe}};window.HOL={{hol_json|safe}};window.PRM={{prm_json|safe}};window.SRVTODAY="{{srv_today}}";</script>{% endif %}
+{% if att_json %}<script>window.ATT={{att_json|safe}};window.HOL={{hol_json|safe}};window.PRM={{prm_json|safe}};window.SRVTODAY="{{srv_today}}";{% if hol_only %}window.HOLONLY=true;{% endif %}</script>{% endif %}
 {% if session.role and not bare %}<script>
 (function(){var g=document.getElementById('cal_g');if(!g)return;var d=document.getElementById('cal');
 var M=['January','February','March','April','May','June','July','August','September','October','November','December'],W=['S','M','T','W','T','F','S'];
@@ -3313,7 +3314,7 @@ if(PRM[k]){nm++;tt=(tt?tt+' + ':'')+'Permission'}
 if(k===NH){c+=' nh';tt=(tt||'Holiday')+' (next holiday)'}
 h+='<span class="'+c+'"'+(t?' aria-current="date"':'')+(tt?' title="'+i+' '+M[m].slice(0,3)+': '+tt+'"':'')+'>'+i+'</span>'}
 var tail=(7-(first+n)%7)%7;for(i=1;i<=tail;i++)h+='<span class="o">'+i+'</span>';g.innerHTML=h;
-if(A){
+if(A&&!window.HOLONLY){
 var ct=document.getElementById('cal_ct');ct.hidden=false;ct.innerHTML='<span><b class="cp">'+np+'</b> Present</span><span><b class="ca">'+na+'</b> Absent</span><span><b class="cl">'+nl+'</b> Leave</span><span><b class="cm">'+nm+'</b> Permission</span>'}}
 function side(){var u=document.getElementById('cal_up');if(!u||!A)return;
 var tk=iso(now),ks=Object.keys(HL).filter(function(k){return k>=tk}).sort(),DN=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -4013,6 +4014,7 @@ def welcome_overlay_html(name):
 
 def page(body, title="Productivity Tracker", **ctx):
     ctx["title"] = title
+    ctx["hide_status"] = hide_entry_pages()      # Update243: Associate Manager / Team Lead / Senior Team Lead - no Present / Absent / Leave / Permission status displays
     p = request.path
     items = list(NAVS.get(session.get("role"), []))
     if hide_entry_pages(): items = [it for it in items if it[0] not in ("/employee", "/employee/productivity")]      # Update236
@@ -4101,12 +4103,16 @@ def page(body, title="Productivity Tracker", **ctx):
     if session.get("role") == "employee" and not ctx.get("bare"):
         try:
             import json as _json
-            att_json = _json.dumps(employee_att_map(session.get("emp_id", "")), separators=(",", ":"))
-            hol_json = employee_holiday_json()
-            prm_json = _json.dumps(employee_perm_map(session.get("emp_id", "")), separators=(",", ":"))
+            if ctx["hide_status"]:      # Update243
+                att_json = _json.dumps(calendar_holiday_only(employee_att_map(session.get("emp_id", ""))), separators=(",", ":"))
+                hol_json = employee_holiday_json(); prm_json = "{}"
+            else:
+                att_json = _json.dumps(employee_att_map(session.get("emp_id", "")), separators=(",", ":"))
+                hol_json = employee_holiday_json()
+                prm_json = _json.dumps(employee_perm_map(session.get("emp_id", "")), separators=(",", ":"))
         except Exception as ex: print("attendance calendar error:", repr(ex))
     return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar, side_name=side_name, side_name_html=side_name_html, welcome_html=welcome_html, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, srv_today=str(today_local()), theme_css=_theme_css())
+                                  side_avatar=side_avatar, side_name=side_name, side_name_html=side_name_html, welcome_html=welcome_html, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, hol_only=bool(ctx["hide_status"]), srv_today=str(today_local()), theme_css=_theme_css())
 
 
 LOGIN_CLASSIC = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i><i></i><i></i></div>
@@ -7292,6 +7298,10 @@ def employee_perm_map(eid):
         if d: out[d] = out.get(d, 0) + num(r.get("Hours"))
     return out
 
+def calendar_holiday_only(att):
+    """Update243: Associate Manager / Team Lead / Senior Team Lead - the calendar shows declared HOLIDAYS only (no Present / Absent / Leave / Half day / Weekly off, no permission)."""
+    return {k: v for k, v in att.items() if v == "O"}
+
 def employee_holiday_json():
     """Update172: {'YYYY-MM-DD': name} of every holiday from 1 month ago to 12 months ahead, as JSON that is safe inside a <script> tag."""
     today = today_local(); lo, hi = str(today - dt.timedelta(days=31)), str(today + dt.timedelta(days=366))
@@ -7302,7 +7312,10 @@ def employee_holiday_json():
 @need("employee")
 def employee_calendar_data():
     """Update200: live calendar data (status per date, holiday names, server today) - polled by the sidebar calendar so it stays current."""
-    resp = jsonify(att=employee_att_map(session.get("emp_id", "")), prm=employee_perm_map(session.get("emp_id", "")), hol=json.loads(employee_holiday_json()), today=str(today_local()))
+    if hide_entry_pages():      # Update243: holidays only
+        resp = jsonify(att=calendar_holiday_only(employee_att_map(session.get("emp_id", ""))), prm={}, hol=json.loads(employee_holiday_json()), today=str(today_local()))
+    else:
+        resp = jsonify(att=employee_att_map(session.get("emp_id", "")), prm=employee_perm_map(session.get("emp_id", "")), hol=json.loads(employee_holiday_json()), today=str(today_local()))
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
@@ -7970,11 +7983,11 @@ LEAVE_EMP = """<style>
 <label>Reason<input name="reason" size="30" placeholder="Reason"></label>
 <button class="primary">Submit leave</button></form></div>
 {% if hols %}<p class="mut">&#127774; <b>Upcoming holidays</b> (no leave, permission or productivity entry needed): {% for d,n in hols %}{{d}}{% if n %} - {{n}}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
-<h2>My leave days</h2><table><tr><th>Date</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
+<h2>My leave days</h2><table><tr><th>Date</th><th>Reason</th><th>Applied at</th>{% if not hide_status %}<th>Status</th>{% endif %}<th></th></tr>
 {% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}{% if r|lhalf %} <span class="pill act">Half day</span>{% endif %}</td><td>{{r['Applied at']|t12}}</td>
-<td><span class="pill {{st|ppill}}">{{st}}</span></td>
+{% if not hide_status %}<td><span class="pill {{st|ppill}}">{{st}}</span></td>{% endif %}
 <td>{% if st=='Pending' %}<form method="post" action="/employee/leave/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this leave?')"><button class="danger">Cancel</button></form>{% else %}-{% endif %}</td></tr>
-{% else %}<tr><td colspan="5">No leave yet.</td></tr>{% endfor %}</table>
+{% else %}<tr><td colspan="{{ 4 if hide_status else 5 }}">No leave yet.</td></tr>{% endfor %}</table>
 
 <div class="card"><h2>Apply permission</h2><p class="mut">Pick the date for your permission (it opens on today, {{today}}) - use it if you need to arrive late, leave early, or step out during work hours. One request per date, up to {{perm_limit|g}} hrs total per calendar month.</p>
 <ul class="lpsum"><li>Monthly Limit: <b>{{perm_limit|g}} hrs</b></li><li>Used This Month: <b>{{perm_used|g}} hrs</b></li><li>Remaining: <b>{{perm_remaining|g}} hrs</b></li></ul>
@@ -7983,9 +7996,9 @@ LEAVE_EMP = """<style>
 <label>Hours<input type="number" name="hours" step="0.25" min="0.25" max="{{perm_limit}}" placeholder="e.g. 1" required></label>
 <label>Reason<input name="reason" size="30" placeholder="Reason for permission" required></label>
 <button class="primary">Submit request</button></form></div>
-<h2>My permission requests</h2><table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th><th>Status</th><th></th></tr>
+<h2>My permission requests</h2><table><tr><th>Date</th><th>Hours</th><th>Reason</th><th>Applied at</th>{% if not hide_status %}<th>Status</th>{% endif %}<th></th></tr>
 {% for r in perm_data %}<tr><td>{{r['Date']}}</td><td>{{r['Hours']|g}}</td><td>{{r['Reason']}}</td><td>{{r['Applied at']|t12}}</td>
-<td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td>
+{% if not hide_status %}<td><span class="pill {{r['Status']|ppill}}">{{r['Status']}}</span></td>{% endif %}
 <td>{% if r['Date'][:7]>=today[:7] %}<details><summary class="mut" style="cursor:pointer">Edit</summary>
 <form method="post" action="/employee/permission/{{r['_row']}}/edit" class="grid" style="margin-top:6px"><input type="hidden" name="pid" value="{{r['Permission ID']}}">
 <label>Hours<input type="number" name="hours" step="0.25" min="0.25" max="{{perm_limit}}" value="{{r['Hours']|g}}" required></label>
@@ -7993,7 +8006,7 @@ LEAVE_EMP = """<style>
 <button class="primary sm">Save</button> <button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='/employee'">Back</button></form>
 {% if r['Status']!='Pending' %}<p class="mut">Saving a change sends this request back to Pending for admin approval.</p>{% endif %}</details>{% endif %}
 {% if r['Status']=='Pending' %}<form method="post" action="/employee/permission/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this request?')"><button class="danger">Cancel</button></form>{% elif r['Date'][:7]<today[:7] %}-{% endif %}</td></tr>
-{% else %}<tr><td colspan="6">No permission requests yet.</td></tr>{% endfor %}</table></div>"""
+{% else %}<tr><td colspan="{{ 5 if hide_status else 6 }}">No permission requests yet.</td></tr>{% endfor %}</table></div>"""
 
 LEAVE_ADMIN = """<div class="head"><h1>Leave log</h1></div>
 <div class="card"><form method="post" class="grid">
@@ -10444,12 +10457,12 @@ TEAM_PLOG = TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all em
 <td>{% if r.off %}<span class="mut">Off / holiday</span>{% elif not r.rate %}-{% elif r.met %}<span class="tg-badge met">&#9989; Achieved</span>{% else %}<span class="tg-badge miss">&#10060; Not Achieved</span>{% endif %}</td>
 <td>{{ (r.pct ~ '%') if (r.pct is not none and not r.off) else '-' }}</td></tr>
 {% else %}<tr><td colspan="9">No productivity records match this process.</td></tr>{% endfor %}</table></div>
-{% else %}<div style="overflow-x:auto"><table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Joining Date</th><th>Tracking From</th><th>Working Days</th><th>Entries</th><th>Missed</th><th>Attendance</th><th>Productivity</th></tr>
+{% else %}<div style="overflow-x:auto"><table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Joining Date</th><th>Tracking From</th><th>Working Days</th><th>Entries</th><th>Missed</th>{% if not hide_status %}<th>Attendance</th>{% endif %}<th>Productivity</th></tr>
 {% for p in lrows %}<tr><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}">{{p.e['Employee ID']}}</a></td><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
 <td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}}{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td><td>{{p.pstart.strftime('%d %b %Y')}}</td>
-{% if not p.active %}<td colspan="5" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
-{% elif p.r.vo %}<td colspan="5" class="mut">View only (no productivity entry for this designation)</td>
-{% else %}<td>{{p.r.wd}}</td><td>{{p.entries}}</td><td>{{p.missed}}</td><td>{{p.r.att}}%</td><td><b>{{p.r.pct}}%</b></td>{% endif %}</tr>
+{% if not p.active %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
+{% elif p.r.vo %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">View only (no productivity entry for this designation)</td>
+{% else %}<td>{{p.r.wd}}</td><td>{{p.entries}}</td><td>{{p.missed}}</td>{% if not hide_status %}<td>{{p.r.att}}%</td>{% endif %}<td><b>{{p.r.pct}}%</b></td>{% endif %}</tr>
 {% else %}<tr><td colspan="10">No employees found.</td></tr>{% endfor %}</table></div>{% endif %}</div>"""
 
 def _team_plog_page():

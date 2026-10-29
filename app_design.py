@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update233: (1) Employee LOGIN page - NO name / nickname is shown any more (the display, its script and the name returned by /login-char are removed; the lookup now returns only m / f / n for the character, so the page and the server stay light). The old "Employee system" caption stays as before. (2) Employee panel - the name above the Logout button keeps the 3D letter animation, now in LIGHT colours (white / pale blue letters with depth and glow). Nothing else changed.
   * Update232: Employee panel name under the avatar - bolder gold 3D letters (extruded depth + glow), springy letter-by-letter flip-in, continuous 3D swing and a moving light sheen. Layout unchanged.
   * Update230b: FASTER page after Employee login. (1) The one-time "Welcome" overlay (Update227) is no longer shown - it covered the page for about 4 seconds. (2) While the login page is open, every sheet the Employee page needs is read in the background (not only Employees), so the Employee page opens from memory right after sign-in instead of waiting for 8 Google Sheets reads. (3) Single-flight reads: the page no longer asks Google again for a sheet that is already being read. Password check, lock check, session handling and all tracking are unchanged.
   * Update230: Employee LOGIN page - the nickname under the 3D character is plain static text again (3D effects and letter animation removed; simple fade-in only). Layout and other animations unchanged.
@@ -2511,8 +2512,8 @@ aside.emp{position:sticky;top:0;height:100vh;overflow-y:auto;align-self:flex-sta
 /* Update226: employee nickname (Profile Name, else full name) under the 3D avatar - letter-by-letter 3D flip-in, then a slow wave + gold sheen. Transform / opacity only. */
 .nm3d{display:inline-block;perspective:520px;font-size:1.22em;padding:2px 2px 7px;position:relative}
 .nm3d .w{display:inline-block;white-space:nowrap}
-.nm3d i{font-style:normal;display:inline-block;font-weight:900;letter-spacing:.5px;transform-origin:50% 100%;transform-style:preserve-3d;opacity:0;color:#ffe9a8;
-  text-shadow:0 1px 0 #f5b83a,0 2px 0 #d9962a,0 3px 0 #b87420,0 4px 0 #8a5214,0 5px 0 #6b3a0c,0 8px 8px rgba(0,0,0,.55),0 0 12px rgba(255,200,80,.75);
+.nm3d i{font-style:normal;display:inline-block;font-weight:900;letter-spacing:.5px;transform-origin:50% 100%;transform-style:preserve-3d;opacity:0;color:#f8fbff;
+  text-shadow:0 1px 0 #dbeafe,0 2px 0 #bfdbfe,0 3px 0 #93c5fd,0 4px 0 #6d8fd6,0 7px 7px rgba(0,0,0,.5),0 0 10px rgba(224,242,254,.85),0 0 22px rgba(165,243,252,.5);
   animation:nm3In .9s cubic-bezier(.2,.9,.25,1.25) forwards,nm3Wave 2.8s ease-in-out infinite;animation-delay:calc(var(--i)*85ms + .1s),calc(var(--i)*140ms + 1.3s)}
 .nm3d::after{content:"";position:absolute;top:0;bottom:0;left:-30%;width:26%;pointer-events:none;background:linear-gradient(100deg,transparent,rgba(255,255,255,.28),transparent);transform:skewX(-18deg);animation:nm3Sheen 3.6s ease-in-out 1.6s infinite}
 @keyframes nm3In{0%{opacity:0;transform:translateY(20px) rotateX(-110deg) scale(.5)}60%{opacity:1;transform:translateY(-4px) rotateX(14deg) scale(1.15)}100%{opacity:1;transform:none}}
@@ -4342,12 +4343,6 @@ html{scrollbar-gutter:stable}
 .chr-box.ca{left:69%;width:30%;--ar:1/1;--sh:88%;--skin:#f0b08a;--skin2:#e59e77;--hcx:49%;--hcy:22%;--hrw:20%;--hrh:21%;--pvx:50%;--pvy:36.5%;--e1x:48%;--e1y:28.4%;--e1w:5%;--e1h:4%;--e2x:57.8%;--e2y:25.1%;--e2w:3.8%;--e2h:4.4%;--l1l:45.1%;--l1t:26%;--l1w:6.2%;--l1h:5.1%;--l2l:55.3%;--l2t:22.2%;--l2w:4.9%;--l2h:5.8%;--mcx:54.9%;--mcy:31.6%;--mw:7.5%;--mh:3.5%}
 .ca .chr-p{background-image:url(/char/b.webp)}
 .ca .chr-shine{-webkit-mask-image:url(/char/b.webp);mask-image:url(/char/b.webp)}
-/* Update225: employee display name (Profile Name, else full name) directly below the 3D character */
-.chr-name{position:absolute;left:50%;top:100%;transform:translate(-50%,4px);max-width:150%;text-align:center;font-weight:700;font-size:clamp(13px,1.25vw,18px);line-height:1.2;letter-spacing:.3px;color:#fff;text-shadow:0 0 10px #38bdf8aa,0 2px 6px #000a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0;transition:opacity .28s ease;pointer-events:none}
-.chr-name.on{opacity:1}
-/* Update230: the login nickname is plain static text (no 3D effect, no letter animation). The small "Employee system" caption steps aside while a nickname is shown so they never overlap. */
-.lx.emp text.lx-lb[x="144"]{transition:opacity .3s ease}
-.lx.emp.hasnm text.lx-lb[x="144"]{opacity:0}
 /* Update216: neutral (unknown / no gender) hologram character + smooth character swap when the username changes */
 .chr-box{transition:opacity .28s ease,transform .28s ease}
 .chr-box.sw{opacity:0;transform:translateY(8px) scale(.96)}
@@ -4457,7 +4452,7 @@ html{scrollbar-gutter:stable}
 </svg>
 <div class="lx-srv" aria-hidden="true"><div class="srv-box {{ 'sa' if role=='admin' else 'se' }}"><div class="srv-aura"></div><div class="srv-fl"></div><div class="srv-3d"><div class="tq-3d"><div class="tq-scene"><div class="tq-p tq-base"></div><div class="tq-p tq-head"></div><div class="tq-p tq-hand"></div><div class="tq-glow"></div><div class="tq-scr"><i style="top:8%;--w:70%;--t:-6.0s"></i><i style="top:22%;--w:55%;--t:-5.1s"></i><i style="top:36%;--w:80%;--t:-4.2s"></i><i style="top:50%;--w:40%;--t:-3.3s"></i><i style="top:64%;--w:65%;--t:-2.4s"></i><i style="top:78%;--w:30%;--t:-1.5s"></i><b></b></div><i class="tq-u" style="top:8.07%;--d:-0.00s"></i><i class="tq-u" style="top:15.33%;--d:-0.45s"></i><i class="tq-u" style="top:22.71%;--d:-0.90s"></i><i class="tq-u" style="top:30.10%;--d:-1.35s"></i><i class="tq-u" style="top:37.24%;--d:-1.80s"></i><i class="tq-u" style="top:66.50%;--d:-2.25s"></i><i class="tq-u" style="top:73.80%;--d:-2.70s"></i><i class="tq-u" style="top:81.05%;--d:-3.15s"></i><i class="tq-pk" style="top:11.07%;--d:0s;--w:2.1s"><b></b></i><i class="tq-pk" style="top:18.33%;--d:-0.7s;--w:1.7s"><b></b></i><i class="tq-pk" style="top:25.71%;--d:-1.4s;--w:2.4s"><b></b></i><i class="tq-pk" style="top:33.10%;--d:-0.3s;--w:1.9s"><b></b></i><i class="tq-pk" style="top:40.24%;--d:-1.1s;--w:2.2s"><b></b></i><i class="tq-pk" style="top:69.50%;--d:-0.5s;--w:1.8s"><b></b></i><i class="tq-pk" style="top:76.80%;--d:-1.6s;--w:2.5s"><b></b></i><i class="tq-pk" style="top:84.05%;--d:-0.9s;--w:2.0s"><b></b></i><i class="tq-led" style="top:11.07%;animation-delay:-0.00s"></i><i class="tq-led g" style="top:18.33%;animation-delay:-0.37s"></i><i class="tq-led" style="top:25.71%;animation-delay:-0.74s"></i><i class="tq-led g" style="top:33.10%;animation-delay:-1.11s"></i><i class="tq-led" style="top:40.24%;animation-delay:-1.48s"></i><i class="tq-led g" style="top:69.50%;animation-delay:-1.85s"></i><i class="tq-led" style="top:76.80%;animation-delay:-2.22s"></i><i class="tq-led g" style="top:84.05%;animation-delay:-2.59s"></i><div class="tq-shine"><i></i></div></div></div></div></div></div>
 <script>(function(){var s=document.querySelector('.tq-3d');if(!s||!window.matchMedia||window.matchMedia('(prefers-reduced-motion:reduce)').matches)return;var r=0,x=0,y=0;addEventListener('pointermove',function(e){x=e.clientX/innerWidth-.5;y=e.clientY/innerHeight-.5;if(!r)r=requestAnimationFrame(function(){r=0;s.style.setProperty('--px',x.toFixed(3));s.style.setProperty('--py',y.toFixed(3))})},{passive:true})})();</script>
-<div class="lx-chr" aria-hidden="true"><div class="chr-box {{ 'ca' if role=='admin' else ('cf' if lxg=='f' else ('cm' if lxg=='m' else 'cn')) }}"><div class="chr-sh"></div><div class="chr-fx"><div class="chr-3d"><div class="chr-stage"><div class="chr-p chr-base"></div><div class="chr-p chr-head"><div class="chr-p chr-eyes"></div><i class="chr-lid l1"></i><i class="chr-lid l2"></i><div class="chr-p chr-mouth"></div></div><div class="chr-p chr-shine"></div></div></div></div>{% if role!='admin' %}<div class="chr-name" id="chr_name" aria-live="polite"></div>{% endif %}</div></div>
+<div class="lx-chr" aria-hidden="true"><div class="chr-box {{ 'ca' if role=='admin' else ('cf' if lxg=='f' else ('cm' if lxg=='m' else 'cn')) }}"><div class="chr-sh"></div><div class="chr-fx"><div class="chr-3d"><div class="chr-stage"><div class="chr-p chr-base"></div><div class="chr-p chr-head"><div class="chr-p chr-eyes"></div><i class="chr-lid l1"></i><i class="chr-lid l2"></i><div class="chr-p chr-mouth"></div></div><div class="chr-p chr-shine"></div></div></div></div></div></div>
 <div class="lx-card"><img src="/logo.png" alt="Mobius Technologies and Services" width="150" height="78"><h2>Welcome back</h2><p>{{title}}</p>
 """
 LOGIN_NEW_MID = r"""</div>
@@ -4546,10 +4541,8 @@ LOGIN_CHR_JS = r"""<script>
 LOGIN_CHR_PICK = r"""<script>
 /* Update216: show the matching character as soon as the username is recognised (no sign-in needed). Display only - never touches the form. */
 (function(){
-  var lx = document.querySelector('.lx.emp'), u = document.getElementById('login_u'), box = lx && lx.querySelector('.chr-box'), nmEl = document.getElementById('chr_name');
+  var lx = document.querySelector('.lx.emp'), u = document.getElementById('login_u'), box = lx && lx.querySelector('.chr-box');
   if (!u || !box) return;
-  var nmT = 0;
-  function setName(t){ if (!nmEl) return; clearTimeout(nmT); nmEl.classList.remove('on'); if (!t) { if (lx) lx.classList.remove('hasnm'); return; } nmT = setTimeout(function(){ if (lx) lx.classList.add('hasnm'); nmEl.textContent = t; nmEl.classList.add('on'); }, 150); }
   var cur = box.classList.contains('cf') ? 'f' : box.classList.contains('cm') ? 'm' : 'n', timer = 0, seq = 0, last = null, cache = {}, busy = 0;
   function show(g){
     if (g === cur) return; cur = g; var my = ++busy;
@@ -4558,12 +4551,12 @@ LOGIN_CHR_PICK = r"""<script>
   }
   function ask(){
     var v = (u.value || '').trim(); if (v === last) return; last = v;
-    if (!v) { seq++; show('n'); setName(''); return; }
-    var k = v.toLowerCase(); if (cache[k]) { seq++; show(cache[k].g); setName(cache[k].n); return; }
+    if (!v) { seq++; show('n'); return; }
+    var k = v.toLowerCase(); if (cache[k]) { seq++; show(cache[k]); return; }
     var my = ++seq;
     fetch('/login-char?u=' + encodeURIComponent(v), {credentials: 'same-origin', cache: 'no-store'})
       .then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(d){ if (!d || my !== seq) return; var g = (d.g === 'f' || d.g === 'm') ? d.g : 'n'; var nm = (typeof d.n === 'string') ? d.n : ''; cache[k] = {g: g, n: nm}; show(g); setName(nm); })
+      .then(function(d){ if (!d || my !== seq) return; var g = (d.g === 'f' || d.g === 'm') ? d.g : 'n'; cache[k] = g; show(g); })
       .catch(function(){});
   }
   function sched(){ clearTimeout(timer); timer = setTimeout(ask, 350); }
@@ -5741,7 +5734,7 @@ def login_char_lookup():
     hits = [t for t in _lc_hits.get(ip, []) if now - t < 60]
     hits.append(now); _lc_hits[ip] = hits
     if len(_lc_hits) > 5000: _lc_hits.clear()
-    g = "n"; nm = ""
+    g = "n"
     if len(hits) <= 90:
         u = (request.args.get("u", "") or "").strip().lower()[:120]
         if u:
@@ -5750,12 +5743,10 @@ def login_char_lookup():
                     if u in (str(e.get("Employee ID", "")).strip().lower(), str(e.get("Email", "")).strip().lower()):
                         v = str(e.get("Gender", "")).strip().lower()
                         g = "m" if v in ("male", "m", "man", "boy") or v.startswith("male") else ("f" if v in ("female", "f", "woman", "girl") or v.startswith("female") else "n")
-                        # Update225: ONLY the display name (saved Profile Name, else the full name) is returned - never the ID, e-mail, gender text or any other detail
-                        nm = (str(e.get("Profile Name", "") or "").strip() or str(e.get("Name", "") or "").strip())[:40]
                         break
             except Exception:
-                g = "n"; nm = ""
-    resp = Response(_j.dumps({"g": g, "n": nm}), mimetype="application/json")
+                g = "n"
+    resp = Response(_j.dumps({"g": g}), mimetype="application/json")
     resp.headers["Cache-Control"] = "no-store"
     return resp
 

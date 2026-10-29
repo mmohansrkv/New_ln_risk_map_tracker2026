@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update240: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the female picture is removed; the supplied male picture (glasses, white suit, thumbs-up; /char/lm.webp) is shown above the login box once the username is typed, with the same tilt / breathing / floating / shine animation. Employee panel picture and all other designations / pages unchanged.
   * Update239: Associate Manager / Team Lead / Senior Team Lead only (live Designation): (1) Employee panel - the name / nickname above Logout is plain normal text (no 3D, no animation); (2) the panel picture is the supplied male / female cut-out (by Gender) with the existing 3D depth, breathing, shine and ring animation plus a gentle sway; (3) Employee login page - once the username (Employee ID / e-mail) of one of these employees is typed, the supplied female picture is shown above the login box with the same tilt / breathing / floating / shine animation (served at /char/lf.webp; /login-char returns "l"). All other designations, pages and layouts unchanged.
   * Update238: (1) Associate Manager / Team Lead / Senior Team Lead (live Designation) get an "Employee Details" menu: Personal Details of ALL employees (search by ID / name, click a name to view / edit; same editable fields as the Admin form, Employee ID / Name / Designation / Office Email stay read-only; saved through the same save_employee_row; every change is logged in the Admin Notifications under the editor). Server-side 403 for everyone else. (2) Employee panel - the name / nickname above Logout is static 3D letters (flip-in, wave and sheen animations removed). Nothing else changed.
   * Update237: Team Logs > Productivity Log for Associate Manager / Team Lead / Senior Team Lead (live Designation): table of all employees (Employee ID, Name, Designation, Joining Date, Tracking From, Working Days, Entries, Missed, Attendance, Productivity - same figures as Admin > Employee Info > Productivity), month filter, search by Employee ID / Name / Process name (process search lists the matching records with target, completed, status and productivity %). Employee ID / Name opens the complete date-wise details (Date, Day, Processes Worked, Productive / Non-productive / Total hrs, Target Count, Completed Count, Target Status, Productivity %, Submitted At + process-wise rows). All read from the existing Productivity log; read-only. Other designations keep the previous Team Logs page.
@@ -4389,9 +4390,9 @@ html{scrollbar-gutter:stable}
 .chr-box.sw{opacity:0;transform:translateY(8px) scale(.96)}
 .chr-box.cn{--ar:460/615;--sh:90%}
 /* Update239: login picture for Associate Manager / Team Lead / Senior Team Lead = the supplied female picture (same tilt / breathing / floating / shine animation; face layers hidden) */
-.chr-box.cl{--ar:317/539;--sh:90%}
-.cl .chr-p{background-image:url(/char/lf.webp)}
-.cl .chr-shine{-webkit-mask-image:url(/char/lf.webp);mask-image:url(/char/lf.webp)}
+.chr-box.cl{--ar:307/528;--sh:90%}
+.cl .chr-p{background-image:url(/char/lm.webp)}
+.cl .chr-shine{-webkit-mask-image:url(/char/lm.webp);mask-image:url(/char/lm.webp)}
 .cl .chr-head,.cl .chr-lid{display:none}
 .cn .chr-p{background-image:url(/char/n.webp)}
 .cn .chr-shine{-webkit-mask-image:url(/char/n.webp);mask-image:url(/char/n.webp)}
@@ -4608,7 +4609,7 @@ LOGIN_CHR_PICK = r"""<script>
   function sched(){ clearTimeout(timer); timer = setTimeout(ask, 350); }
   u.addEventListener('input', sched); u.addEventListener('change', ask); u.addEventListener('blur', ask);
   setTimeout(ask, 600); setTimeout(ask, 1600);                       /* browser auto-fill */
-  window.addEventListener('load', function(){ setTimeout(function(){ ['f','m','n','lf'].forEach(function(c){ new Image().src = '/char/' + c + '.webp'; }); }, 800); });
+  window.addEventListener('load', function(){ setTimeout(function(){ ['f','m','n','lm'].forEach(function(c){ new Image().src = '/char/' + c + '.webp'; }); }, 800); });
 })();
 </script>
 """

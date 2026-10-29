@@ -1,5 +1,4 @@
 """Productivity Tracker - Flask + Google Sheets.
-  * Update224: Productivity start date for NEW employees. (1) Admin adds a new employee (Employee Info > Employee Login Access > Add employee login, or Admin > Employees > Add) and chooses the JOINING DATE (default today): productivity entries, missed-entry reminders (manual + automatic e-mail) and every productivity / attendance report start from that date - earlier dates are never required, missed or counted. (2) Existing employees are NOT changed: a row without a Joining date keeps exactly the old behaviour and no existing row / productivity record is written or migrated; adding a login to an existing Employee ID does not touch its joining date. (3) Only the Admin can add employees (server-side check). (4) New 'Productivity' section in the Admin employee log: Employee Info > Productivity (all employees, month filter, counted from each joining date) and a Productivity tab on every employee page (joining date, tracking-from date, month-by-month figures, daily entries with a Counted column, missed dates). report(): approved permission hours also start at the joining date.
   * Update223: the extra glowing rack picture is removed from ALL login pages (only the technician scene stays). Update222: Employee AND Admin login pages - old server-rack picture removed; replaced by the supplied technician-at-the-server scene (/char/tq.webp) with 3D depth + pointer parallax, subtle head movement, typing hand, laptop-screen text, rack data packets / LEDs. Login layout, fields and logic unchanged.
   * Update221: Employee panel - new look (display only): deep-indigo gradient left panel with pill-style active menu, soft page background, KPI cards with an accent edge and bigger numbers, rounded cards with soft shadows, cleaner inputs with a focus ring, gradient buttons and rounded tables. Colours / roundness are the variables at the top of the new <style id="emp221"> block; set EMP_REDESIGN = False to go back. No route, sheet, e-mail or tracking code changed.
   * Update220: Admin LOGIN page - the old admin picture (suited man with orange server) is removed and the supplied 3D boy with laptop (/char/b.webp, transparent cut-out) takes its place with the SAME photo-style 3D animation (float, breathing, pointer tilt, head turn / eye gaze, blinking, smile, light sweep, floor glow); only the eye / mouth / head anchor points were re-mapped to the new picture. The server rack with its swinging glass door, form, layout, routes and login checks are unchanged.
@@ -4467,13 +4466,13 @@ LOGIN = LOGIN_NEW_HEAD + _LOGIN_FORM + LOGIN_NEW_MID + _LOGIN_WT + _LOGIN_MAIN +
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}{% if h=='Target count / hour' %} (count in 1 hr, e.g. 1000){% endif %}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
-{% if kind=='employees' %}<label title="Productivity entries are required only from this date">Joining date<input type="date" name="joining" value="{{today}}" required></label>{% endif %}<button class="primary">Add</button></form>
+<button class="primary">Add</button></form>
 {% if kind=='processes' %}<p class="mut">Set the <b>Target count / hour</b> &mdash; the count to complete in 1 hour (e.g. <b>1000 / 1</b> hr). The target for an entry is worked out automatically from the hours the employee logs: 8 hrs &rarr; 8 &times; the hourly count, 4 hrs &rarr; 4 &times;, 2 hrs &rarr; 2 &times;. If the employee's count is below that target, they get an alert.</p>{% endif %}
 {% if missing %}<p class="mut">&#9888; {{missing}} employee(s) have no Designation yet. Use Edit to set it; it then fills in automatically on their daily entry page.</p>{% endif %}
 {% if locked %}<p class="mut">Personal details are managed on the Personal details page. Office Email ID follows the login Email.</p>{% endif %}</div>
-<table><tr>{% for h in heads %}<th>{{h}}</th>{% endfor %}{% if kind=='employees' %}<th>Joining date</th><th>Status</th>{% endif %}<th></th></tr>
+<table><tr>{% for h in heads %}<th>{{h}}</th>{% endfor %}{% if kind=='employees' %}<th>Status</th>{% endif %}<th></th></tr>
 {% for r in data %}<tr>{% for h in heads %}<td>{{r[h]}}{% if h=='Target count / hour' and r[h] %} / 1{% endif %}</td>{% endfor %}
-{% if kind=='employees' %}{% set lk = (r['Account locked']|string|lower) in ['yes','y','true','locked','1'] %}<td>{{ r.get('Joining date') or '-' }}</td><td>{% if lk %}<span class="pill" style="background:#fde8e8;color:#b42318">Locked</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td>{% endif %}
+{% if kind=='employees' %}{% set lk = (r['Account locked']|string|lower) in ['yes','y','true','locked','1'] %}<td>{% if lk %}<span class="pill" style="background:#fde8e8;color:#b42318">Locked</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td>{% endif %}
 <td class="act"><a href="/admin/{{kind}}/{{r['_row']}}">Edit</a>
 {% if kind=='employees' %}<form method="post" action="/admin/employees/{{r['_row']}}/lock"><input type="hidden" name="eid" value="{{r['Employee ID']}}"><input type="hidden" name="do" value="{{'unlock' if lk else 'lock'}}"><button class="back sm" type="submit">{{'Unlock' if lk else 'Lock'}}</button></form>
 <form method="post" action="/admin/employees/{{r['_row']}}/reset-password" onsubmit="var p=prompt('New password for {{r['Employee ID']}} (leave empty to generate one):','');if(p===null)return false;this.newpw.value=p;return true"><input type="hidden" name="eid" value="{{r['Employee ID']}}"><input type="hidden" name="newpw" value=""><button class="back sm" type="submit">Reset password</button></form>
@@ -4754,16 +4753,10 @@ def admin_list(kind):
                 full["Target count / hour"], full["Target count / 8 hrs"], err = proc_targets_sync(
                     full.get("Target count / hour"), full.get("Target count / 8 hrs"))
                 if err: flash(err, "error"); return redirect(request.path)
-            if sheet == "Employees":
-                full["Office Email ID"] = full.get("Email", "")
-                if session.get("role") != "admin": abort(403)                          # Update224: only the Admin adds employees
-                jv = (request.form.get("joining") or "").strip() or str(today_local())   # Update224: NEW employee -> productivity starts on the joining date
-                try: dt.date.fromisoformat(jv)
-                except ValueError: flash("Please choose a valid joining date.", "error"); return redirect(request.path)
-                full["Joining date"] = jv
+            if sheet == "Employees": full["Office Email ID"] = full.get("Email", "")
             ws_of(sheet).append_row([full.get(h, "") for h in HEADERS[sheet]],
                                                value_input_option="RAW"); invalidate_cache(sheet)
-            flash("Added." + (f" Productivity tracking starts from {max(PROD_TRACKING_START, dt.date.fromisoformat(full['Joining date'])).strftime('%d %b %Y')}." if sheet == "Employees" else ""))
+            flash("Added.")
         return redirect(request.path)
     data = rows(sheet)
     if sheet == "Processes":                      # show the hourly figure for processes saved with only the 8-hour column
@@ -4774,7 +4767,7 @@ def admin_list(kind):
                 if not str(r.get("Target count / hour", "")).strip(): r["Target count / hour"] = _g4(t["rate"])
                 if not str(r.get("Target count / 8 hrs", "")).strip(): r["Target count / 8 hrs"] = _g4(t["daily"])
     missing = sum(1 for r in data if not str(r.get("Designation", "x")).strip()) if sheet == "Employees" else 0
-    return page(TABLE, title=sheet, heads=heads, data=data, kind=kind, missing=missing, today=str(today_local()),
+    return page(TABLE, title=sheet, heads=heads, data=data, kind=kind, missing=missing,
                 optional=OPTIONAL_FIELDS, locked=LOCKED_FIELDS.get(sheet, set()))
 
 @app.route("/admin/<kind>/<int:row>", methods=["GET", "POST"])
@@ -5236,19 +5229,18 @@ def admin_notify_poll():
                    last=str(max(last, since)), items=items)
 
 # ---------------------------------------------------------------- admin: Employee Info (list -> employee details)
-TABS = [("personal", "Personal Details"), ("productivity", "Productivity"), ("missed", "Missed Entries"), ("leave", "Leave Log"),
+TABS = [("personal", "Personal Details"), ("missed", "Missed Entries"), ("leave", "Leave Log"),
         ("holidays", "Holidays"), ("mahizhchi", "Mahizhchi Log"), ("notifications", "Notifications")]
 
-EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if view=='notifications' %}A log of what employees have added, updated or deleted, newest first (latest 200).{% elif view=='productivity' %}Every employee's productivity, counted from their own joining date. Dates before it are never required, missed or reported. Click a name for the full productivity log.{% elif view=='access' %}Enable or disable each employee's login. Disabled employees cannot log in; their data is not changed.{% else %}Click an employee's name to open their details. A name in red has unseen login/logout notifications.{% endif %}</p></div>
+EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if view=='notifications' %}A log of what employees have added, updated or deleted, newest first (latest 200).{% elif view=='access' %}Enable or disable each employee's login. Disabled employees cannot log in; their data is not changed.{% else %}Click an employee's name to open their details. A name in red has unseen login/logout notifications.{% endif %}</p></div>
 {% if view!='notifications' %}<form class="grid" method="get"><input name="q" placeholder="Search ID / name" value="{{q}}">
 <button class="primary">Search</button><a href="/admin/employee-info">Reset</a></form>{% endif %}</div>
 <div class="tabs no-print"><a href="/admin/employee-info" class="{{'on' if view=='employees' else ''}}">Employees</a>
 <a href="/admin/employee-info?view=access" class="{{'on' if view=='access' else ''}}">Employee Login Access</a>
-<a href="/admin/employee-info?view=productivity" class="{{'on' if view=='productivity' else ''}}">Productivity</a>
 <a href="/admin/employee-info?view=notifications" class="{{'on' if view=='notifications' else ''}}">Notifications{% if new_count %} ({{new_count}} new){% endif %}</a></div>
 {% if view=='access' %}
 <div class="card no-print" id="addlogin"><h2 style="margin-top:0">Add employee login</h2>
-<p class="mut">For a new joiner: enter the username (Employee ID) and an initial password, then save. The employee can sign in at <b>/employee/login</b> with the Employee ID or the Email, plus this password. If the Employee ID already exists without a password, only the password is set (an existing employee's joining date and productivity records are not changed). <b>Joining date</b>: for a new joiner the employee's productivity entries, missed-entry reminders and reports start from this date.</p>
+<p class="mut">For a new joiner: enter the username (Employee ID) and an initial password, then save. The employee can sign in at <b>/employee/login</b> with the Employee ID or the Email, plus this password. If the Employee ID already exists without a password, only the password is set.</p>
 <form method="post" action="/admin/employee-info/login-access/add" autocomplete="off" class="grid" onsubmit="var b=this.querySelector('button.primary');setTimeout(function(){b.disabled=true},0)">
 <input name="eid" placeholder="Username / Employee ID *" required maxlength="40" value="{{ad.get('eid','')}}">
 <input name="name" placeholder="Employee name *" required maxlength="80" value="{{ad.get('name','')}}">
@@ -5256,7 +5248,6 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <input name="band" placeholder="Band" maxlength="20" value="{{ad.get('band','')}}">
 <input name="designation" placeholder="Designation" maxlength="80" value="{{ad.get('designation','')}}">
 <select name="gender"><option value="">Gender (for 3D avatar)</option><option {{'selected' if ad.get('gender')=='Male'}}>Male</option><option {{'selected' if ad.get('gender')=='Female'}}>Female</option></select>
-<label title="Productivity entries are required only from this date" style="display:inline-flex;flex-direction:column;font-size:12px;gap:2px">Joining date *<input type="date" name="joining" required value="{{ad.get('joining') or today}}"></label>
 <span style="position:relative;display:inline-block"><input id="al_pw" name="pw" type="text" placeholder="Initial password * (min 4)" required minlength="4" maxlength="60" style="padding-right:84px"><button type="button" class="back sm" style="position:absolute;right:4px;top:50%;transform:translateY(-50%)" onclick="var c='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789',o='';for(var i=0;i<8;i++)o+=c[Math.floor(Math.random()*c.length)];document.getElementById('al_pw').value=o">Generate</button></span>
 <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" name="enable" value="1" checked style="width:auto"> Enable login now</label>
 <button class="primary" type="submit">Save login credentials</button></form></div>
@@ -5269,17 +5260,6 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <form method="post" action="/admin/employee-info/login-access/{{e['_row']}}" onsubmit="return confirm('Disable login for {{e['Employee ID']}} ({{e['Name']}})? This employee will not be able to log in until you enable it again. Their data is not changed.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="do" value="disable"><button class="danger sm" type="submit" {{'disabled' if off else ''}}>Disable Login</button></form>
 <form method="post" action="/admin/employees/{{e['_row']}}/reset-password" onsubmit="var p=prompt('Set password for {{e['Employee ID']}} (leave empty to generate one):','');if(p===null)return false;this.newpw.value=p;return true"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="newpw" value=""><button class="back sm" type="submit">Set Password</button></form></td></tr>
 {% else %}<tr><td colspan="5">No employees found.</td></tr>{% endfor %}</table>
-{% elif view=='productivity' %}
-<form class="grid no-print" method="get"><input type="hidden" name="view" value="productivity"><input type="month" name="month" value="{{month}}"><button class="primary">Show</button><a href="/admin/employee-info?view=productivity">This month</a></form>
-<p class="mut">{{label}} &middot; working days are counted from each employee's joining date (a new joiner is counted only from that day; existing employees are unchanged). Weekly offs and holidays are excluded.</p>
-<table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Joining date</th><th>Tracking from</th><th>Working days</th><th>Entries</th><th>Missed</th><th>Attendance</th><th>Productivity</th></tr>
-{% for p in prows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
-<td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}} <span class="pill act">New joiner</span>{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td>
-<td>{{p.pstart.strftime('%d %b %Y')}}</td>
-{% if not p.active %}<td colspan="5" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
-{% elif p.r.vo %}<td colspan="5" class="mut">View only (no productivity entry for this designation)</td>
-{% else %}<td>{{p.r.wd}}</td><td>{{p.entries}}</td><td>{{p.missed}}</td><td>{{p.r.att}}%</td><td><b>{{p.r.pct}}%</b></td>{% endif %}</tr>
-{% else %}<tr><td colspan="10">No employees found.</td></tr>{% endfor %}</table>
 {% elif view=='notifications' %}
 <table><tr><th>Employee Name</th><th>Date &amp; Time</th><th>Section / Log</th><th>Action</th><th>Details</th><th>Summary</th></tr>
 {% for r in log %}<tr{% if r.new %} style="font-weight:600"{% endif %}>
@@ -5312,31 +5292,6 @@ T_PERSONAL = """<div class="card"><h2>Personal details</h2>
 <p class="mut">Productivity entry is available only from this date. Earlier dates cannot be submitted and are never shown as missed or pending. Leave empty for no restriction.</p>
 <form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/joining" class="grid"><input type="date" name="joining" value="{{emp.get('Joining date','')}}">
 <button class="primary sm" type="submit">Save joining date</button></form></div>"""
-
-T_PROD = """<div class="kpis"><div class="kpi"><span>Joining date</span><b>{{ jd.strftime('%d %b %Y') if jd else 'Not set' }}</b></div>
-<div class="kpi"><span>Productivity tracking from</span><b>{{ pstart.strftime('%d %b %Y') }}</b></div>
-<div class="kpi"><span>Employee type</span><b>{{ 'New joiner' if basis=='joining' else 'Existing employee' }}</b></div></div>
-<p class="mut">{% if basis=='joining' %}New joiner: productivity entries, missed-entry reminders and reports start from the joining date. Earlier dates are never required, missed, pending or counted.{% else %}No joining date is set (existing employee): nothing changes - productivity is tracked from {{ pstart.strftime('%d %b %Y') }}, when tracking began. To start a new joiner from a later date, set the joining date under Personal Details.{% endif %}</p>
-<form class="grid no-print" method="get"><input type="hidden" name="tab" value="productivity"><input type="month" name="month" value="{{month}}"><button class="primary">Show</button><a href="?tab=productivity">This month</a></form>
-<div class="card"><h2 style="margin-top:0">{{label}}</h2>
-{% if not cur.active %}<p class="mut">Not started &mdash; this employee joins on {{ jd.strftime('%d %b %Y') }}. Nothing is required, missed or reported for this month.</p>
-{% elif cur.r.vo %}<p class="mut">View only: this designation has no daily productivity entry, percentage or reminders.</p>
-{% else %}<div class="kpis"><div class="kpi"><span>Working days counted</span><b>{{cur.r.wd}}</b></div><div class="kpi"><span>Entries submitted</span><b>{{cur.entries}}</b></div>
-<div class="kpi"><span>Leave days</span><b>{{cur.r.leave}}</b></div><div class="kpi"><span>Missed entries</span><b>{{cur.missed|length}}</b></div>
-<div class="kpi"><span>Attendance</span><b>{{cur.r.att}}%</b></div><div class="kpi"><span>Productivity</span><b>{{cur.r.pct}}%</b></div>
-<div class="kpi"><span>Productive hrs</span><b>{{cur.r.prod|g}}</b></div><div class="kpi"><span>Non-productive hrs</span><b>{{cur.r.non|g}}</b></div></div>
-{% if cur.missed %}<p><b>Missed dates:</b> {% for d in cur.missed|reverse %}<span class="pill out">{{d}}</span> {% endfor %}</p>{% endif %}{% endif %}</div>
-<h2>Month by month</h2>
-<table><tr><th>Month</th><th>Working days</th><th>Entries</th><th>Missed</th><th>Attendance</th><th>Productivity</th></tr>
-{% for m in months %}<tr><td><a href="?tab=productivity&amp;month={{m.ym}}">{{m.label}}</a>{% if m.first %} <span class="mut">(from {{pstart.strftime('%d %b') if basis=='joining' else m.first}})</span>{% endif %}</td>
-{% if not m.active %}<td colspan="5" class="mut">Not started</td>{% elif m.vo %}<td colspan="5" class="mut">View only</td>
-{% else %}<td>{{m.wd}}</td><td>{{m.entries}}</td><td>{{m.missed}}</td><td>{{m.att}}%</td><td><b>{{m.pct}}%</b></td>{% endif %}</tr>
-{% else %}<tr><td colspan="6">No months yet.</td></tr>{% endfor %}</table>
-<h2>Daily entries &middot; {{label}}</h2>
-<table><tr><th>Date</th><th>Day</th><th>Productive hrs</th><th>Non-productive hrs</th><th>Total hrs</th><th>Productivity</th><th>Target</th><th>Counted</th></tr>
-{% for s in daily %}<tr><td>{{s.date}}</td><td>{{s.day}}</td><td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td><td>{{ (s.pct|string ~ '%') if s.pct is not none else '-' }}</td>
-<td>{{ {'met':'Achieved','miss':'Below target','none':'-','off':'-'}[s.tgt_state] }}</td><td>{{s.why}}</td></tr>
-{% else %}<tr><td colspan="8">No productivity entries in this month{% if jd %} (counted from {{ jd.strftime('%d %b %Y') }}){% endif %}.</td></tr>{% endfor %}</table>"""
 
 T_MISSED = """<form class="grid no-print" method="get"><input type="hidden" name="tab" value="missed">
 <input type="month" name="month" value="{{month if month!='all' else ''}}"><button class="primary">Show</button>
@@ -5402,9 +5357,7 @@ def admin_employee_info():
         off = sum(1 for e in emps if e["login_off"])
         return page(EMP_LIST, title="Employee Info", view="access", emps=emps, q=request.args.get("q", ""),
                     n_on=len(emps) - off, n_off=off, new_count=sum(1 for r in update_log() if r["new"]),
-                    ad=session.pop("_ad", {}), today=str(today_local()))
-    if request.args.get("view") == "productivity":      # Update224: Productivity section of the employee log (Admin only)
-        return admin_productivity_overview(emps, q)
+                    ad=session.pop("_ad", {}))
     # Employees with unseen login/logout notifications get their name highlighted in red.
     unseen_ids = {str(r["Employee ID"]) for r in rows("Notifications") if str(r.get("Seen", "")).strip() != "Yes"}
     for e in emps: e["flag"] = str(e["Employee ID"]) in unseen_ids
@@ -5420,8 +5373,7 @@ def admin_login_add():
     f = request.form; heads = HEADERS["Employees"]
     eid, name = f.get("eid", "").strip(), f.get("name", "").strip()
     email, pw = f.get("email", "").strip(), f.get("pw", "").strip()
-    keep = dict(eid=eid, name=name, email=email, band=f.get("band", "").strip(), designation=f.get("designation", "").strip(), gender=f.get("gender", ""),
-                joining=f.get("joining", "").strip())
+    keep = dict(eid=eid, name=name, email=email, band=f.get("band", "").strip(), designation=f.get("designation", "").strip(), gender=f.get("gender", ""))
     back = redirect("/admin/employee-info?view=access#addlogin")
     def fail(m):
         session["_ad"] = keep; flash(m, "error"); return back
@@ -5429,10 +5381,6 @@ def admin_login_add():
     if re.search(r"\s", eid) or "@" in eid: return fail("The username (Employee ID) cannot contain spaces or '@'. Use the Email field for an email address.")
     if len(pw) < 4: return fail("The password must be at least 4 characters.")
     if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email): return fail("Please enter a valid email address.")
-    if session.get("role") != "admin": abort(403)                              # Update224: only the Admin adds employees
-    jv = keep["joining"] or str(today_local())                                   # Update224: the Admin's joining date = the employee's productivity start date
-    try: dt.date.fromisoformat(jv)
-    except ValueError: return fail("Please choose a valid joining date.")
     invalidate_cache("Employees")
     emps = rows("Employees"); k = _key(eid); ek = email.lower()
     for e in emps:                                               # the username / email must be unique across all logins
@@ -5451,10 +5399,10 @@ def admin_login_add():
     full = {h: "" for h in heads}
     full.update({"Employee ID": eid, "Name": name, "Band": keep["band"], "Email": email, "Office Email ID": email, "Password": pw,
                  "Designation": keep["designation"], "Gender": keep["gender"], "Account locked": "" if enable else "Yes",
-                 "Joining date": jv})      # Update224: Admin-chosen (default today); an EXISTING employee row is never touched here
+                 "Joining date": str(now_local().date())})
     _with_retry(ws_of("Employees").append_row, [full[h] for h in heads], value_input_option="RAW")
     invalidate_cache("Employees")
-    flash(f"Login created for {name}. Username: {eid} / Password: {pw} - {'login enabled' if enable else 'login is DISABLED until you enable it'}. Share these with the employee. Productivity tracking starts from {max(PROD_TRACKING_START, dt.date.fromisoformat(jv)).strftime('%d %b %Y')} (joining date {dt.date.fromisoformat(jv).strftime('%d %b %Y')}).")
+    flash(f"Login created for {name}. Username: {eid} / Password: {pw} - {'login enabled' if enable else 'login is DISABLED until you enable it'}. Share these with the employee.")
     return redirect("/admin/employee-info?view=access")
 
 @app.route("/admin/employee-info/login-access/<int:row>", methods=["POST"])
@@ -5505,28 +5453,6 @@ def admin_employee_detail(eid):
                   ("Band", emp["Band"])] + [(f, emp.get(f, "")) for f in EDITABLE_PERSONAL] + \
                  [("Joining date", emp.get("Joining date", "")), ("Office Email ID", emp.get("Email", "")), ("Last updated", t12(emp.get("Profile updated at", "")))]
         body = T_PERSONAL; ctx["fields"] = fields
-    elif tab == "productivity":      # Update224: Productivity section of the employee log - everything counted from the joining date
-        subs_e = load_subs(eid)
-        leaves_e = [l for l in rows("Leave") if _key(l["Employee ID"]) == _key(eid)]
-        pstart, jd, basis = prod_start_info(eid)
-        m0, m1 = month_range(month if month != "all" else today.strftime("%Y-%m"))
-        cur_ = emp_prod_month(emp, subs_e, leaves_e, m0, m1)
-        try: first = jd or min(dt.date.fromisoformat(s["date"]) for s in subs_e if s["date"])
-        except (ValueError, TypeError): first = pstart
-        first = min(first, today).replace(day=1); months, y_, mo_ = [], first.year, first.month
-        while (y_, mo_) <= (today.year, today.month) and len(months) < 24:
-            ms, me = month_range("%04d-%02d" % (y_, mo_)); mm = emp_prod_month(emp, subs_e, leaves_e, ms, me)
-            months.append(dict(ym="%04d-%02d" % (y_, mo_), label=ms.strftime("%B %Y"), active=mm["active"], vo=mm["r"].get("vo"), wd=mm["r"]["wd"], entries=mm["entries"],
-                               missed=len(mm["missed"]), att=mm["r"]["att"], pct=mm["r"]["pct"],
-                               first=(ms.strftime("%d %b") if jd and ms <= jd <= (ms.replace(day=28) + dt.timedelta(days=4)).replace(day=1) - dt.timedelta(days=1) else "")))
-            y_, mo_ = (y_ + 1, 1) if mo_ == 12 else (y_, mo_ + 1)
-        months.reverse()
-        def _why(s):
-            if s["off"]: return "No - weekly off / holiday"
-            if jd and s["date"] < str(jd): return "No - before joining date"
-            return "Yes"
-        daily = [dict(s, day=dt.date.fromisoformat(s["date"]).strftime("%a"), why=_why(s)) for s in subs_e if str(s["date"])[:7] == m0.strftime("%Y-%m") and s["date"]]
-        body = T_PROD; ctx.update(jd=jd, pstart=pstart, basis=basis, cur=cur_, months=months, daily=daily, month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"))
     elif tab == "missed":
         subs = [s for s in load_subs() if _key(s["emp_id"]) == _key(eid)]
         leaves = [l for l in rows("Leave") if _key(l["Employee ID"]) == _key(eid)]
@@ -7238,7 +7164,7 @@ def report(employees, subs, leaves, start, end):
         lv = {l["Date"] for l in mylv if not leave_is_half(l)} - days   # Update170: a full-day leave date that also has a productivity entry is a day WORKED - counted once (Present), not twice
         half = {l["Date"] for l in mylv if leave_is_half(l)}            # half-day leave: 4 hrs still have to be worked
         perm_hrs = sum(num(r.get("Hours")) for r in perms
-                       if _key(r["Employee ID"]) == ek and ea <= norm_date(r["Date"]) <= b
+                       if _key(r["Employee ID"]) == ek and a <= norm_date(r["Date"]) <= b
                        and str(r.get("Status", "")).strip() == "Approved")
         # Update170: one figure per DATE straight from the Productivity log rows (an extra entry on the same date is added in, never dropped)
         tph_ = process_rates(); by_day = {}
@@ -7401,49 +7327,6 @@ def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
             out.append(d.strftime(fmt))
         d += dt.timedelta(days=1)
     return out
-
-def prod_start_info(eid):
-    """Update224: (tracking start date, joining date or None, basis) for ONE employee.
-    basis 'joining'  = NEW joiner - the Admin set a Joining date: productivity is required / counted / reminded ONLY from that date
-                       (never earlier than PROD_TRACKING_START).
-    basis 'existing' = no Joining date on the row (every employee that existed before): nothing changes - tracking from PROD_TRACKING_START.
-    Same rule as missing_dates() and report(); this only EXPLAINS it to the Admin."""
-    jd = join_date(eid)
-    if jd: return max(PROD_TRACKING_START, jd), jd, "joining"
-    return PROD_TRACKING_START, None, "existing"
-
-def emp_prod_month(emp, subs, leaves, m0, m1):
-    """Update224: one employee's productivity figures for m0..m1 (m1 already capped at today), counted from the joining date.
-    Uses the SAME report() / missing_dates() as the dashboards and the reminder e-mails, so the numbers always agree."""
-    eid = str(emp["Employee ID"]).strip(); k = _key(eid)
-    pstart, jd, basis = prod_start_info(eid)
-    r = report([emp], subs, leaves, m0, m1)[0]
-    ea = max(m0, jd) if jd else m0
-    mine = {s["date"] for s in subs if _key(s["emp_id"]) == k and not s["off"] and str(ea) <= s["date"] <= str(m1)}
-    end_m = min(m1, today_local() - dt.timedelta(days=1))
-    miss = missing_dates(eid, [s for s in subs if _key(s["emp_id"]) == k], leaves, m0, end_m, fmt="%Y-%m-%d") if end_m >= m0 else []
-    return dict(r=r, entries=len(mine), missed=miss, pstart=pstart, jd=jd, basis=basis, active=(not jd or jd <= m1))
-
-def admin_productivity_overview(emps, q):
-    """Update224: Employee Info > Productivity - every employee's productivity for one month, each counted from ITS OWN joining date."""
-    today = today_local()
-    month = request.args.get("month") or today.strftime("%Y-%m")
-    m0, m1 = month_range(month)
-    subs, leaves = load_subs(), rows("Leave")
-    reps = {_key(r["id"]): r for r in report(emps, subs, leaves, m0, m1)} if emps else {}
-    by_emp, lv_by = {}, {}
-    for s in subs: by_emp.setdefault(_key(s["emp_id"]), []).append(s)
-    for l in leaves: lv_by.setdefault(_key(l["Employee ID"]), []).append(l)
-    end_m = min(m1, today - dt.timedelta(days=1)); prow = []
-    for e in emps:
-        eid = str(e["Employee ID"]).strip(); k = _key(eid)
-        pstart, jd, basis = prod_start_info(eid); r = reps.get(k, {})
-        ea = max(m0, jd) if jd else m0
-        entries = len({s["date"] for s in by_emp.get(k, []) if not s["off"] and str(ea) <= s["date"] <= str(m1)})
-        missed = len(missing_dates(eid, by_emp.get(k, []), lv_by.get(k, []), m0, end_m)) if end_m >= m0 else 0
-        prow.append(dict(e=e, jd=jd, pstart=pstart, basis=basis, active=(not jd or jd <= m1), r=r, entries=entries, missed=missed))
-    return page(EMP_LIST, title="Employee Info", view="productivity", emps=emps, q=request.args.get("q", ""), prows=prow,
-                month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), new_count=sum(1 for r in update_log() if r["new"]))
 
 EMP_MARQUEE = """{% if missed %}{% set msg %}&#9888; Productivity entry pending &mdash;
  You missed the entry for {{missed|length}} day(s) this month: {{missed|join(', ')}}. Pick that date in the form below and submit, or apply leave.{% endset %}
@@ -10906,7 +10789,7 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
  var ed=document.getElementById('mn-ed'), bar=document.getElementById('mn-tb'), rich=document.getElementById('mn-rich'),
      sizeSel=document.getElementById('mn-size'), colorIn=document.getElementById('mn-color'), saved=null, pendingPx=16, clean='', tmr=null, seq=0;
  var PH='<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>';
- function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
+ function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
  function paint(){
   var v={subject:esc(sub.value.trim())||'Your subject appears here', message:(hasText()&&clean)?clean:PH};
   frame.srcdoc=T.replace(/[{][{](\w+)[}][}]/g,function(m,k){return (k in v)?v[k]:m;});}

@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update237: Team Logs > Productivity Log for Associate Manager / Team Lead / Senior Team Lead (live Designation): table of all employees (Employee ID, Name, Designation, Joining Date, Tracking From, Working Days, Entries, Missed, Attendance, Productivity - same figures as Admin > Employee Info > Productivity), month filter, search by Employee ID / Name / Process name (process search lists the matching records with target, completed, status and productivity %). Employee ID / Name opens the complete date-wise details (Date, Day, Processes Worked, Productive / Non-productive / Total hrs, Target Count, Completed Count, Target Status, Productivity %, Submitted At + process-wise rows). All read from the existing Productivity log; read-only. Other designations keep the previous Team Logs page.
   * Update236: (1) Admin > Productivity Log: clicking an employee's NAME opens that employee's complete Productivity Log (/admin/employee-info/<id>/productivity-log) - every date (all time by default, optional month filter) with Date / Process / Target count / Completed count / Achieved or Not Achieved / Productivity % / hours / submitted-at, a date-wise summary, a process-wise summary and non-productive time, all read from the same Productivity log data. Works for every employee. (2) Employees whose Designation is Associate Manager / Team Lead / Senior Team Lead (matched live) no longer have the Daily entry and Productivity Info pages: both menu items are hidden and the URLs redirect to Leave & Permission. Other employees are unchanged.
   * Update235: Admin > Employee Info > clicking the name of an employee whose Designation is Associate Manager / Team Lead / Senior Team Lead opens ONLY their detailed Productivity Log (/admin/employee-info/<id>/productivity-log): process-wise summary (days, hours, target count, completed count, Achieved / Not Achieved, productivity %), every daily process line with the same details, non-productive time, month filter. Read-only; no Daily Entry or Productivity Info sections. Other designations unchanged.
   * Update234: Managers & Team Leads (Designation Associate Manager / Manager / Team Lead / Senior Team Lead, matched live). (1) Admin > Employee Info has a new tab "Managers & Leads": each of these employees with month entries, productivity %, missed entries + dates and links to their Productivity Log and Missed Entries Log. (2) When they log in, their panel gets a read-only "Team Logs" menu: Productivity Log and Missed Entries Log of all employees (month + search filters; no edit / delete / e-mail actions). Other employees get 403 on those URLs and see no menu item. Nothing else changed.
@@ -5707,10 +5708,10 @@ app.jinja_env.globals["is_plog_desig"] = lambda d: desig_view_only(d)
 
 T_PLOG = """<div class="head"><div><h1>{{emp['Name']}} &mdash; Productivity Log</h1>
 <p class="mut">{{emp['Employee ID']}} &middot; {{emp['Designation'] or 'No designation'}} &middot; Band {{emp['Band']}} &middot; {{label}}</p></div>
-<a href="/admin/log">&larr; Productivity Log</a></div>
+<a href="{{back_url}}">&larr; {{back_label}}</a></div>
 <form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><button class="primary">Show month</button>
-<a href="/admin/employee-info/{{emp['Employee ID']|urlencode}}/productivity-log">All time</a>
-<a href="/admin/employee-info/{{emp['Employee ID']|urlencode}}?tab=personal">Personal details</a></form>
+<a href="{{base_url}}">All time</a>
+{% if show_personal %}<a href="/admin/employee-info/{{emp['Employee ID']|urlencode}}?tab=personal">Personal details</a>{% endif %}</form>
 <div class="kpis"><div class="kpi"><span>Entries (days)</span><b>{{n_days}}</b></div><div class="kpi"><span>Processes worked</span><b>{{procsum|length}}</b></div>
 <div class="kpi"><span>Target count</span><b>{{tot_t|cnt}}</b></div><div class="kpi"><span>Completed count</span><b>{{tot_c|cnt}}</b></div>
 <div class="kpi"><span>Targets achieved</span><b>{{n_met}}</b></div><div class="kpi"><span>Targets not achieved</span><b>{{n_miss}}</b></div>
@@ -5746,8 +5747,12 @@ T_PLOG = """<div class="head"><div><h1>{{emp['Name']}} &mdash; Productivity Log<
 @app.route("/admin/employee-info/<eid>/productivity-log")
 @need("admin")
 def admin_employee_plog(eid):
+    ctx = plog_ctx(eid, request.args.get("month", "").strip())
+    return page(T_PLOG, title=ctx["emp"]["Name"] + " - Productivity Log", back_url="/admin/log", back_label="Productivity Log", base_url=request.path, show_personal=True, **ctx)
+
+def plog_ctx(eid, month):
+    """Update237: everything the detailed date-wise Productivity Log page shows for ONE employee (read from the existing Productivity log via load_subs)."""
     emp = emp_or_404(eid); eid = str(emp["Employee ID"])
-    month = request.args.get("month", "").strip()
     subs = load_subs(eid)
     label = "All time"
     if month:
@@ -5781,7 +5786,7 @@ def admin_employee_plog(eid):
         a["pct"] = round(a["count"] / a["target"] * 100) if a["target"] else None
         procsum.append(a)
     avg = ("%d%%" % round(sum(pcts) / len(pcts))) if pcts else "-"
-    return page(T_PLOG, title=emp["Name"] + " - Productivity Log", emp=emp, month=month, label=label, lines=lines, notes=notes, procsum=procsum, dates=dates,
+    return dict(emp=emp, month=month, label=label, lines=lines, notes=notes, procsum=procsum, dates=dates,
                 n_days=len([x for x in subs if not x["off"]]), tot_h=tot_h, tot_n=tot_n, tot_t=tot_t, tot_c=tot_c, n_met=n_met, n_miss=n_miss, avg_pct=avg)
 
 @app.route("/admin/employee-info/<eid>/leave", methods=["POST"])
@@ -10265,11 +10270,86 @@ TEAM_MISSED = TEAM_TABS + """<div class="card"><h2>Missed Entries Log &mdash; al
 {% for x in summary %}<tr><td>{{x.dates|join(', ')}}</td><td>{{x.id}} &middot; {{x.name}}</td><td><b>{{x.dates|length}}</b></td></tr>
 {% else %}<tr><td colspan="3">No missed entries for this period.</td></tr>{% endfor %}</table></div></div>"""
 
+def plog_user():
+    """Update237: Associate Manager / Team Lead / Senior Team Lead (live Designation) get the new Team Logs - Productivity Log."""
+    try: return bool(team_log_access() and desig_view_only(my_emp_row().get("Designation", "")))
+    except Exception: return False
+
+TEAM_PLOG = TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all employees</h2>
+<p class="mut">{{label}} &middot; read-only. Working days are counted from each employee's joining date; weekly offs and holidays are excluded. Click an Employee ID or Name for the complete date-wise details.</p>
+<form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}" title="Month (leave empty to search all dates by process)">
+<input name="emp" placeholder="Employee ID / name" value="{{emp}}"><input name="proc" placeholder="Process name" value="{{proc}}"><button class="primary">Search</button><a href="/employee/team-logs">Reset</a></form>
+{% if proc %}<p class="mut">Process search: <b>{{proc}}</b> &middot; {{prows|length}} record(s){% if more %} (latest {{prows|length}} shown - narrow the month or employee){% endif %} &middot; {{pemps}} employee(s)</p>
+<div style="overflow-x:auto"><table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Date</th><th>Process</th><th>Target count</th><th>Completed count</th><th>Target status</th><th>Productivity %</th></tr>
+{% for r in prows %}<tr><td><a href="/employee/team-logs/employee/{{r.id|urlencode}}">{{r.id}}</a></td><td><a href="/employee/team-logs/employee/{{r.id|urlencode}}"><b>{{r.name}}</b></a></td><td>{{r.desig or '-'}}</td><td>{{r.date}}</td><td>{{r.proc}}</td>
+<td>{{ (r.target|cnt) if r.rate else '-' }}</td><td>{{r.count|cnt}}</td>
+<td>{% if r.off %}<span class="mut">Off / holiday</span>{% elif not r.rate %}-{% elif r.met %}<span class="tg-badge met">&#9989; Achieved</span>{% else %}<span class="tg-badge miss">&#10060; Not Achieved</span>{% endif %}</td>
+<td>{{ (r.pct ~ '%') if (r.pct is not none and not r.off) else '-' }}</td></tr>
+{% else %}<tr><td colspan="9">No productivity records match this process.</td></tr>{% endfor %}</table></div>
+{% else %}<div style="overflow-x:auto"><table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Joining Date</th><th>Tracking From</th><th>Working Days</th><th>Entries</th><th>Missed</th><th>Attendance</th><th>Productivity</th></tr>
+{% for p in lrows %}<tr><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}">{{p.e['Employee ID']}}</a></td><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
+<td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}}{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td><td>{{p.pstart.strftime('%d %b %Y')}}</td>
+{% if not p.active %}<td colspan="5" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
+{% elif p.r.vo %}<td colspan="5" class="mut">View only (no productivity entry for this designation)</td>
+{% else %}<td>{{p.r.wd}}</td><td>{{p.entries}}</td><td>{{p.missed}}</td><td>{{p.r.att}}%</td><td><b>{{p.r.pct}}%</b></td>{% endif %}</tr>
+{% else %}<tr><td colspan="10">No employees found.</td></tr>{% endfor %}</table></div>{% endif %}</div>"""
+
+def _team_plog_page():
+    today = today_local()
+    emp_q = request.args.get("emp", "").strip(); proc_q = request.args.get("proc", "").strip()
+    month_arg = request.args.get("month", "").strip()
+    emps = sorted(rows("Employees"), key=lambda e: str(e.get("Name", "")).lower())
+    if emp_q:
+        ql = emp_q.lower(); emps = [e for e in emps if ql in str(e["Employee ID"]).lower() or ql in str(e["Name"]).lower()]
+    subs, leaves = load_subs(), rows("Leave")
+    if proc_q:      # process search: matching records of the matching employees (all dates unless a month is picked)
+        pl = proc_q.lower(); ids = {_key(e["Employee ID"]): e for e in emps}; tph = process_rates(); out = []
+        if month_arg:
+            m0, m1 = month_range(month_arg); label = m0.strftime("%B %Y"); month_arg = m0.strftime("%Y-%m")
+        else: m0 = m1 = None; label = "All dates"
+        for x in subs:
+            e = ids.get(_key(x["emp_id"]))
+            if e is None or (m0 and not (str(m0) <= str(x["date"]) <= str(m1))): continue
+            for p in x["procs"]:
+                if pl not in str(p["name"]).lower(): continue
+                rate = tph.get(p["name"], 0) or 0; tgt = p["hour"] * rate
+                out.append(dict(id=str(e["Employee ID"]), name=e["Name"], desig=e.get("Designation", ""), date=x["date"], proc=p["name"], rate=rate, target=round(tgt, 2),
+                                count=p["count"], met=bool(rate) and p["count"] + 1e-9 >= tgt, pct=p["pct"], off=x["off"]))
+        out.sort(key=lambda r: (r["date"], r["name"]), reverse=True)
+        total = len(out); out = out[:1000]
+        return page(TEAM_PLOG, title="Team Logs - Productivity Log", tl="prod", month=month_arg, label=label, emp=emp_q, proc=proc_q, prows=out, more=total > len(out),
+                    pemps=len({r["id"] for r in out}), lrows=[])
+    month = month_arg or today.strftime("%Y-%m")
+    m0, m1 = month_range(month)
+    reps = {_key(r["id"]): r for r in report(emps, subs, leaves, m0, m1)} if emps else {}
+    by_emp, lv_by = {}, {}
+    for x in subs: by_emp.setdefault(_key(x["emp_id"]), []).append(x)
+    for l in leaves: lv_by.setdefault(_key(l["Employee ID"]), []).append(l)
+    end_m = min(m1, today - dt.timedelta(days=1)); lrows = []
+    for e in emps:      # same figures as Admin > Employee Info > Productivity
+        eid = str(e["Employee ID"]).strip(); k = _key(eid)
+        pstart, jd, basis = prod_start_info(eid); r = reps.get(k, {})
+        ea = max(m0, jd) if jd else m0
+        entries = len({x["date"] for x in by_emp.get(k, []) if not x["off"] and str(ea) <= x["date"] <= str(m1)})
+        missed = len(missing_dates(eid, by_emp.get(k, []), lv_by.get(k, []), m0, end_m)) if end_m >= m0 else 0
+        lrows.append(dict(e=e, jd=jd, pstart=pstart, active=(not jd or jd <= m1), r=r, entries=entries, missed=missed))
+    return page(TEAM_PLOG, title="Team Logs - Productivity Log", tl="prod", month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), emp=emp_q, proc="", lrows=lrows, prows=[], more=False, pemps=0)
+
+@app.route("/employee/team-logs/employee/<eid>")
+@need("employee")
+@team_need
+def employee_team_plog(eid):
+    if not plog_user(): abort(403)
+    prefetch("Employees", "Productivity log", "Leave", "Holidays", "Processes", "Permissions")
+    ctx = plog_ctx(eid, request.args.get("month", "").strip())
+    return page(T_PLOG, title=ctx["emp"]["Name"] + " - Productivity Log", back_url="/employee/team-logs", back_label="Team Logs", base_url=request.path, show_personal=False, **ctx)
+
 @app.route("/employee/team-logs")
 @need("employee")
 @team_need
 def employee_team_prod():
     prefetch("Employees", "Productivity log", "Leave", "Holidays", "Processes", "Permissions")
+    if plog_user(): return _team_plog_page()      # Update237: Associate Manager / Team Lead / Senior Team Lead
     month = request.args.get("month") or today_local().strftime("%Y-%m")
     q = request.args.get("emp", "").strip().lower()
     m0, m1 = month_range(month)

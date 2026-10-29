@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update236: (1) Admin > Productivity Log: clicking an employee's NAME opens that employee's complete Productivity Log (/admin/employee-info/<id>/productivity-log) - every date (all time by default, optional month filter) with Date / Process / Target count / Completed count / Achieved or Not Achieved / Productivity % / hours / submitted-at, a date-wise summary, a process-wise summary and non-productive time, all read from the same Productivity log data. Works for every employee. (2) Employees whose Designation is Associate Manager / Team Lead / Senior Team Lead (matched live) no longer have the Daily entry and Productivity Info pages: both menu items are hidden and the URLs redirect to Leave & Permission. Other employees are unchanged.
   * Update235: Admin > Employee Info > clicking the name of an employee whose Designation is Associate Manager / Team Lead / Senior Team Lead opens ONLY their detailed Productivity Log (/admin/employee-info/<id>/productivity-log): process-wise summary (days, hours, target count, completed count, Achieved / Not Achieved, productivity %), every daily process line with the same details, non-productive time, month filter. Read-only; no Daily Entry or Productivity Info sections. Other designations unchanged.
   * Update234: Managers & Team Leads (Designation Associate Manager / Manager / Team Lead / Senior Team Lead, matched live). (1) Admin > Employee Info has a new tab "Managers & Leads": each of these employees with month entries, productivity %, missed entries + dates and links to their Productivity Log and Missed Entries Log. (2) When they log in, their panel gets a read-only "Team Logs" menu: Productivity Log and Missed Entries Log of all employees (month + search filters; no edit / delete / e-mail actions). Other employees get 403 on those URLs and see no menu item. Nothing else changed.
   * Update233: (1) Employee LOGIN page - NO name / nickname is shown any more (the display, its script and the name returned by /login-char are removed; the lookup now returns only m / f / n for the character, so the page and the server stay light). The old "Employee system" caption stays as before. (2) Employee panel - the name above the Logout button keeps the 3D letter animation, now in LIGHT colours (white / pale blue letters with depth and glow). Nothing else changed.
@@ -3930,6 +3931,11 @@ def admin_theme():
     prefetch("Settings")
     return page(THEME_PAGE, title="Theme & Layout", themes=THEMES, panels=PANEL_LAYOUTS, logins=LOGIN_LAYOUTS, cur=theme_choice())
 
+def hide_entry_pages():
+    """Update236: Associate Manager / Team Lead / Senior Team Lead (matched live by Designation) have no Daily entry and no Productivity Info page."""
+    try: return session.get("role") == "employee" and is_view_only(session.get("emp_id", ""))
+    except Exception: return False
+
 NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"), 
               ("/admin/leave-permission", "Leave & Permission Log"),
@@ -3993,6 +3999,7 @@ def page(body, title="Productivity Tracker", **ctx):
     ctx["title"] = title
     p = request.path
     items = list(NAVS.get(session.get("role"), []))
+    if hide_entry_pages(): items = [it for it in items if it[0] not in ("/employee", "/employee/productivity")]      # Update236
     if session.get("role") == "employee":
         try:      # Admin-controlled: the menu item exists only while Audit Log access is enabled for this employee
             if audit_active(audit_access(session.get("emp_id", ""))): items.append(("/employee/audit", "Audit Log"))
@@ -4611,7 +4618,7 @@ SAVED_ANIM = """{% if saved_anim %}<script>window.__cmSaved={{ session.name|tojs
 
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th><th>Designation</th>{% endif %}
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Target count</th><th>Completed</th><th>Target status</th><th>Productivity</th><th></th></tr>
-{% for s in subs %}<tr{% if s.late %} class="late-row" title="Submitted / updated on {{s.subat}} - after the entry date"{% endif %}><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; {{s.emp_name}}</td><td>{{s.designation}}</td>{% endif %}
+{% for s in subs %}<tr{% if s.late %} class="late-row" title="Submitted / updated on {{s.subat}} - after the entry date"{% endif %}><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; <a href="/admin/employee-info/{{s.emp_id|urlencode}}/productivity-log" title="Open this employee's complete Productivity Log"><b>{{s.emp_name}}</b></a></td><td>{{s.designation}}</td>{% endif %}
 <td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
 <td>{{ (s.tgt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td><td>{{ (s.cnt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td>
 <td>{% if s.tgt_state=='met' %}<span class="tg-badge met">&#9989; Achieved</span>{% elif s.tgt_state=='miss' %}<span class="tg-badge miss" title="Below target: {{s.tgt_miss|join(', ')}}">&#10060; Not Achieved</span>{% else %}-{% endif %}</td>
@@ -5700,7 +5707,7 @@ app.jinja_env.globals["is_plog_desig"] = lambda d: desig_view_only(d)
 
 T_PLOG = """<div class="head"><div><h1>{{emp['Name']}} &mdash; Productivity Log</h1>
 <p class="mut">{{emp['Employee ID']}} &middot; {{emp['Designation'] or 'No designation'}} &middot; Band {{emp['Band']}} &middot; {{label}}</p></div>
-<a href="/admin/employee-info">&larr; All employees</a></div>
+<a href="/admin/log">&larr; Productivity Log</a></div>
 <form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><button class="primary">Show month</button>
 <a href="/admin/employee-info/{{emp['Employee ID']|urlencode}}/productivity-log">All time</a>
 <a href="/admin/employee-info/{{emp['Employee ID']|urlencode}}?tab=personal">Personal details</a></form>
@@ -5709,6 +5716,14 @@ T_PLOG = """<div class="head"><div><h1>{{emp['Name']}} &mdash; Productivity Log<
 <div class="kpi"><span>Targets achieved</span><b>{{n_met}}</b></div><div class="kpi"><span>Targets not achieved</span><b>{{n_miss}}</b></div>
 <div class="kpi"><span>Productive hrs</span><b>{{tot_h|g}}</b></div><div class="kpi"><span>Non-productive hrs</span><b>{{tot_n|g}}</b></div>
 <div class="kpi"><span>Avg. day productivity</span><b>{{avg_pct}}</b></div></div>
+<h2>Date-wise summary</h2>
+<p class="mut">Every date in the Productivity Log for this employee (newest first). Weekly-off / holiday entries are saved but not counted.</p>
+<div style="overflow-x:auto"><table><tr><th>Date</th><th>Day</th><th>Processes worked</th><th>Productive hrs</th><th>Non-productive hrs</th><th>Total hrs</th><th>Target count</th><th>Completed count</th><th>Target status</th><th>Productivity %</th><th>Submitted at</th></tr>
+{% for d in dates %}<tr{% if d.late %} class="late-row" title="Submitted / updated after the entry date"{% endif %}><td>{{d.date}}</td><td>{{d.day}}</td><td>{{d.procs or '-'}}</td><td>{{d.prod|g}}</td><td>{{d.non|g}}</td><td>{{d.total|g}}</td>
+<td>{{ (d.tgt|cnt) if d.state in ('met','miss') else '-' }}</td><td>{{ (d.cnt|cnt) if d.state in ('met','miss') else '-' }}</td>
+<td>{% if d.state=='met' %}<span class="tg-badge met">&#9989; Achieved</span>{% elif d.state=='miss' %}<span class="tg-badge miss" title="Below target: {{d.missed|join(', ')}}">&#10060; Not Achieved</span>{% elif d.state=='off' %}<span class="mut">Off / holiday</span>{% else %}-{% endif %}</td>
+<td>{{ 'Not counted' if d.state=='off' else ((d.pct ~ '%') if d.pct is not none else '-') }}</td><td>{{d.subat or '-'}}</td></tr>
+{% else %}<tr><td colspan="11">No Productivity Log entries for this employee.</td></tr>{% endfor %}</table></div>
 <h2>Process-wise summary</h2>
 <p class="mut">Weekly-off / holiday entries are shown in the daily log below but are not counted here.</p>
 <div style="overflow-x:auto"><table><tr><th>Process</th><th>Days worked</th><th>Hours</th><th>Target count</th><th>Completed count</th><th>Target status</th><th>Productivity %</th></tr>
@@ -5732,7 +5747,6 @@ T_PLOG = """<div class="head"><div><h1>{{emp['Name']}} &mdash; Productivity Log<
 @need("admin")
 def admin_employee_plog(eid):
     emp = emp_or_404(eid); eid = str(emp["Employee ID"])
-    if not desig_view_only(emp.get("Designation", "")): abort(404)      # only Associate Manager / Team Lead / Senior Team Lead
     month = request.args.get("month", "").strip()
     subs = load_subs(eid)
     label = "All time"
@@ -5741,11 +5755,13 @@ def admin_employee_plog(eid):
         except Exception: month = ""
         else: subs = [x for x in subs if str(m0) <= str(x["date"]) <= str(m1)]
     tph = process_rates()
-    lines, notes, agg = [], [], {}
+    lines, notes, agg, dates = [], [], {}, []
     tot_h = tot_n = tot_t = tot_c = 0.0; n_met = n_miss = 0; pcts = []
     for x in sorted(subs, key=lambda z: str(z["date"]), reverse=True):
         try: dname = dt.date.fromisoformat(str(x["date"])).strftime("%a")
         except ValueError: dname = ""
+        dates.append(dict(date=x["date"], day=dname, procs=", ".join(dict.fromkeys(p["name"] for p in x["procs"])), prod=x["prod"], non=x["non"], total=x["total"],
+                          tgt=x["tgt_total"], cnt=x["cnt_total"], state=x["tgt_state"], missed=x["tgt_miss"], pct=x["pct"], late=x["late"], subat=x["subat"]))
         for p in x["procs"]:
             rate = tph.get(p["name"], 0) or 0; tgt = p["hour"] * rate
             met = bool(rate) and p["count"] + 1e-9 >= tgt
@@ -5765,7 +5781,7 @@ def admin_employee_plog(eid):
         a["pct"] = round(a["count"] / a["target"] * 100) if a["target"] else None
         procsum.append(a)
     avg = ("%d%%" % round(sum(pcts) / len(pcts))) if pcts else "-"
-    return page(T_PLOG, title=emp["Name"] + " - Productivity Log", emp=emp, month=month, label=label, lines=lines, notes=notes, procsum=procsum,
+    return page(T_PLOG, title=emp["Name"] + " - Productivity Log", emp=emp, month=month, label=label, lines=lines, notes=notes, procsum=procsum, dates=dates,
                 n_days=len([x for x in subs if not x["off"]]), tot_h=tot_h, tot_n=tot_n, tot_t=tot_t, tot_c=tot_c, n_met=n_met, n_miss=n_miss, avg_pct=avg)
 
 @app.route("/admin/employee-info/<eid>/leave", methods=["POST"])
@@ -7201,6 +7217,7 @@ def employee_welcome():
 @app.route("/employee")
 @need("employee")
 def employee_home():
+    if hide_entry_pages(): return redirect("/employee/leave")      # Update236: no Daily entry page for Associate Manager / Team Lead / Senior Team Lead
     prefetch(*EMP_PAGE_SHEETS)          # cold cache: fetch all sheets together instead of one by one
     today = str(today_local())
     session["designation"] = find_designation(session["emp_id"], session["name"], session["band"])
@@ -7247,6 +7264,7 @@ def prod_months():
 def employee_productivity():
     """Productivity Info: this employee's submissions for the chosen month (current month by default; the previous month is also
     available from the month picker, with View / Edit / Delete on every entry). Only the employee's OWN entries are ever listed."""
+    if hide_entry_pages(): return redirect("/employee/leave")      # Update236: no Productivity Info page for Associate Manager / Team Lead / Senior Team Lead
     prefetch("Productivity log", "Processes", "Employees", "Settings", "Permissions", "Holidays")
     today = today_local()
     months = prod_months()
@@ -7791,7 +7809,7 @@ EMP_TOP = EMP_GREET_CSS + """<div class="head hero"><div class="welcome wflex g3
 VIEW_ONLY_CARD = """<div class="card"><h2 style="margin-top:0">Productivity &mdash; View Only</h2>
 <p class="mut">Your designation ({{session.designation}}) has <b>View Only</b> access to Productivity. Daily productivity entry is not required,
 no productivity % is calculated, and no missed-entry reminders are sent. Leave &amp; Permission works as usual.</p>
-<a class="btnl" href="/employee/leave">Leave &amp; Permission</a> <a class="btnl" href="/employee/productivity">Productivity Info</a></div>"""
+<a class="btnl" href="/employee/leave">Leave &amp; Permission</a></div>"""
 
 SUMMARY = """<div class="head ov-head"><div><h1>Overview</h1>
 <p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; the daily target of {{target|g}} hrs per present day (capped at 100%).</p></div>

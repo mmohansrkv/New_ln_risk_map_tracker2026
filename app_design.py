@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update238: (1) Associate Manager / Team Lead / Senior Team Lead (live Designation) get an "Employee Details" menu: Personal Details of ALL employees (search by ID / name, click a name to view / edit; same editable fields as the Admin form, Employee ID / Name / Designation / Office Email stay read-only; saved through the same save_employee_row; every change is logged in the Admin Notifications under the editor). Server-side 403 for everyone else. (2) Employee panel - the name / nickname above Logout is static 3D letters (flip-in, wave and sheen animations removed). Nothing else changed.
   * Update237: Team Logs > Productivity Log for Associate Manager / Team Lead / Senior Team Lead (live Designation): table of all employees (Employee ID, Name, Designation, Joining Date, Tracking From, Working Days, Entries, Missed, Attendance, Productivity - same figures as Admin > Employee Info > Productivity), month filter, search by Employee ID / Name / Process name (process search lists the matching records with target, completed, status and productivity %). Employee ID / Name opens the complete date-wise details (Date, Day, Processes Worked, Productive / Non-productive / Total hrs, Target Count, Completed Count, Target Status, Productivity %, Submitted At + process-wise rows). All read from the existing Productivity log; read-only. Other designations keep the previous Team Logs page.
   * Update236: (1) Admin > Productivity Log: clicking an employee's NAME opens that employee's complete Productivity Log (/admin/employee-info/<id>/productivity-log) - every date (all time by default, optional month filter) with Date / Process / Target count / Completed count / Achieved or Not Achieved / Productivity % / hours / submitted-at, a date-wise summary, a process-wise summary and non-productive time, all read from the same Productivity log data. Works for every employee. (2) Employees whose Designation is Associate Manager / Team Lead / Senior Team Lead (matched live) no longer have the Daily entry and Productivity Info pages: both menu items are hidden and the URLs redirect to Leave & Permission. Other employees are unchanged.
   * Update235: Admin > Employee Info > clicking the name of an employee whose Designation is Associate Manager / Team Lead / Senior Team Lead opens ONLY their detailed Productivity Log (/admin/employee-info/<id>/productivity-log): process-wise summary (days, hours, target count, completed count, Achieved / Not Achieved, productivity %), every daily process line with the same details, non-productive time, month filter. Read-only; no Daily Entry or Productivity Info sections. Other designations unchanged.
@@ -2516,10 +2517,10 @@ aside.emp{position:sticky;top:0;height:100vh;overflow-y:auto;align-self:flex-sta
 /* Update226: employee nickname (Profile Name, else full name) under the 3D avatar - letter-by-letter 3D flip-in, then a slow wave + gold sheen. Transform / opacity only. */
 .nm3d{display:inline-block;perspective:520px;font-size:1.22em;padding:2px 2px 7px;position:relative}
 .nm3d .w{display:inline-block;white-space:nowrap}
-.nm3d i{font-style:normal;display:inline-block;font-weight:900;letter-spacing:.5px;transform-origin:50% 100%;transform-style:preserve-3d;opacity:0;color:#f8fbff;
+.nm3d i{font-style:normal;display:inline-block;font-weight:900;letter-spacing:.5px;opacity:1;color:#f8fbff;
   text-shadow:0 1px 0 #dbeafe,0 2px 0 #bfdbfe,0 3px 0 #93c5fd,0 4px 0 #6d8fd6,0 7px 7px rgba(0,0,0,.5),0 0 10px rgba(224,242,254,.85),0 0 22px rgba(165,243,252,.5);
-  animation:nm3In .9s cubic-bezier(.2,.9,.25,1.25) forwards,nm3Wave 2.8s ease-in-out infinite;animation-delay:calc(var(--i)*85ms + .1s),calc(var(--i)*140ms + 1.3s)}
-.nm3d::after{content:"";position:absolute;top:0;bottom:0;left:-30%;width:26%;pointer-events:none;background:linear-gradient(100deg,transparent,rgba(255,255,255,.28),transparent);transform:skewX(-18deg);animation:nm3Sheen 3.6s ease-in-out 1.6s infinite}
+  animation:none}      /* Update238: static 3D letters - no animation */
+.nm3d::after{content:"";position:absolute;top:0;bottom:0;left:-30%;width:26%;pointer-events:none;background:linear-gradient(100deg,transparent,rgba(255,255,255,.28),transparent);transform:skewX(-18deg);animation:none;display:none}      /* Update238: no sheen */
 @keyframes nm3In{0%{opacity:0;transform:translateY(20px) rotateX(-110deg) scale(.5)}60%{opacity:1;transform:translateY(-4px) rotateX(14deg) scale(1.15)}100%{opacity:1;transform:none}}
 @keyframes nm3Wave{0%,100%{transform:translateY(0) rotateY(-16deg)}50%{transform:translateY(-3px) rotateY(16deg)}}
 @keyframes nm3Sheen{0%{left:-30%}55%,100%{left:125%}}
@@ -4006,6 +4007,10 @@ def page(body, title="Productivity Tracker", **ctx):
             if audit_active(audit_access(session.get("emp_id", ""))): items.append(("/employee/audit", "Audit Log"))
         except Exception:
             pass
+        try:      # Update238: Associate Manager / Team Lead / Senior Team Lead - Personal Details of all employees
+            if pd_user(): items.append(("/employee/people", "Employee Details"))
+        except Exception as ex_:
+            print("Employee Details menu check failed:", repr(ex_))
         try:      # Update234: Managers / Team Leads (by Designation) get the read-only Team Logs
             if team_log_access(): items.append(("/employee/team-logs", "Team Logs"))
         except Exception as ex_:
@@ -10269,6 +10274,67 @@ TEAM_MISSED = TEAM_TABS + """<div class="card"><h2>Missed Entries Log &mdash; al
 <div style="overflow-x:auto"><table><tr><th>Date</th><th>Employee ID &middot; Name</th><th>Missed Entries</th></tr>
 {% for x in summary %}<tr><td>{{x.dates|join(', ')}}</td><td>{{x.id}} &middot; {{x.name}}</td><td><b>{{x.dates|length}}</b></td></tr>
 {% else %}<tr><td colspan="3">No missed entries for this period.</td></tr>{% endfor %}</table></div></div>"""
+
+def pd_user():
+    """Update238: Associate Manager / Team Lead / Senior Team Lead (live Designation, active login) may view + edit the Personal Details of ALL employees."""
+    try:
+        if session.get("role") != "employee": return False
+        me = my_emp_row()
+        return bool(me and desig_view_only(me.get("Designation", "")) and not emp_locked(me))
+    except Exception:
+        return False
+
+def pd_need(f):
+    @wraps(f)
+    def w(*a, **k):
+        if not pd_user(): abort(403)
+        return f(*a, **k)
+    return w
+
+PEOPLE_LIST = """<div class="head"><div><h1>Employee Details</h1><p class="mut">Personal Details of all employees &mdash; click a name to view / edit.</p></div></div>
+<form class="grid no-print" method="get"><input name="q" placeholder="Search ID / name" value="{{q}}"><button class="primary">Search</button><a href="/employee/people">Reset</a></form>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Designation</th><th>Gender</th><th>Address Line_1</th><th>Address Line_2</th><th>City</th><th>PIN</th><th>Phone</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID</th><th>Profile Name</th><th>Last updated</th><th></th></tr>
+{% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td><a href="/employee/people/{{e['_row']}}"><b>{{e['Name']}}</b></a></td><td>{{e['Designation'] or '-'}}</td><td>{{e['Gender'] or '-'}}</td><td>{{e['Address Line_1'] or '-'}}</td><td>{{e['Address Line_2'] or '-'}}</td>
+<td>{{e['City'] or '-'}}</td><td>{{e['PIN'] or '-'}}</td><td>{{e['Phone Number'] or '-'}}</td><td>{{e['Emergency no'] or '-'}}</td><td>{{e['Personal Email ID'] or '-'}}</td><td>{{e['Email'] or '-'}}</td><td>{{e['Profile Name'] or '-'}}</td>
+<td>{{(e['Profile updated at'] or '-')|t12}}</td><td class="act"><a href="/employee/people/{{e['_row']}}">Edit</a></td></tr>
+{% else %}<tr><td colspan="15">No employees found.</td></tr>{% endfor %}</table></div>"""
+
+PEOPLE_EDIT = """<div class="card"><h2>Personal details &mdash; {{emp['Name']}}</h2>
+<form method="post" class="grid">
+<label>Emp ID<input value="{{emp['Employee ID']}}" readonly></label>
+<label>Name<input value="{{emp['Name']}}" readonly></label>
+<label>Designation<input value="{{emp['Designation']}}" readonly></label>
+{% for f in fields %}{% if f=='Gender' %}<label>Gender<select name="Gender"><option value="">Select</option>{% for g in ['Male','Female'] %}<option {{'selected' if (emp.get('Gender') or '')|lower==g|lower else ''}}>{{g}}</option>{% endfor %}</select></label>{% else %}<label>{{f}}<input {% if f.endswith('Email ID') %}type="email" {% endif %}name="{{f}}" value="{{emp[f]}}"></label>{% endif %}{% endfor %}
+<label>Office Email ID<input value="{{emp['Email']}}" readonly></label>
+<button class="primary sm">Save</button> <a class="back sm" href="/employee/people">Back</a></form>
+<p class="mut">Employee ID, name, designation and Office Email ID (login email) are set by the Admin. Last updated: {{(emp['Profile updated at'] or '-')|t12}}</p></div>"""
+
+@app.route("/employee/people")
+@need("employee")
+@pd_need
+def employee_people():
+    prefetch("Employees")
+    q = request.args.get("q", "").strip(); ql = q.lower()
+    emps = sorted((e for e in rows("Employees") if not ql or ql in str(e["Employee ID"]).lower() or ql in str(e["Name"]).lower()), key=lambda e: str(e["Name"]).lower())
+    return page(PEOPLE_LIST, title="Employee Details", emps=emps, q=q)
+
+@app.route("/employee/people/<int:row>", methods=["GET", "POST"])
+@need("employee")
+@pd_need
+def employee_people_edit(row):
+    emp = next((e for e in rows("Employees") if e["_row"] == row), None)
+    if not emp: abort(404)
+    if request.method == "POST":
+        changes = {f: request.form.get(f, "").strip() for f in EDITABLE_PERSONAL}
+        lines = [field_change(f.replace("_", " "), emp.get(f, ""), changes[f]) for f in EDITABLE_PERSONAL if changes[f] != str(emp.get(f, "") or "").strip()]
+        ok = save_employee_row(row, emp["Employee ID"], changes)
+        if ok:
+            if lines: log_change(SEC_PERSONAL, "Updated", "Edited %s (%s): %s" % (emp["Name"], emp["Employee ID"], "; ".join(lines)))
+            flash("Personal details updated.")
+        else:
+            flash("Could not save - the employee list changed. Please reopen and try again.")
+        return redirect("/employee/people")
+    return page(PEOPLE_EDIT, title="Personal details", emp=emp, fields=EDITABLE_PERSONAL)
 
 def plog_user():
     """Update237: Associate Manager / Team Lead / Senior Team Lead (live Designation) get the new Team Logs - Productivity Log."""

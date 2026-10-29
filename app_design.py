@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update232: Employee panel name under the avatar - bolder gold 3D letters (extruded depth + glow), springy letter-by-letter flip-in, continuous 3D swing and a moving light sheen. Layout unchanged.
   * Update230b: FASTER page after Employee login. (1) The one-time "Welcome" overlay (Update227) is no longer shown - it covered the page for about 4 seconds. (2) While the login page is open, every sheet the Employee page needs is read in the background (not only Employees), so the Employee page opens from memory right after sign-in instead of waiting for 8 Google Sheets reads. (3) Single-flight reads: the page no longer asks Google again for a sheet that is already being read. Password check, lock check, session handling and all tracking are unchanged.
   * Update230: Employee LOGIN page - the nickname under the 3D character is plain static text again (3D effects and letter animation removed; simple fade-in only). Layout and other animations unchanged.
   * Update229: Login nickname - bigger, clearer solid 3D letters (extruded depth, cyan glow, springy letter-by-letter flip-in, continuous 3D swing); the small "Employee system" caption fades out while a nickname is shown so they never overlap. Layout unchanged.
@@ -2508,15 +2509,16 @@ aside.emp{position:sticky;top:0;height:100vh;overflow-y:auto;align-self:flex-sta
 .prof .av3d{width:84px;height:84px;margin:0 0 6px}
 .prof-name{font-size:14.5px;font-weight:600;color:#fff;letter-spacing:.2px;text-shadow:0 2px 6px #0006;word-break:break-word;line-height:1.25}
 /* Update226: employee nickname (Profile Name, else full name) under the 3D avatar - letter-by-letter 3D flip-in, then a slow wave + gold sheen. Transform / opacity only. */
-.nm3d{display:inline-block;perspective:520px}
+.nm3d{display:inline-block;perspective:520px;font-size:1.22em;padding:2px 2px 7px;position:relative}
 .nm3d .w{display:inline-block;white-space:nowrap}
-.nm3d i{font-style:normal;display:inline-block;font-weight:800;letter-spacing:.4px;transform-origin:50% 100%;opacity:0;
-  background:linear-gradient(180deg,#ffffff 0%,#fff1b8 45%,#f5b83a 100%);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;
-  filter:drop-shadow(0 1px 0 #92400e) drop-shadow(0 2px 0 #6b3306) drop-shadow(0 4px 5px #0009);
-  animation:nm3In .75s cubic-bezier(.2,.9,.25,1.15) forwards,nm3Wave 4s ease-in-out infinite;animation-delay:calc(var(--i)*60ms + .15s),calc(var(--i)*110ms + 1.4s)}
-@keyframes nm3In{0%{opacity:0;transform:translateY(16px) rotateX(-95deg) scale(.7)}60%{opacity:1}100%{opacity:1;transform:none}}
-@keyframes nm3Wave{0%,100%{transform:translateY(0) rotateY(0)}50%{transform:translateY(-2px) rotateY(14deg)}}
-@media(prefers-reduced-motion:reduce){.nm3d i{animation:none;opacity:1}}
+.nm3d i{font-style:normal;display:inline-block;font-weight:900;letter-spacing:.5px;transform-origin:50% 100%;transform-style:preserve-3d;opacity:0;color:#ffe9a8;
+  text-shadow:0 1px 0 #f5b83a,0 2px 0 #d9962a,0 3px 0 #b87420,0 4px 0 #8a5214,0 5px 0 #6b3a0c,0 8px 8px rgba(0,0,0,.55),0 0 12px rgba(255,200,80,.75);
+  animation:nm3In .9s cubic-bezier(.2,.9,.25,1.25) forwards,nm3Wave 2.8s ease-in-out infinite;animation-delay:calc(var(--i)*85ms + .1s),calc(var(--i)*140ms + 1.3s)}
+.nm3d::after{content:"";position:absolute;top:0;bottom:0;left:-30%;width:26%;pointer-events:none;background:linear-gradient(100deg,transparent,rgba(255,255,255,.28),transparent);transform:skewX(-18deg);animation:nm3Sheen 3.6s ease-in-out 1.6s infinite}
+@keyframes nm3In{0%{opacity:0;transform:translateY(20px) rotateX(-110deg) scale(.5)}60%{opacity:1;transform:translateY(-4px) rotateX(14deg) scale(1.15)}100%{opacity:1;transform:none}}
+@keyframes nm3Wave{0%,100%{transform:translateY(0) rotateY(-16deg)}50%{transform:translateY(-3px) rotateY(16deg)}}
+@keyframes nm3Sheen{0%{left:-30%}55%,100%{left:125%}}
+@media(prefers-reduced-motion:reduce){.nm3d i{animation:none;opacity:1}.nm3d::after{display:none}}
 .prof-sub{font-size:12px;color:#9aa3c7;line-height:1.4;margin-top:2px;word-break:break-word}
 .prof-out{display:block;text-align:center;padding:6px 18px;color:#fff;background:#2b3560;border-radius:7px;font-size:13px;transition:background .2s ease,transform .15s ease}
 .prof-out:hover{background:#e5484d;transform:translateY(-1px)}@media print{.prof{display:none!important}}

@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update234: Managers & Team Leads (Designation Associate Manager / Manager / Team Lead / Senior Team Lead, matched live). (1) Admin > Employee Info has a new tab "Managers & Leads": each of these employees with month entries, productivity %, missed entries + dates and links to their Productivity Log and Missed Entries Log. (2) When they log in, their panel gets a read-only "Team Logs" menu: Productivity Log and Missed Entries Log of all employees (month + search filters; no edit / delete / e-mail actions). Other employees get 403 on those URLs and see no menu item. Nothing else changed.
   * Update233: (1) Employee LOGIN page - NO name / nickname is shown any more (the display, its script and the name returned by /login-char are removed; the lookup now returns only m / f / n for the character, so the page and the server stay light). The old "Employee system" caption stays as before. (2) Employee panel - the name above the Logout button keeps the 3D letter animation, now in LIGHT colours (white / pale blue letters with depth and glow). Nothing else changed.
   * Update232: Employee panel name under the avatar - bolder gold 3D letters (extruded depth + glow), springy letter-by-letter flip-in, continuous 3D swing and a moving light sheen. Layout unchanged.
   * Update230b: FASTER page after Employee login. (1) The one-time "Welcome" overlay (Update227) is no longer shown - it covered the page for about 4 seconds. (2) While the login page is open, every sheet the Employee page needs is read in the background (not only Employees), so the Employee page opens from memory right after sign-in instead of waiting for 8 Google Sheets reads. (3) Single-flight reads: the page no longer asks Google again for a sheet that is already being read. Password check, lock check, session handling and all tracking are unchanged.
@@ -3996,6 +3997,10 @@ def page(body, title="Productivity Tracker", **ctx):
             if audit_active(audit_access(session.get("emp_id", ""))): items.append(("/employee/audit", "Audit Log"))
         except Exception:
             pass
+        try:      # Update234: Managers / Team Leads (by Designation) get the read-only Team Logs
+            if team_log_access(): items.append(("/employee/team-logs", "Team Logs"))
+        except Exception as ex_:
+            print("Team Logs menu check failed:", repr(ex_))
         try:      # Admin-controlled: Mahizhchi appears only while it is published AND shared with this employee
             if mz_active(session.get("emp_id", "")): items.append(("/employee/mahizhchi", MZ_TITLE))
         except Exception as e:
@@ -5348,6 +5353,7 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <div class="tabs no-print"><a href="/admin/employee-info" class="{{'on' if view=='employees' else ''}}">Employees</a>
 <a href="/admin/employee-info?view=access" class="{{'on' if view=='access' else ''}}">Employee Login Access</a>
 <a href="/admin/employee-info?view=productivity" class="{{'on' if view=='productivity' else ''}}">Productivity</a>
+<a href="/admin/employee-info?view=leads" class="{{'on' if view=='leads' else ''}}">Managers &amp; Leads</a>
 <a href="/admin/employee-info?view=notifications" class="{{'on' if view=='notifications' else ''}}">Notifications{% if new_count %} ({{new_count}} new){% endif %}</a></div>
 {% if view=='access' %}
 <div class="card no-print" id="addlogin"><h2 style="margin-top:0">Add employee login</h2>
@@ -5383,6 +5389,15 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 {% elif p.r.vo %}<td colspan="5" class="mut">View only (no productivity entry for this designation)</td>
 {% else %}<td>{{p.r.wd}}</td><td>{{p.entries}}</td><td>{{p.missed}}</td><td>{{p.r.att}}%</td><td><b>{{p.r.pct}}%</b></td>{% endif %}</tr>
 {% else %}<tr><td colspan="10">No employees found.</td></tr>{% endfor %}</table>
+{% elif view=='leads' %}
+<form class="grid no-print" method="get"><input type="hidden" name="view" value="leads"><input type="month" name="month" value="{{month}}"><button class="primary">Show</button><a href="/admin/employee-info?view=leads">This month</a></form>
+<p class="mut">{{label}} &middot; Associate Managers, Managers, Team Leads and Senior Team Leads: their own Productivity Log and Missed Entries Log. These employees also see the read-only <b>Team Logs</b> (Productivity Log + Missed Entries Log of all employees) in their own panel when they log in. Access follows the Designation automatically.</p>
+<table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Entries</th><th>Productivity</th><th>Missed entries</th><th>Missed dates</th><th>Logs</th></tr>
+{% for p in lrows %}<tr><td>{{p.e['Employee ID']}}</td><td><b>{{p.e['Name']}}</b></td><td>{{p.e['Designation'] or '-'}}</td>
+{% if not p.active %}<td colspan="3" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>{% elif p.vo %}<td colspan="3" class="mut">View only</td>{% else %}<td>{{p.entries}}</td><td><b>{{p.pct}}%</b></td><td>{{p.missed|length}}</td>{% endif %}
+<td>{{p.missed|join(', ') or '-'}}</td>
+<td><a href="/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}">Productivity Log</a> &middot; <a href="/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=missed&amp;month={{month}}">Missed Entries Log</a></td></tr>
+{% else %}<tr><td colspan="8">No employee with the designation Associate Manager, Manager, Team Lead or Senior Team Lead.</td></tr>{% endfor %}</table>
 {% elif view=='notifications' %}
 <table><tr><th>Employee Name</th><th>Date &amp; Time</th><th>Section / Log</th><th>Action</th><th>Details</th><th>Summary</th></tr>
 {% for r in log %}<tr{% if r.new %} style="font-weight:600"{% endif %}>
@@ -5508,6 +5523,8 @@ def admin_employee_info():
                     ad=session.pop("_ad", {}), today=str(today_local()))
     if request.args.get("view") == "productivity":      # Update224: Productivity section of the employee log (Admin only)
         return admin_productivity_overview(emps, q)
+    if request.args.get("view") == "leads":             # Update234: Managers & Leads - their Productivity Log + Missed Entries Log (Admin only)
+        return admin_leads_overview(emps, q)
     # Employees with unseen login/logout notifications get their name highlighted in red.
     unseen_ids = {str(r["Employee ID"]) for r in rows("Notifications") if str(r.get("Seen", "")).strip() != "Yes"}
     for e in emps: e["flag"] = str(e["Employee ID"]) in unseen_ids
@@ -10102,6 +10119,89 @@ def missed_scope(month, subs, leaves):
 def mail_history(eid=None, limit=40):
     out = [r for r in rows(MISSED_LOG) if str(r.get("Employee ID", "")) != "__RUN__" and str(r.get("Mode", "")) in ("Manual", "Auto") and (eid is None or _key(r.get("Employee ID", "")) == _key(eid))]
     return sorted(out, key=lambda r: str(r.get("Sent at", "")), reverse=True)[:limit]
+
+# ---------------------------------------------------------------- Update234: Managers & Team Leads - logs
+# Designations: Associate Manager, Manager, Team Lead, Senior Team Lead (same matching as the summary e-mail). Admin sees them under Employee Info > Managers & Leads;
+# these employees get a read-only "Team Logs" menu (Productivity Log + Missed Entries Log of all employees) in their own panel. Access follows the Designation live.
+def is_lead_emp(e): return is_summary_recipient_designation(e.get("Designation", ""))
+
+def team_log_access():
+    try:
+        if session.get("role") != "employee": return False
+        me = my_emp_row()
+        return is_lead_emp(me) and not emp_locked(me)
+    except Exception:
+        return False
+
+def team_need(f):
+    @wraps(f)
+    def w(*a, **k):
+        if not team_log_access(): abort(403)
+        return f(*a, **k)
+    return w
+
+def admin_leads_overview(emps, q):
+    today = today_local(); month = request.args.get("month") or today.strftime("%Y-%m")
+    m0, m1 = month_range(month)
+    leads = [e for e in emps if is_lead_emp(e)]
+    subs, leaves = load_subs(), rows("Leave")
+    out = []
+    for e in leads:
+        d = emp_prod_month(e, subs, leaves, m0, m1)
+        r = d["r"]
+        out.append(dict(e=e, jd=d["jd"], active=d["active"], vo=bool(r.get("vo")), entries=d["entries"], pct=r.get("pct", 0), missed=sorted(d["missed"])))
+    return page(EMP_LIST, title="Employee Info", view="leads", emps=emps, q=request.args.get("q", ""), lrows=out,
+                month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), new_count=sum(1 for r in update_log() if r["new"]))
+
+TEAM_TABS = """<div class="tabs no-print"><a href="/employee/team-logs" class="{{'on' if tl=='prod' else ''}}">Productivity Log</a><a href="/employee/team-logs/missed" class="{{'on' if tl=='missed' else ''}}">Missed Entries Log</a></div>"""
+TEAM_PROD = TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all employees</h2>
+<p class="mut">{{label}} &middot; read-only. Weekly-off / holiday entries are shown but not counted.</p>
+<form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><input name="emp" placeholder="Employee ID / name" value="{{emp}}"><button class="primary">Show</button><a href="/employee/team-logs">Reset</a></form>
+<div style="overflow-x:auto"><table><tr><th>Date</th><th>Employee</th><th>Designation</th><th>Productive hrs</th><th>Non-productive hrs</th><th>Productivity %</th><th>Target</th></tr>
+{% for s in subs %}<tr><td>{{s.date}}</td><td>{{s.emp_id}} &middot; {{s.emp_name}}</td><td>{{s.designation or '-'}}</td><td>{{'%.2f'|format(s.prod)}}</td><td>{{'%.2f'|format(s.non)}}</td><td>{% if s.pct is none %}-{% else %}{{s.pct}}%{% endif %}</td>
+<td>{{ {'met':'Met','miss':'Missed','none':'-','off':'Off'}[s.tgt_state] }}</td></tr>
+{% else %}<tr><td colspan="7">No entries for this period.</td></tr>{% endfor %}</table></div>
+{% if more %}<p class="mut">Showing the latest {{subs|length}} of {{total}} entries - narrow the month or search for an employee.</p>{% endif %}</div>"""
+TEAM_MISSED = TEAM_TABS + """<div class="card"><h2>Missed Entries Log &mdash; all employees</h2>
+<p class="mut">{{label}} &middot; working days with no productivity entry and no leave (weekly offs, holidays and dates before joining excluded). Today is not included. Read-only.</p>
+<form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><input name="emp" placeholder="Employee ID / name" value="{{emp}}"><button class="primary">Show</button><a href="/employee/team-logs/missed">Reset</a></form>
+<div class="kpis"><div class="kpi"><span>Missed entries</span><b>{{total}}</b></div><div class="kpi"><span>Employees affected</span><b>{{summary|length}}</b></div></div>
+<div style="overflow-x:auto"><table><tr><th>Date</th><th>Employee ID &middot; Name</th><th>Missed Entries</th></tr>
+{% for x in summary %}<tr><td>{{x.dates|join(', ')}}</td><td>{{x.id}} &middot; {{x.name}}</td><td><b>{{x.dates|length}}</b></td></tr>
+{% else %}<tr><td colspan="3">No missed entries for this period.</td></tr>{% endfor %}</table></div></div>"""
+
+@app.route("/employee/team-logs")
+@need("employee")
+@team_need
+def employee_team_prod():
+    prefetch("Employees", "Productivity log", "Leave", "Holidays", "Processes", "Permissions")
+    month = request.args.get("month") or today_local().strftime("%Y-%m")
+    q = request.args.get("emp", "").strip().lower()
+    m0, m1 = month_range(month)
+    subs = [x for x in load_subs() if str(m0) <= str(x["date"]) <= str(m1) and (not q or q in str(x["emp_id"]).lower() or q in str(x["emp_name"]).lower())]
+    total = len(subs); subs = subs[:600]
+    return page(TEAM_PROD, title="Team Logs - Productivity Log", tl="prod", month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), emp=request.args.get("emp", ""),
+                subs=subs, total=total, more=total > len(subs))
+
+@app.route("/employee/team-logs/missed")
+@need("employee")
+@team_need
+def employee_team_missed():
+    prefetch("Employees", "Productivity log", "Leave", "Holidays")
+    month = request.args.get("month") or today_local().strftime("%Y-%m")
+    q = request.args.get("emp", "").strip().lower()
+    subs, leaves, emps = load_subs(), rows("Leave"), rows("Employees")
+    start, end, label = missed_scope(month, subs, leaves)
+    summary, total = [], 0
+    for e in emps:
+        if q and q not in str(e["Employee ID"]).lower() and q not in str(e["Name"]).lower(): continue
+        k = _key(e["Employee ID"])
+        dates = missing_dates(e["Employee ID"], [x for x in subs if _key(x["emp_id"]) == k], [l for l in leaves if _key(l["Employee ID"]) == k], start, end, fmt="%Y-%m-%d")
+        if not dates: continue
+        total += len(dates)
+        summary.append(dict(id=e["Employee ID"], name=e["Name"], dates=sorted(dates, reverse=True)))
+    summary.sort(key=lambda x: str(x["name"]).lower())
+    return page(TEAM_MISSED, title="Team Logs - Missed Entries Log", tl="missed", month=month, label=label, emp=request.args.get("emp", ""), summary=summary, total=total)
 
 @app.route("/admin/missed-log")
 @need("admin")

@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update227: Employee panel - ONE-TIME animated welcome right after login: "Welcome, <nickname>!" (saved Profile Name, else full name) with letter-by-letter 3D flip-in, glowing letters, pulsing light and a light sweep, then it fades out by itself (~4 s; click / Enter / Esc closes it). Pure CSS (transform / opacity), no libraries, shown on the first page only; layout and functionality unchanged.
   * Update226: Employee panel - after login the nickname (saved Profile Name, else full name) under the 3D avatar is shown with animated 3D text: letters flip in one by one, then a gentle wave with a gold gradient and depth shadow (CSS transform / opacity only; still text for reduced-motion users). Layout and functionality unchanged.
   * Update225b: AUTOMATIC Missed Entries SUMMARY e-mail to every Manager / Associate Manager / Senior Team Lead / Team Lead (by Designation; sent with the daily automatic run, once per day per recipient, logged as Mode "Manager Summary"): one table of all employees who still have missed entries - Date(s), Employee ID . Name, Missed Entries - plus totals. Weekly offs, holidays, approved leave, dates before the joining date and already-submitted dates are excluded (live re-check before sending). Nothing is sent when nobody has missed entries. Employee reminder e-mails unchanged.
   * Update225: Employee login - the employee's display name is shown directly below the 3D character: the saved "Profile Name" (new field in Personal details, optional, max 40 chars, Employee + Admin can edit; new sheet column added automatically), or the full Name when it is blank. It follows the typed username (Employee ID / e-mail) and changes when a different username is entered. /login-char returns only the display name + m/f/n (no ID, e-mail or other details), still rate-limited; name is written with textContent. Layout, animations and login checks unchanged.
@@ -3780,6 +3781,7 @@ setInterval(function(){location.reload()},120000);
  },true);
 })();
 </script>{% endif %}
+{% if welcome_html %}{{welcome_html|safe}}{% endif %}
 </body></html>"""
 
 # ---------------------------------------------------------------- Update209: Theme & Layout (Admin controls the look of every login page and panel)
@@ -3918,6 +3920,46 @@ def render_fast(src, **context):
     app.update_template_context(context)
     return _compiled(src).render(context)
 
+WELCOME_CSS = """<style id="wlc-css">
+.wlc{position:fixed;inset:0;z-index:100000;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;cursor:pointer;overflow:hidden;
+ background:radial-gradient(ellipse at 50% 42%,rgba(79,70,229,.94),rgba(17,14,48,.98) 72%);animation:wlcIn .45s ease both,wlcOut .7s ease 3.6s forwards;perspective:800px}
+.wlc-glow{position:absolute;left:50%;top:46%;width:min(80vw,720px);aspect-ratio:2/1;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;
+ background:radial-gradient(closest-side,rgba(103,232,249,.38),rgba(129,140,248,.22) 55%,transparent);animation:wlcPulse 2.6s ease-in-out infinite}
+.wlc-sweep{position:absolute;top:0;bottom:0;left:-40%;width:35%;pointer-events:none;background:linear-gradient(100deg,transparent,rgba(255,255,255,.20),transparent);transform:skewX(-18deg);animation:wlcSweep 1.8s ease-in-out .9s 2 both}
+.wlc-t{position:relative;display:block;max-width:96vw}
+.wlc-l1{font-size:clamp(18px,3.2vw,34px);letter-spacing:.35em;text-transform:uppercase;margin-bottom:.35em}
+.wlc-l2{font-size:clamp(34px,8vw,92px);line-height:1.08}
+.wlc-t .w{display:inline-block;white-space:nowrap;margin:0 .12em}
+.wlc-t i{font-style:normal;display:inline-block;font-weight:800;opacity:0;transform-origin:50% 100%;
+ background:linear-gradient(180deg,#fff 0%,#cffafe 40%,#a5b4fc 100%);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;
+ filter:drop-shadow(0 2px 0 #4338ca) drop-shadow(0 4px 0 #312e81) drop-shadow(0 0 14px rgba(103,232,249,.75)) drop-shadow(0 0 30px rgba(129,140,248,.6));
+ animation:wlcLet .85s cubic-bezier(.2,.9,.25,1.2) both,wlcBob 3s ease-in-out infinite;animation-delay:calc(var(--i)*70ms + .35s),calc(var(--i)*90ms + 1.8s)}
+.wlc-l1 i{font-weight:600}
+@keyframes wlcIn{from{opacity:0}to{opacity:1}}
+@keyframes wlcOut{to{opacity:0;visibility:hidden}}
+@keyframes wlcPulse{0%,100%{opacity:.65;transform:translate(-50%,-50%) scale(.94)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.06)}}
+@keyframes wlcSweep{from{left:-40%}to{left:120%}}
+@keyframes wlcLet{0%{opacity:0;transform:translateY(34px) rotateX(-100deg) scale(.6)}65%{opacity:1}100%{opacity:1;transform:none}}
+@keyframes wlcBob{0%,100%{transform:translateY(0) rotateY(0)}50%{transform:translateY(-4px) rotateY(10deg)}}
+@media(prefers-reduced-motion:reduce){.wlc{animation:wlcIn .2s ease both,wlcOut .4s ease 2s forwards}.wlc-glow,.wlc-sweep{animation:none}.wlc-t i{animation:none;opacity:1}}
+</style>"""
+
+def welcome_overlay_html(name):
+    """Update227: one-time animated 'Welcome, <nickname>!' overlay (pure CSS, transform / opacity only, auto-hides after ~4 s, click / key / Esc closes it). Display only."""
+    import html as _hh
+    name = str(name or "").strip()[:40]
+    if not name: return ""
+    def _line(text, start):
+        i, w = start, []
+        for word in text.split():
+            w.append('<span class="w">' + "".join(f'<i style="--i:{i + k}">{_hh.escape(c)}</i>' for k, c in enumerate(word)) + '</span>'); i += len(word) + 1
+        return "".join(w), i
+    l1, n1 = _line("Welcome,", 0); l2, _n = _line(name + "!", n1)
+    return (WELCOME_CSS + f'<div class="wlc" id="wlc" role="status" aria-live="polite" aria-label="Welcome, {_hh.escape(name)}!"><div class="wlc-glow"></div><div class="wlc-sweep"></div>'
+            f'<span class="wlc-t" aria-hidden="true"><span class="wlc-t wlc-l1">{l1}</span><span class="wlc-t wlc-l2">{l2}</span></span></div>'
+            '<script>(function(){var w=document.getElementById("wlc");if(!w)return;function x(){if(w&&w.parentNode){w.parentNode.removeChild(w);var c=document.getElementById("wlc-css");if(c)c.parentNode.removeChild(c);}w=null}'
+            'w.addEventListener("animationend",function(e){if(e.animationName==="wlcOut")x()});w.addEventListener("click",x);addEventListener("keydown",function(e){if(e.key==="Escape"||e.key==="Enter")x()},{once:true});setTimeout(x,5200)})();</script>')
+
 def page(body, title="Productivity Tracker", **ctx):
     ctx["title"] = title
     p = request.path
@@ -3980,6 +4022,10 @@ def page(body, title="Productivity Tracker", **ctx):
                 _w.append('<span class="w">' + "".join(_l) + '</span>')
                 _i += 1
             side_name_html = f'<span class="nm3d" role="text" aria-label="{_hh.escape(side_name)}">' + " ".join(_w) + '</span>'
+    welcome_html = ""
+    if session.get("role") == "employee" and not ctx.get("bare") and session.pop("welcome", None):      # Update227: shown once, right after login
+        try: welcome_html = welcome_overlay_html(side_name)
+        except Exception as ex: print("welcome overlay error:", repr(ex))
     att_json, hol_json, prm_json = "", "{}", "{}"              # Update158: attendance for the sidebar calendar (employees only)
     if session.get("role") == "employee" and not ctx.get("bare"):
         try:
@@ -3989,7 +4035,7 @@ def page(body, title="Productivity Tracker", **ctx):
             prm_json = _json.dumps(employee_perm_map(session.get("emp_id", "")), separators=(",", ":"))
         except Exception as ex: print("attendance calendar error:", repr(ex))
     return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar, side_name=side_name, side_name_html=side_name_html, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, srv_today=str(today_local()), theme_css=_theme_css())
+                                  side_avatar=side_avatar, side_name=side_name, side_name_html=side_name_html, welcome_html=welcome_html, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, srv_today=str(today_local()), theme_css=_theme_css())
 
 
 LOGIN_CLASSIC = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i><i></i><i></i></div>
@@ -5701,7 +5747,7 @@ def employee_login():
                 track_logout(auto=True, reason="New login")      # closes a previous session in this browser, if any
                 session.clear()
                 session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"],
-                               designation=str(e.get("Designation", "")))
+                               designation=str(e.get("Designation", "")), welcome=1)      # Update227: one-time animated welcome on the first page after login
                 track_login(session["emp_id"], session["name"], session["band"])
                 _bg(warm_employee_cache)                  # dashboard data loads while the welcome animation plays
                 resp = redirect("/employee")                  # Update202: straight to the Employee Panel (no welcome page)
@@ -11038,7 +11084,7 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
  var ed=document.getElementById('mn-ed'), bar=document.getElementById('mn-tb'), rich=document.getElementById('mn-rich'),
      sizeSel=document.getElementById('mn-size'), colorIn=document.getElementById('mn-color'), saved=null, pendingPx=16, clean='', tmr=null, seq=0;
  var PH='<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>';
- function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
+ function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
  function paint(){
   var v={subject:esc(sub.value.trim())||'Your subject appears here', message:(hasText()&&clean)?clean:PH};
   frame.srcdoc=T.replace(/[{][{](\w+)[}][}]/g,function(m,k){return (k in v)?v[k]:m;});}

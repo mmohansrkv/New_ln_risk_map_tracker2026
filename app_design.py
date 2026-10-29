@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update244: Employee Panel menu / access - Team Logs (menu + all /employee/team-logs routes) is now limited to Associate Manager / Team Lead / Senior Team Lead (live Designation); it was also open to plain Manager. Employee Details, Personal details, Leave & Permission and the Calendar already show for these designations; every other designation unchanged.
   * Update243: Associate Manager / Team Lead / Senior Team Lead ONLY (live Designation, same test as the hidden Daily entry): Team Logs (Attendance column removed), Employee Details, Personal Details, Leave & Permission (Status columns removed) and the sidebar Employee Calendar no longer show Present / Absent / Leave / Permission status; the Calendar shows declared Holidays only (no Present / Absent / Leave / Half day / Weekly off marks, no counts row, no permission mark). Every other designation and all data, routes and calculations are unchanged.
   * Update242: Employee login page - the two characters now animate: eyes open / close naturally (random single and occasional double blinks) on BOTH pictures, the left character's thumbs-up hand wiggles, the right (clipboard) character's raised fist waves and the hand holding the clipboard adjusts its grip. CSS layers + one tiny script, no new images / libraries; login form, lookup and every route unchanged; reduced-motion users get still pictures.
   * Update241: Employee login page - for Associate Manager / Team Lead / Senior Team Lead (recognised from the typed username, same lookup as the character) the server picture on the right is replaced by the supplied clipboard picture (/char/tl.webp) with 3D depth (shadow layer behind, pointer parallax), 3D sway, floating, breathing, light sweep, aura and floor ring. Login form / logic and every other designation's login page unchanged.
@@ -10339,7 +10340,7 @@ def team_log_access():
     try:
         if session.get("role") != "employee": return False
         me = my_emp_row()
-        return is_lead_emp(me) and not emp_locked(me)
+        return bool(me and desig_view_only(me.get("Designation", "")) and not emp_locked(me))      # Update244: Associate Manager / Team Lead / Senior Team Lead ONLY (plain Manager no longer gets Team Logs)
     except Exception:
         return False
 

@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update230b: FASTER page after Employee login. (1) The one-time "Welcome" overlay (Update227) is no longer shown - it covered the page for about 4 seconds. (2) While the login page is open, every sheet the Employee page needs is read in the background (not only Employees), so the Employee page opens from memory right after sign-in instead of waiting for 8 Google Sheets reads. (3) Single-flight reads: the page no longer asks Google again for a sheet that is already being read. Password check, lock check, session handling and all tracking are unchanged.
   * Update230: Employee LOGIN page - the nickname under the 3D character is plain static text again (3D effects and letter animation removed; simple fade-in only). Layout and other animations unchanged.
   * Update229: Login nickname - bigger, clearer solid 3D letters (extruded depth, cyan glow, springy letter-by-letter flip-in, continuous 3D swing); the small "Employee system" caption fades out while a nickname is shown so they never overlap. Layout unchanged.
   * Update228: Employee LOGIN page - the nickname under the 3D character now appears letter by letter with a 3D flip-in, glowing cyan / violet letters, a pulsing light behind it and a gentle wave (script builds the letters with textContent; CSS transform / opacity only). Layout unchanged.
@@ -971,12 +972,19 @@ def _prewarm_employees():
     try:
         with _rows_cache_lock: c = _rows_cache.get("Employees")
         if c is None or time.monotonic() - c[0] > _ROWS_CACHE_TTL: _refresh_bg("Employees")
+        _now = time.monotonic()          # Update230: warm every sheet the Employee page needs WHILE the person types the password, so the page opens from memory right after login
+        for _n in EMP_PAGE_SHEETS:
+            if _n == "Employees": continue
+            with _rows_cache_lock: _c = _rows_cache.get(_n)
+            if _c is None or _now - _c[0] > 30: _refresh_bg(_n)
     except Exception:
         pass
 
 def warm_employee_cache():
-    """Read every sheet the Employee dashboard needs, all at once."""
-    ths = [threading.Thread(target=_safe_fetch, args=(n,), daemon=True) for n in EMP_PAGE_SHEETS]
+    """Read every sheet the Employee dashboard needs, all at once (only the ones that are not already fresh)."""
+    now = time.monotonic()
+    with _rows_cache_lock: cold = [n for n in EMP_PAGE_SHEETS if n not in _rows_cache or now - _rows_cache[n][0] > 30]
+    ths = [threading.Thread(target=_safe_fetch, args=(n,), daemon=True) for n in cold]
     for t in ths: t.start()
     for t in ths: t.join(timeout=25)
 
@@ -992,8 +1000,21 @@ def prefetch(*names):
     for t in ths: t.join(timeout=20)
 
 def _safe_fetch(name):
+    # Update230: single flight - if this sheet is already being read (login-page warm-up / background refresh), WAIT for that read instead of asking Google a second time
+    with _rows_cache_lock:
+        busy = name in _refreshing
+        if not busy: _refreshing.add(name)
+    if busy:
+        t_end = time.monotonic() + 25
+        while time.monotonic() < t_end:
+            with _rows_cache_lock:
+                if name not in _refreshing: return
+            time.sleep(0.03)
+        return
     try: _fetch_rows(name)
-    except Exception as e: print("prefetch error:", e)
+    except Exception as e:
+        print("prefetch error:", e)
+        with _rows_cache_lock: _refreshing.discard(name)
 
 def num(x):
     """Update170: tolerant number read - '2', '2.5', '2,5', '1,250', '2 hrs', '1:30' (= 1.5) and '85%' all give a number; blank / text gives 0."""
@@ -5753,7 +5774,7 @@ def employee_login():
                 track_logout(auto=True, reason="New login")      # closes a previous session in this browser, if any
                 session.clear()
                 session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"],
-                               designation=str(e.get("Designation", "")), welcome=1)      # Update227: one-time animated welcome on the first page after login
+                               designation=str(e.get("Designation", "")))      # Update230: the one-time welcome overlay (Update227) is switched off - it held the page for ~4 s after login
                 track_login(session["emp_id"], session["name"], session["band"])
                 _bg(warm_employee_cache)                  # dashboard data loads while the welcome animation plays
                 resp = redirect("/employee")                  # Update202: straight to the Employee Panel (no welcome page)

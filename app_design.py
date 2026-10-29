@@ -1,4 +1,6 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update225b: AUTOMATIC Missed Entries SUMMARY e-mail to every Manager / Associate Manager / Senior Team Lead / Team Lead (by Designation; sent with the daily automatic run, once per day per recipient, logged as Mode "Manager Summary"): one table of all employees who still have missed entries - Date(s), Employee ID . Name, Missed Entries - plus totals. Weekly offs, holidays, approved leave, dates before the joining date and already-submitted dates are excluded (live re-check before sending). Nothing is sent when nobody has missed entries. Employee reminder e-mails unchanged.
+  * Update225: Employee login - the employee's display name is shown directly below the 3D character: the saved "Profile Name" (new field in Personal details, optional, max 40 chars, Employee + Admin can edit; new sheet column added automatically), or the full Name when it is blank. It follows the typed username (Employee ID / e-mail) and changes when a different username is entered. /login-char returns only the display name + m/f/n (no ID, e-mail or other details), still rate-limited; name is written with textContent. Layout, animations and login checks unchanged.
   * Update224: Productivity start date for NEW employees. (1) Admin adds a new employee (Employee Info > Employee Login Access > Add employee login, or Admin > Employees > Add) and chooses the JOINING DATE (default today): productivity entries, missed-entry reminders (manual + automatic e-mail) and every productivity / attendance report start from that date - earlier dates are never required, missed or counted. (2) Existing employees are NOT changed: a row without a Joining date keeps exactly the old behaviour and no existing row / productivity record is written or migrated; adding a login to an existing Employee ID does not touch its joining date. (3) Only the Admin can add employees (server-side check). (4) New 'Productivity' section in the Admin employee log: Employee Info > Productivity (all employees, month filter, counted from each joining date) and a Productivity tab on every employee page (joining date, tracking-from date, month-by-month figures, daily entries with a Counted column, missed dates). report(): approved permission hours also start at the joining date.
   * Update223: the extra glowing rack picture is removed from ALL login pages (only the technician scene stays). Update222: Employee AND Admin login pages - old server-rack picture removed; replaced by the supplied technician-at-the-server scene (/char/tq.webp) with 3D depth + pointer parallax, subtle head movement, typing hand, laptop-screen text, rack data packets / LEDs. Login layout, fields and logic unchanged.
   * Update221: Employee panel - new look (display only): deep-indigo gradient left panel with pill-style active menu, soft page background, KPI cards with an accent edge and bigger numbers, rounded cards with soft shadows, cleaner inputs with a focus ring, gradient buttons and rounded tables. Colours / roundness are the variables at the top of the new <style id="emp221"> block; set EMP_REDESIGN = False to go back. No route, sheet, e-mail or tracking code changed.
@@ -480,7 +482,7 @@ HEADERS = {
     "Employees": ["Employee ID", "Name", "Band", "Email", "Password",
                   "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                   "Emergency no", "Personal Email ID", "Office Email ID", "Designation", "Profile updated at", "Gender",
-                  "Account locked", "Joining date"],      # Update96: "Account locked" = Yes / blank; Update97: "Joining date" (YYYY-MM-DD, set by Admin in Employee Info)
+                  "Account locked", "Joining date", "Profile Name"],      # Update225: "Profile Name" = nickname shown under the 3D character on the Employee login page. Update96: "Account locked" = Yes / blank; Update97: "Joining date" (YYYY-MM-DD, set by Admin in Employee Info)
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour", "Target count / 8 hrs"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Target Count", "Productivity %",
@@ -538,12 +540,12 @@ HEADERS = {
     "Mahizhchi Connection Attempts": ["Employee ID", "Employee name", "Game", "Started at", "Closed at", "Solved", "Mistakes", "Result", "Extra seconds"],
 }
 PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
-                    "Emergency no", "Personal Email ID", "Office Email ID"]
+                    "Emergency no", "Personal Email ID", "Office Email ID", "Profile Name"]
 # Office Email ID is not typed by anyone: it always mirrors the employee's login Email.
 EDITABLE_PERSONAL = [f for f in PERSONAL_FIELDS if f != "Office Email ID"]
 # Address Line_2 (flat / landmark / area) is genuinely optional, so a blank one must not make a profile
 # "incomplete". Everything else the employee can edit is required.
-OPTIONAL_PERSONAL = {"Address Line_2"}
+OPTIONAL_PERSONAL = {"Address Line_2", "Profile Name"}
 REQUIRED_PERSONAL = [f for f in EDITABLE_PERSONAL if f not in OPTIONAL_PERSONAL]
 # Gender is admin-only: employees never see or submit it on their own Personal details page,
 # so it must not appear as an editable/required field there.
@@ -4240,6 +4242,9 @@ html{scrollbar-gutter:stable}
 .chr-box.ca{left:69%;width:30%;--ar:1/1;--sh:88%;--skin:#f0b08a;--skin2:#e59e77;--hcx:49%;--hcy:22%;--hrw:20%;--hrh:21%;--pvx:50%;--pvy:36.5%;--e1x:48%;--e1y:28.4%;--e1w:5%;--e1h:4%;--e2x:57.8%;--e2y:25.1%;--e2w:3.8%;--e2h:4.4%;--l1l:45.1%;--l1t:26%;--l1w:6.2%;--l1h:5.1%;--l2l:55.3%;--l2t:22.2%;--l2w:4.9%;--l2h:5.8%;--mcx:54.9%;--mcy:31.6%;--mw:7.5%;--mh:3.5%}
 .ca .chr-p{background-image:url(/char/b.webp)}
 .ca .chr-shine{-webkit-mask-image:url(/char/b.webp);mask-image:url(/char/b.webp)}
+/* Update225: employee display name (Profile Name, else full name) directly below the 3D character */
+.chr-name{position:absolute;left:50%;top:100%;transform:translate(-50%,4px);max-width:150%;text-align:center;font-weight:700;font-size:clamp(13px,1.25vw,18px);line-height:1.2;letter-spacing:.3px;color:#fff;text-shadow:0 0 10px #38bdf8aa,0 2px 6px #000a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0;transition:opacity .28s ease;pointer-events:none}
+.chr-name.on{opacity:1}
 /* Update216: neutral (unknown / no gender) hologram character + smooth character swap when the username changes */
 .chr-box{transition:opacity .28s ease,transform .28s ease}
 .chr-box.sw{opacity:0;transform:translateY(8px) scale(.96)}
@@ -4349,7 +4354,7 @@ html{scrollbar-gutter:stable}
 </svg>
 <div class="lx-srv" aria-hidden="true"><div class="srv-box {{ 'sa' if role=='admin' else 'se' }}"><div class="srv-aura"></div><div class="srv-fl"></div><div class="srv-3d"><div class="tq-3d"><div class="tq-scene"><div class="tq-p tq-base"></div><div class="tq-p tq-head"></div><div class="tq-p tq-hand"></div><div class="tq-glow"></div><div class="tq-scr"><i style="top:8%;--w:70%;--t:-6.0s"></i><i style="top:22%;--w:55%;--t:-5.1s"></i><i style="top:36%;--w:80%;--t:-4.2s"></i><i style="top:50%;--w:40%;--t:-3.3s"></i><i style="top:64%;--w:65%;--t:-2.4s"></i><i style="top:78%;--w:30%;--t:-1.5s"></i><b></b></div><i class="tq-u" style="top:8.07%;--d:-0.00s"></i><i class="tq-u" style="top:15.33%;--d:-0.45s"></i><i class="tq-u" style="top:22.71%;--d:-0.90s"></i><i class="tq-u" style="top:30.10%;--d:-1.35s"></i><i class="tq-u" style="top:37.24%;--d:-1.80s"></i><i class="tq-u" style="top:66.50%;--d:-2.25s"></i><i class="tq-u" style="top:73.80%;--d:-2.70s"></i><i class="tq-u" style="top:81.05%;--d:-3.15s"></i><i class="tq-pk" style="top:11.07%;--d:0s;--w:2.1s"><b></b></i><i class="tq-pk" style="top:18.33%;--d:-0.7s;--w:1.7s"><b></b></i><i class="tq-pk" style="top:25.71%;--d:-1.4s;--w:2.4s"><b></b></i><i class="tq-pk" style="top:33.10%;--d:-0.3s;--w:1.9s"><b></b></i><i class="tq-pk" style="top:40.24%;--d:-1.1s;--w:2.2s"><b></b></i><i class="tq-pk" style="top:69.50%;--d:-0.5s;--w:1.8s"><b></b></i><i class="tq-pk" style="top:76.80%;--d:-1.6s;--w:2.5s"><b></b></i><i class="tq-pk" style="top:84.05%;--d:-0.9s;--w:2.0s"><b></b></i><i class="tq-led" style="top:11.07%;animation-delay:-0.00s"></i><i class="tq-led g" style="top:18.33%;animation-delay:-0.37s"></i><i class="tq-led" style="top:25.71%;animation-delay:-0.74s"></i><i class="tq-led g" style="top:33.10%;animation-delay:-1.11s"></i><i class="tq-led" style="top:40.24%;animation-delay:-1.48s"></i><i class="tq-led g" style="top:69.50%;animation-delay:-1.85s"></i><i class="tq-led" style="top:76.80%;animation-delay:-2.22s"></i><i class="tq-led g" style="top:84.05%;animation-delay:-2.59s"></i><div class="tq-shine"><i></i></div></div></div></div></div></div>
 <script>(function(){var s=document.querySelector('.tq-3d');if(!s||!window.matchMedia||window.matchMedia('(prefers-reduced-motion:reduce)').matches)return;var r=0,x=0,y=0;addEventListener('pointermove',function(e){x=e.clientX/innerWidth-.5;y=e.clientY/innerHeight-.5;if(!r)r=requestAnimationFrame(function(){r=0;s.style.setProperty('--px',x.toFixed(3));s.style.setProperty('--py',y.toFixed(3))})},{passive:true})})();</script>
-<div class="lx-chr" aria-hidden="true"><div class="chr-box {{ 'ca' if role=='admin' else ('cf' if lxg=='f' else ('cm' if lxg=='m' else 'cn')) }}"><div class="chr-sh"></div><div class="chr-fx"><div class="chr-3d"><div class="chr-stage"><div class="chr-p chr-base"></div><div class="chr-p chr-head"><div class="chr-p chr-eyes"></div><i class="chr-lid l1"></i><i class="chr-lid l2"></i><div class="chr-p chr-mouth"></div></div><div class="chr-p chr-shine"></div></div></div></div></div></div>
+<div class="lx-chr" aria-hidden="true"><div class="chr-box {{ 'ca' if role=='admin' else ('cf' if lxg=='f' else ('cm' if lxg=='m' else 'cn')) }}"><div class="chr-sh"></div><div class="chr-fx"><div class="chr-3d"><div class="chr-stage"><div class="chr-p chr-base"></div><div class="chr-p chr-head"><div class="chr-p chr-eyes"></div><i class="chr-lid l1"></i><i class="chr-lid l2"></i><div class="chr-p chr-mouth"></div></div><div class="chr-p chr-shine"></div></div></div></div>{% if role!='admin' %}<div class="chr-name" id="chr_name" aria-live="polite"></div>{% endif %}</div></div>
 <div class="lx-card"><img src="/logo.png" alt="Mobius Technologies and Services" width="150" height="78"><h2>Welcome back</h2><p>{{title}}</p>
 """
 LOGIN_NEW_MID = r"""</div>
@@ -4438,8 +4443,10 @@ LOGIN_CHR_JS = r"""<script>
 LOGIN_CHR_PICK = r"""<script>
 /* Update216: show the matching character as soon as the username is recognised (no sign-in needed). Display only - never touches the form. */
 (function(){
-  var lx = document.querySelector('.lx.emp'), u = document.getElementById('login_u'), box = lx && lx.querySelector('.chr-box');
+  var lx = document.querySelector('.lx.emp'), u = document.getElementById('login_u'), box = lx && lx.querySelector('.chr-box'), nmEl = document.getElementById('chr_name');
   if (!u || !box) return;
+  var nmT = 0;
+  function setName(t){ if (!nmEl) return; clearTimeout(nmT); if (!t) { nmEl.classList.remove('on'); return; } nmEl.classList.remove('on'); nmT = setTimeout(function(){ nmEl.textContent = t; nmEl.classList.add('on'); }, 150); }
   var cur = box.classList.contains('cf') ? 'f' : box.classList.contains('cm') ? 'm' : 'n', timer = 0, seq = 0, last = null, cache = {}, busy = 0;
   function show(g){
     if (g === cur) return; cur = g; var my = ++busy;
@@ -4448,12 +4455,12 @@ LOGIN_CHR_PICK = r"""<script>
   }
   function ask(){
     var v = (u.value || '').trim(); if (v === last) return; last = v;
-    if (!v) { seq++; show('n'); return; }
-    var k = v.toLowerCase(); if (cache[k]) { seq++; show(cache[k]); return; }
+    if (!v) { seq++; show('n'); setName(''); return; }
+    var k = v.toLowerCase(); if (cache[k]) { seq++; show(cache[k].g); setName(cache[k].n); return; }
     var my = ++seq;
     fetch('/login-char?u=' + encodeURIComponent(v), {credentials: 'same-origin', cache: 'no-store'})
       .then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(d){ if (!d || my !== seq) return; var g = (d.g === 'f' || d.g === 'm') ? d.g : 'n'; cache[k] = g; show(g); })
+      .then(function(d){ if (!d || my !== seq) return; var g = (d.g === 'f' || d.g === 'm') ? d.g : 'n'; var nm = (typeof d.n === 'string') ? d.n : ''; cache[k] = {g: g, n: nm}; show(g); setName(nm); })
       .catch(function(){});
   }
   function sched(){ clearTimeout(timer); timer = setTimeout(ask, 350); }
@@ -5631,7 +5638,7 @@ def login_char_lookup():
     hits = [t for t in _lc_hits.get(ip, []) if now - t < 60]
     hits.append(now); _lc_hits[ip] = hits
     if len(_lc_hits) > 5000: _lc_hits.clear()
-    g = "n"
+    g = "n"; nm = ""
     if len(hits) <= 90:
         u = (request.args.get("u", "") or "").strip().lower()[:120]
         if u:
@@ -5640,10 +5647,12 @@ def login_char_lookup():
                     if u in (str(e.get("Employee ID", "")).strip().lower(), str(e.get("Email", "")).strip().lower()):
                         v = str(e.get("Gender", "")).strip().lower()
                         g = "m" if v in ("male", "m", "man", "boy") or v.startswith("male") else ("f" if v in ("female", "f", "woman", "girl") or v.startswith("female") else "n")
+                        # Update225: ONLY the display name (saved Profile Name, else the full name) is returned - never the ID, e-mail, gender text or any other detail
+                        nm = (str(e.get("Profile Name", "") or "").strip() or str(e.get("Name", "") or "").strip())[:40]
                         break
             except Exception:
-                g = "n"
-    resp = Response(_j.dumps({"g": g}), mimetype="application/json")
+                g = "n"; nm = ""
+    resp = Response(_j.dumps({"g": g, "n": nm}), mimetype="application/json")
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
@@ -7841,6 +7850,7 @@ PROFILE = """<div class="card"><h2>Personal details</h2>
 <label>Emergency no<input name="Emergency no" value="{{emp['Emergency no']}}"></label>
 <label>Personal Email ID<input type="email" name="Personal Email ID" value="{{emp['Personal Email ID']}}"></label>
 <label>Office Email ID<input value="{{emp['Email']}}" readonly></label>
+<label title="Shown below the 3D character on the login page. Leave blank to show your full name.">Profile Name<input name="Profile Name" maxlength="40" value="{{emp['Profile Name']}}" placeholder="Your nickname"></label>
 <button class="primary sm">Save</button> <button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='/employee'">Back</button></form>
 <p class="mut" style="margin-top:10px">Last updated: {{(emp['Profile updated at'] or '-')|t12}}</p></div>
 <div class="card"><h2>Change password</h2>
@@ -7924,7 +7934,9 @@ def save_employee_row(row, emp_id, changes):
     cur = ws.row_values(row); cur += [""] * (len(heads) - len(cur))
     if _key(cur[heads.index("Employee ID")]) != _key(emp_id):
         invalidate_cache("Employees"); return False
-    for k, v in changes.items(): cur[heads.index(k)] = v
+    for k, v in changes.items():
+        if k == "Profile Name": v = re.sub(r"\s+", " ", re.sub(r"[\x00-\x1f\x7f<>]", " ", str(v))).strip()[:40]      # Update225: plain short nickname only
+        cur[heads.index(k)] = v
     cur[heads.index("Office Email ID")] = cur[heads.index("Email")]      # always mirrors the login email
     cur[heads.index("Profile updated at")] = now_local().strftime("%Y-%m-%d %H:%M:%S")
     _with_retry(ws.update, range_name=f"A{row}", values=[cur[:len(heads)]], value_input_option="RAW")
@@ -10174,11 +10186,103 @@ def run_auto_missed_mail(force=False):
             sent_n += len(keep)
             failed += sum(1 for v in out.values() if v != "Sent")
         print(f"Automatic missed-entry e-mail: {sent_n} e-mail(s) sent/tried for {len(per_emp)} employee(s), {skipped} date(s) skipped (no longer missing), {failed} failed, {len(noaddr)} without a valid e-mail.")
-        return (len(items), failed)                                   # employees without a valid address are listed on the status board (Failed: no valid Office Email ID)
+        try: sm_n, sm_f = run_manager_summary(force)                  # Update225: summary e-mail to Managers / Team Leads
+        except Exception as ex_: sm_n, sm_f = 0, 1; print("Manager summary error:", ex_)
+        failed += sm_f
+        return (len(items) + sm_n, failed)                            # employees without a valid address are listed on the status board (Failed: no valid Office Email ID)
     except Exception as ex:
         print("Automatic missed-entry e-mail error:", ex); return (0, 1)
     finally:
         _tl.fresh = False
+
+# ---------------------------------------------------------------- Update225: MANAGER SUMMARY e-mail (automatic)
+# Every automatic run also sends ONE summary e-mail to each Manager / Associate Manager / Senior Team Lead / Team Lead (by Designation) listing every
+# employee who STILL has missed Productivity Entries: date(s), Employee ID . Name and the total number of missed entries. Same rules as the employee mails:
+# weekly offs, holidays, approved leave and dates before the joining date are never counted; dates submitted meanwhile are removed by a live re-check
+# just before sending; employees with nothing missing are not listed; nothing is sent when nobody has missed entries. Once per day per recipient.
+SUMMARY_MODE = "Manager Summary"
+
+def is_summary_recipient_designation(d):
+    n = _norm_desig(d)
+    return bool(n) and ("manager" in n or "team lead" in n or "teamlead" in n.replace(" ", ""))
+
+def manager_summary_recipients():
+    """[(Employee ID, name, e-mail)] - every unlocked employee whose Designation is Manager / Associate Manager / Senior Team Lead / Team Lead with a valid Office Email ID (no duplicates)."""
+    out, seen = [], set()
+    for e in _fetch_rows("Employees"):
+        if not is_summary_recipient_designation(e.get("Designation", "")) or emp_locked(e): continue
+        mail = employee_office_email(e)
+        if not EMAIL_RE.match(mail) or mail.lower() in seen: continue
+        seen.add(mail.lower()); out.append((str(e.get("Employee ID", "")).strip(), str(e.get("Name", "")).strip(), mail))
+    return out
+
+def manager_summary_rows(today=None):
+    """[(eid, name, [ISO dates, newest first])] for every employee who still has missed entries (current month up to yesterday), checked LIVE against the sheets."""
+    today = today or today_local(); end = today - dt.timedelta(days=1); start = today.replace(day=1)
+    if end < start: return []
+    try: access = _fetch_rows("Productivity Access")
+    except Exception: access = []
+    subs, leaves = load_subs(), _fetch_rows("Leave")
+    covered, hol = _live_covered()                                  # strict, un-cached read of Productivity log / Leave / Holidays
+    out = []
+    for e in _fetch_rows("Employees"):
+        eid = str(e.get("Employee ID", "")).strip(); k = _key(eid)
+        if not eid or not productivity_access(eid, access): continue
+        ds = missing_dates(eid, [x for x in subs if _key(x["emp_id"]) == k], [l for l in leaves if _key(l["Employee ID"]) == k], start, end, fmt="%Y-%m-%d")
+        ds = sorted({d for d in ds if d not in covered.get(k, set()) and d not in hol and not is_off(d)}, reverse=True)
+        if ds: out.append((eid, str(e.get("Name", "")).strip(), ds))
+    out.sort(key=lambda r: (r[1].lower(), r[0]))
+    return out
+
+def manager_summary_message(rcp, summary, today):
+    import html as _h
+    F = "font-family:'Segoe UI',Arial,Helvetica,sans-serif;"
+    n_emp, total = len(summary), sum(len(r[2]) for r in summary)
+    link = employee_login_link()
+    msg = EmailMessage()
+    msg["Subject"] = f"Missed Entries summary - {n_emp} employee{'' if n_emp == 1 else 's'}, {total} missed entr{'y' if total == 1 else 'ies'} ({today.strftime('%d %b %Y')})"
+    msg["From"] = formataddr(mail_sender()); msg["To"] = rcp[2]
+    plain = "\n".join(f"  {', '.join(ds)}  |  {eid} · {name}  |  {len(ds)}" for eid, name, ds in summary)
+    msg.set_content(f"Hello {rcp[1]},\n\nThese {n_emp} employee{'' if n_emp == 1 else 's'} have missed Productivity Entries (total missed entries: {total}).\n\n"
+                    f"Date | Employee ID · Name | Missed Entries\n{plain}\n\nWeekly offs, holidays, approved leave and dates before the joining date are excluded.\n\n"
+                    "This is an automated email. Please do not reply to this email.\n\nThanks,\nProductivity Tracker (LN_Map)")
+    th = f"padding:8px 10px;{F}font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:#7c2d12;background:#fed7aa;border-bottom:2px solid #ea580c;"
+    td = f"padding:8px 10px;{F}font-size:13px;color:#431407;border-bottom:1px solid #fdba74;"
+    body = "".join(f'<tr><td style="{td}">{_h.escape(", ".join(ds))}</td><td style="{td}font-weight:bold">{_h.escape(eid)} &middot; {_h.escape(name)}</td>'
+                   f'<td align="right" style="{td}font-weight:bold">{len(ds)}</td></tr>' for eid, name, ds in summary)
+    table = ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#fff7ed" '
+             'style="max-width:532px;margin-top:14px;background:#fff7ed;border:1px solid #fdba74;border-radius:12px;border-collapse:separate;border-spacing:0">'
+             f'<tr><td style="{th}">Date</td><td style="{th}">Employee ID &middot; Name</td><td align="right" style="{th}">Missed Entries</td></tr>{body}</table>')
+    msg.add_alternative(_html3d(_h.escape(rcp[1]), f"{n_emp} employee(s) have {total} missed Productivity Entries.",
+                                f'<b style="color:#b91c1c">{n_emp}</b> employee{"" if n_emp == 1 else "s"} ha{"s" if n_emp == 1 else "ve"} missed Productivity Entries - '
+                                f'total missed entries: <b style="color:#b91c1c">{total}</b>. Weekly offs, holidays, approved leave and dates before the joining date are excluded.',
+                                f'{_orange_row([("Employees", str(n_emp)), ("Total Missed Entries", str(total))], F)}{table}', link,
+                                "Please follow up with the employees listed above:" if link else ""), subtype="html")
+    return msg, n_emp, total
+
+def run_manager_summary(force=False):
+    """Never raises. Returns (recipients mailed, failures). Once per day per recipient (a failed one is retried by the next automatic run)."""
+    try:
+        today = today_local()
+        summary = manager_summary_rows(today)
+        if not summary: print("Manager summary e-mail: nobody has missed entries - nothing sent."); return (0, 0)
+        rcps = manager_summary_recipients()
+        if not rcps: print("Manager summary e-mail: no Manager / Team Lead with a valid Office Email ID."); return (0, 0)
+        t_ = str(today)
+        done = set() if force else {_key(r.get("Employee ID", "")) for r in _fetch_rows(MISSED_LOG)
+                                    if str(r.get("Date sent", "")) == t_ and str(r.get("Mode", "")) == SUMMARY_MODE and str(r.get("Status", "")) == "Sent"}
+        items = []
+        for r in rcps:
+            if _key(r[0]) in done: continue
+            msg, n_emp, total = manager_summary_message(r, summary, today)
+            items.append((dict(eid=r[0], name=r[1], email=r[2]), msg, f"{n_emp} employee(s)", total))
+        if not items: return (0, 0)
+        out = send_logged(items, SUMMARY_MODE, "System")
+        failed = sum(1 for v in out.values() if v != "Sent")
+        print(f"Manager summary e-mail: {len(items)} recipient(s), {len(summary)} employee(s) listed, {failed} failed.")
+        return (len(items), failed)
+    except Exception as ex:
+        print("Manager summary e-mail error:", repr(ex)); return (0, 1)
 
 _auto_done_day, _auto_tries = [None], [0, None]
 def _auto_mail_loop():
@@ -10906,7 +11010,7 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
  var ed=document.getElementById('mn-ed'), bar=document.getElementById('mn-tb'), rich=document.getElementById('mn-rich'),
      sizeSel=document.getElementById('mn-size'), colorIn=document.getElementById('mn-color'), saved=null, pendingPx=16, clean='', tmr=null, seq=0;
  var PH='<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>';
- function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
+ function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
  function paint(){
   var v={subject:esc(sub.value.trim())||'Your subject appears here', message:(hasText()&&clean)?clean:PH};
   frame.srcdoc=T.replace(/[{][{](\w+)[}][}]/g,function(m,k){return (k in v)?v[k]:m;});}

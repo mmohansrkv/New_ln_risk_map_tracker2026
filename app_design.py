@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update244b: Leave & Permission - for Associate Manager / Team Lead / Senior Team Lead the remaining status hints (the "Half day" tag on leave rows and the "back to Pending" note on permission rows) are hidden too.
   * Update244: Employee Panel menu / access - Team Logs (menu + all /employee/team-logs routes) is now limited to Associate Manager / Team Lead / Senior Team Lead (live Designation); it was also open to plain Manager. Employee Details, Personal details, Leave & Permission and the Calendar already show for these designations; every other designation unchanged.
   * Update243: Associate Manager / Team Lead / Senior Team Lead ONLY (live Designation, same test as the hidden Daily entry): Team Logs (Attendance column removed), Employee Details, Personal Details, Leave & Permission (Status columns removed) and the sidebar Employee Calendar no longer show Present / Absent / Leave / Permission status; the Calendar shows declared Holidays only (no Present / Absent / Leave / Half day / Weekly off marks, no counts row, no permission mark). Every other designation and all data, routes and calculations are unchanged.
   * Update242: Employee login page - the two characters now animate: eyes open / close naturally (random single and occasional double blinks) on BOTH pictures, the left character's thumbs-up hand wiggles, the right (clipboard) character's raised fist waves and the hand holding the clipboard adjusts its grip. CSS layers + one tiny script, no new images / libraries; login form, lookup and every route unchanged; reduced-motion users get still pictures.
@@ -7985,7 +7986,7 @@ LEAVE_EMP = """<style>
 <button class="primary">Submit leave</button></form></div>
 {% if hols %}<p class="mut">&#127774; <b>Upcoming holidays</b> (no leave, permission or productivity entry needed): {% for d,n in hols %}{{d}}{% if n %} - {{n}}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
 <h2>My leave days</h2><table><tr><th>Date</th><th>Reason</th><th>Applied at</th>{% if not hide_status %}<th>Status</th>{% endif %}<th></th></tr>
-{% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}{% if r|lhalf %} <span class="pill act">Half day</span>{% endif %}</td><td>{{r['Applied at']|t12}}</td>
+{% for r in data %}{% set st = r|lstatus %}<tr><td>{{r['Date']}}</td><td>{{r['Reason']}}{% if r|lhalf and not hide_status %} <span class="pill act">Half day</span>{% endif %}</td><td>{{r['Applied at']|t12}}</td>
 {% if not hide_status %}<td><span class="pill {{st|ppill}}">{{st}}</span></td>{% endif %}
 <td>{% if st=='Pending' %}<form method="post" action="/employee/leave/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this leave?')"><button class="danger">Cancel</button></form>{% else %}-{% endif %}</td></tr>
 {% else %}<tr><td colspan="{{ 4 if hide_status else 5 }}">No leave yet.</td></tr>{% endfor %}</table>
@@ -8005,7 +8006,7 @@ LEAVE_EMP = """<style>
 <label>Hours<input type="number" name="hours" step="0.25" min="0.25" max="{{perm_limit}}" value="{{r['Hours']|g}}" required></label>
 <label>Reason<input name="reason" size="24" value="{{r['Reason']}}" required></label>
 <button class="primary sm">Save</button> <button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='/employee'">Back</button></form>
-{% if r['Status']!='Pending' %}<p class="mut">Saving a change sends this request back to Pending for admin approval.</p>{% endif %}</details>{% endif %}
+{% if r['Status']!='Pending' and not hide_status %}<p class="mut">Saving a change sends this request back to Pending for admin approval.</p>{% endif %}</details>{% endif %}
 {% if r['Status']=='Pending' %}<form method="post" action="/employee/permission/{{r['_row']}}/delete" onsubmit="return confirm('Cancel this request?')"><button class="danger">Cancel</button></form>{% elif r['Date'][:7]<today[:7] %}-{% endif %}</td></tr>
 {% else %}<tr><td colspan="{{ 5 if hide_status else 6 }}">No permission requests yet.</td></tr>{% endfor %}</table></div>"""
 

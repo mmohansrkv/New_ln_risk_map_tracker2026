@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update230: Employee LOGIN page - the nickname under the 3D character is plain static text again (3D effects and letter animation removed; simple fade-in only). Layout and other animations unchanged.
   * Update229: Login nickname - bigger, clearer solid 3D letters (extruded depth, cyan glow, springy letter-by-letter flip-in, continuous 3D swing); the small "Employee system" caption fades out while a nickname is shown so they never overlap. Layout unchanged.
   * Update228: Employee LOGIN page - the nickname under the 3D character now appears letter by letter with a 3D flip-in, glowing cyan / violet letters, a pulsing light behind it and a gentle wave (script builds the letters with textContent; CSS transform / opacity only). Layout unchanged.
   * Update227: Employee panel - ONE-TIME animated welcome right after login: "Welcome, <nickname>!" (saved Profile Name, else full name) with letter-by-letter 3D flip-in, glowing letters, pulsing light and a light sweep, then it fades out by itself (~4 s; click / Enter / Esc closes it). Pure CSS (transform / opacity), no libraries, shown on the first page only; layout and functionality unchanged.
@@ -4321,22 +4322,9 @@ html{scrollbar-gutter:stable}
 /* Update225: employee display name (Profile Name, else full name) directly below the 3D character */
 .chr-name{position:absolute;left:50%;top:100%;transform:translate(-50%,4px);max-width:150%;text-align:center;font-weight:700;font-size:clamp(13px,1.25vw,18px);line-height:1.2;letter-spacing:.3px;color:#fff;text-shadow:0 0 10px #38bdf8aa,0 2px 6px #000a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0;transition:opacity .28s ease;pointer-events:none}
 .chr-name.on{opacity:1}
-/* Update228: letter-by-letter 3D glowing nickname (letters are built by the script with textContent; transform / opacity only) */
-.chr-name{overflow:visible;text-overflow:clip;perspective:520px}
-.chr-name::before{content:"";position:absolute;left:50%;top:50%;width:150%;height:260%;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;z-index:-1;
- background:radial-gradient(closest-side,rgba(103,232,249,.35),rgba(129,140,248,.18) 55%,transparent);animation:cnGlow 2.8s ease-in-out infinite}
-.chr-name .w{display:inline-block;white-space:nowrap;margin:0 .1em}
-.chr-name{font-size:clamp(17px,1.9vw,26px);transform:translate(-50%,10px)}
-.chr-name i{font-style:normal;display:inline-block;font-weight:900;opacity:0;transform-origin:50% 100%;transform-style:preserve-3d;color:#fff;
- text-shadow:0 1px 0 #38bdf8,0 2px 0 #0ea5e9,0 3px 0 #0284c7,0 4px 0 #0369a1,0 5px 0 #075985,0 10px 10px rgba(0,0,0,.55),0 0 14px rgba(103,232,249,.95),0 0 28px rgba(129,140,248,.8);
- animation:cnLet .85s cubic-bezier(.2,.9,.25,1.25) both,cnBob 2.6s ease-in-out infinite;animation-delay:calc(var(--i)*80ms),calc(var(--i)*130ms + 1.3s)}
-/* the plain "Employee system" caption steps aside while a nickname is shown (the nickname takes its place) */
+/* Update230: the login nickname is plain static text (no 3D effect, no letter animation). The small "Employee system" caption steps aside while a nickname is shown so they never overlap. */
 .lx.emp text.lx-lb[x="144"]{transition:opacity .3s ease}
 .lx.emp.hasnm text.lx-lb[x="144"]{opacity:0}
-@keyframes cnLet{0%{opacity:0;transform:translateY(26px) rotateX(-110deg) scale(.5)}60%{opacity:1;transform:translateY(-5px) rotateX(15deg) scale(1.15)}100%{opacity:1;transform:none}}
-@keyframes cnBob{0%,100%{transform:translateY(0) rotateY(-14deg)}50%{transform:translateY(-4px) rotateY(14deg)}}
-@keyframes cnGlow{0%,100%{opacity:.55}50%{opacity:1}}
-@media(prefers-reduced-motion:reduce){.chr-name i{animation:none;opacity:1}.chr-name::before{animation:none}}
 /* Update216: neutral (unknown / no gender) hologram character + smooth character swap when the username changes */
 .chr-box{transition:opacity .28s ease,transform .28s ease}
 .chr-box.sw{opacity:0;transform:translateY(8px) scale(.96)}
@@ -4538,11 +4526,7 @@ LOGIN_CHR_PICK = r"""<script>
   var lx = document.querySelector('.lx.emp'), u = document.getElementById('login_u'), box = lx && lx.querySelector('.chr-box'), nmEl = document.getElementById('chr_name');
   if (!u || !box) return;
   var nmT = 0;
-  function setName(t){ if (!nmEl) return; clearTimeout(nmT); nmEl.classList.remove('on'); if (!t) { if (lx) lx.classList.remove('hasnm'); return; } nmT = setTimeout(function(){ if (lx) lx.classList.add('hasnm');
-    nmEl.textContent = ''; nmEl.setAttribute('aria-label', t); var n = 0;
-    t.split(/\s+/).forEach(function(word){ if (!word) return; var w = document.createElement('span'); w.className = 'w'; w.setAttribute('aria-hidden', 'true');
-      for (var k = 0; k < word.length; k++) { var i = document.createElement('i'); i.style.setProperty('--i', n++); i.textContent = word.charAt(k); w.appendChild(i); } n++; nmEl.appendChild(w); });
-    nmEl.classList.add('on'); }, 200); }
+  function setName(t){ if (!nmEl) return; clearTimeout(nmT); nmEl.classList.remove('on'); if (!t) { if (lx) lx.classList.remove('hasnm'); return; } nmT = setTimeout(function(){ if (lx) lx.classList.add('hasnm'); nmEl.textContent = t; nmEl.classList.add('on'); }, 150); }
   var cur = box.classList.contains('cf') ? 'f' : box.classList.contains('cm') ? 'm' : 'n', timer = 0, seq = 0, last = null, cache = {}, busy = 0;
   function show(g){
     if (g === cur) return; cur = g; var my = ++busy;

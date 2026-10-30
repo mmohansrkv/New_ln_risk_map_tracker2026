@@ -7,6 +7,7 @@
   * Update242: Employee login page - the two characters now animate: eyes open / close naturally (random single and occasional double blinks) on BOTH pictures, the left character's thumbs-up hand wiggles, the right (clipboard) character's raised fist waves and the hand holding the clipboard adjusts its grip. CSS layers + one tiny script, no new images / libraries; login form, lookup and every route unchanged; reduced-motion users get still pictures.
   * Update241: Employee login page - for Associate Manager / Team Lead / Senior Team Lead (recognised from the typed username, same lookup as the character) the server picture on the right is replaced by the supplied clipboard picture (/char/tl.webp) with 3D depth (shadow layer behind, pointer parallax), 3D sway, floating, breathing, light sweep, aura and floor ring. Login form / logic and every other designation's login page unchanged.
   * Update240: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the female picture is removed; the supplied male picture (glasses, white suit, thumbs-up; /char/lm.webp) is shown above the login box once the username is typed, with the same tilt / breathing / floating / shine animation. Employee panel picture and all other designations / pages unchanged.
+  * Update250: Employee Panel - the Messages page / menu item and the 3D pop-up cards are removed (/employee/messages now goes to Daily Entry). The Admin's live notes / messages (inside their Display - Stop times and chosen viewers) scroll as a smooth, continuous marquee from left to right at the TOP of the Daily Entry page (Associate Manager / Team Lead / Senior Team Lead, who have no Daily Entry, see it on their first page). It pauses on hover, refreshes every minute (new / ended messages appear or leave by themselves) and shows no animation when reduced motion is on. Admin > Notes & Messages now counts 'Seen' (shown to the employee).
   * Update249: Admin Notes / Messages scheduling - 'Display date & time' (when the message starts appearing in the Employee Panel; blank = immediately) and 'Stop date & time' (when it disappears automatically; blank = stays until stopped). Employees see a message only inside that window (pop-ups, Messages page, unread count). Admin list shows Display / Stop times and a state (Scheduled / Live / Ended / Switched off); Edit changes text, viewers and times; 'Start now' / 'Stop now' / Switch off / Delete. Stop must be after Display. New columns 'Display from' and 'Stop at' are added to the 'Admin Notes' sheet automatically; older notes with only a date keep ending at the end of that day.
   * Update248: NEW Admin Notes / Messages. Admin > Notes & Messages: write a short note or a longer message (title optional, priority Normal / Important / Urgent, pin, optional 'show until' date) and choose WHO can view it - all employees or only the ticked employees (search, select shown, clear); edit it later (change text or viewers), hide / show again, delete, and see how many and which employees have read it. Employee > Messages: 3D animated cards (short notes as tilted sticky cards, long messages expandable with 'Read full message'), NEW badge, unread count in the menu, filters, Mark all as read; plus 3D pop-up notifications on every Employee page for unread notes (Urgent stay until dismissed). New sheets \"Admin Notes\" and \"Admin Note Reads\" are created automatically on the next start.
   * Update247: (1) Admin > Productivity log: the Employee column shows the Employee ID only (no name). (2) Employee panel: the name above Logout is plain text for every employee (no 3D / animation). (3) Login pages: Employee - after the username is entered a 3D e-mail flies from the employee picture to the server; Admin - on Log in a 3D e-mail flies from the server to the admin picture (the form is sent right after); Associate Manager / Team Lead / Senior Team Lead - report sheets then fly from the server to their picture. Display only, skipped when reduced motion is on. (4) Employee login: the 3D e-mail animation starts as soon as the username is entered and repeats through the whole sign-in until the next page has loaded (Associate Manager / Team Lead / Senior Team Lead also see the report sheets); Admin: starts on Log in and repeats until the next page has loaded. (5) The captions "Server", "Admin system" and "Employee system" are removed from both login pages.
@@ -4058,11 +4059,6 @@ def page(body, title="Productivity Tracker", **ctx):
             if mz_active(session.get("emp_id", "")): items.append(("/employee/mahizhchi", MZ_TITLE))
         except Exception as e:
             print("Mahizhchi menu check failed (are the Mahizhchi sheets created? restart the app once):", e)
-        try:      # Update248: Messages from the Admin (unread count in brackets)
-            _nu = nt_unread_count(session.get("emp_id", ""))
-            items.append(("/employee/messages", "Messages" + (" (%d)" % _nu if _nu else "")))
-        except Exception as ex_:
-            print("Messages menu check failed:", repr(ex_))
         try:      # Update204: Multiplayer Game link - Employee page only, and only while the Admin has enabled it for this employee
             if gm_allowed(session.get("emp_id", "")): items.append(("/employee/game", GM_TITLE))
         except Exception as e:
@@ -4137,14 +4133,12 @@ def page(body, title="Productivity Tracker", **ctx):
                 hol_json = employee_holiday_json()
                 prm_json = _json.dumps(employee_perm_map(session.get("emp_id", "")), separators=(",", ":"))
         except Exception as ex: print("attendance calendar error:", repr(ex))
-    _html = render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
+    _ntm = ""
+    if session.get("role") == "employee" and not ctx.get("bare") and (p == "/employee" or (ctx["hide_status"] and p == "/employee/leave")):      # Update250: Admin notes scroll at the top of the Daily Entry page (Associate Manager / Team Lead / Senior Team Lead have no Daily Entry - their first page shows it)
+        try: _ntm = nt_marquee_html()
+        except Exception as ex_: print("Messages marquee failed:", repr(ex_))
+    _html = render_fast(BASE, body=_ntm + render_fast(body, **ctx), title=title, nav=nav,
                                   side_avatar=side_avatar, side_name=side_name, side_name_html=side_name_html, welcome_html=welcome_html, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, hol_only=bool(ctx["hide_status"]), srv_today=str(today_local()), theme_css=_theme_css())
-    if session.get("role") == "employee" and not ctx.get("bare") and not request.path.startswith("/employee/messages"):      # Update248: 3D pop-up notifications
-        try:
-            _w = nt_toast_html(); _i = _html.rfind("</body>")
-            if _w and _i >= 0: _html = _html[:_i] + _w + _html[_i:]
-        except Exception as ex_:
-            print("Messages pop-up failed:", repr(ex_))
     return _html
 
 
@@ -12861,7 +12855,7 @@ NOTES_ADM = r"""<style>
 .nt-det .rd{color:#047857}.nt-det .un{color:#b91c1c}
 </style>
 <div class="card nt-f"><h2>{{ 'Edit note / message' if f.id else 'Send a note / message to employees' }}</h2>
-<p class="mut">Short notes appear as small 3D sticky cards; longer messages as expandable cards. You decide exactly who can view each one.</p>
+<p class="mut">Notes and messages scroll as a marquee (left to right) at the top of the employees' Daily Entry page, only between the Display and Stop times. You decide exactly who can view each one.</p>
 <form method="post" action="/admin/notes/save" id="nt-form">
 <input type="hidden" name="id" value="{{f.id}}">
 <label>Title <span class="mut">(optional)</span><input type="text" name="title" maxlength="120" value="{{f.title}}" placeholder="e.g. Holiday notice / Target update"></label>
@@ -12883,18 +12877,18 @@ NOTES_ADM = r"""<style>
 <div class="nt-tools"><input type="text" id="nt-q" placeholder="Search by ID, name or designation"><button type="button" class="back sm" id="nt-all">Select shown</button><button type="button" class="back sm" id="nt-none">Clear all</button></div>
 <div class="nt-list">{% for e in emps %}<label class="nt-pk" data-s="{{(e.id ~ ' ' ~ e.name ~ ' ' ~ e.desig)|lower}}"><input type="checkbox" name="to" value="{{e.id}}" {{'checked' if e.ck}}><b>{{e.id}}</b> &middot; {{e.name}}{% if e.locked %} <em class="mut">(locked)</em>{% endif %}<small>{{e.desig}}</small></label>{% endfor %}</div>
 <div class="nt-sel"><span id="nt-n">0</span> employee(s) selected</div></div></fieldset>
-<div class="nt-pv"><small>Preview (how employees see it)</small><div class="nt-pvc p-Normal" id="nt-pvc"><b id="nt-pvt">Message from Admin</b><span id="nt-pvm">Your text appears here...</span></div></div>
+<div class="nt-pv"><small>Preview</small><div class="nt-pvc p-Normal" id="nt-pvc"><b id="nt-pvt">Message from Admin</b><span id="nt-pvm">Your text appears here...</span></div></div>
 <p style="margin-top:14px"><button class="primary">{{ 'Save changes' if f.id else 'Send' }}</button> {% if f.id %}<a class="back sm" href="/admin/notes">Cancel</a>{% endif %}</p>
 </form></div>
 <div class="card"><h2>Sent notes &amp; messages</h2>
 {% if not notes %}<p class="mut">Nothing sent yet.</p>{% else %}
-<table><tr><th>Sent</th><th>Note</th><th>Schedule</th><th>Type</th><th>Priority</th><th>Viewers</th><th>Read</th><th>Status</th><th></th></tr>
+<table><tr><th>Sent</th><th>Note</th><th>Schedule</th><th>Type</th><th>Priority</th><th>Viewers</th><th>Seen</th><th>Status</th><th></th></tr>
 {% for n in notes %}<tr class="p-{{n.pri}}"><td>{{n.at|t12}}{% if n.upd %}<br><small class="mut">edited {{n.upd|t12}}</small>{% endif %}</td>
 <td style="max-width:300px"><b>{% if n.pinned %}&#128204; {% endif %}{{n.title or '(no title)'}}</b><br><span class="mut">{{n.message[:140]}}{{'...' if n.message|length>140}}</span></td>
 <td style="white-space:nowrap"><small class="mut">Display</small> {{ (n.start|t12) if n.start else 'Immediately' }}<br><small class="mut">Stop</small> {{ (n.stop|t12) if n.stop else 'Not set' }}</td>
 <td>{{n.kind}}</td><td><span class="nt-tag">{{n.pri}}</span></td>
 <td>{% if n.sel %}Selected ({{n.total}}){% else %}All employees ({{n.total}}){% endif %}</td>
-<td><b>{{n.read_n}}</b> / {{n.total}}<details class="nt-det"><summary>Who</summary><div><span class="rd">Read:</span> {% for w in n.who_read %}{{w[0]}} <small>({{w[1]|t12}})</small>{{ ', ' if not loop.last }}{% else %}-{% endfor %}</div><div><span class="un">Not read:</span> {{ n.who_not|join(', ') or '-' }}</div></details></td>
+<td><b>{{n.read_n}}</b> / {{n.total}}<details class="nt-det"><summary>Who</summary><div><span class="rd">Seen:</span> {% for w in n.who_read %}{{w[0]}} <small>({{w[1]|t12}})</small>{{ ', ' if not loop.last }}{% else %}-{% endfor %}</div><div><span class="un">Not seen yet:</span> {{ n.who_not|join(', ') or '-' }}</div></details></td>
 <td class="nt-st-{{n.state}}">{{n.state}}</td>
 <td class="nt-act"><a class="back sm" href="/admin/notes?edit={{n.id}}#nt-form">Edit</a>
 {% if n.state=='Scheduled' %}<form method="post" action="/admin/notes/{{n.id}}/status"><input type="hidden" name="to" value="startnow"><button class="back sm">Start now</button></form>{% elif n.state=='Live' %}<form method="post" action="/admin/notes/{{n.id}}/status"><input type="hidden" name="to" value="stopnow"><button class="back sm">Stop now</button></form>{% endif %}
@@ -12926,140 +12920,74 @@ NOTES_ADM = r"""<style>
 })();
 </script>"""
 
-NOTES_EMP = r"""<style>
-.nm-top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
-.nm-top h2{margin:0 12px 0 0}
-.nm-chip{padding:6px 14px;border-radius:99px;border:1px solid #d6dbf3;background:#fff;font-size:13px;font-weight:600;cursor:pointer;color:#3b4270}
-.nm-chip.on{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border-color:transparent;box-shadow:0 8px 16px -8px #4f46e5aa}
-.nm-chip b{margin-left:4px}
-.nm-all{margin-left:auto;font-size:12px;padding:6px 12px}
-.nm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:22px;perspective:1100px;align-items:start}
-.nm-card{position:relative;border-radius:16px;padding:16px 16px 14px;color:#fff;background:linear-gradient(140deg,var(--a),var(--b));box-shadow:0 22px 34px -16px #000a,0 0 0 1px #ffffff30 inset;transform-style:preserve-3d;transform-origin:50% 0;
-  animation:nmIn .75s cubic-bezier(.2,.9,.25,1.12) both;animation-delay:calc(var(--i,0)*70ms);transition:transform .18s ease-out,box-shadow .25s}
-.nm-card.note{transform:rotate(var(--r,0deg))}
-.nm-card.msg{grid-column:1/-1}
-@keyframes nmIn{0%{opacity:0;transform:rotateX(-80deg) translateY(-30px) scale(.9)}100%{opacity:1}}
-.nm-card.unread{box-shadow:0 22px 34px -16px #000a,0 0 0 1px #ffffff30 inset,0 0 26px var(--g);animation:nmIn .75s cubic-bezier(.2,.9,.25,1.12) both,nmGlow 2.6s ease-in-out 1s infinite}
-@keyframes nmGlow{50%{box-shadow:0 22px 34px -16px #000a,0 0 0 1px #ffffff50 inset,0 0 40px var(--g)}}
-.nm-card:target{outline:3px solid #fde68a;outline-offset:3px}
-.nm-hd{display:flex;gap:10px;align-items:flex-start}
-.nm-ic{flex:none;width:34px;height:24px;margin-top:2px;border-radius:4px;background:linear-gradient(145deg,#fff,#dbe2ff);position:relative;transform-style:preserve-3d;animation:nmSpin 6s ease-in-out infinite;box-shadow:0 6px 10px #0006}
-.nm-ic::before{content:"";position:absolute;inset:0;border-radius:4px;background:linear-gradient(135deg,transparent 49%,#9fb0f0 50%,transparent 52%),linear-gradient(225deg,transparent 49%,#9fb0f0 50%,transparent 52%)}
-@keyframes nmSpin{0%,100%{transform:rotateY(-18deg) rotateX(8deg)}50%{transform:rotateY(18deg) rotateX(-4deg)}}
-.nm-t{font-weight:700;font-size:15px;line-height:1.3;word-break:break-word}
-.nm-m{font-size:11.5px;opacity:.85;margin-top:2px}
-.nm-new{margin-left:auto;flex:none;font-size:10px;font-weight:800;letter-spacing:.08em;background:#fff;color:#be123c;padding:3px 8px;border-radius:99px;animation:nmPulse 1.4s ease-in-out infinite}
-@keyframes nmPulse{50%{transform:scale(1.12)}}
-.nm-body{margin-top:10px;font-size:14px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
-.nm-card.clamp .nm-body{display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
-.nm-more{margin-top:8px;background:#ffffff26;color:#fff;border:1px solid #ffffff55;border-radius:99px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer}
-.nm-pri{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:99px;background:#00000030;font-size:10.5px;font-weight:700}
-.nm-pin{position:absolute;top:-8px;right:12px;font-size:18px;transform:rotate(18deg);filter:drop-shadow(0 3px 3px #0006)}
-.nm-empty{text-align:center;padding:50px 10px;color:#6b7280}
-.nm-empty .em{font-size:44px}
-.p-Normal{--a:#4f46e5;--b:#7c3aed;--g:#7c3aed77}.p-Important{--a:#f59e0b;--b:#f97316;--g:#f59e0b88}.p-Urgent{--a:#ef4444;--b:#be123c;--g:#ef4444aa}
-@media(prefers-reduced-motion:reduce){.nm-card,.nm-card.unread,.nm-ic,.nm-new{animation:none!important}}
+# Update250: the Admin's live notes / messages scroll as a marquee at the top of the Employee Daily Entry page (left -> right, smooth and continuous).
+NT_MARQUEE = r"""<style id="ntm-css">
+.ntm{position:relative;display:flex;align-items:stretch;margin:0 0 14px;border-radius:14px;overflow:hidden;background:linear-gradient(135deg,#312e81,#4f46e5 55%,#7c3aed);color:#fff;
+  box-shadow:0 14px 26px -14px #4f46e5cc,0 0 0 1px #ffffff2a inset;perspective:700px}
+.ntm-lb{flex:none;display:flex;align-items:center;gap:8px;padding:0 16px 0 14px;font-weight:800;font-size:12.5px;letter-spacing:.08em;background:linear-gradient(135deg,#1e1b4b,#3730a3);position:relative;z-index:2;box-shadow:6px 0 14px -6px #0008}
+.ntm-ic{width:22px;height:16px;border-radius:3px;background:linear-gradient(145deg,#fff,#dbe2ff);position:relative;box-shadow:0 4px 7px #0006;animation:ntmSpin 4.5s ease-in-out infinite}
+.ntm-ic::before{content:"";position:absolute;inset:0;border-radius:3px;background:linear-gradient(135deg,transparent 49%,#9fb0f0 50%,transparent 52%),linear-gradient(225deg,transparent 49%,#9fb0f0 50%,transparent 52%)}
+@keyframes ntmSpin{0%,100%{transform:rotateY(-24deg) rotateX(8deg)}50%{transform:rotateY(24deg) rotateX(-6deg)}}
+.ntm-vp{position:relative;flex:1;min-width:0;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent,#000 40px,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(90deg,transparent,#000 40px,#000 calc(100% - 40px),transparent)}
+.ntm-track{display:flex;width:max-content;will-change:transform;animation:ntmMove var(--d,40s) linear infinite;backface-visibility:hidden;transform:translate3d(-50%,0,0)}
+.ntm:hover .ntm-track{animation-play-state:paused}
+@keyframes ntmMove{from{transform:translate3d(-50%,0,0)}to{transform:translate3d(0,0,0)}}
+.ntm-g{display:flex;flex:none;align-items:center;white-space:nowrap}
+.ntm-i{display:inline-flex;align-items:center;gap:8px;padding:12px 0;font-size:14.5px;line-height:1.2}
+.ntm-t{font-weight:800;text-shadow:0 1px 6px #0006}
+.ntm-pr{font-size:10.5px;font-weight:800;letter-spacing:.06em;padding:2px 8px;border-radius:99px;color:#fff}
+.ntm-pr.Important{background:linear-gradient(135deg,#f59e0b,#f97316)}.ntm-pr.Urgent{background:linear-gradient(135deg,#ef4444,#be123c);animation:ntmBl 1.2s ease-in-out infinite}
+@keyframes ntmBl{50%{opacity:.6}}
+.ntm-sep{display:inline-block;padding:0 26px;color:#c7d2fe;opacity:.9;font-size:13px}
+@media(prefers-reduced-motion:reduce){.ntm-track{animation:none;transform:none;flex-wrap:wrap}.ntm-g{flex-wrap:wrap;white-space:normal}.ntm-g+.ntm-g{display:none}.ntm-vp{-webkit-mask-image:none;mask-image:none}.ntm-ic{animation:none}}
+@media print{.ntm{display:none}}
+@media(max-width:600px){.ntm-lb span{display:none}.ntm-lb{padding:0 12px}.ntm-i{font-size:13.5px}}
 </style>
-<div class="card"><div class="nm-top"><h2>&#128236; Messages from Admin</h2>
-<button class="nm-chip on" data-f="all">All <b>{{items|length}}</b></button><button class="nm-chip" data-f="unread">Unread <b id="nm-un">{{unread}}</b></button><button class="nm-chip" data-f="note">Notes</button><button class="nm-chip" data-f="msg">Messages</button>
-<button class="back sm nm-all" id="nm-markall" {{'style=display:none' if not unread}}>Mark all as read</button></div>
-{% if not items %}<div class="nm-empty"><div class="em">&#128236;</div><p><b>No messages yet</b><br>Notes and messages sent by the Admin will appear here.</p></div>
-{% else %}<div class="nm-grid" id="nm-grid">
-{% for n in items %}<div class="nm-card {{'msg' if n.kind=='Message' else 'note'}} p-{{n.pri}} {{'' if n.read else 'unread'}}" id="n-{{n.id}}" data-id="{{n.id}}" data-k="{{'msg' if n.kind=='Message' else 'note'}}" data-r="{{1 if n.read else 0}}" style="--i:{{loop.index0 if loop.index0<12 else 12}};--r:{{ [-1.6,1.2,-0.8,1.8,-1.2,0.9][loop.index0 % 6] }}deg">
-{% if n.pinned %}<span class="nm-pin" title="Pinned">&#128204;</span>{% endif %}
-<div class="nm-hd"><i class="nm-ic"></i><div><div class="nm-t">{{n.title or 'Message from Admin'}}</div><div class="nm-m">{{n.at|t12}}{% if n.upd %} &middot; edited{% endif %}{% if n.until %} &middot; visible until {{n.until|t12}}{% endif %}{% if n.pri!='Normal' %}<span class="nm-pri">{{n.pri}}</span>{% endif %}</div></div>{% if not n.read %}<span class="nm-new">NEW</span>{% endif %}</div>
-<div class="nm-body">{{n.message}}</div>
-{% if n.kind=='Message' and (n.message|length>260 or n.message.count('\n')>=4) %}<button class="nm-more" type="button">Read full message</button>{% endif %}
-</div>{% endfor %}</div>{% endif %}</div>
+<div class="ntm" id="ntm" role="marquee" aria-label="Notes and messages from Admin" style="display:none"><div class="ntm-lb"><i class="ntm-ic"></i><span>NOTICE</span></div><div class="ntm-vp"><div class="ntm-track" id="ntm-track"></div></div></div>
 <script>
 (function(){
-  var grid=document.getElementById('nm-grid'); if(!grid) return;
-  var cards=[].slice.call(grid.querySelectorAll('.nm-card')), un=document.getElementById('nm-un'), allb=document.getElementById('nm-markall');
-  var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)').matches;
-  function post(ids){ try{ return fetch('/employee/messages/read',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:ids})}); }catch(e){} }
-  function counts(){ var c=0; cards.forEach(function(k){ if(k.getAttribute('data-r')==='0') c++; }); un.textContent=c; if(allb) allb.style.display=c?'':'none';
-    var a=document.querySelector('a[href="/employee/messages"]'); if(a){ a.textContent=a.textContent.replace(/\s*\(\d+\)\s*$/,'')+(c?' ('+c+')':''); } }
-  function markRead(k){ if(k.getAttribute('data-r')==='1') return; k.setAttribute('data-r','1'); k.classList.remove('unread'); var b=k.querySelector('.nm-new'); if(b) b.remove(); post([k.getAttribute('data-id')]); counts(); }
-  cards.forEach(function(k){
-    var more=k.querySelector('.nm-more'); if(more){ k.classList.add('clamp'); more.addEventListener('click',function(){ var c=k.classList.toggle('clamp'); more.textContent=c?'Read full message':'Show less'; markRead(k); }); }
-    k.addEventListener('click',function(){ markRead(k); });
-    if(!reduce){
-      k.addEventListener('pointermove',function(e){ var r=k.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5; k.style.animation='none'; k.style.transform='rotateY('+(x*12).toFixed(1)+'deg) rotateX('+(-y*10).toFixed(1)+'deg) translateZ(8px)'; });
-      k.addEventListener('pointerleave',function(){ k.style.transform=''; });
-    }
-  });
-  document.querySelectorAll('.nm-chip').forEach(function(b){ b.addEventListener('click',function(){
-    document.querySelectorAll('.nm-chip').forEach(function(x){ x.classList.remove('on'); }); b.classList.add('on'); var f=b.getAttribute('data-f');
-    cards.forEach(function(k){ var show=f==='all'||(f==='unread'&&k.getAttribute('data-r')==='0')||(f===k.getAttribute('data-k')); k.style.display=show?'':'none'; }); }); });
-  if(allb) allb.addEventListener('click',function(){ var ids=[]; cards.forEach(function(k){ if(k.getAttribute('data-r')==='0'){ ids.push(k.getAttribute('data-id')); k.setAttribute('data-r','1'); k.classList.remove('unread'); var b=k.querySelector('.nm-new'); if(b) b.remove(); } }); if(ids.length) post(ids); counts(); });
-  if(location.hash){ var t=document.querySelector(location.hash.replace(/[^#A-Za-z0-9_-]/g,'')); if(t&&t.classList&&t.classList.contains('nm-card')){ var mb=t.querySelector('.nm-more'); if(mb) mb.click(); else markRead(t); setTimeout(function(){ t.scrollIntoView({behavior:'smooth',block:'center'}); },300); } }
-})();
-</script>"""
-
-# 3D animated pop-up notifications (every Employee page). Pure display + one POST to mark a note read.
-NT_TOAST = r"""<style id="ntt-css">
-.ntt-wrap{position:fixed;top:14px;right:14px;z-index:99990;display:flex;flex-direction:column;gap:12px;perspective:900px;pointer-events:none;width:min(340px,calc(100vw - 28px))}
-.ntt{pointer-events:auto;position:relative;border-radius:14px;padding:12px 38px 12px 14px;color:#fff;background:linear-gradient(135deg,var(--a),var(--b));font-family:inherit;
-  box-shadow:0 18px 34px -12px #000a,0 0 0 1px #ffffff30 inset,0 0 24px var(--g);transform-style:preserve-3d;transform-origin:100% 50%;
-  animation:nttIn .85s cubic-bezier(.2,.9,.25,1.15) both,nttFloat 5s ease-in-out .9s infinite;display:flex;gap:12px;align-items:flex-start}
-.ntt.out{animation:nttOut .45s ease-in both}
-@keyframes nttIn{0%{opacity:0;transform:translateX(120%) rotateY(-75deg) rotateX(18deg) scale(.7)}60%{opacity:1;transform:translateX(-6px) rotateY(10deg) scale(1.03)}100%{opacity:1;transform:none}}
-@keyframes nttFloat{50%{transform:translateY(-3px) rotateX(3deg) rotateY(-4deg)}}
-@keyframes nttOut{to{opacity:0;transform:translateX(120%) rotateY(70deg) scale(.7)}}
-.ntt-ic{flex:none;width:36px;height:26px;margin-top:3px;border-radius:4px;background:linear-gradient(145deg,#fff,#dbe2ff);position:relative;box-shadow:0 6px 10px #0006;animation:nttSpin 4.5s ease-in-out infinite;transform-style:preserve-3d}
-.ntt-ic::before{content:"";position:absolute;inset:0;border-radius:4px;background:linear-gradient(135deg,transparent 49%,#9fb0f0 50%,transparent 52%),linear-gradient(225deg,transparent 49%,#9fb0f0 50%,transparent 52%)}
-@keyframes nttSpin{0%,100%{transform:rotateY(-22deg) rotateX(8deg)}50%{transform:rotateY(22deg) rotateX(-6deg)}}
-.ntt-b{min-width:0}.ntt-t{font-weight:700;font-size:14px;line-height:1.3;word-break:break-word}
-.ntt-m{font-size:12.5px;opacity:.95;margin-top:3px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
-.ntt-a{display:inline-block;margin-top:7px;padding:3px 12px;border-radius:99px;background:#ffffff2e;border:1px solid #ffffff66;color:#fff;font-size:12px;font-weight:700;text-decoration:none}
-.ntt-x{position:absolute;top:6px;right:8px;width:24px;height:24px;border:0;border-radius:50%;background:#00000030;color:#fff;font-size:15px;line-height:24px;cursor:pointer;padding:0}
-.ntt-more{pointer-events:auto;align-self:flex-end;background:#1f2547;color:#fff;border-radius:99px;padding:4px 12px;font-size:12px;font-weight:700;text-decoration:none;box-shadow:0 8px 16px -8px #000a}
-.ntt.p-Normal{--a:#4f46e5;--b:#7c3aed;--g:#7c3aed77}.ntt.p-Important{--a:#f59e0b;--b:#f97316;--g:#f59e0b88}.ntt.p-Urgent{--a:#ef4444;--b:#be123c;--g:#ef4444aa}
-@media(prefers-reduced-motion:reduce){.ntt,.ntt-ic{animation:none!important}}
-@media print{.ntt-wrap{display:none}}
-</style>
-<div class="ntt-wrap" id="ntt-wrap" aria-live="polite"></div>
-<script>
-(function(){
-  var wrap=document.getElementById('ntt-wrap'); if(!wrap) return;
-  var DATA=__DATA__, seen={}, SK='ntSeen';
-  try{ (JSON.parse(sessionStorage.getItem(SK)||'[]')||[]).forEach(function(i){ seen[i]=1; }); }catch(e){}
-  function save(){ try{ sessionStorage.setItem(SK,JSON.stringify(Object.keys(seen))); }catch(e){} }
-  function post(id){ try{ fetch('/employee/messages/read',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[id]})}); }catch(e){} }
+  var bar=document.getElementById('ntm'); if(!bar) return;
+  var track=document.getElementById('ntm-track'), DATA=__DATA__, last='', SPEED=70, SK='ntmSeen';
   function esc(s){ var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
-  function close(el){ el.classList.add('out'); setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); },460); }
-  function show(n){
-    if(seen[n.id]) return; seen[n.id]=1; save();
-    var el=document.createElement('div'); el.className='ntt p-'+n.pri; el.setAttribute('role','status');
-    el.innerHTML='<i class="ntt-ic"></i><div class="ntt-b"><div class="ntt-t">'+esc(n.title||'Message from Admin')+'</div><div class="ntt-m">'+esc(n.snip)+'</div><a class="ntt-a" href="/employee/messages#n-'+encodeURIComponent(n.id)+'">Open</a></div><button class="ntt-x" aria-label="Dismiss" type="button">&times;</button>';
-    el.querySelector('.ntt-x').addEventListener('click',function(){ post(n.id); close(el); });
-    wrap.appendChild(el);
-    while(wrap.querySelectorAll('.ntt').length>3){ var f=wrap.querySelector('.ntt'); if(f) f.parentNode.removeChild(f); }
-    if(n.pri!=='Urgent') setTimeout(function(){ if(el.parentNode) close(el); },14000);
+  function seg(n){ return '<span class="ntm-i">'+(n.pri!=='Normal'?'<span class="ntm-pr '+n.pri+'">'+n.pri.toUpperCase()+'</span>':'')+(n.title?'<b class="ntm-t">'+esc(n.title)+':</b>':'')+'<span>'+esc(n.text)+'</span></span><span class="ntm-sep">\u2726</span>'; }
+  function build(items){
+    var key=JSON.stringify(items); if(key===last) return; last=key;
+    if(!items.length){ bar.style.display='none'; track.innerHTML=''; return; }
+    bar.style.display='';
+    var one=items.map(seg).join(''), bw=Math.max(bar.clientWidth,320), grp=one, probe=document.createElement('div');
+    probe.className='ntm-g'; probe.style.cssText='position:absolute;visibility:hidden;left:0;top:0'; track.appendChild(probe);
+    probe.innerHTML=grp; var w=probe.offsetWidth, tries=0; while(w<bw&&tries<12){ grp+=one; probe.innerHTML=grp; w=probe.offsetWidth; tries++; }
+    track.removeChild(probe);
+    track.innerHTML='<div class="ntm-g">'+grp+'</div><div class="ntm-g" aria-hidden="true">'+grp+'</div>';
+    track.style.setProperty('--d',Math.max(12,w/SPEED).toFixed(1)+'s');
   }
-  var q=DATA.slice(); (function next(){ if(!q.length) return; show(q.shift()); setTimeout(next,450); })();
+  function seen(items){ var s={}; try{ (JSON.parse(sessionStorage.getItem(SK)||'[]')||[]).forEach(function(i){ s[i]=1; }); }catch(e){}
+    var ids=items.map(function(n){ return n.id; }).filter(function(i){ return !s[i]; }); if(!ids.length) return;
+    try{ fetch('/employee/messages/read',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:ids})}); ids.forEach(function(i){ s[i]=1; }); sessionStorage.setItem(SK,JSON.stringify(Object.keys(s))); }catch(e){} }
+  build(DATA); seen(DATA);
+  var rt=0; window.addEventListener('resize',function(){ clearTimeout(rt); rt=setTimeout(function(){ last=''; build(JSON.parse(JSON.stringify(cur))); },250); });
+  var cur=DATA;
   setInterval(function(){ if(document.hidden) return;
-    fetch('/employee/messages/poll',{credentials:'same-origin',cache:'no-store'}).then(function(r){ return r.ok?r.json():null; }).then(function(d){ if(d&&d.items) d.items.forEach(show); }).catch(function(){});
+    fetch('/employee/messages/ticker',{credentials:'same-origin',cache:'no-store'}).then(function(r){ return r.ok?r.json():null; }).then(function(d){ if(d&&d.items){ cur=d.items; build(cur); seen(cur); } }).catch(function(){});
   },60000);
 })();
 </script>"""
 
-def nt_toast_html():
-    """Pop-up cards for the signed-in employee's unread notes (empty string when there is nothing to show)."""
-    eid = session.get("emp_id", "")
-    items = [x for x in nt_for(eid) if not x["read"]][:5]
-    data = json.dumps([_nt_toast_item(x) for x in items])
-    return NT_TOAST.replace("__DATA__", data.replace("</", "<\\/"))
+def _nt_ticker_items(eid):
+    out = []
+    for x in nt_for(eid):
+        txt = re.sub(r"\s+", " ", x["message"]).strip()
+        out.append(dict(id=x["id"], title=x["title"], text=(txt[:1500] + (" ..." if len(txt) > 1500 else "")), pri=x["pri"]))
+    return out
 
-def _nt_toast_item(x):
-    snip = re.sub(r"\s+", " ", x["message"]).strip()
-    return dict(id=x["id"], title=x["title"], snip=(snip[:140] + ("..." if len(snip) > 140 else "")), pri=x["pri"])
+def nt_marquee_html():
+    """The marquee shown at the top of the Employee Daily Entry page (live notes / messages only; hidden when there are none)."""
+    data = json.dumps(_nt_ticker_items(session.get("emp_id", "")))
+    return NT_MARQUEE.replace("__DATA__", data.replace("</", "<\\/"))
 
 @app.route("/employee/messages")
 @need("employee")
-def employee_messages():
-    items = nt_for(session["emp_id"])
-    return page(NOTES_EMP, title="Messages", items=items, unread=sum(1 for x in items if not x["read"]))
+def employee_messages(): return redirect("/employee")      # Update250: the Messages page is removed - notes scroll on the Daily Entry page
 
 @app.route("/employee/messages/read", methods=["POST"])
 @need("employee")
@@ -13075,11 +13003,10 @@ def employee_messages_read():
             print("Admin Note Reads save failed:", repr(ex)); return jsonify(ok=False), 500
     return jsonify(ok=True, added=len(out))
 
-@app.route("/employee/messages/poll")
+@app.route("/employee/messages/ticker")
 @need("employee")
-def employee_messages_poll():
-    items = [x for x in nt_for(session["emp_id"]) if not x["read"]][:5]
-    r = jsonify(items=[_nt_toast_item(x) for x in items], unread=len(items)); r.headers["Cache-Control"] = "no-store"; return r
+def employee_messages_ticker():
+    r = jsonify(items=_nt_ticker_items(session["emp_id"])); r.headers["Cache-Control"] = "no-store"; return r
 
 @app.route("/admin/notes")
 @need("admin")

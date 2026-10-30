@@ -7,6 +7,7 @@
   * Update242: Employee login page - the two characters now animate: eyes open / close naturally (random single and occasional double blinks) on BOTH pictures, the left character's thumbs-up hand wiggles, the right (clipboard) character's raised fist waves and the hand holding the clipboard adjusts its grip. CSS layers + one tiny script, no new images / libraries; login form, lookup and every route unchanged; reduced-motion users get still pictures.
   * Update241: Employee login page - for Associate Manager / Team Lead / Senior Team Lead (recognised from the typed username, same lookup as the character) the server picture on the right is replaced by the supplied clipboard picture (/char/tl.webp) with 3D depth (shadow layer behind, pointer parallax), 3D sway, floating, breathing, light sweep, aura and floor ring. Login form / logic and every other designation's login page unchanged.
   * Update240: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the female picture is removed; the supplied male picture (glasses, white suit, thumbs-up; /char/lm.webp) is shown above the login box once the username is typed, with the same tilt / breathing / floating / shine animation. Employee panel picture and all other designations / pages unchanged.
+  * Update248: NEW Admin Notes / Messages. Admin > Notes & Messages: write a short note or a longer message (title optional, priority Normal / Important / Urgent, pin, optional 'show until' date) and choose WHO can view it - all employees or only the ticked employees (search, select shown, clear); edit it later (change text or viewers), hide / show again, delete, and see how many and which employees have read it. Employee > Messages: 3D animated cards (short notes as tilted sticky cards, long messages expandable with 'Read full message'), NEW badge, unread count in the menu, filters, Mark all as read; plus 3D pop-up notifications on every Employee page for unread notes (Urgent stay until dismissed). New sheets \"Admin Notes\" and \"Admin Note Reads\" are created automatically on the next start.
   * Update247: (1) Admin > Productivity log: the Employee column shows the Employee ID only (no name). (2) Employee panel: the name above Logout is plain text for every employee (no 3D / animation). (3) Login pages: Employee - after the username is entered a 3D e-mail flies from the employee picture to the server; Admin - on Log in a 3D e-mail flies from the server to the admin picture (the form is sent right after); Associate Manager / Team Lead / Senior Team Lead - report sheets then fly from the server to their picture. Display only, skipped when reduced motion is on. (4) Employee login: the 3D e-mail animation starts as soon as the username is entered and repeats through the whole sign-in until the next page has loaded (Associate Manager / Team Lead / Senior Team Lead also see the report sheets); Admin: starts on Log in and repeats until the next page has loaded. (5) The captions "Server", "Admin system" and "Employee system" are removed from both login pages.
   * Update239: Associate Manager / Team Lead / Senior Team Lead only (live Designation): (1) Employee panel - the name / nickname above Logout is plain normal text (no 3D, no animation); (2) the panel picture is the supplied male / female cut-out (by Gender) with the existing 3D depth, breathing, shine and ring animation plus a gentle sway; (3) Employee login page - once the username (Employee ID / e-mail) of one of these employees is typed, the supplied female picture is shown above the login box with the same tilt / breathing / floating / shine animation (served at /char/lf.webp; /login-char returns "l"). All other designations, pages and layouts unchanged.
   * Update238: (1) Associate Manager / Team Lead / Senior Team Lead (live Designation) get an "Employee Details" menu: Personal Details of ALL employees (search by ID / name, click a name to view / edit; same editable fields as the Admin form, Employee ID / Name / Designation / Office Email stay read-only; saved through the same save_employee_row; every change is logged in the Admin Notifications under the editor). Server-side 403 for everyone else. (2) Employee panel - the name / nickname above Logout is static 3D letters (flip-in, wave and sheen animations removed). Nothing else changed.
@@ -541,6 +542,9 @@ HEADERS = {
     # Mahizhchi (Update62): Admin's questions (A-D options, one ✓ correct answer) and which employees may view them.
     "Mahizhchi Log": ["Question", "A", "B", "C", "D", "Correct Answer"],
     "Mahizhchi Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
+    # Update248: Admin Notes / Messages (Admin > Notes & Messages; Employee > Messages)
+    "Admin Notes": ["Note ID", "Created at", "Title", "Message", "Kind", "Priority", "Audience", "Recipients", "Pinned", "Status", "Created by", "Expires on", "Updated at"],
+    "Admin Note Reads": ["Note ID", "Employee ID", "Employee name", "Read at"],
     "Mahizhchi Answers": ["Employee ID", "Employee name", "Question ID", "Question", "Answer", "Submitted at"],
     # Update84: one row per employee PER SET: when they pressed Start (timer runs from this SERVER time), when the Set closed, and its result
     "Mahizhchi Attempts": ["Employee ID", "Employee name", "Started at", "Closed at", "Set", "Answered", "Correct", "Result", "Extra seconds"],
@@ -3974,7 +3978,8 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"), 
               ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log"),
-              ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes")],   # Update211: Theme & Layout is link-only (/admin/theme), not in the menu
+              ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes"),
+              ("/admin/notes", "Notes & Messages")],   # Update248 / Update211: Theme & Layout is link-only (/admin/theme), not in the menu
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
@@ -4052,6 +4057,11 @@ def page(body, title="Productivity Tracker", **ctx):
             if mz_active(session.get("emp_id", "")): items.append(("/employee/mahizhchi", MZ_TITLE))
         except Exception as e:
             print("Mahizhchi menu check failed (are the Mahizhchi sheets created? restart the app once):", e)
+        try:      # Update248: Messages from the Admin (unread count in brackets)
+            _nu = nt_unread_count(session.get("emp_id", ""))
+            items.append(("/employee/messages", "Messages" + (" (%d)" % _nu if _nu else "")))
+        except Exception as ex_:
+            print("Messages menu check failed:", repr(ex_))
         try:      # Update204: Multiplayer Game link - Employee page only, and only while the Admin has enabled it for this employee
             if gm_allowed(session.get("emp_id", "")): items.append(("/employee/game", GM_TITLE))
         except Exception as e:
@@ -4073,7 +4083,7 @@ def page(body, title="Productivity Tracker", **ctx):
         by_h = {n[0]: n for n in nav}
         nav = [by_h["/admin/summary"], by_h["/admin/processes"],
                ("/admin/log", "Log", any(k[2] for k in log_kids), log_kids),
-               by_h["/admin/employee-info"]]      # Update211: Theme & Layout removed from the menu
+               by_h["/admin/employee-info"], by_h["/admin/notes"]]      # Update248: Notes & Messages / Update211: Theme & Layout removed from the menu
     side_avatar = ""
     if session.get("role") == "admin":
         side_avatar = ADMIN3D_HTML
@@ -4126,8 +4136,15 @@ def page(body, title="Productivity Tracker", **ctx):
                 hol_json = employee_holiday_json()
                 prm_json = _json.dumps(employee_perm_map(session.get("emp_id", "")), separators=(",", ":"))
         except Exception as ex: print("attendance calendar error:", repr(ex))
-    return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
+    _html = render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
                                   side_avatar=side_avatar, side_name=side_name, side_name_html=side_name_html, welcome_html=welcome_html, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, hol_only=bool(ctx["hide_status"]), srv_today=str(today_local()), theme_css=_theme_css())
+    if session.get("role") == "employee" and not ctx.get("bare") and not request.path.startswith("/employee/messages"):      # Update248: 3D pop-up notifications
+        try:
+            _w = nt_toast_html(); _i = _html.rfind("</body>")
+            if _w and _i >= 0: _html = _html[:_i] + _w + _html[_i:]
+        except Exception as ex_:
+            print("Messages pop-up failed:", repr(ex_))
+    return _html
 
 
 LOGIN_CLASSIC = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i><i></i><i></i></div>
@@ -12734,6 +12751,372 @@ function gmAll(v){document.querySelectorAll('#gmA-t tr:not([hidden]) input[name=
 document.getElementById('gmA-q').addEventListener('input',function(){var q=this.value.toLowerCase().trim();
   document.querySelectorAll('#gmA-t tr[data-s]').forEach(function(r){r.hidden=q&&r.dataset.s.indexOf(q)<0})});
 </script>{% endraw %}"""
+
+
+# ================================================================ Admin Notes / Messages - Update248
+# Admin writes short notes or longer messages (Admin > Notes & Messages) and chooses WHO may view each one (all employees, or only the
+# employees ticked). Employees see them as 3D animated pop-up notifications on every page and in Employee > Messages (read / unread).
+# Sheets (created automatically): "Admin Notes" (one row per note) and "Admin Note Reads" (who has read what).
+NT_SHEET, NT_READS = "Admin Notes", "Admin Note Reads"
+NT_PRI = ("Normal", "Important", "Urgent")
+
+def _nt_clean(s, n):
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(s or "").replace("\r\n", "\n").replace("\r", "\n")).strip()[:n]
+
+def _nt_recips(n):
+    return {_key(x) for x in str(n.get("Recipients", "")).split(",") if str(x).strip()}
+
+def _nt_visible(n, eid):
+    """Active, not expired, and (sent to everyone OR this employee is one of the chosen recipients)."""
+    if str(n.get("Status", "")).strip() != "Active": return False
+    exp = str(n.get("Expires on", "")).strip()
+    if exp and exp < str(today_local()): return False
+    if str(n.get("Audience", "All")).strip().lower() == "selected": return _key(eid) in _nt_recips(n)
+    return True
+
+def nt_for(eid):
+    """Notes this employee may view, pinned first then newest; each with a 'read' flag."""
+    try: notes = [n for n in rows(NT_SHEET) if str(n.get("Note ID", "")).strip() and _nt_visible(n, eid)]
+    except Exception as ex:
+        print("Admin Notes read failed:", repr(ex)); return []
+    try: rd = {str(r.get("Note ID", "")).strip() for r in rows(NT_READS) if _key(r.get("Employee ID", "")) == _key(eid)}
+    except Exception: rd = set()
+    out = []
+    for n in notes:
+        nid = str(n["Note ID"]).strip()
+        out.append(dict(id=nid, title=str(n.get("Title", "")).strip(), message=str(n.get("Message", "")), kind=("Message" if str(n.get("Kind", "")).strip() == "Message" else "Note"),
+                        pri=(str(n.get("Priority", "")).strip() if str(n.get("Priority", "")).strip() in NT_PRI else "Normal"),
+                        pinned=str(n.get("Pinned", "")).strip() == "Yes", at=str(n.get("Created at", "")).strip(), upd=str(n.get("Updated at", "")).strip(), read=(nid in rd)))
+    out.sort(key=lambda x: x["at"], reverse=True); out.sort(key=lambda x: not x["pinned"])
+    return out
+
+def nt_unread_count(eid):
+    try: return sum(1 for x in nt_for(eid) if not x["read"])
+    except Exception: return 0
+
+def _nt_emps():
+    out = []
+    for e in rows("Employees"):
+        eid = str(e.get("Employee ID", "")).strip()
+        if not eid: continue
+        out.append(dict(id=eid, key=_key(eid), name=str(e.get("Name", "")).strip(), desig=str(e.get("Designation", "")).strip(),
+                        locked=str(e.get("Account locked", "")).strip().lower() in ("yes", "y", "true")))
+    out.sort(key=lambda x: x["name"].lower())
+    return out
+
+NOTES_ADM = r"""<style>
+.nt-f label{display:block;font-weight:600;font-size:13px;margin:12px 0 4px}
+.nt-f input[type=text],.nt-f input[type=date],.nt-f select,.nt-f textarea{width:100%;box-sizing:border-box}
+.nt-f textarea{min-height:130px;resize:vertical;line-height:1.5}
+.nt-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;align-items:end}
+.nt-cnt{font-size:12px;color:#6b7280;margin-top:4px}
+.nt-chk{display:flex!important;align-items:center;gap:8px;font-weight:600}
+.nt-chk input{width:auto}
+.nt-aud{border:1px solid #dfe4f5;border-radius:12px;padding:12px 14px;margin-top:14px;background:#f8f9ff}
+.nt-aud legend{font-weight:700;font-size:13px;padding:0 6px}
+.nt-aud .ra{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:6px}.nt-aud .ra label{display:flex;align-items:center;gap:6px;margin:4px 0;font-weight:600}
+.nt-aud .ra input{width:auto}
+.nt-pick{margin-top:8px}.nt-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}.nt-tools input{flex:1;min-width:160px}
+.nt-tools button{padding:6px 12px;font-size:12px}
+.nt-list{max-height:260px;overflow:auto;border:1px solid #e3e7f7;border-radius:10px;background:#fff;padding:6px 10px}
+.nt-pk{display:flex!important;align-items:center;gap:8px;font-weight:500!important;margin:0!important;padding:5px 2px;border-bottom:1px dashed #eef0fb;font-size:13px}
+.nt-pk input{width:auto}.nt-pk small{color:#6b7280;margin-left:auto}
+.nt-sel{font-size:12px;color:#4f46e5;font-weight:700;margin-top:6px}
+.nt-pv{margin-top:16px;perspective:900px}
+.nt-pvc{border-radius:14px;padding:14px 16px;color:#fff;background:linear-gradient(135deg,var(--a),var(--b));box-shadow:0 18px 30px -14px #0008,0 0 18px var(--g);transform:rotateX(4deg) rotateY(-6deg);transition:transform .25s;max-width:420px}
+.nt-pvc:hover{transform:rotateX(0) rotateY(0)}.nt-pvc b{display:block;font-size:14px}.nt-pvc span{display:block;font-size:13px;opacity:.95;margin-top:4px;white-space:pre-wrap;word-break:break-word;max-height:4.4em;overflow:hidden}
+.nt-pv small{display:block;color:#6b7280;margin-bottom:6px}
+.p-Normal{--a:#4f46e5;--b:#7c3aed;--g:#7c3aed55}.p-Important{--a:#f59e0b;--b:#f97316;--g:#f59e0b66}.p-Urgent{--a:#ef4444;--b:#be123c;--g:#ef444477}
+.nt-tag{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700;color:#fff;background:linear-gradient(135deg,var(--a),var(--b))}
+.nt-st-Active{color:#047857;font-weight:700}.nt-st-Archived{color:#b45309;font-weight:700}
+.nt-act form{display:inline}.nt-act button,.nt-act a{font-size:12px;padding:4px 10px;margin:2px;cursor:pointer}
+.nt-det summary{cursor:pointer;color:#4f46e5;font-size:12px;font-weight:600}.nt-det div{font-size:12px;margin-top:4px;max-width:340px}
+.nt-det .rd{color:#047857}.nt-det .un{color:#b91c1c}
+</style>
+<div class="card nt-f"><h2>{{ 'Edit note / message' if f.id else 'Send a note / message to employees' }}</h2>
+<p class="mut">Short notes appear as small 3D sticky cards; longer messages as expandable cards. You decide exactly who can view each one.</p>
+<form method="post" action="/admin/notes/save" id="nt-form">
+<input type="hidden" name="id" value="{{f.id}}">
+<label>Title <span class="mut">(optional)</span><input type="text" name="title" maxlength="120" value="{{f.title}}" placeholder="e.g. Holiday notice / Target update"></label>
+<label>Message<textarea name="message" id="nt-msg" maxlength="5000" required placeholder="Type a short note or a longer message...">{{f.message}}</textarea></label>
+<div class="nt-cnt"><span id="nt-c">0</span> / 5000 characters &middot; shows as a <b id="nt-k">short note</b></div>
+<div class="nt-row">
+<label>Type<select name="kind" id="nt-kind"><option value="auto" {{'selected' if f.kind=='auto'}}>Auto (by length)</option><option value="short" {{'selected' if f.kind=='short'}}>Short note</option><option value="long" {{'selected' if f.kind=='long'}}>Long message</option></select></label>
+<label>Priority<select name="priority" id="nt-pri">{% for p in pris %}<option value="{{p}}" {{'selected' if f.pri==p}}>{{p}}</option>{% endfor %}</select></label>
+<label>Show until <span class="mut">(optional)</span><input type="date" name="expires" value="{{f.expires}}"></label>
+<label class="nt-chk"><input type="checkbox" name="pinned" value="1" {{'checked' if f.pinned}}> Pin to top</label>
+</div>
+<fieldset class="nt-aud"><legend>Who can view this?</legend>
+<div class="ra"><label><input type="radio" name="audience" value="all" {{'checked' if f.aud=='all'}}> All employees</label><label><input type="radio" name="audience" value="selected" {{'checked' if f.aud=='selected'}}> Only selected employees</label></div>
+<div class="nt-pick" id="nt-pick" style="display:{{'block' if f.aud=='selected' else 'none'}}">
+<div class="nt-tools"><input type="text" id="nt-q" placeholder="Search by ID, name or designation"><button type="button" class="back sm" id="nt-all">Select shown</button><button type="button" class="back sm" id="nt-none">Clear all</button></div>
+<div class="nt-list">{% for e in emps %}<label class="nt-pk" data-s="{{(e.id ~ ' ' ~ e.name ~ ' ' ~ e.desig)|lower}}"><input type="checkbox" name="to" value="{{e.id}}" {{'checked' if e.ck}}><b>{{e.id}}</b> &middot; {{e.name}}{% if e.locked %} <em class="mut">(locked)</em>{% endif %}<small>{{e.desig}}</small></label>{% endfor %}</div>
+<div class="nt-sel"><span id="nt-n">0</span> employee(s) selected</div></div></fieldset>
+<div class="nt-pv"><small>Preview (how employees see it)</small><div class="nt-pvc p-Normal" id="nt-pvc"><b id="nt-pvt">Message from Admin</b><span id="nt-pvm">Your text appears here...</span></div></div>
+<p style="margin-top:14px"><button class="primary">{{ 'Save changes' if f.id else 'Send' }}</button> {% if f.id %}<a class="back sm" href="/admin/notes">Cancel</a>{% endif %}</p>
+</form></div>
+<div class="card"><h2>Sent notes &amp; messages</h2>
+{% if not notes %}<p class="mut">Nothing sent yet.</p>{% else %}
+<table><tr><th>Sent</th><th>Note</th><th>Type</th><th>Priority</th><th>Viewers</th><th>Read</th><th>Status</th><th></th></tr>
+{% for n in notes %}<tr class="p-{{n.pri}}"><td>{{n.at|t12}}{% if n.upd %}<br><small class="mut">edited {{n.upd|t12}}</small>{% endif %}</td>
+<td style="max-width:300px"><b>{% if n.pinned %}&#128204; {% endif %}{{n.title or '(no title)'}}</b><br><span class="mut">{{n.message[:140]}}{{'...' if n.message|length>140}}</span>{% if n.expires %}<br><small class="mut">shown until {{n.expires}}</small>{% endif %}</td>
+<td>{{n.kind}}</td><td><span class="nt-tag">{{n.pri}}</span></td>
+<td>{% if n.sel %}Selected ({{n.total}}){% else %}All employees ({{n.total}}){% endif %}</td>
+<td><b>{{n.read_n}}</b> / {{n.total}}<details class="nt-det"><summary>Who</summary><div><span class="rd">Read:</span> {% for w in n.who_read %}{{w[0]}} <small>({{w[1]|t12}})</small>{{ ', ' if not loop.last }}{% else %}-{% endfor %}</div><div><span class="un">Not read:</span> {{ n.who_not|join(', ') or '-' }}</div></details></td>
+<td class="nt-st-{{n.status}}">{{n.status}}</td>
+<td class="nt-act"><a class="back sm" href="/admin/notes?edit={{n.id}}#nt-form">Edit</a>
+<form method="post" action="/admin/notes/{{n.id}}/status"><input type="hidden" name="to" value="{{ 'restore' if n.status=='Archived' else 'archive' }}"><button class="back sm">{{ 'Show again' if n.status=='Archived' else 'Hide from employees' }}</button></form>
+<form method="post" action="/admin/notes/{{n.id}}/status" onsubmit="return confirm('Delete this note / message permanently from the employees\' panels?')"><input type="hidden" name="to" value="delete"><button class="back sm">Delete</button></form></td></tr>{% endfor %}</table>{% endif %}</div>
+<script>
+(function(){
+  var f=document.getElementById('nt-form'); if(!f) return;
+  var msg=document.getElementById('nt-msg'),cnt=document.getElementById('nt-c'),kd=document.getElementById('nt-k'),kind=document.getElementById('nt-kind'),pri=document.getElementById('nt-pri');
+  var pick=document.getElementById('nt-pick'),q=document.getElementById('nt-q'),nn=document.getElementById('nt-n'),pv=document.getElementById('nt-pvc'),pvt=document.getElementById('nt-pvt'),pvm=document.getElementById('nt-pvm'),ti=f.querySelector('[name=title]');
+  function isLong(){ var v=msg.value; if(kind.value==='long') return true; if(kind.value==='short') return false; return v.length>200||(v.match(/\n/g)||[]).length>=2; }
+  function upd(){ cnt.textContent=msg.value.length; kd.textContent=isLong()?'long message':'short note'; pvt.textContent=ti.value.trim()||'Message from Admin'; pvm.textContent=msg.value.trim()||'Your text appears here...'; pv.className='nt-pvc p-'+pri.value; }
+  [msg,kind,pri,ti].forEach(function(e){ e.addEventListener('input',upd); e.addEventListener('change',upd); }); upd();
+  function boxes(){ return f.querySelectorAll('input[name=to]'); }
+  function count(){ var c=0; boxes().forEach(function(b){ if(b.checked) c++; }); nn.textContent=c; }
+  f.querySelectorAll('input[name=audience]').forEach(function(r){ r.addEventListener('change',function(){ pick.style.display=(f.querySelector('input[name=audience]:checked').value==='selected')?'block':'none'; }); });
+  f.addEventListener('change',function(e){ if(e.target.name==='to') count(); }); count();
+  q.addEventListener('input',function(){ var s=q.value.trim().toLowerCase(); f.querySelectorAll('.nt-pk').forEach(function(l){ l.style.display=(!s||l.getAttribute('data-s').indexOf(s)>=0)?'':'none'; }); });
+  document.getElementById('nt-all').addEventListener('click',function(){ f.querySelectorAll('.nt-pk').forEach(function(l){ if(l.style.display!=='none') l.querySelector('input').checked=true; }); count(); });
+  document.getElementById('nt-none').addEventListener('click',function(){ boxes().forEach(function(b){ b.checked=false; }); count(); });
+  f.addEventListener('submit',function(e){ var sel=f.querySelector('input[name=audience]:checked'); if(sel&&sel.value==='selected'&&!f.querySelector('input[name=to]:checked')){ e.preventDefault(); alert('Tick at least one employee, or choose All employees.'); } });
+})();
+</script>"""
+
+NOTES_EMP = r"""<style>
+.nm-top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
+.nm-top h2{margin:0 12px 0 0}
+.nm-chip{padding:6px 14px;border-radius:99px;border:1px solid #d6dbf3;background:#fff;font-size:13px;font-weight:600;cursor:pointer;color:#3b4270}
+.nm-chip.on{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border-color:transparent;box-shadow:0 8px 16px -8px #4f46e5aa}
+.nm-chip b{margin-left:4px}
+.nm-all{margin-left:auto;font-size:12px;padding:6px 12px}
+.nm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:22px;perspective:1100px;align-items:start}
+.nm-card{position:relative;border-radius:16px;padding:16px 16px 14px;color:#fff;background:linear-gradient(140deg,var(--a),var(--b));box-shadow:0 22px 34px -16px #000a,0 0 0 1px #ffffff30 inset;transform-style:preserve-3d;transform-origin:50% 0;
+  animation:nmIn .75s cubic-bezier(.2,.9,.25,1.12) both;animation-delay:calc(var(--i,0)*70ms);transition:transform .18s ease-out,box-shadow .25s}
+.nm-card.note{transform:rotate(var(--r,0deg))}
+.nm-card.msg{grid-column:1/-1}
+@keyframes nmIn{0%{opacity:0;transform:rotateX(-80deg) translateY(-30px) scale(.9)}100%{opacity:1}}
+.nm-card.unread{box-shadow:0 22px 34px -16px #000a,0 0 0 1px #ffffff30 inset,0 0 26px var(--g);animation:nmIn .75s cubic-bezier(.2,.9,.25,1.12) both,nmGlow 2.6s ease-in-out 1s infinite}
+@keyframes nmGlow{50%{box-shadow:0 22px 34px -16px #000a,0 0 0 1px #ffffff50 inset,0 0 40px var(--g)}}
+.nm-card:target{outline:3px solid #fde68a;outline-offset:3px}
+.nm-hd{display:flex;gap:10px;align-items:flex-start}
+.nm-ic{flex:none;width:34px;height:24px;margin-top:2px;border-radius:4px;background:linear-gradient(145deg,#fff,#dbe2ff);position:relative;transform-style:preserve-3d;animation:nmSpin 6s ease-in-out infinite;box-shadow:0 6px 10px #0006}
+.nm-ic::before{content:"";position:absolute;inset:0;border-radius:4px;background:linear-gradient(135deg,transparent 49%,#9fb0f0 50%,transparent 52%),linear-gradient(225deg,transparent 49%,#9fb0f0 50%,transparent 52%)}
+@keyframes nmSpin{0%,100%{transform:rotateY(-18deg) rotateX(8deg)}50%{transform:rotateY(18deg) rotateX(-4deg)}}
+.nm-t{font-weight:700;font-size:15px;line-height:1.3;word-break:break-word}
+.nm-m{font-size:11.5px;opacity:.85;margin-top:2px}
+.nm-new{margin-left:auto;flex:none;font-size:10px;font-weight:800;letter-spacing:.08em;background:#fff;color:#be123c;padding:3px 8px;border-radius:99px;animation:nmPulse 1.4s ease-in-out infinite}
+@keyframes nmPulse{50%{transform:scale(1.12)}}
+.nm-body{margin-top:10px;font-size:14px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.nm-card.clamp .nm-body{display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
+.nm-more{margin-top:8px;background:#ffffff26;color:#fff;border:1px solid #ffffff55;border-radius:99px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer}
+.nm-pri{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:99px;background:#00000030;font-size:10.5px;font-weight:700}
+.nm-pin{position:absolute;top:-8px;right:12px;font-size:18px;transform:rotate(18deg);filter:drop-shadow(0 3px 3px #0006)}
+.nm-empty{text-align:center;padding:50px 10px;color:#6b7280}
+.nm-empty .em{font-size:44px}
+.p-Normal{--a:#4f46e5;--b:#7c3aed;--g:#7c3aed77}.p-Important{--a:#f59e0b;--b:#f97316;--g:#f59e0b88}.p-Urgent{--a:#ef4444;--b:#be123c;--g:#ef4444aa}
+@media(prefers-reduced-motion:reduce){.nm-card,.nm-card.unread,.nm-ic,.nm-new{animation:none!important}}
+</style>
+<div class="card"><div class="nm-top"><h2>&#128236; Messages from Admin</h2>
+<button class="nm-chip on" data-f="all">All <b>{{items|length}}</b></button><button class="nm-chip" data-f="unread">Unread <b id="nm-un">{{unread}}</b></button><button class="nm-chip" data-f="note">Notes</button><button class="nm-chip" data-f="msg">Messages</button>
+<button class="back sm nm-all" id="nm-markall" {{'style=display:none' if not unread}}>Mark all as read</button></div>
+{% if not items %}<div class="nm-empty"><div class="em">&#128236;</div><p><b>No messages yet</b><br>Notes and messages sent by the Admin will appear here.</p></div>
+{% else %}<div class="nm-grid" id="nm-grid">
+{% for n in items %}<div class="nm-card {{'msg' if n.kind=='Message' else 'note'}} p-{{n.pri}} {{'' if n.read else 'unread'}}" id="n-{{n.id}}" data-id="{{n.id}}" data-k="{{'msg' if n.kind=='Message' else 'note'}}" data-r="{{1 if n.read else 0}}" style="--i:{{loop.index0 if loop.index0<12 else 12}};--r:{{ [-1.6,1.2,-0.8,1.8,-1.2,0.9][loop.index0 % 6] }}deg">
+{% if n.pinned %}<span class="nm-pin" title="Pinned">&#128204;</span>{% endif %}
+<div class="nm-hd"><i class="nm-ic"></i><div><div class="nm-t">{{n.title or 'Message from Admin'}}</div><div class="nm-m">{{n.at|t12}}{% if n.upd %} &middot; edited{% endif %}{% if n.pri!='Normal' %}<span class="nm-pri">{{n.pri}}</span>{% endif %}</div></div>{% if not n.read %}<span class="nm-new">NEW</span>{% endif %}</div>
+<div class="nm-body">{{n.message}}</div>
+{% if n.kind=='Message' and (n.message|length>260 or n.message.count('\n')>=4) %}<button class="nm-more" type="button">Read full message</button>{% endif %}
+</div>{% endfor %}</div>{% endif %}</div>
+<script>
+(function(){
+  var grid=document.getElementById('nm-grid'); if(!grid) return;
+  var cards=[].slice.call(grid.querySelectorAll('.nm-card')), un=document.getElementById('nm-un'), allb=document.getElementById('nm-markall');
+  var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  function post(ids){ try{ return fetch('/employee/messages/read',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:ids})}); }catch(e){} }
+  function counts(){ var c=0; cards.forEach(function(k){ if(k.getAttribute('data-r')==='0') c++; }); un.textContent=c; if(allb) allb.style.display=c?'':'none';
+    var a=document.querySelector('a[href="/employee/messages"]'); if(a){ a.textContent=a.textContent.replace(/\s*\(\d+\)\s*$/,'')+(c?' ('+c+')':''); } }
+  function markRead(k){ if(k.getAttribute('data-r')==='1') return; k.setAttribute('data-r','1'); k.classList.remove('unread'); var b=k.querySelector('.nm-new'); if(b) b.remove(); post([k.getAttribute('data-id')]); counts(); }
+  cards.forEach(function(k){
+    var more=k.querySelector('.nm-more'); if(more){ k.classList.add('clamp'); more.addEventListener('click',function(){ var c=k.classList.toggle('clamp'); more.textContent=c?'Read full message':'Show less'; markRead(k); }); }
+    k.addEventListener('click',function(){ markRead(k); });
+    if(!reduce){
+      k.addEventListener('pointermove',function(e){ var r=k.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5; k.style.animation='none'; k.style.transform='rotateY('+(x*12).toFixed(1)+'deg) rotateX('+(-y*10).toFixed(1)+'deg) translateZ(8px)'; });
+      k.addEventListener('pointerleave',function(){ k.style.transform=''; });
+    }
+  });
+  document.querySelectorAll('.nm-chip').forEach(function(b){ b.addEventListener('click',function(){
+    document.querySelectorAll('.nm-chip').forEach(function(x){ x.classList.remove('on'); }); b.classList.add('on'); var f=b.getAttribute('data-f');
+    cards.forEach(function(k){ var show=f==='all'||(f==='unread'&&k.getAttribute('data-r')==='0')||(f===k.getAttribute('data-k')); k.style.display=show?'':'none'; }); }); });
+  if(allb) allb.addEventListener('click',function(){ var ids=[]; cards.forEach(function(k){ if(k.getAttribute('data-r')==='0'){ ids.push(k.getAttribute('data-id')); k.setAttribute('data-r','1'); k.classList.remove('unread'); var b=k.querySelector('.nm-new'); if(b) b.remove(); } }); if(ids.length) post(ids); counts(); });
+  if(location.hash){ var t=document.querySelector(location.hash.replace(/[^#A-Za-z0-9_-]/g,'')); if(t&&t.classList&&t.classList.contains('nm-card')){ var mb=t.querySelector('.nm-more'); if(mb) mb.click(); else markRead(t); setTimeout(function(){ t.scrollIntoView({behavior:'smooth',block:'center'}); },300); } }
+})();
+</script>"""
+
+# 3D animated pop-up notifications (every Employee page). Pure display + one POST to mark a note read.
+NT_TOAST = r"""<style id="ntt-css">
+.ntt-wrap{position:fixed;top:14px;right:14px;z-index:99990;display:flex;flex-direction:column;gap:12px;perspective:900px;pointer-events:none;width:min(340px,calc(100vw - 28px))}
+.ntt{pointer-events:auto;position:relative;border-radius:14px;padding:12px 38px 12px 14px;color:#fff;background:linear-gradient(135deg,var(--a),var(--b));font-family:inherit;
+  box-shadow:0 18px 34px -12px #000a,0 0 0 1px #ffffff30 inset,0 0 24px var(--g);transform-style:preserve-3d;transform-origin:100% 50%;
+  animation:nttIn .85s cubic-bezier(.2,.9,.25,1.15) both,nttFloat 5s ease-in-out .9s infinite;display:flex;gap:12px;align-items:flex-start}
+.ntt.out{animation:nttOut .45s ease-in both}
+@keyframes nttIn{0%{opacity:0;transform:translateX(120%) rotateY(-75deg) rotateX(18deg) scale(.7)}60%{opacity:1;transform:translateX(-6px) rotateY(10deg) scale(1.03)}100%{opacity:1;transform:none}}
+@keyframes nttFloat{50%{transform:translateY(-3px) rotateX(3deg) rotateY(-4deg)}}
+@keyframes nttOut{to{opacity:0;transform:translateX(120%) rotateY(70deg) scale(.7)}}
+.ntt-ic{flex:none;width:36px;height:26px;margin-top:3px;border-radius:4px;background:linear-gradient(145deg,#fff,#dbe2ff);position:relative;box-shadow:0 6px 10px #0006;animation:nttSpin 4.5s ease-in-out infinite;transform-style:preserve-3d}
+.ntt-ic::before{content:"";position:absolute;inset:0;border-radius:4px;background:linear-gradient(135deg,transparent 49%,#9fb0f0 50%,transparent 52%),linear-gradient(225deg,transparent 49%,#9fb0f0 50%,transparent 52%)}
+@keyframes nttSpin{0%,100%{transform:rotateY(-22deg) rotateX(8deg)}50%{transform:rotateY(22deg) rotateX(-6deg)}}
+.ntt-b{min-width:0}.ntt-t{font-weight:700;font-size:14px;line-height:1.3;word-break:break-word}
+.ntt-m{font-size:12.5px;opacity:.95;margin-top:3px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.ntt-a{display:inline-block;margin-top:7px;padding:3px 12px;border-radius:99px;background:#ffffff2e;border:1px solid #ffffff66;color:#fff;font-size:12px;font-weight:700;text-decoration:none}
+.ntt-x{position:absolute;top:6px;right:8px;width:24px;height:24px;border:0;border-radius:50%;background:#00000030;color:#fff;font-size:15px;line-height:24px;cursor:pointer;padding:0}
+.ntt-more{pointer-events:auto;align-self:flex-end;background:#1f2547;color:#fff;border-radius:99px;padding:4px 12px;font-size:12px;font-weight:700;text-decoration:none;box-shadow:0 8px 16px -8px #000a}
+.ntt.p-Normal{--a:#4f46e5;--b:#7c3aed;--g:#7c3aed77}.ntt.p-Important{--a:#f59e0b;--b:#f97316;--g:#f59e0b88}.ntt.p-Urgent{--a:#ef4444;--b:#be123c;--g:#ef4444aa}
+@media(prefers-reduced-motion:reduce){.ntt,.ntt-ic{animation:none!important}}
+@media print{.ntt-wrap{display:none}}
+</style>
+<div class="ntt-wrap" id="ntt-wrap" aria-live="polite"></div>
+<script>
+(function(){
+  var wrap=document.getElementById('ntt-wrap'); if(!wrap) return;
+  var DATA=__DATA__, seen={}, SK='ntSeen';
+  try{ (JSON.parse(sessionStorage.getItem(SK)||'[]')||[]).forEach(function(i){ seen[i]=1; }); }catch(e){}
+  function save(){ try{ sessionStorage.setItem(SK,JSON.stringify(Object.keys(seen))); }catch(e){} }
+  function post(id){ try{ fetch('/employee/messages/read',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[id]})}); }catch(e){} }
+  function esc(s){ var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+  function close(el){ el.classList.add('out'); setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); },460); }
+  function show(n){
+    if(seen[n.id]) return; seen[n.id]=1; save();
+    var el=document.createElement('div'); el.className='ntt p-'+n.pri; el.setAttribute('role','status');
+    el.innerHTML='<i class="ntt-ic"></i><div class="ntt-b"><div class="ntt-t">'+esc(n.title||'Message from Admin')+'</div><div class="ntt-m">'+esc(n.snip)+'</div><a class="ntt-a" href="/employee/messages#n-'+encodeURIComponent(n.id)+'">Open</a></div><button class="ntt-x" aria-label="Dismiss" type="button">&times;</button>';
+    el.querySelector('.ntt-x').addEventListener('click',function(){ post(n.id); close(el); });
+    wrap.appendChild(el);
+    while(wrap.querySelectorAll('.ntt').length>3){ var f=wrap.querySelector('.ntt'); if(f) f.parentNode.removeChild(f); }
+    if(n.pri!=='Urgent') setTimeout(function(){ if(el.parentNode) close(el); },14000);
+  }
+  var q=DATA.slice(); (function next(){ if(!q.length) return; show(q.shift()); setTimeout(next,450); })();
+  setInterval(function(){ if(document.hidden) return;
+    fetch('/employee/messages/poll',{credentials:'same-origin',cache:'no-store'}).then(function(r){ return r.ok?r.json():null; }).then(function(d){ if(d&&d.items) d.items.forEach(show); }).catch(function(){});
+  },60000);
+})();
+</script>"""
+
+def nt_toast_html():
+    """Pop-up cards for the signed-in employee's unread notes (empty string when there is nothing to show)."""
+    eid = session.get("emp_id", "")
+    items = [x for x in nt_for(eid) if not x["read"]][:5]
+    data = json.dumps([_nt_toast_item(x) for x in items])
+    return NT_TOAST.replace("__DATA__", data.replace("</", "<\\/"))
+
+def _nt_toast_item(x):
+    snip = re.sub(r"\s+", " ", x["message"]).strip()
+    return dict(id=x["id"], title=x["title"], snip=(snip[:140] + ("..." if len(snip) > 140 else "")), pri=x["pri"])
+
+@app.route("/employee/messages")
+@need("employee")
+def employee_messages():
+    items = nt_for(session["emp_id"])
+    return page(NOTES_EMP, title="Messages", items=items, unread=sum(1 for x in items if not x["read"]))
+
+@app.route("/employee/messages/read", methods=["POST"])
+@need("employee")
+def employee_messages_read():
+    eid = session["emp_id"]; d = request.get_json(silent=True) or {}
+    ids = [str(i).strip() for i in (d.get("ids") or []) if str(i).strip()][:200]
+    mine = {x["id"]: x for x in nt_for(eid)}
+    have = {str(r.get("Note ID", "")).strip() for r in rows(NT_READS) if _key(r.get("Employee ID", "")) == _key(eid)}
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S"); out = [[i, str(eid), str(session.get("name", "")), now] for i in ids if i in mine and i not in have]
+    if out:
+        try: ws_of(NT_READS).append_rows(out, value_input_option="RAW"); invalidate_cache(NT_READS)
+        except Exception as ex:
+            print("Admin Note Reads save failed:", repr(ex)); return jsonify(ok=False), 500
+    return jsonify(ok=True, added=len(out))
+
+@app.route("/employee/messages/poll")
+@need("employee")
+def employee_messages_poll():
+    items = [x for x in nt_for(session["emp_id"]) if not x["read"]][:5]
+    r = jsonify(items=[_nt_toast_item(x) for x in items], unread=len(items)); r.headers["Cache-Control"] = "no-store"; return r
+
+@app.route("/admin/notes")
+@need("admin")
+def admin_notes():
+    emps = _nt_emps(); reads = {}
+    for r in rows(NT_READS): reads.setdefault(str(r.get("Note ID", "")).strip(), {})[_key(r.get("Employee ID", ""))] = str(r.get("Read at", "")).strip()
+    notes = []
+    for n in rows(NT_SHEET):
+        nid = str(n.get("Note ID", "")).strip(); st = str(n.get("Status", "")).strip() or "Active"
+        if not nid or st == "Deleted": continue
+        rec = _nt_recips(n); sel = str(n.get("Audience", "")).strip().lower() == "selected"
+        aud = [e for e in emps if (e["key"] in rec if sel else not e["locked"])]; rd = reads.get(nid, {})
+        pri = str(n.get("Priority", "")).strip(); pri = pri if pri in NT_PRI else "Normal"
+        notes.append(dict(id=nid, at=str(n.get("Created at", "")).strip(), upd=str(n.get("Updated at", "")).strip(), title=str(n.get("Title", "")).strip(), message=str(n.get("Message", "")),
+                          kind=("Message" if str(n.get("Kind", "")).strip() == "Message" else "Note"), pri=pri, sel=sel, status=st, pinned=str(n.get("Pinned", "")).strip() == "Yes",
+                          expires=str(n.get("Expires on", "")).strip(), total=len(aud), read_n=sum(1 for e in aud if e["key"] in rd),
+                          who_read=[(e["name"], rd[e["key"]]) for e in aud if e["key"] in rd], who_not=[e["name"] for e in aud if e["key"] not in rd]))
+    notes.sort(key=lambda x: x["at"], reverse=True)
+    f = dict(id="", title="", message="", kind="auto", pri="Normal", aud="all", to=set(), pinned=False, expires="")
+    eid = request.args.get("edit", "").strip()
+    if eid:
+        for n in rows(NT_SHEET):
+            if str(n.get("Note ID", "")).strip() == eid and str(n.get("Status", "")).strip() != "Deleted":
+                pri = str(n.get("Priority", "")).strip()
+                f = dict(id=eid, title=str(n.get("Title", "")), message=str(n.get("Message", "")), kind=("long" if str(n.get("Kind", "")).strip() == "Message" else "short"), pri=(pri if pri in NT_PRI else "Normal"),
+                         aud=("selected" if str(n.get("Audience", "")).strip().lower() == "selected" else "all"), to=_nt_recips(n), pinned=str(n.get("Pinned", "")).strip() == "Yes", expires=str(n.get("Expires on", "")).strip())
+                break
+    for e in emps: e["ck"] = e["key"] in f["to"]
+    return page(NOTES_ADM, title="Notes & Messages", emps=emps, notes=notes, f=f, pris=NT_PRI)
+
+@app.route("/admin/notes/save", methods=["POST"])
+@need("admin")
+def admin_notes_save():
+    fm = request.form; nid = fm.get("id", "").strip()
+    title = _nt_clean(fm.get("title"), 120); msg = _nt_clean(fm.get("message"), 5000)
+    back = "/admin/notes" + (("?edit=" + nid) if nid else "")
+    if not msg:
+        flash("Please type the note / message.", "error"); return redirect(back)
+    k = fm.get("kind", "auto"); kind = "Message" if k == "long" else ("Note" if k == "short" else ("Note" if len(msg) <= 200 and msg.count("\n") < 2 else "Message"))
+    pri = fm.get("priority", "Normal"); pri = pri if pri in NT_PRI else "Normal"
+    sel = fm.get("audience") == "selected"; valid = {e["key"]: e["id"] for e in _nt_emps()}
+    to = []
+    for x in fm.getlist("to"):
+        kx = _key(x)
+        if kx in valid and valid[kx] not in to: to.append(valid[kx])
+    if sel and not to:
+        flash("Tick at least one employee, or choose All employees.", "error"); return redirect(back)
+    exp = fm.get("expires", "").strip()
+    try: exp = dt.datetime.strptime(exp, "%Y-%m-%d").strftime("%Y-%m-%d") if exp else ""
+    except ValueError: exp = ""
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S"); pinned = "Yes" if fm.get("pinned") else ""
+    ws = ws_of(NT_SHEET); H = HEADERS[NT_SHEET]
+    if nid:
+        cur = next((n for n in rows(NT_SHEET) if str(n.get("Note ID", "")).strip() == nid and str(n.get("Status", "")).strip() != "Deleted"), None)
+        if cur is None:
+            flash("That note no longer exists.", "error"); return redirect("/admin/notes")
+        vals = [nid, str(cur.get("Created at", "")), title, msg, kind, pri, "Selected" if sel else "All", ",".join(to) if sel else "", pinned, str(cur.get("Status", "")).strip() or "Active", str(cur.get("Created by", "") or "Admin"), exp, now]
+        ws.update(range_name="A%d:%s%d" % (cur["_row"], chr(64 + len(H)), cur["_row"]), values=[vals], value_input_option="RAW")
+        flash("Saved. Employees see the updated note / message.")
+    else:
+        import uuid as _uu
+        nid = "N" + now_local().strftime("%y%m%d%H%M%S") + _uu.uuid4().hex[:3]
+        ws.append_row([nid, now, title, msg, kind, pri, "Selected" if sel else "All", ",".join(to) if sel else "", pinned, "Active", "Admin", exp, ""], value_input_option="RAW")
+        flash("Sent to %s." % (("%d selected employee(s)" % len(to)) if sel else "all employees"))
+    invalidate_cache(NT_SHEET)
+    return redirect("/admin/notes")
+
+@app.route("/admin/notes/<nid>/status", methods=["POST"])
+@need("admin")
+def admin_notes_status(nid):
+    act = request.form.get("to", ""); val = {"archive": "Archived", "restore": "Active", "delete": "Deleted"}.get(act)
+    cur = next((n for n in rows(NT_SHEET) if str(n.get("Note ID", "")).strip() == nid), None)
+    if not val or cur is None:
+        flash("Nothing changed.", "error"); return redirect("/admin/notes")
+    ws_of(NT_SHEET).update(range_name="J%d" % cur["_row"], values=[[val]], value_input_option="RAW"); invalidate_cache(NT_SHEET)
+    flash({"Archived": "Hidden from employees.", "Active": "Visible to employees again.", "Deleted": "Deleted."}[val])
+    return redirect("/admin/notes")
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@
   * Update242: Employee login page - the two characters now animate: eyes open / close naturally (random single and occasional double blinks) on BOTH pictures, the left character's thumbs-up hand wiggles, the right (clipboard) character's raised fist waves and the hand holding the clipboard adjusts its grip. CSS layers + one tiny script, no new images / libraries; login form, lookup and every route unchanged; reduced-motion users get still pictures.
   * Update241: Employee login page - for Associate Manager / Team Lead / Senior Team Lead (recognised from the typed username, same lookup as the character) the server picture on the right is replaced by the supplied clipboard picture (/char/tl.webp) with 3D depth (shadow layer behind, pointer parallax), 3D sway, floating, breathing, light sweep, aura and floor ring. Login form / logic and every other designation's login page unchanged.
   * Update240: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the female picture is removed; the supplied male picture (glasses, white suit, thumbs-up; /char/lm.webp) is shown above the login box once the username is typed, with the same tilt / breathing / floating / shine animation. Employee panel picture and all other designations / pages unchanged.
+  * Update249: Admin Notes / Messages scheduling - 'Display date & time' (when the message starts appearing in the Employee Panel; blank = immediately) and 'Stop date & time' (when it disappears automatically; blank = stays until stopped). Employees see a message only inside that window (pop-ups, Messages page, unread count). Admin list shows Display / Stop times and a state (Scheduled / Live / Ended / Switched off); Edit changes text, viewers and times; 'Start now' / 'Stop now' / Switch off / Delete. Stop must be after Display. New columns 'Display from' and 'Stop at' are added to the 'Admin Notes' sheet automatically; older notes with only a date keep ending at the end of that day.
   * Update248: NEW Admin Notes / Messages. Admin > Notes & Messages: write a short note or a longer message (title optional, priority Normal / Important / Urgent, pin, optional 'show until' date) and choose WHO can view it - all employees or only the ticked employees (search, select shown, clear); edit it later (change text or viewers), hide / show again, delete, and see how many and which employees have read it. Employee > Messages: 3D animated cards (short notes as tilted sticky cards, long messages expandable with 'Read full message'), NEW badge, unread count in the menu, filters, Mark all as read; plus 3D pop-up notifications on every Employee page for unread notes (Urgent stay until dismissed). New sheets \"Admin Notes\" and \"Admin Note Reads\" are created automatically on the next start.
   * Update247: (1) Admin > Productivity log: the Employee column shows the Employee ID only (no name). (2) Employee panel: the name above Logout is plain text for every employee (no 3D / animation). (3) Login pages: Employee - after the username is entered a 3D e-mail flies from the employee picture to the server; Admin - on Log in a 3D e-mail flies from the server to the admin picture (the form is sent right after); Associate Manager / Team Lead / Senior Team Lead - report sheets then fly from the server to their picture. Display only, skipped when reduced motion is on. (4) Employee login: the 3D e-mail animation starts as soon as the username is entered and repeats through the whole sign-in until the next page has loaded (Associate Manager / Team Lead / Senior Team Lead also see the report sheets); Admin: starts on Log in and repeats until the next page has loaded. (5) The captions "Server", "Admin system" and "Employee system" are removed from both login pages.
   * Update239: Associate Manager / Team Lead / Senior Team Lead only (live Designation): (1) Employee panel - the name / nickname above Logout is plain normal text (no 3D, no animation); (2) the panel picture is the supplied male / female cut-out (by Gender) with the existing 3D depth, breathing, shine and ring animation plus a gentle sway; (3) Employee login page - once the username (Employee ID / e-mail) of one of these employees is typed, the supplied female picture is shown above the login box with the same tilt / breathing / floating / shine animation (served at /char/lf.webp; /login-char returns "l"). All other designations, pages and layouts unchanged.
@@ -543,7 +544,7 @@ HEADERS = {
     "Mahizhchi Log": ["Question", "A", "B", "C", "D", "Correct Answer"],
     "Mahizhchi Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
     # Update248: Admin Notes / Messages (Admin > Notes & Messages; Employee > Messages)
-    "Admin Notes": ["Note ID", "Created at", "Title", "Message", "Kind", "Priority", "Audience", "Recipients", "Pinned", "Status", "Created by", "Expires on", "Updated at"],
+    "Admin Notes": ["Note ID", "Created at", "Title", "Message", "Kind", "Priority", "Audience", "Recipients", "Pinned", "Status", "Created by", "Expires on", "Updated at", "Display from", "Stop at"],
     "Admin Note Reads": ["Note ID", "Employee ID", "Employee name", "Read at"],
     "Mahizhchi Answers": ["Employee ID", "Employee name", "Question ID", "Question", "Answer", "Submitted at"],
     # Update84: one row per employee PER SET: when they pressed Start (timer runs from this SERVER time), when the Set closed, and its result
@@ -12766,11 +12767,33 @@ def _nt_clean(s, n):
 def _nt_recips(n):
     return {_key(x) for x in str(n.get("Recipients", "")).split(",") if str(x).strip()}
 
+def _nt_dt(v):
+    s_ = str(v or "").strip().replace("T", " ")[:16]
+    try: return dt.datetime.strptime(s_, "%Y-%m-%d %H:%M")
+    except ValueError: return None
+
+def _nt_window(n):
+    """(display-from, stop-at) as datetimes (None = no limit). Old rows that only have the date-only 'Expires on' stop at the end of that day."""
+    st, sp = _nt_dt(n.get("Display from")), _nt_dt(n.get("Stop at"))
+    if sp is None:
+        ex = str(n.get("Expires on", "")).strip()
+        try: sp = (dt.datetime.strptime(ex, "%Y-%m-%d") + dt.timedelta(days=1)) if ex else None
+        except ValueError: sp = None
+    return st, sp
+
+def _nt_state(n, now=None):
+    """Hidden (switched off by Admin) / Scheduled (display time not reached) / Ended (stop time passed) / Live."""
+    now = now or now_local()
+    if str(n.get("Status", "")).strip() == "Archived": return "Hidden"
+    st, sp = _nt_window(n)
+    if st and now < st: return "Scheduled"
+    if sp and now >= sp: return "Ended"
+    return "Live"
+
 def _nt_visible(n, eid):
-    """Active, not expired, and (sent to everyone OR this employee is one of the chosen recipients)."""
+    """Live right now (inside the Display - Stop window) and (sent to everyone OR this employee is one of the chosen recipients)."""
     if str(n.get("Status", "")).strip() != "Active": return False
-    exp = str(n.get("Expires on", "")).strip()
-    if exp and exp < str(today_local()): return False
+    if _nt_state(n) != "Live": return False
     if str(n.get("Audience", "All")).strip().lower() == "selected": return _key(eid) in _nt_recips(n)
     return True
 
@@ -12786,7 +12809,8 @@ def nt_for(eid):
         nid = str(n["Note ID"]).strip()
         out.append(dict(id=nid, title=str(n.get("Title", "")).strip(), message=str(n.get("Message", "")), kind=("Message" if str(n.get("Kind", "")).strip() == "Message" else "Note"),
                         pri=(str(n.get("Priority", "")).strip() if str(n.get("Priority", "")).strip() in NT_PRI else "Normal"),
-                        pinned=str(n.get("Pinned", "")).strip() == "Yes", at=str(n.get("Created at", "")).strip(), upd=str(n.get("Updated at", "")).strip(), read=(nid in rd)))
+                        pinned=str(n.get("Pinned", "")).strip() == "Yes", at=(str(n.get("Display from", "")).strip().replace("T", " ") or str(n.get("Created at", "")).strip()), upd=str(n.get("Updated at", "")).strip(),
+                        until=(_nt_window(n)[1].strftime("%Y-%m-%d %H:%M") if _nt_window(n)[1] else ""), read=(nid in rd)))
     out.sort(key=lambda x: x["at"], reverse=True); out.sort(key=lambda x: not x["pinned"])
     return out
 
@@ -12821,6 +12845,9 @@ NOTES_ADM = r"""<style>
 .nt-list{max-height:260px;overflow:auto;border:1px solid #e3e7f7;border-radius:10px;background:#fff;padding:6px 10px}
 .nt-pk{display:flex!important;align-items:center;gap:8px;font-weight:500!important;margin:0!important;padding:5px 2px;border-bottom:1px dashed #eef0fb;font-size:13px}
 .nt-pk input{width:auto}.nt-pk small{color:#6b7280;margin-left:auto}
+.nt-dtw{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.nt-dtw input{flex:1;min-width:190px}.nt-dtw button{padding:6px 10px;font-size:12px}
+.nt-sch{margin-top:12px}
+.nt-st-Live{color:#047857;font-weight:700}.nt-st-Scheduled{color:#1d4ed8;font-weight:700}.nt-st-Ended{color:#6b7280;font-weight:700}.nt-st-Hidden{color:#b45309;font-weight:700}
 .nt-sel{font-size:12px;color:#4f46e5;font-weight:700;margin-top:6px}
 .nt-pv{margin-top:16px;perspective:900px}
 .nt-pvc{border-radius:14px;padding:14px 16px;color:#fff;background:linear-gradient(135deg,var(--a),var(--b));box-shadow:0 18px 30px -14px #0008,0 0 18px var(--g);transform:rotateX(4deg) rotateY(-6deg);transition:transform .25s;max-width:420px}
@@ -12843,9 +12870,13 @@ NOTES_ADM = r"""<style>
 <div class="nt-row">
 <label>Type<select name="kind" id="nt-kind"><option value="auto" {{'selected' if f.kind=='auto'}}>Auto (by length)</option><option value="short" {{'selected' if f.kind=='short'}}>Short note</option><option value="long" {{'selected' if f.kind=='long'}}>Long message</option></select></label>
 <label>Priority<select name="priority" id="nt-pri">{% for p in pris %}<option value="{{p}}" {{'selected' if f.pri==p}}>{{p}}</option>{% endfor %}</select></label>
-<label>Show until <span class="mut">(optional)</span><input type="date" name="expires" value="{{f.expires}}"></label>
 <label class="nt-chk"><input type="checkbox" name="pinned" value="1" {{'checked' if f.pinned}}> Pin to top</label>
 </div>
+<fieldset class="nt-aud nt-sch"><legend>Schedule</legend>
+<div class="nt-row">
+<label>Display date &amp; time <span class="mut">(blank = show immediately)</span><span class="nt-dtw"><input type="datetime-local" name="start" id="nt-start" value="{{f.start}}"><button type="button" class="back sm" data-now="nt-start">Now</button><button type="button" class="back sm" data-clr="nt-start">Clear</button></span></label>
+<label>Stop date &amp; time <span class="mut">(blank = stays until you stop it)</span><span class="nt-dtw"><input type="datetime-local" name="stop" id="nt-stop" value="{{f.stop}}"><button type="button" class="back sm" data-clr="nt-stop">Clear</button></span></label>
+</div><div class="nt-cnt" id="nt-sch"></div></fieldset>
 <fieldset class="nt-aud"><legend>Who can view this?</legend>
 <div class="ra"><label><input type="radio" name="audience" value="all" {{'checked' if f.aud=='all'}}> All employees</label><label><input type="radio" name="audience" value="selected" {{'checked' if f.aud=='selected'}}> Only selected employees</label></div>
 <div class="nt-pick" id="nt-pick" style="display:{{'block' if f.aud=='selected' else 'none'}}">
@@ -12857,15 +12888,17 @@ NOTES_ADM = r"""<style>
 </form></div>
 <div class="card"><h2>Sent notes &amp; messages</h2>
 {% if not notes %}<p class="mut">Nothing sent yet.</p>{% else %}
-<table><tr><th>Sent</th><th>Note</th><th>Type</th><th>Priority</th><th>Viewers</th><th>Read</th><th>Status</th><th></th></tr>
+<table><tr><th>Sent</th><th>Note</th><th>Schedule</th><th>Type</th><th>Priority</th><th>Viewers</th><th>Read</th><th>Status</th><th></th></tr>
 {% for n in notes %}<tr class="p-{{n.pri}}"><td>{{n.at|t12}}{% if n.upd %}<br><small class="mut">edited {{n.upd|t12}}</small>{% endif %}</td>
-<td style="max-width:300px"><b>{% if n.pinned %}&#128204; {% endif %}{{n.title or '(no title)'}}</b><br><span class="mut">{{n.message[:140]}}{{'...' if n.message|length>140}}</span>{% if n.expires %}<br><small class="mut">shown until {{n.expires}}</small>{% endif %}</td>
+<td style="max-width:300px"><b>{% if n.pinned %}&#128204; {% endif %}{{n.title or '(no title)'}}</b><br><span class="mut">{{n.message[:140]}}{{'...' if n.message|length>140}}</span></td>
+<td style="white-space:nowrap"><small class="mut">Display</small> {{ (n.start|t12) if n.start else 'Immediately' }}<br><small class="mut">Stop</small> {{ (n.stop|t12) if n.stop else 'Not set' }}</td>
 <td>{{n.kind}}</td><td><span class="nt-tag">{{n.pri}}</span></td>
 <td>{% if n.sel %}Selected ({{n.total}}){% else %}All employees ({{n.total}}){% endif %}</td>
 <td><b>{{n.read_n}}</b> / {{n.total}}<details class="nt-det"><summary>Who</summary><div><span class="rd">Read:</span> {% for w in n.who_read %}{{w[0]}} <small>({{w[1]|t12}})</small>{{ ', ' if not loop.last }}{% else %}-{% endfor %}</div><div><span class="un">Not read:</span> {{ n.who_not|join(', ') or '-' }}</div></details></td>
-<td class="nt-st-{{n.status}}">{{n.status}}</td>
+<td class="nt-st-{{n.state}}">{{n.state}}</td>
 <td class="nt-act"><a class="back sm" href="/admin/notes?edit={{n.id}}#nt-form">Edit</a>
-<form method="post" action="/admin/notes/{{n.id}}/status"><input type="hidden" name="to" value="{{ 'restore' if n.status=='Archived' else 'archive' }}"><button class="back sm">{{ 'Show again' if n.status=='Archived' else 'Hide from employees' }}</button></form>
+{% if n.state=='Scheduled' %}<form method="post" action="/admin/notes/{{n.id}}/status"><input type="hidden" name="to" value="startnow"><button class="back sm">Start now</button></form>{% elif n.state=='Live' %}<form method="post" action="/admin/notes/{{n.id}}/status"><input type="hidden" name="to" value="stopnow"><button class="back sm">Stop now</button></form>{% endif %}
+<form method="post" action="/admin/notes/{{n.id}}/status"><input type="hidden" name="to" value="{{ 'restore' if n.status=='Archived' else 'archive' }}"><button class="back sm">{{ 'Switch on again' if n.status=='Archived' else 'Switch off' }}</button></form>
 <form method="post" action="/admin/notes/{{n.id}}/status" onsubmit="return confirm('Delete this note / message permanently from the employees\' panels?')"><input type="hidden" name="to" value="delete"><button class="back sm">Delete</button></form></td></tr>{% endfor %}</table>{% endif %}</div>
 <script>
 (function(){
@@ -12882,6 +12915,13 @@ NOTES_ADM = r"""<style>
   q.addEventListener('input',function(){ var s=q.value.trim().toLowerCase(); f.querySelectorAll('.nt-pk').forEach(function(l){ l.style.display=(!s||l.getAttribute('data-s').indexOf(s)>=0)?'':'none'; }); });
   document.getElementById('nt-all').addEventListener('click',function(){ f.querySelectorAll('.nt-pk').forEach(function(l){ if(l.style.display!=='none') l.querySelector('input').checked=true; }); count(); });
   document.getElementById('nt-none').addEventListener('click',function(){ boxes().forEach(function(b){ b.checked=false; }); count(); });
+  var NOW='{{now_str}}', st=document.getElementById('nt-start'), sp=document.getElementById('nt-stop'), sch=document.getElementById('nt-sch');
+  function fmt(v){ if(!v) return ''; var d=new Date(v); return isNaN(d)?v:d.toLocaleString([], {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
+  function schedTxt(){ var a=st.value,b=sp.value; sch.textContent=(a?'Appears on '+fmt(a):'Appears immediately')+(b?' \u2192 disappears on '+fmt(b):' \u2192 stays until you stop or hide it'); }
+  [st,sp].forEach(function(i){ i.addEventListener('input',schedTxt); i.addEventListener('change',schedTxt); }); schedTxt();
+  f.querySelectorAll('[data-now]').forEach(function(b){ b.addEventListener('click',function(){ document.getElementById(b.getAttribute('data-now')).value=NOW; schedTxt(); }); });
+  f.querySelectorAll('[data-clr]').forEach(function(b){ b.addEventListener('click',function(){ document.getElementById(b.getAttribute('data-clr')).value=''; schedTxt(); }); });
+  f.addEventListener('submit',function(e){ if(st.value&&sp.value&&sp.value<=st.value){ e.preventDefault(); alert('The Stop date & time must be after the Display date & time.'); return; } });
   f.addEventListener('submit',function(e){ var sel=f.querySelector('input[name=audience]:checked'); if(sel&&sel.value==='selected'&&!f.querySelector('input[name=to]:checked')){ e.preventDefault(); alert('Tick at least one employee, or choose All employees.'); } });
 })();
 </script>"""
@@ -12927,7 +12967,7 @@ NOTES_EMP = r"""<style>
 {% else %}<div class="nm-grid" id="nm-grid">
 {% for n in items %}<div class="nm-card {{'msg' if n.kind=='Message' else 'note'}} p-{{n.pri}} {{'' if n.read else 'unread'}}" id="n-{{n.id}}" data-id="{{n.id}}" data-k="{{'msg' if n.kind=='Message' else 'note'}}" data-r="{{1 if n.read else 0}}" style="--i:{{loop.index0 if loop.index0<12 else 12}};--r:{{ [-1.6,1.2,-0.8,1.8,-1.2,0.9][loop.index0 % 6] }}deg">
 {% if n.pinned %}<span class="nm-pin" title="Pinned">&#128204;</span>{% endif %}
-<div class="nm-hd"><i class="nm-ic"></i><div><div class="nm-t">{{n.title or 'Message from Admin'}}</div><div class="nm-m">{{n.at|t12}}{% if n.upd %} &middot; edited{% endif %}{% if n.pri!='Normal' %}<span class="nm-pri">{{n.pri}}</span>{% endif %}</div></div>{% if not n.read %}<span class="nm-new">NEW</span>{% endif %}</div>
+<div class="nm-hd"><i class="nm-ic"></i><div><div class="nm-t">{{n.title or 'Message from Admin'}}</div><div class="nm-m">{{n.at|t12}}{% if n.upd %} &middot; edited{% endif %}{% if n.until %} &middot; visible until {{n.until|t12}}{% endif %}{% if n.pri!='Normal' %}<span class="nm-pri">{{n.pri}}</span>{% endif %}</div></div>{% if not n.read %}<span class="nm-new">NEW</span>{% endif %}</div>
 <div class="nm-body">{{n.message}}</div>
 {% if n.kind=='Message' and (n.message|length>260 or n.message.count('\n')>=4) %}<button class="nm-more" type="button">Read full message</button>{% endif %}
 </div>{% endfor %}</div>{% endif %}</div>
@@ -13055,20 +13095,21 @@ def admin_notes():
         pri = str(n.get("Priority", "")).strip(); pri = pri if pri in NT_PRI else "Normal"
         notes.append(dict(id=nid, at=str(n.get("Created at", "")).strip(), upd=str(n.get("Updated at", "")).strip(), title=str(n.get("Title", "")).strip(), message=str(n.get("Message", "")),
                           kind=("Message" if str(n.get("Kind", "")).strip() == "Message" else "Note"), pri=pri, sel=sel, status=st, pinned=str(n.get("Pinned", "")).strip() == "Yes",
-                          expires=str(n.get("Expires on", "")).strip(), total=len(aud), read_n=sum(1 for e in aud if e["key"] in rd),
+                          start=(_nt_window(n)[0].strftime("%Y-%m-%d %H:%M") if _nt_window(n)[0] else ""), stop=(_nt_window(n)[1].strftime("%Y-%m-%d %H:%M") if _nt_window(n)[1] else ""), state=_nt_state(n), total=len(aud), read_n=sum(1 for e in aud if e["key"] in rd),
                           who_read=[(e["name"], rd[e["key"]]) for e in aud if e["key"] in rd], who_not=[e["name"] for e in aud if e["key"] not in rd]))
     notes.sort(key=lambda x: x["at"], reverse=True)
-    f = dict(id="", title="", message="", kind="auto", pri="Normal", aud="all", to=set(), pinned=False, expires="")
+    f = dict(id="", title="", message="", kind="auto", pri="Normal", aud="all", to=set(), pinned=False, start="", stop="")
     eid = request.args.get("edit", "").strip()
     if eid:
         for n in rows(NT_SHEET):
             if str(n.get("Note ID", "")).strip() == eid and str(n.get("Status", "")).strip() != "Deleted":
                 pri = str(n.get("Priority", "")).strip()
                 f = dict(id=eid, title=str(n.get("Title", "")), message=str(n.get("Message", "")), kind=("long" if str(n.get("Kind", "")).strip() == "Message" else "short"), pri=(pri if pri in NT_PRI else "Normal"),
-                         aud=("selected" if str(n.get("Audience", "")).strip().lower() == "selected" else "all"), to=_nt_recips(n), pinned=str(n.get("Pinned", "")).strip() == "Yes", expires=str(n.get("Expires on", "")).strip())
+                         aud=("selected" if str(n.get("Audience", "")).strip().lower() == "selected" else "all"), to=_nt_recips(n), pinned=str(n.get("Pinned", "")).strip() == "Yes",
+                         start=(_nt_window(n)[0].strftime("%Y-%m-%dT%H:%M") if _nt_window(n)[0] else ""), stop=(_nt_window(n)[1].strftime("%Y-%m-%dT%H:%M") if _nt_window(n)[1] else ""))
                 break
     for e in emps: e["ck"] = e["key"] in f["to"]
-    return page(NOTES_ADM, title="Notes & Messages", emps=emps, notes=notes, f=f, pris=NT_PRI)
+    return page(NOTES_ADM, title="Notes & Messages", emps=emps, notes=notes, f=f, pris=NT_PRI, now_str=now_local().strftime("%Y-%m-%dT%H:%M"))
 
 @app.route("/admin/notes/save", methods=["POST"])
 @need("admin")
@@ -13087,23 +13128,28 @@ def admin_notes_save():
         if kx in valid and valid[kx] not in to: to.append(valid[kx])
     if sel and not to:
         flash("Tick at least one employee, or choose All employees.", "error"); return redirect(back)
-    exp = fm.get("expires", "").strip()
-    try: exp = dt.datetime.strptime(exp, "%Y-%m-%d").strftime("%Y-%m-%d") if exp else ""
-    except ValueError: exp = ""
+    st_raw, sp_raw = fm.get("start", "").strip(), fm.get("stop", "").strip()
+    st_d, sp_d = _nt_dt(st_raw), _nt_dt(sp_raw)
+    if (st_raw and st_d is None) or (sp_raw and sp_d is None):
+        flash("Please enter a valid Display / Stop date & time.", "error"); return redirect(back)
+    if st_d and sp_d and sp_d <= st_d:
+        flash("The Stop date & time must be after the Display date & time.", "error"); return redirect(back)
+    start_s, stop_s = (st_d.strftime("%Y-%m-%d %H:%M") if st_d else ""), (sp_d.strftime("%Y-%m-%d %H:%M") if sp_d else "")
     now = now_local().strftime("%Y-%m-%d %H:%M:%S"); pinned = "Yes" if fm.get("pinned") else ""
     ws = ws_of(NT_SHEET); H = HEADERS[NT_SHEET]
     if nid:
         cur = next((n for n in rows(NT_SHEET) if str(n.get("Note ID", "")).strip() == nid and str(n.get("Status", "")).strip() != "Deleted"), None)
         if cur is None:
             flash("That note no longer exists.", "error"); return redirect("/admin/notes")
-        vals = [nid, str(cur.get("Created at", "")), title, msg, kind, pri, "Selected" if sel else "All", ",".join(to) if sel else "", pinned, str(cur.get("Status", "")).strip() or "Active", str(cur.get("Created by", "") or "Admin"), exp, now]
+        vals = [nid, str(cur.get("Created at", "")), title, msg, kind, pri, "Selected" if sel else "All", ",".join(to) if sel else "", pinned, str(cur.get("Status", "")).strip() or "Active", str(cur.get("Created by", "") or "Admin"), "", now, start_s, stop_s]
         ws.update(range_name="A%d:%s%d" % (cur["_row"], chr(64 + len(H)), cur["_row"]), values=[vals], value_input_option="RAW")
-        flash("Saved. Employees see the updated note / message.")
+        flash("Saved. The updated schedule and text apply to employees right away.")
     else:
         import uuid as _uu
         nid = "N" + now_local().strftime("%y%m%d%H%M%S") + _uu.uuid4().hex[:3]
-        ws.append_row([nid, now, title, msg, kind, pri, "Selected" if sel else "All", ",".join(to) if sel else "", pinned, "Active", "Admin", exp, ""], value_input_option="RAW")
-        flash("Sent to %s." % (("%d selected employee(s)" % len(to)) if sel else "all employees"))
+        ws.append_row([nid, now, title, msg, kind, pri, "Selected" if sel else "All", ",".join(to) if sel else "", pinned, "Active", "Admin", "", "", start_s, stop_s], value_input_option="RAW")
+        who = ("%d selected employee(s)" % len(to)) if sel else "all employees"
+        flash(("Scheduled for %s - it appears on %s." % (who, start_s)) if (st_d and st_d > now_local()) else ("Sent to %s." % who))
     invalidate_cache(NT_SHEET)
     return redirect("/admin/notes")
 
@@ -13112,10 +13158,21 @@ def admin_notes_save():
 def admin_notes_status(nid):
     act = request.form.get("to", ""); val = {"archive": "Archived", "restore": "Active", "delete": "Deleted"}.get(act)
     cur = next((n for n in rows(NT_SHEET) if str(n.get("Note ID", "")).strip() == nid), None)
-    if not val or cur is None:
+    if cur is None or (not val and act not in ("startnow", "stopnow")):
         flash("Nothing changed.", "error"); return redirect("/admin/notes")
-    ws_of(NT_SHEET).update(range_name="J%d" % cur["_row"], values=[[val]], value_input_option="RAW"); invalidate_cache(NT_SHEET)
-    flash({"Archived": "Hidden from employees.", "Active": "Visible to employees again.", "Deleted": "Deleted."}[val])
+    now_s = now_local().strftime("%Y-%m-%d %H:%M"); ws = ws_of(NT_SHEET)
+    if act == "startnow":      # Scheduled -> show now (a stop time that is already earlier than now is cleared)
+        ws.update(range_name="N%d" % cur["_row"], values=[[now_s]], value_input_option="RAW")
+        sp = _nt_window(cur)[1]
+        if sp and sp <= now_local(): ws.update(range_name="O%d" % cur["_row"], values=[[""]], value_input_option="RAW"); ws.update(range_name="L%d" % cur["_row"], values=[[""]], value_input_option="RAW")
+        flash("Started - employees can see it now.")
+    elif act == "stopnow":     # Live -> stop now (ends exactly now)
+        ws.update(range_name="O%d" % cur["_row"], values=[[now_s]], value_input_option="RAW"); ws.update(range_name="L%d" % cur["_row"], values=[[""]], value_input_option="RAW")
+        flash("Stopped - it no longer shows in the Employee Panel.")
+    else:
+        ws.update(range_name="J%d" % cur["_row"], values=[[val]], value_input_option="RAW")
+        flash({"Archived": "Hidden from employees.", "Active": "Switched on again (it follows its Display / Stop times).", "Deleted": "Deleted."}[val])
+    invalidate_cache(NT_SHEET)
     return redirect("/admin/notes")
 
 

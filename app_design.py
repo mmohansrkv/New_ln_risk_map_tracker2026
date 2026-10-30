@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update251: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the 3D e-mail animation now flies from the LEFT picture (glasses, white suit, thumbs-up) to the RIGHT picture (clipboard) as soon as the username is recognised, and repeats until the next page has loaded (the report sheets from the server are no longer shown for them). All other designations and the Admin login keep the Update247 animation; a generation counter prevents two animation loops running at once. Display only - form, lookup and every route unchanged.
   * Update246: Admin > Work Time page lag fixed - the shared-employee list was re-read (and every Employee row copied) for EACH Lock Event row and for EACH employee, and the per-employee event number was counted with a nested loop; now read once / counted with a dict. Output unchanged.
   * Update245: Associate Manager / Team Lead / Senior Team Lead ONLY - Employee Panel left menu laid out as in the supplied screenshot (menu items, holidays-only Calendar, avatar / name / Logout dock) via a new .tlside class on the sidebar; compact spacing so the Calendar's Today button is no longer hidden behind the profile dock. No new page; all other designations unchanged.
   * Update244b: Leave & Permission - for Associate Manager / Team Lead / Senior Team Lead the remaining status hints (the "Half day" tag on leave rows and the "back to Pending" note on permission rows) are hidden too.
@@ -4734,6 +4735,7 @@ LOGIN_MAIL_FX = r"""<style>
   function pt(el, fy){ var b = body.getBoundingClientRect(), r = el.getBoundingClientRect(); return {x: r.left - b.left + r.width / 2, y: r.top - b.top + r.height * fy}; }
   function chrEl(){ return lx.querySelector('.chr-box'); }
   function srvEl(){ var a = lx.querySelectorAll('.lx-srv .srv-box'); return a.length ? a[a.length - 1] : null; }
+  function tlEl(){ return lx.querySelector('.lx-srv .srv-box.srv-new'); }      /* Update251: the clipboard picture (Associate Manager / Team Lead / Senior Team Lead) */
   function setChip(t){ if (chip && !lx.classList.contains('go')) chip.textContent = t; }
   function ring(p, delay){ var r = document.createElement('i'); r.className = 'mfx-ring'; r.style.left = p.x + 'px'; r.style.top = p.y + 'px'; layer.appendChild(r);
     var a = r.animate([{transform: 'scale(.3)', opacity: .95}, {transform: 'scale(2.3)', opacity: 0}], {duration: 700, delay: delay || 0, easing: 'ease-out', fill: 'both'});
@@ -4778,28 +4780,29 @@ LOGIN_MAIL_FX = r"""<style>
   }
   var chain = Promise.resolve(), pending = 0;
   function enqueue(fn){ if (pending > 3) return; pending++; chain = chain.then(function(){ if (document.hidden || lx.classList.contains('go')) return; return fn(); }).catch(function(){}).then(function(){ pending--; }); }
-  /* ---- Employee: the moment a username is entered the 3D e-mail starts flying from the employee picture to the server and keeps repeating
-         (Associate Manager / Team Lead / Senior Team Lead also get the report sheets coming back) until the next page has loaded. ---- */
+  /* ---- Update251: continuous transfer animation. Generation counter = a restarted loop can never run twice at once.
+         Admin: server -> admin picture.  Employee: employee picture -> server.
+         Associate Manager / Team Lead / Senior Team Lead (.tlm): the 3D e-mail flies from the left picture (glasses, white suit) to the right picture (clipboard). ---- */
+  var gen = 0, looping = false;
+  function stopLoop(){ gen++; looping = false; layer.innerHTML = ''; }
+  function loopRun(){
+    if (looping) return; looping = true; var g = ++gen;
+    (function cycle(){
+      if (!looping || g !== gen) return;
+      if (document.hidden) { setTimeout(cycle, 800); return; }
+      var tl = !adm && lx.classList.contains('tlm');
+      var p = adm ? playMail(srvEl(), chrEl(), false) : playMail(chrEl(), tl ? (tlEl() || srvEl()) : srvEl(), true);
+      p.then(function(){ if (looping && g === gen) setTimeout(cycle, 150); });
+    })();
+  }
+  /* Employee: starts as soon as the username is entered and repeats until the next page has loaded.
+     Associate Manager / Team Lead / Senior Team Lead are recognised by the username lookup ('lxreport'): the flight is then (re)started towards the clipboard picture. */
   if (!adm){
     var mailTimer = 0;
-    document.addEventListener('lxmail', function(e){
-      var u = e.detail && e.detail.u; if (!u || u.length < 4) return; clearTimeout(mailTimer);
-      mailTimer = setTimeout(function(){ setChip('FTE \u00b7 E-mail sending to server'); loopRun(); }, 600);
-    });
+    var begin = function(delay){ clearTimeout(mailTimer); mailTimer = setTimeout(function(){ setChip(lx.classList.contains('tlm') ? 'FTE \u00b7 E-mail sending' : 'FTE \u00b7 E-mail sending to server'); loopRun(); }, delay); };
+    document.addEventListener('lxmail', function(e){ var u = e.detail && e.detail.u; if (!u || u.length < 4) return; if (!looping) begin(1000); });
+    document.addEventListener('lxreport', function(){ stopLoop(); begin(450); });
     document.addEventListener('lxclear', function(){ clearTimeout(mailTimer); stopLoop(); });
-  }
-  /* ---- Continuous transfer animation while the login is in progress (Admin; Associate Manager / Team Lead / Senior Team Lead).
-         It repeats until the sign-in finishes (the next page loads) and is then gone; a page that comes back or a 25 s timeout also stops it. ---- */
-  var looping = false;
-  function stopLoop(){ looping = false; layer.innerHTML = ''; }
-  function loopRun(){
-    if (looping) return; looping = true;
-    (function cycle(){
-      if (!looping) return;
-      if (document.hidden) { setTimeout(cycle, 800); return; }
-      var p = adm ? playMail(srvEl(), chrEl(), false) : playMail(chrEl(), srvEl(), true).then(function(){ return (looping && lx.classList.contains('tlm')) ? playDocs() : 0; });
-      p.then(function(){ if (looping) setTimeout(cycle, 150); });
-    })();
   }
   var fm = lx.querySelector('form'), sent = false;
   if (fm){

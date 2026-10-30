@@ -7,7 +7,7 @@
   * Update242: Employee login page - the two characters now animate: eyes open / close naturally (random single and occasional double blinks) on BOTH pictures, the left character's thumbs-up hand wiggles, the right (clipboard) character's raised fist waves and the hand holding the clipboard adjusts its grip. CSS layers + one tiny script, no new images / libraries; login form, lookup and every route unchanged; reduced-motion users get still pictures.
   * Update241: Employee login page - for Associate Manager / Team Lead / Senior Team Lead (recognised from the typed username, same lookup as the character) the server picture on the right is replaced by the supplied clipboard picture (/char/tl.webp) with 3D depth (shadow layer behind, pointer parallax), 3D sway, floating, breathing, light sweep, aura and floor ring. Login form / logic and every other designation's login page unchanged.
   * Update240: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the female picture is removed; the supplied male picture (glasses, white suit, thumbs-up; /char/lm.webp) is shown above the login box once the username is typed, with the same tilt / breathing / floating / shine animation. Employee panel picture and all other designations / pages unchanged.
-  * Update247: (1) Admin > Productivity log: the Employee column shows the Employee ID only (no name). (2) Employee panel: the name above Logout is plain text for every employee (no 3D / animation). (3) Login pages: Employee - after the username is entered a 3D e-mail flies from the employee picture to the server; Admin - on Log in a 3D e-mail flies from the server to the admin picture (the form is sent right after); Associate Manager / Team Lead / Senior Team Lead - report sheets then fly from the server to their picture. Display only, skipped when reduced motion is on. (4) The captions "Server", "Admin system" and "Employee system" are removed from both login pages.
+  * Update247: (1) Admin > Productivity log: the Employee column shows the Employee ID only (no name). (2) Employee panel: the name above Logout is plain text for every employee (no 3D / animation). (3) Login pages: Employee - after the username is entered a 3D e-mail flies from the employee picture to the server; Admin - on Log in a 3D e-mail flies from the server to the admin picture (the form is sent right after); Associate Manager / Team Lead / Senior Team Lead - report sheets then fly from the server to their picture. Display only, skipped when reduced motion is on. (4) Admin and Associate Manager / Team Lead / Senior Team Lead: the 3D e-mail / report transfer animation repeats continuously while the sign-in is in progress and stops when it finishes. (5) The captions "Server", "Admin system" and "Employee system" are removed from both login pages.
   * Update239: Associate Manager / Team Lead / Senior Team Lead only (live Designation): (1) Employee panel - the name / nickname above Logout is plain normal text (no 3D, no animation); (2) the panel picture is the supplied male / female cut-out (by Gender) with the existing 3D depth, breathing, shine and ring animation plus a gentle sway; (3) Employee login page - once the username (Employee ID / e-mail) of one of these employees is typed, the supplied female picture is shown above the login box with the same tilt / breathing / floating / shine animation (served at /char/lf.webp; /login-char returns "l"). All other designations, pages and layouts unchanged.
   * Update238: (1) Associate Manager / Team Lead / Senior Team Lead (live Designation) get an "Employee Details" menu: Personal Details of ALL employees (search by ID / name, click a name to view / edit; same editable fields as the Admin form, Employee ID / Name / Designation / Office Email stay read-only; saved through the same save_employee_row; every change is logged in the Admin Notifications under the editor). Server-side 403 for everyone else. (2) Employee panel - the name / nickname above Logout is static 3D letters (flip-in, wave and sheen animations removed). Nothing else changed.
   * Update237: Team Logs > Productivity Log for Associate Manager / Team Lead / Senior Team Lead (live Designation): table of all employees (Employee ID, Name, Designation, Joining Date, Tracking From, Working Days, Entries, Missed, Attendance, Productivity - same figures as Admin > Employee Info > Productivity), month filter, search by Employee ID / Name / Process name (process search lists the matching records with target, completed, status and productivity %). Employee ID / Name opens the complete date-wise details (Date, Day, Processes Worked, Productive / Non-productive / Total hrs, Target Count, Completed Count, Target Status, Productivity %, Submitted At + process-wise rows). All read from the existing Productivity log; read-only. Other designations keep the previous Team Logs page.
@@ -4779,16 +4779,28 @@ LOGIN_MAIL_FX = r"""<style>
     });
     document.addEventListener('lxreport', function(e){ var u = e.detail && e.detail.u; if (!u) return; reportOK[u] = 1; if (mailDone[u] === 'd') docsFor(u); });
   }
-  /* ---- Admin: Log in -> e-mail received from the server at the admin picture, then the form is sent ---- */
+  /* ---- Continuous transfer animation while the login is in progress (Admin; Associate Manager / Team Lead / Senior Team Lead).
+         It repeats until the sign-in finishes (the next page loads) and is then gone; a page that comes back or a 25 s timeout also stops it. ---- */
+  var looping = false, stopT = 0;
+  function stopLoop(){ looping = false; clearTimeout(stopT); layer.innerHTML = ''; }
+  function loopRun(){
+    if (looping) return; looping = true; stopT = setTimeout(stopLoop, 25000);
+    (function cycle(){
+      if (!looping) return;
+      var p = adm ? playMail(srvEl(), chrEl(), false) : playMail(chrEl(), srvEl(), true).then(function(){ return looping ? playDocs() : 0; });
+      p.then(function(){ if (looping) setTimeout(cycle, 150); });
+    })();
+  }
   var fm = lx.querySelector('form'), sent = false;
-  if (adm && fm){
+  if (fm){
     fm.addEventListener('submit', function(e){
-      if (sent || e.defaultPrevented) return; e.preventDefault(); sent = true;
-      var done = false; function go(){ if (done) return; done = true; try { fm.submit(); } catch (x) { sent = false; } }
-      setTimeout(go, 2600);
-      playMail(srvEl(), chrEl(), false).then(go, go);
+      if (sent || e.defaultPrevented) return;
+      if (!(adm || lx.classList.contains('tlm'))) return;
+      e.preventDefault(); sent = true; loopRun();
+      setTimeout(function(){ try { fm.submit(); } catch (x) { sent = false; stopLoop(); } }, 2200);      /* the animation is seen for one full round, then the form is sent and the animation keeps looping until the sign-in is done */
     });
   }
+  window.addEventListener('pageshow', function(e){ if (e.persisted) { stopLoop(); sent = false; } });
 })();
 </script>
 """

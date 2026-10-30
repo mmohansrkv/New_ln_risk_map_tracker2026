@@ -7,6 +7,7 @@
   * Update242: Employee login page - the two characters now animate: eyes open / close naturally (random single and occasional double blinks) on BOTH pictures, the left character's thumbs-up hand wiggles, the right (clipboard) character's raised fist waves and the hand holding the clipboard adjusts its grip. CSS layers + one tiny script, no new images / libraries; login form, lookup and every route unchanged; reduced-motion users get still pictures.
   * Update241: Employee login page - for Associate Manager / Team Lead / Senior Team Lead (recognised from the typed username, same lookup as the character) the server picture on the right is replaced by the supplied clipboard picture (/char/tl.webp) with 3D depth (shadow layer behind, pointer parallax), 3D sway, floating, breathing, light sweep, aura and floor ring. Login form / logic and every other designation's login page unchanged.
   * Update240: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the female picture is removed; the supplied male picture (glasses, white suit, thumbs-up; /char/lm.webp) is shown above the login box once the username is typed, with the same tilt / breathing / floating / shine animation. Employee panel picture and all other designations / pages unchanged.
+  * Update247: (1) Admin > Productivity log: the Employee column shows the Employee ID only (no name). (2) Employee panel: the name above Logout is plain text for every employee (no 3D / animation). (3) Login pages: Employee - after the username is entered a 3D e-mail flies from the employee picture to the server; Admin - on Log in a 3D e-mail flies from the server to the admin picture (the form is sent right after); Associate Manager / Team Lead / Senior Team Lead - report sheets then fly from the server to their picture. Display only, skipped when reduced motion is on.
   * Update239: Associate Manager / Team Lead / Senior Team Lead only (live Designation): (1) Employee panel - the name / nickname above Logout is plain normal text (no 3D, no animation); (2) the panel picture is the supplied male / female cut-out (by Gender) with the existing 3D depth, breathing, shine and ring animation plus a gentle sway; (3) Employee login page - once the username (Employee ID / e-mail) of one of these employees is typed, the supplied female picture is shown above the login box with the same tilt / breathing / floating / shine animation (served at /char/lf.webp; /login-char returns "l"). All other designations, pages and layouts unchanged.
   * Update238: (1) Associate Manager / Team Lead / Senior Team Lead (live Designation) get an "Employee Details" menu: Personal Details of ALL employees (search by ID / name, click a name to view / edit; same editable fields as the Admin form, Employee ID / Name / Designation / Office Email stay read-only; saved through the same save_employee_row; every change is logged in the Admin Notifications under the editor). Server-side 403 for everyone else. (2) Employee panel - the name / nickname above Logout is static 3D letters (flip-in, wave and sheen animations removed). Nothing else changed.
   * Update237: Team Logs > Productivity Log for Associate Manager / Team Lead / Senior Team Lead (live Designation): table of all employees (Employee ID, Name, Designation, Joining Date, Tracking From, Working Days, Entries, Missed, Attendance, Productivity - same figures as Admin > Employee Info > Productivity), month filter, search by Employee ID / Name / Process name (process search lists the matching records with target, completed, status and productivity %). Employee ID / Name opens the complete date-wise details (Date, Day, Processes Worked, Productive / Non-productive / Total hrs, Target Count, Completed Count, Target Status, Productivity %, Submitted At + process-wise rows). All read from the existing Productivity log; read-only. Other designations keep the previous Team Logs page.
@@ -4658,6 +4659,7 @@ LOGIN_CHR_PICK = r"""<script>
   var lx = document.querySelector('.lx.emp'), u = document.getElementById('login_u'), box = lx && lx.querySelector('.chr-box');
   if (!u || !box) return;
   var cur = box.classList.contains('cf') ? 'f' : box.classList.contains('cm') ? 'm' : box.classList.contains('cl') ? 'l' : 'n', timer = 0, seq = 0, last = null, cache = {}, busy = 0;
+  function fx(n, k){ try { document.dispatchEvent(new CustomEvent(n, {detail: {u: k}})); } catch (x) {} }      /* Update247: tells the login animation which username was entered */
   function show(g){
     if (g === cur) return; cur = g; var my = ++busy;
     lx.classList.toggle('tlm', g === 'l');                       /* Update241: server picture -> clipboard picture for these designations */
@@ -4667,11 +4669,11 @@ LOGIN_CHR_PICK = r"""<script>
   function ask(){
     var v = (u.value || '').trim(); if (v === last) return; last = v;
     if (!v) { seq++; show('n'); return; }
-    var k = v.toLowerCase(); if (cache[k]) { seq++; show(cache[k]); return; }
+    var k = v.toLowerCase(); fx('lxmail', k); if (cache[k]) { seq++; show(cache[k]); if (cache[k] === 'l') fx('lxreport', k); return; }
     var my = ++seq;
     fetch('/login-char?u=' + encodeURIComponent(v), {credentials: 'same-origin', cache: 'no-store'})
       .then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(d){ if (!d || my !== seq) return; var g = (d.g === 'f' || d.g === 'm' || d.g === 'l') ? d.g : 'n'; cache[k] = g; show(g); })
+      .then(function(d){ if (!d || my !== seq) return; var g = (d.g === 'f' || d.g === 'm' || d.g === 'l') ? d.g : 'n'; cache[k] = g; show(g); if (g === 'l') fx('lxreport', k); })
       .catch(function(){});
   }
   function sched(){ clearTimeout(timer); timer = setTimeout(ask, 350); }
@@ -4693,7 +4695,104 @@ LOGIN_ANIM_JS = r"""<script>
 })();
 </script>
 """
-LOGIN = LOGIN_NEW_HEAD + _LOGIN_FORM + LOGIN_NEW_MID + _LOGIN_WT + _LOGIN_MAIN + LOGIN_NEW_JS + LOGIN_CHR_JS + LOGIN_CHR_PICK + LOGIN_ANIM_JS
+LOGIN_MAIL_FX = r"""<style>
+/* Update247: 3D e-mail / report flights on the login page. Display only - never touches the form data. */
+.mfx{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden;perspective:800px;perspective-origin:50% 45%}
+.mfx-env{position:absolute;left:0;top:0;width:58px;height:40px;transform-style:preserve-3d;opacity:0;will-change:transform,opacity;filter:drop-shadow(0 8px 8px #000a) drop-shadow(0 0 12px var(--mc,#22d3ee))}
+.mfx-env i{position:absolute;display:block}
+.mfx-env .e-back{inset:0;border-radius:5px;background:linear-gradient(145deg,#fff,#c9d4ff);transform:translateZ(-3px)}
+.mfx-env .e-letter{left:6px;right:6px;top:4px;height:27px;border-radius:2px;background:linear-gradient(#b9c6f7 2px,transparent 2px) 0 7px/100% 6px,#fff;transform:translateZ(-1px)}
+.mfx-env .e-front{inset:0;border-radius:5px;background:linear-gradient(150deg,#eef2ff,#a9b8f3);clip-path:polygon(0 0,50% 56%,100% 0,100% 100%,0 100%);transform:translateZ(1px)}
+.mfx-env .e-flap{left:0;right:0;top:0;height:60%;background:linear-gradient(180deg,#fff,#b7c4fa);clip-path:polygon(0 0,100% 0,50% 100%);transform-origin:50% 0;transform:translateZ(2px)}
+.mfx-env .e-seal{left:50%;top:44%;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;background:var(--mc,#22d3ee);box-shadow:0 0 8px var(--mc,#22d3ee);transform:translateZ(3px)}
+.mfx-doc{position:absolute;left:0;top:0;width:36px;height:46px;border-radius:4px;opacity:0;will-change:transform,opacity;
+  background:linear-gradient(#4f46e5,#4f46e5) 5px 5px/15px 4px no-repeat,linear-gradient(#94a3d8,#94a3d8) 5px 13px/26px 2px no-repeat,linear-gradient(#94a3d8,#94a3d8) 5px 18px/21px 2px no-repeat,
+  linear-gradient(#22d3ee,#22d3ee) 6px 33px/6px 8px no-repeat,linear-gradient(#a78bfa,#a78bfa) 15px 28px/6px 13px no-repeat,linear-gradient(#fbbf24,#fbbf24) 24px 24px/6px 17px no-repeat,#fff;
+  box-shadow:0 8px 10px #0008,0 0 14px #a78bfa99;filter:drop-shadow(0 0 8px #22d3ee88)}
+.mfx-ring{position:absolute;left:0;top:0;width:70px;height:70px;margin:-35px 0 0 -35px;border-radius:50%;border:3px solid var(--mc,#22d3ee);box-shadow:0 0 18px var(--mc,#22d3ee),inset 0 0 14px var(--mc,#22d3ee);opacity:0}
+@media(prefers-reduced-motion:reduce){.mfx{display:none}}
+</style>
+<script>
+(function(){
+  var lx = document.querySelector('.lx'); if (!lx) return;
+  var body = lx.querySelector('.lx-body'); if (!body || !body.animate) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches) return;
+  var adm = lx.classList.contains('adm'), chip = lx.querySelector('.lx-chip span'), MC = adm ? '#34d399' : '#22d3ee';
+  var layer = document.createElement('div'); layer.className = 'mfx'; layer.setAttribute('aria-hidden', 'true'); layer.style.setProperty('--mc', MC); body.appendChild(layer);
+  function pt(el, fy){ var b = body.getBoundingClientRect(), r = el.getBoundingClientRect(); return {x: r.left - b.left + r.width / 2, y: r.top - b.top + r.height * fy}; }
+  function chrEl(){ return lx.querySelector('.chr-box'); }
+  function srvEl(){ var a = lx.querySelectorAll('.lx-srv .srv-box'); return a.length ? a[a.length - 1] : null; }
+  function setChip(t){ if (chip && !lx.classList.contains('go')) chip.textContent = t; }
+  function ring(p, delay){ var r = document.createElement('i'); r.className = 'mfx-ring'; r.style.left = p.x + 'px'; r.style.top = p.y + 'px'; layer.appendChild(r);
+    var a = r.animate([{transform: 'scale(.3)', opacity: .95}, {transform: 'scale(2.3)', opacity: 0}], {duration: 700, delay: delay || 0, easing: 'ease-out', fill: 'both'});
+    a.onfinish = function(){ if (r.parentNode) r.parentNode.removeChild(r); }; }
+  function path(a, b, W, H, o){
+    var N = 20, kf = [], dx = b.x - a.x, sg = dx >= 0 ? 1 : -1, lift = Math.min(110, Math.abs(dx) * .2 + 34), cx = (a.x + b.x) / 2, cy = Math.min(a.y, b.y) - lift;
+    for (var i = 0; i <= N; i++){
+      var t = i / N, e = t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2, m = 1 - e;
+      var x = m * m * a.x + 2 * m * e * cx + e * e * b.x, y = m * m * a.y + 2 * m * e * cy + e * e * b.y, s = o.s0 + (o.s1 - o.s0) * t + Math.sin(Math.PI * t) * .3, bell = Math.sin(Math.PI * t);
+      kf.push({offset: t, opacity: t < .08 ? t / .08 : (t > .9 ? (1 - t) / .1 : 1),
+        transform: 'translate3d(' + (x - W / 2).toFixed(1) + 'px,' + (y - H / 2).toFixed(1) + 'px,' + (bell * o.z).toFixed(1) + 'px) rotateX(' + (16 - bell * 34).toFixed(1) + 'deg) rotateY(' + (t * o.spin * sg).toFixed(1) + 'deg) rotateZ(' + (sg * Math.sin(Math.PI * t * 2) * 9).toFixed(1) + 'deg) scale(' + s.toFixed(3) + ')'});
+    }
+    return kf;
+  }
+  /* one 3D e-mail flying from point A to point B (flap closes at the sender / opens at the receiver) */
+  function playMail(fromEl, toEl, closing){
+    if (!fromEl || !toEl) return Promise.resolve();
+    var a = pt(fromEl, .32), b = pt(toEl, .34), n = document.createElement('div'); n.className = 'mfx-env';
+    n.innerHTML = '<i class="e-back"></i><i class="e-letter"></i><i class="e-front"></i><i class="e-flap"></i><i class="e-seal"></i>'; layer.appendChild(n);
+    ring(a, 0);
+    var fl = n.querySelector('.e-flap'), D = 1900;
+    fl.animate(closing ? [{transform: 'translateZ(2px) rotateX(180deg)', offset: 0}, {transform: 'translateZ(2px) rotateX(0deg)', offset: .3}, {transform: 'translateZ(2px) rotateX(0deg)', offset: 1}]
+                       : [{transform: 'translateZ(2px) rotateX(0deg)', offset: 0}, {transform: 'translateZ(2px) rotateX(0deg)', offset: .72}, {transform: 'translateZ(2px) rotateX(180deg)', offset: 1}], {duration: D, easing: 'ease-in-out', fill: 'both'});
+    var an = n.animate(path(a, b, 58, 40, {s0: .5, s1: .85, z: 130, spin: 360}), {duration: D, easing: 'linear', fill: 'both'});
+    return an.finished.then(function(){ ring(b, 0); return new Promise(function(r){ setTimeout(r, 450); }); })
+      .then(function(){ if (n.parentNode) n.parentNode.removeChild(n); }, function(){ if (n.parentNode) n.parentNode.removeChild(n); });
+  }
+  /* report sheets transferred from the server to the person */
+  function playDocs(){
+    var s = srvEl(), c = chrEl(); if (!s || !c) return Promise.resolve();
+    var a = pt(s, .36), b = pt(c, .32), all = [], i;
+    setChip('Reports \u00b7 Receiving from server'); ring(a, 0);
+    for (i = 0; i < 4; i++){
+      (function(k){
+        var d = document.createElement('div'); d.className = 'mfx-doc'; layer.appendChild(d);
+        var an = d.animate(path({x: a.x, y: a.y + (k - 1.5) * 9}, {x: b.x, y: b.y + (k - 1.5) * 7}, 36, 46, {s0: .45, s1: .8, z: 150 + k * 20, spin: 540}), {duration: 1700, delay: k * 300, easing: 'linear', fill: 'both'});
+        all.push(an.finished.then(function(){ if (d.parentNode) d.parentNode.removeChild(d); }, function(){ if (d.parentNode) d.parentNode.removeChild(d); }));
+      })(i);
+    }
+    ring(b, 1700 + 3 * 300 - 200);
+    return Promise.all(all).then(function(){ return new Promise(function(r){ setTimeout(r, 400); }); }).then(function(){ if (chip && chip.textContent.indexOf('Reports') === 0) chip.textContent = chip.getAttribute('data-go') ? (adm ? 'Boss' : 'FTE') + ' \u00b7 Sending to server' : chip.textContent; });
+  }
+  var chain = Promise.resolve(), pending = 0;
+  function enqueue(fn){ if (pending > 3) return; pending++; chain = chain.then(function(){ if (document.hidden || lx.classList.contains('go')) return; return fn(); }).catch(function(){}).then(function(){ pending--; }); }
+  /* ---- Employee: username typed -> e-mail from the employee picture to the server; Associate Manager / Team Lead / Senior Team Lead then also get reports from the server ---- */
+  if (!adm){
+    var mailTimer = 0, mailDone = {}, reportOK = {}, reported = {};
+    function docsFor(u){ if (reported[u]) return; reported[u] = 1; enqueue(playDocs); }
+    document.addEventListener('lxmail', function(e){
+      var u = e.detail && e.detail.u; if (!u || u.length < 4) return; clearTimeout(mailTimer);
+      mailTimer = setTimeout(function(){
+        if (mailDone[u]) return; mailDone[u] = 'q';
+        enqueue(function(){ setChip('FTE \u00b7 E-mail sending to server'); return playMail(chrEl(), srvEl(), true).then(function(){ mailDone[u] = 'd'; if (reportOK[u]) docsFor(u); }); });
+      }, 900);
+    });
+    document.addEventListener('lxreport', function(e){ var u = e.detail && e.detail.u; if (!u) return; reportOK[u] = 1; if (mailDone[u] === 'd') docsFor(u); });
+  }
+  /* ---- Admin: Log in -> e-mail received from the server at the admin picture, then the form is sent ---- */
+  var fm = lx.querySelector('form'), sent = false;
+  if (adm && fm){
+    fm.addEventListener('submit', function(e){
+      if (sent || e.defaultPrevented) return; e.preventDefault(); sent = true;
+      var done = false; function go(){ if (done) return; done = true; try { fm.submit(); } catch (x) { sent = false; } }
+      setTimeout(go, 2600);
+      playMail(srvEl(), chrEl(), false).then(go, go);
+    });
+  }
+})();
+</script>
+"""
+LOGIN = LOGIN_NEW_HEAD + _LOGIN_FORM + LOGIN_NEW_MID + _LOGIN_WT + _LOGIN_MAIN + LOGIN_NEW_JS + LOGIN_CHR_JS + LOGIN_CHR_PICK + LOGIN_ANIM_JS + LOGIN_MAIL_FX
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}{% if h=='Target count / hour' %} (count in 1 hr, e.g. 1000){% endif %}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}

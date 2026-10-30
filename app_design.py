@@ -4095,9 +4095,7 @@ def page(body, title="Productivity Tracker", **ctx):
             side_name = (str(_e.get("Profile Name", "") or "").strip() or str(_e.get("Name", "") or "").strip() or str(session.get("name", ""))).strip()[:40]
         except Exception:
             side_name = str(session.get("name", ""))
-        _plain = False
-        try: _plain = is_view_only(session.get("emp_id", ""))      # Update239: normal letters, no 3D / animation for these designations
-        except Exception: _plain = False
+        _plain = True      # Update247: normal letters, no 3D / animation for ALL employees (was: only view-only designations)
         if side_name and _plain:
             import html as _hh2
             side_name_html = '<span class="nm-plain">' + _hh2.escape(side_name) + '</span>'

@@ -1,5 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
-  * Update252: Resigned / NCNS (Admin only). Employee Info > Employee Login Access: new 'Status (Resigned / NCNS)' and 'Relieving Date' (both required) per employee; saving disables the login automatically (Account locked = Yes) and the login cannot be enabled again until the Admin clears the status. The details also show in Employee Info > Managers & Leads. Associate Manager / Team Lead / Senior Team Lead see the Login Access Status (Enabled / Disabled) plus Resigned / NCNS and the relieving date of ALL employees, read-only, in Employee Details. New columns 'Separation status' and 'Relieving date' are added to the Employees sheet automatically.
+  * Update252: Admin > Employee Info > Employee Login Access - for Associate Manager / Team Lead / Senior Team Lead the Admin (ONLY) can mark an employee Resigned or NCNS and must enter the Relieving Date (new Employees columns \"Employment Status\" and \"Relieving Date\", added automatically). Saving either status DISABLES the employee login automatically (existing \"Account locked\" flag, so an open session is also ended). The tab now shows Designation, Employment Status, Relieving Date and Login Access Status (Enabled / Disabled) for every employee, with a filter for the three designations. Clearing the status does not re-enable login - the Admin enables it manually. Server-side Admin check; nothing else changed.
   * Update251: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the 3D e-mail animation now flies from the LEFT picture (glasses, white suit, thumbs-up) to the RIGHT picture (clipboard) as soon as the username is recognised, and repeats until the next page has loaded (the report sheets from the server are no longer shown for them). All other designations and the Admin login keep the Update247 animation; a generation counter prevents two animation loops running at once. Display only - form, lookup and every route unchanged.
   * Update246: Admin > Work Time page lag fixed - the shared-employee list was re-read (and every Employee row copied) for EACH Lock Event row and for EACH employee, and the per-employee event number was counted with a nested loop; now read once / counted with a dict. Output unchanged.
   * Update245: Associate Manager / Team Lead / Senior Team Lead ONLY - Employee Panel left menu laid out as in the supplied screenshot (menu items, holidays-only Calendar, avatar / name / Logout dock) via a new .tlside class on the sidebar; compact spacing so the Calendar's Today button is no longer hidden behind the profile dock. No new page; all other designations unchanged.
@@ -510,7 +510,8 @@ HEADERS = {
     "Employees": ["Employee ID", "Name", "Band", "Email", "Password",
                   "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                   "Emergency no", "Personal Email ID", "Office Email ID", "Designation", "Profile updated at", "Gender",
-                  "Account locked", "Joining date", "Profile Name", "Separation status", "Relieving date"],      # Update252: "Separation status" = Resigned / NCNS and "Relieving date" are set by the Admin only (setting either also sets "Account locked" = Yes).      # Update225: "Profile Name" = nickname shown under the 3D character on the Employee login page. Update96: "Account locked" = Yes / blank; Update97: "Joining date" (YYYY-MM-DD, set by Admin in Employee Info)
+                  "Account locked", "Joining date", "Profile Name", "Employment Status", "Relieving Date"],      # Update252: Employment Status = Resigned / NCNS / blank (Admin only, Associate Manager / Team Lead / Senior Team Lead); Relieving Date = YYYY-MM-DD
+                  #      # Update225: "Profile Name" = nickname shown under the 3D character on the Employee login page. Update96: "Account locked" = Yes / blank; Update97: "Joining date" (YYYY-MM-DD, set by Admin in Employee Info)
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour", "Target count / 8 hrs"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Target Count", "Productivity %",
@@ -2260,19 +2261,7 @@ def next_url():
 
 
 # ---------------------------------------------------------------- Update96: account lock / unlock / password reset / delete (Admin only)
-SEP_STATUSES = ("Resigned", "NCNS")
-def emp_sep(e):
-    """Update252: 'Resigned' / 'NCNS' (set by the Admin) or '' - such an employee's login is always disabled."""
-    v = str(e.get("Separation status", "")).strip().lower()
-    return "Resigned" if v == "resigned" else ("NCNS" if v == "ncns" else "")
-def emp_locked(e): return str(e.get("Account locked", "")).strip().lower() in ("yes", "y", "true", "locked", "1") or bool(emp_sep(e))      # Update252: Resigned / NCNS => login disabled, even if the flag were edited by hand
-def sep_fields(e):
-    """Update252: adds display fields (sep, rel_iso, rel_txt, login_on) used by the Login Access / Managers & Leads / Employee Details tables."""
-    e["sep"] = emp_sep(e); rv = str(e.get("Relieving date", "")).strip()
-    try: d_ = dt.date.fromisoformat(rv[:10]); e["rel_iso"] = d_.isoformat(); e["rel_txt"] = d_.strftime("%d %b %Y")
-    except ValueError: e["rel_iso"] = ""; e["rel_txt"] = rv
-    e["login_on"] = not emp_locked(e)
-    return e
+def emp_locked(e): return str(e.get("Account locked", "")).strip().lower() in ("yes", "y", "true", "locked", "1")
 
 def emp_status(emp_id):
     """'ok' | 'locked' | 'deleted' for a signed-in employee (uses the short-lived sheet cache, so it costs no extra Google call)."""
@@ -5075,11 +5064,8 @@ def _admin_emp(row, eid):
 @need("admin")
 def admin_emp_lock(row):
     eid = request.form.get("eid", ""); lock = request.form.get("do") == "lock"
-    cur_ = _admin_emp(row, eid)
-    if cur_ is None:
+    if _admin_emp(row, eid) is None:
         flash("That employee changed - please refresh and try again.", "error"); return redirect(_acct_back())
-    if not lock and str(cur_[HEADERS["Employees"].index("Separation status")]).strip().lower() in ("resigned", "ncns"):      # Update252
-        flash(f"{eid} is marked Resigned / NCNS - clear that status first (Employee Info > Employee Login Access) before unlocking the account.", "error"); return redirect(_acct_back())
     set_employee_cell(row, eid, "Account locked", "Yes" if lock else "")
     try: log_change("Employees", "Locked" if lock else "Unlocked", f"Employee ID {eid}")
     except Exception as ex: print("log_change failed:", ex)
@@ -5612,7 +5598,7 @@ def admin_notify_poll():
 TABS = [("personal", "Personal Details"), ("productivity", "Productivity"), ("missed", "Missed Entries"), ("leave", "Leave Log"),
         ("holidays", "Holidays"), ("mahizhchi", "Mahizhchi Log"), ("notifications", "Notifications")]
 
-EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if view=='notifications' %}A log of what employees have added, updated or deleted, newest first (latest 200).{% elif view=='productivity' %}Every employee's productivity, counted from their own joining date. Dates before it are never required, missed or reported. Click a name for the full productivity log.{% elif view=='access' %}Enable or disable each employee's login. Disabled employees cannot log in; their data is not changed. Only the Admin can mark an employee Resigned or NCNS with the relieving date - that disables the login automatically.{% else %}Click an employee's name to open their details. A name in red has unseen login/logout notifications.{% endif %}</p></div>
+EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if view=='notifications' %}A log of what employees have added, updated or deleted, newest first (latest 200).{% elif view=='productivity' %}Every employee's productivity, counted from their own joining date. Dates before it are never required, missed or reported. Click a name for the full productivity log.{% elif view=='access' %}Enable or disable each employee's login. Disabled employees cannot log in; their data is not changed.{% else %}Click an employee's name to open their details. A name in red has unseen login/logout notifications.{% endif %}</p></div>
 {% if view!='notifications' %}<form class="grid" method="get"><input name="q" placeholder="Search ID / name" value="{{q}}">
 <button class="primary">Search</button><a href="/admin/employee-info">Reset</a></form>{% endif %}</div>
 <div class="tabs no-print"><a href="/admin/employee-info" class="{{'on' if view=='employees' else ''}}">Employees</a>
@@ -5634,17 +5620,14 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <span style="position:relative;display:inline-block"><input id="al_pw" name="pw" type="text" placeholder="Initial password * (min 4)" required minlength="4" maxlength="60" style="padding-right:84px"><button type="button" class="back sm" style="position:absolute;right:4px;top:50%;transform:translateY(-50%)" onclick="var c='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789',o='';for(var i=0;i<8;i++)o+=c[Math.floor(Math.random()*c.length)];document.getElementById('al_pw').value=o">Generate</button></span>
 <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" name="enable" value="1" checked style="width:auto"> Enable login now</label>
 <button class="primary" type="submit">Save login credentials</button></form></div>
-<p class="mut">Login enabled: <b>{{n_on}}</b> &middot; Login disabled: <b>{{n_off}}</b> &middot; Resigned: <b>{{n_res}}</b> &middot; NCNS: <b>{{n_ncns}}</b></p>
-<table><tr><th>Employee ID</th><th>Employee Name</th><th>Designation</th><th>Office Email ID</th><th>Login Access Status</th><th>Status (Resigned / NCNS)</th><th>Relieving Date</th><th class="no-print">Action (Admin only)</th></tr>
+<p class="mut">Login enabled: <b>{{n_on}}</b> &middot; Login disabled: <b>{{n_off}}</b> &middot; Show: <a href="/admin/employee-info?view=access" style="{{'font-weight:700' if not grp}}">All employees</a> | <a href="/admin/employee-info?view=access&amp;grp=leads" style="{{'font-weight:700' if grp}}">Associate Manager / Team Lead / Senior Team Lead</a></p>
+<table><tr><th>Employee ID</th><th>Employee Name</th><th>Designation</th><th>Office Email ID</th><th>Employment Status</th><th>Relieving Date</th><th>Login Access Status</th><th class="no-print">Resigned / NCNS (Admin only)</th><th class="no-print">Action (Admin only)</th></tr>
 {% for e in emps %}{% set off = e.login_off %}<tr><td>{{e['Employee ID']}}</td><td><b>{{e['Name']}}</b></td><td>{{e['Designation'] or '-'}}</td><td>{{e['Email'] or '-'}}</td>
+<td>{% if e.get('Employment Status') %}<span class="pill" style="background:#fde8e8;color:#b42318">{{e['Employment Status']}}</span>{% else %}-{% endif %}</td><td>{{e.get('Relieving Date') or '-'}}</td>
 <td>{% if off %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% endif %}</td>
-<td>{% if e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% else %}-{% endif %}</td><td>{{ e.rel_txt or '-' }}</td>
+<td class="no-print">{% if e.is_lead %}<form method="post" action="/admin/employee-info/status/{{e['_row']}}" class="grid" style="gap:4px" onsubmit="return confirm('Save status for {{e['Employee ID']}} ({{e['Name']}})? Selecting Resigned or NCNS disables this employee login automatically.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><select name="status"><option value="">Active</option><option {{'selected' if e.get('Employment Status')=='Resigned'}}>Resigned</option><option {{'selected' if e.get('Employment Status')=='NCNS'}}>NCNS</option></select><input type="date" name="relieving" value="{{e.get('Relieving Date','')}}" title="Relieving date (required for Resigned / NCNS)"><button class="primary sm" type="submit">Save</button></form>{% else %}<span class="mut">-</span>{% endif %}</td>
 <td class="act no-print">
-<form method="post" action="/admin/employee-info/login-access/{{e['_row']}}/separation" onsubmit="var f=this,st=f.status.value;if(!st){alert('Choose Resigned or NCNS.');return false}if(!f.relieving.value){alert('Enter the relieving date.');return false}return confirm('Mark {{e['Employee ID']}} ({{e['Name']}}) as '+st+' with relieving date '+f.relieving.value+'? Login access will be disabled automatically.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}">
-<select name="status" title="Status" style="width:auto"><option value="">Status</option><option {{'selected' if e.sep=='Resigned'}}>Resigned</option><option {{'selected' if e.sep=='NCNS'}}>NCNS</option></select>
-<input type="date" name="relieving" required title="Relieving date" value="{{e.rel_iso}}" style="width:auto"><button class="danger sm" type="submit">Save status</button></form>
-{% if e.sep %}<form method="post" action="/admin/employee-info/login-access/{{e['_row']}}/separation" onsubmit="return confirm('Clear the {{e.sep}} status of {{e['Employee ID']}}? The login stays disabled until you enable it.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="status" value="clear"><button class="back sm" type="submit">Clear status</button></form>{% endif %}
-<form method="post" action="/admin/employee-info/login-access/{{e['_row']}}"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="do" value="enable"><button class="primary sm" type="submit" title="{{'Clear the Resigned / NCNS status first' if e.sep else ''}}" {{'disabled' if (e.sep or not off) else ''}}>Enable Login</button></form>
+<form method="post" action="/admin/employee-info/login-access/{{e['_row']}}"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="do" value="enable"><button class="primary sm" type="submit" {{'' if off else 'disabled'}}>Enable Login</button></form>
 <form method="post" action="/admin/employee-info/login-access/{{e['_row']}}" onsubmit="return confirm('Disable login for {{e['Employee ID']}} ({{e['Name']}})? This employee will not be able to log in until you enable it again. Their data is not changed.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="do" value="disable"><button class="danger sm" type="submit" {{'disabled' if off else ''}}>Disable Login</button></form>
 <form method="post" action="/admin/employees/{{e['_row']}}/reset-password" onsubmit="var p=prompt('Set password for {{e['Employee ID']}} (leave empty to generate one):','');if(p===null)return false;this.newpw.value=p;return true"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="newpw" value=""><button class="back sm" type="submit">Set Password</button></form></td></tr>
 {% else %}<tr><td colspan="8">No employees found.</td></tr>{% endfor %}</table>
@@ -5662,13 +5645,12 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 {% elif view=='leads' %}
 <form class="grid no-print" method="get"><input type="hidden" name="view" value="leads"><input type="month" name="month" value="{{month}}"><button class="primary">Show</button><a href="/admin/employee-info?view=leads">This month</a></form>
 <p class="mut">{{label}} &middot; Associate Managers, Managers, Team Leads and Senior Team Leads: their own Productivity Log and Missed Entries Log. These employees also see the read-only <b>Team Logs</b> (Productivity Log + Missed Entries Log of all employees) in their own panel when they log in. Access follows the Designation automatically.</p>
-<table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Login Access</th><th>Status</th><th>Relieving Date</th><th>Entries</th><th>Productivity</th><th>Missed entries</th><th>Missed dates</th><th>Logs</th></tr>
+<table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Entries</th><th>Productivity</th><th>Missed entries</th><th>Missed dates</th><th>Logs</th></tr>
 {% for p in lrows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
-<td>{% if p.e.login_on %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% else %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% endif %}</td><td>{% if p.e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif p.e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% else %}-{% endif %}</td><td>{{ p.e.rel_txt or '-' }}</td>
 {% if not p.active %}<td colspan="3" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>{% elif p.vo %}<td colspan="3" class="mut">View only</td>{% else %}<td>{{p.entries}}</td><td><b>{{p.pct}}%</b></td><td>{{p.missed|length}}</td>{% endif %}
 <td>{{p.missed|join(', ') or '-'}}</td>
 <td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}{% endif %}">Productivity Log</a> &middot; <a href="/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=missed&amp;month={{month}}">Missed Entries Log</a></td></tr>
-{% else %}<tr><td colspan="11">No employee with the designation Associate Manager, Manager, Team Lead or Senior Team Lead.</td></tr>{% endfor %}</table>
+{% else %}<tr><td colspan="8">No employee with the designation Associate Manager, Manager, Team Lead or Senior Team Lead.</td></tr>{% endfor %}</table>
 {% elif view=='notifications' %}
 <table><tr><th>Employee Name</th><th>Date &amp; Time</th><th>Section / Log</th><th>Action</th><th>Details</th><th>Summary</th></tr>
 {% for r in log %}<tr{% if r.new %} style="font-weight:600"{% endif %}>
@@ -5786,13 +5768,14 @@ def admin_employee_info():
     q = request.args.get("q", "").strip().lower()
     emps = [e for e in rows("Employees") if not q or q in str(e["Employee ID"]).lower() or q in str(e["Name"]).lower()]
     emps.sort(key=lambda e: str(e["Name"]).lower())
-    for e in emps: sep_fields(e)                                  # Update252
     if request.args.get("view") == "access":            # Update117: Employee Login Access tab (Admin only)
-        for e in emps: e["login_off"] = emp_locked(e)
+        for e in emps: e["login_off"] = emp_locked(e); e["is_lead"] = desig_view_only(e.get("Designation", ""))      # Update252
+        grp = request.args.get("grp") == "leads"
+        if grp: emps = [e for e in emps if e["is_lead"]]
         off = sum(1 for e in emps if e["login_off"])
-        return page(EMP_LIST, title="Employee Info", view="access", emps=emps, q=request.args.get("q", ""),
-                    n_on=len(emps) - off, n_off=off, n_res=sum(1 for e in emps if e["sep"] == "Resigned"), n_ncns=sum(1 for e in emps if e["sep"] == "NCNS"),
-                    new_count=sum(1 for r in update_log() if r["new"]), ad=session.pop("_ad", {}), today=str(today_local()))
+        return page(EMP_LIST, title="Employee Info", view="access", emps=emps, q=request.args.get("q", ""), grp=grp,
+                    n_on=len(emps) - off, n_off=off, new_count=sum(1 for r in update_log() if r["new"]),
+                    ad=session.pop("_ad", {}), today=str(today_local()))
     if request.args.get("view") == "productivity":      # Update224: Productivity section of the employee log (Admin only)
         return admin_productivity_overview(emps, q)
     if request.args.get("view") == "leads":             # Update234: Managers & Leads - their Productivity Log + Missed Entries Log (Admin only)
@@ -5849,6 +5832,35 @@ def admin_login_add():
     flash(f"Login created for {name}. Username: {eid} / Password: {pw} - {'login enabled' if enable else 'login is DISABLED until you enable it'}. Share these with the employee. Productivity tracking starts from {max(PROD_TRACKING_START, dt.date.fromisoformat(jv)).strftime('%d %b %Y')} (joining date {dt.date.fromisoformat(jv).strftime('%d %b %Y')}).")
     return redirect("/admin/employee-info?view=access")
 
+@app.route("/admin/employee-info/status/<int:row>", methods=["POST"])
+@need("admin")
+def admin_employment_status(row):
+    """Update252: Admin ONLY - mark an Associate Manager / Team Lead / Senior Team Lead as Resigned or NCNS with a Relieving Date.
+    Either status disables the login in the same write (existing "Account locked" flag). Blank status clears the status / date
+    but does NOT re-enable the login (use Enable Login)."""
+    if session.get("role") != "admin": abort(403)
+    f = request.form; eid = f.get("eid", ""); status = f.get("status", "").strip(); rel = f.get("relieving", "").strip()
+    back = f.get("back") if (f.get("back") or "").startswith("/admin/employee-info") and "//" not in f.get("back") else "/admin/employee-info?view=access"
+    if status not in ("", "Resigned", "NCNS"): abort(400)
+    heads = HEADERS["Employees"]; ws = ws_of("Employees")
+    cur = ws.row_values(row); cur += [""] * (len(heads) - len(cur))
+    if _key(cur[heads.index("Employee ID")]) != _key(eid):
+        invalidate_cache("Employees"); flash("That employee changed - please refresh and try again.", "error"); return redirect(back)
+    if not desig_view_only(cur[heads.index("Designation")]):
+        flash("Resigned / NCNS status applies only to Associate Manager, Team Lead and Senior Team Lead.", "error"); return redirect(back)
+    if status:
+        try: rd = dt.date.fromisoformat(rel)
+        except ValueError:
+            flash("Please enter the Relieving Date for a Resigned / NCNS employee.", "error"); return redirect(back)
+        cur[heads.index("Employment Status")] = status; cur[heads.index("Relieving Date")] = rd.isoformat()
+        cur[heads.index("Account locked")] = "Yes"                       # login disabled automatically
+    else:
+        cur[heads.index("Employment Status")] = ""; cur[heads.index("Relieving Date")] = ""
+    _with_retry(ws.update, range_name=f"A{row}", values=[cur[:len(heads)]], value_input_option="RAW")
+    invalidate_cache("Employees")
+    flash(f"{eid} marked {status} (relieving {rel}) - login disabled automatically." if status else f"Status cleared for {eid}. Login access unchanged - use Enable Login if needed.")
+    return redirect(back)
+
 @app.route("/admin/employee-info/login-access/<int:row>", methods=["POST"])
 @need("admin")
 def admin_login_access(row):
@@ -5857,43 +5869,13 @@ def admin_login_access(row):
     if session.get("role") != "admin": abort(403)
     eid = request.form.get("eid", ""); disable = request.form.get("do") == "disable"
     if request.form.get("do") not in ("enable", "disable"): abort(400)
-    cur_ = _admin_emp(row, eid)
-    if cur_ is None:
+    if _admin_emp(row, eid) is None:
         flash("That employee changed - please refresh and try again.", "error"); return redirect(_acct_back())
-    if not disable and str(cur_[HEADERS["Employees"].index("Separation status")]).strip().lower() in ("resigned", "ncns"):      # Update252: no login while Resigned / NCNS
-        flash(f"{eid} is marked Resigned / NCNS, so the login stays disabled. Clear that status first if this was a mistake.", "error"); return redirect(_acct_back())
     set_employee_cell(row, eid, "Account locked", "Yes" if disable else "")
     try: log_change("Employees", "Login disabled" if disable else "Login enabled", f"Employee ID {eid}")
     except Exception as ex: print("log_change failed:", ex)
     flash(f"Login {'disabled - ' + eid + ' can no longer log in.' if disable else 'enabled - ' + eid + ' can log in again.'}")
     return redirect(request.form.get("back") if (request.form.get("back") or "").startswith("/admin/employee-info") and "//" not in request.form.get("back") else "/admin/employee-info?view=access")
-
-@app.route("/admin/employee-info/login-access/<int:row>/separation", methods=["POST"])
-@need("admin")
-def admin_login_separation(row):
-    """Update252: ADMIN ONLY - mark an employee Resigned / NCNS with the relieving date (both required). The login is disabled automatically
-    ("Account locked" = Yes). 'clear' removes the status and date; the login then stays disabled until the Admin enables it."""
-    if session.get("role") != "admin": abort(403)
-    eid = request.form.get("eid", "").strip(); st = request.form.get("status", "").strip(); rel = request.form.get("relieving", "").strip()
-    if _admin_emp(row, eid) is None:
-        flash("That employee changed - please refresh and try again.", "error"); return redirect(_acct_back())
-    if st == "clear":
-        set_employee_cell(row, eid, "Separation status", ""); set_employee_cell(row, eid, "Relieving date", "")
-        try: log_change("Employees", "Resigned / NCNS cleared", f"Employee ID {eid}")
-        except Exception as ex: print("log_change failed:", ex)
-        flash(f"Status cleared for {eid}. The login is still disabled - use Enable Login when the employee may sign in again.")
-        return redirect(_acct_back())
-    if st not in SEP_STATUSES:
-        flash("Please choose the status: Resigned or NCNS.", "error"); return redirect(_acct_back())
-    try: rel = dt.date.fromisoformat(rel).isoformat()
-    except ValueError:
-        flash("Please enter the relieving date.", "error"); return redirect(_acct_back())
-    set_employee_cell(row, eid, "Separation status", st); set_employee_cell(row, eid, "Relieving date", rel)
-    set_employee_cell(row, eid, "Account locked", "Yes")                      # login access is disabled automatically
-    try: log_change("Employees", f"Marked {st} (relieving {rel}); login disabled", f"Employee ID {eid}")
-    except Exception as ex: print("log_change failed:", ex)
-    flash(f"{eid} marked {st} - relieving date {dt.date.fromisoformat(rel).strftime('%d %b %Y')}. Login access has been disabled automatically.")
-    return redirect(_acct_back())
 
 def emp_or_404(eid):
     e = next((e for e in rows("Employees") if _key(e["Employee ID"]) == _key(eid)), None)
@@ -10589,14 +10571,13 @@ def pd_need(f):
         return f(*a, **k)
     return w
 
-PEOPLE_LIST = """<div class="head"><div><h1>Employee Details</h1><p class="mut">Personal Details of all employees &mdash; click a name to view / edit. The <b>Login Access Status</b> of every employee (and Resigned / NCNS with the relieving date) is shown read-only; only the Admin can change it. &middot; Login enabled: <b>{{n_on}}</b> &middot; disabled: <b>{{n_off}}</b></p></div></div>
+PEOPLE_LIST = """<div class="head"><div><h1>Employee Details</h1><p class="mut">Personal Details of all employees &mdash; click a name to view / edit.</p></div></div>
 <form class="grid no-print" method="get"><input name="q" placeholder="Search ID / name" value="{{q}}"><button class="primary">Search</button><a href="/employee/people">Reset</a></form>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Designation</th><th>Gender</th><th>Address Line_1</th><th>Address Line_2</th><th>City</th><th>PIN</th><th>Phone</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID</th><th>Profile Name</th><th>Login Access Status</th><th>Status (Resigned / NCNS)</th><th>Relieving Date</th><th>Last updated</th><th></th></tr>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Designation</th><th>Gender</th><th>Address Line_1</th><th>Address Line_2</th><th>City</th><th>PIN</th><th>Phone</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID</th><th>Profile Name</th><th>Last updated</th><th></th></tr>
 {% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td><a href="/employee/people/{{e['_row']}}"><b>{{e['Name']}}</b></a></td><td>{{e['Designation'] or '-'}}</td><td>{{e['Gender'] or '-'}}</td><td>{{e['Address Line_1'] or '-'}}</td><td>{{e['Address Line_2'] or '-'}}</td>
 <td>{{e['City'] or '-'}}</td><td>{{e['PIN'] or '-'}}</td><td>{{e['Phone Number'] or '-'}}</td><td>{{e['Emergency no'] or '-'}}</td><td>{{e['Personal Email ID'] or '-'}}</td><td>{{e['Email'] or '-'}}</td><td>{{e['Profile Name'] or '-'}}</td>
-<td>{% if e.login_on %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% else %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% endif %}</td><td>{% if e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% else %}-{% endif %}</td><td>{{ e.rel_txt or '-' }}</td>
 <td>{{(e['Profile updated at'] or '-')|t12}}</td><td class="act"><a href="/employee/people/{{e['_row']}}">Edit</a></td></tr>
-{% else %}<tr><td colspan="18">No employees found.</td></tr>{% endfor %}</table></div>"""
+{% else %}<tr><td colspan="15">No employees found.</td></tr>{% endfor %}</table></div>"""
 
 PEOPLE_EDIT = """<div class="card"><h2>Personal details &mdash; {{emp['Name']}}</h2>
 <form method="post" class="grid">
@@ -10615,8 +10596,7 @@ def employee_people():
     prefetch("Employees")
     q = request.args.get("q", "").strip(); ql = q.lower()
     emps = sorted((e for e in rows("Employees") if not ql or ql in str(e["Employee ID"]).lower() or ql in str(e["Name"]).lower()), key=lambda e: str(e["Name"]).lower())
-    for e in emps: sep_fields(e)                                  # Update252: Login Access Status (Enabled / Disabled) + Resigned / NCNS + relieving date - read only
-    return page(PEOPLE_LIST, title="Employee Details", emps=emps, q=q, n_on=sum(1 for e in emps if e["login_on"]), n_off=sum(1 for e in emps if not e["login_on"]))
+    return page(PEOPLE_LIST, title="Employee Details", emps=emps, q=q)
 
 @app.route("/employee/people/<int:row>", methods=["GET", "POST"])
 @need("employee")

@@ -1,5 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
-  * Update254: Employee Panel > Team Logs (main Productivity Log page only, Associate Manager / Team Lead / Senior Team Lead) - three status categories Active / Resigned / NCNS are shown at the TOP of the page with the matching employees (ID, name, designation, relieving date, login access), followed by the existing Team Logs details. Only employees whose Designation is Associate Manager / Team Lead / Senior Team Lead are listed; status comes from the Admin-set Employment Status. Read-only; no other employee page, route or Admin feature changed.
+  * Update255: Employee Panel > Team Logs - the separate Employee Status section (Update254) is removed. Team Logs lists ONLY employees whose Designation is Associate Manager / Team Lead / Senior Team Lead, each with the Admin-assigned Status (Active / Resigned / NCNS) and Relieving Date as read-only columns; an individual employee log of any other designation answers 404. Status can be changed only by the Admin (Employee Info > Employee Login Access, server-side Admin check); no employee route can change it. No other page changed.
   * Update253: SPEED / no endless loading. (1) Google Sheets calls give up after a total time limit (SHEETS_RETRY_BUDGET, default 25 s; request timeout 30 s) instead of retrying for minutes, so a slow Google answer ends as a clear error message, not a page that never opens. (2) Login pages: if sign-in has not finished within 25 s the button and animation are released with a notice (Employee + Admin); the screen-lock permission wait is 8 s instead of 20 s. (3) Admin pages: the automatic 2-minute reload no longer runs while the tab is hidden or while the Admin is typing in a field (it used to reload and re-read every sheet in hidden tabs); Online-employees poll is 10 s and paused in hidden tabs; Overview change-check is 60 s (it re-reads 7 sheets each time). (4) Sheet read cache TTL 4 s -> 10 s (ROWS_CACHE_TTL env overrides; your own saves and all Admin report pages still read live). Design, animations, data, routes and permissions are unchanged.
   * Update252: Admin > Employee Info > Employee Login Access - for Associate Manager / Team Lead / Senior Team Lead the Admin (ONLY) can mark an employee Resigned or NCNS and must enter the Relieving Date (new Employees columns \"Employment Status\" and \"Relieving Date\", added automatically). Saving either status DISABLES the employee login automatically (existing \"Account locked\" flag, so an open session is also ended). The tab now shows Designation, Employment Status, Relieving Date and Login Access Status (Enabled / Disabled) for every employee, with a filter for the three designations. Clearing the status does not re-enable login - the Admin enables it manually. Server-side Admin check; nothing else changed.
   * Update251: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the 3D e-mail animation now flies from the LEFT picture (glasses, white suit, thumbs-up) to the RIGHT picture (clipboard) as soon as the username is recognised, and repeats until the next page has loaded (the report sheets from the server are no longer shown for them). All other designations and the Admin login keep the Update247 animation; a generation counter prevents two animation loops running at once. Display only - form, lookup and every route unchanged.
@@ -10642,26 +10642,7 @@ def plog_user():
     try: return bool(team_log_access() and desig_view_only(my_emp_row().get("Designation", "")))
     except Exception: return False
 
-def team_status_groups():
-    """Update254: {Active, Resigned, NCNS} -> employees (Associate Manager / Team Lead / Senior Team Lead only) for the top of Team Logs."""
-    g = {"Active": [], "Resigned": [], "NCNS": []}
-    for e in sorted(rows("Employees"), key=lambda x: str(x.get("Name", "")).lower()):
-        if not desig_view_only(e.get("Designation", "")): continue
-        st = str(e.get("Employment Status", "")).strip()
-        st = "Resigned" if st.lower() == "resigned" else ("NCNS" if st.upper() == "NCNS" else "Active")
-        g[st].append(dict(id=e.get("Employee ID", ""), name=e.get("Name", ""), desig=e.get("Designation", ""),
-                          rel=str(e.get("Relieving Date", "") or "").strip(), off=emp_locked(e)))
-    return g
-app.jinja_env.globals["team_status_groups"] = team_status_groups
-
-TEAM_STATUS_TOP = """{% set tsg = team_status_groups() %}<div class="card" id="tl_status"><h2 style="margin-top:0">Employee Status</h2>
-<div class="kpis">{% for k in ['Active','Resigned','NCNS'] %}<div class="kpi"><span>{{'NCNS (No Call, No Show)' if k=='NCNS' else k}}</span><b>{{tsg[k]|length}}</b></div>{% endfor %}</div>
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:10px">
-{% for k in ['Active','Resigned','NCNS'] %}<div><h3 style="margin:0 0 6px">{{'NCNS (No Call, No Show)' if k=='NCNS' else k}} ({{tsg[k]|length}})</h3>
-<div style="overflow-x:auto;max-height:260px;overflow-y:auto"><table><tr><th>Employee ID</th><th>Name</th><th>Designation</th>{% if k!='Active' %}<th>Relieving Date</th>{% endif %}<th>Login</th></tr>
-{% for x in tsg[k] %}<tr><td>{{x.id}}</td><td><b>{{x.name}}</b></td><td>{{x.desig}}</td>{% if k!='Active' %}<td>{{x.rel or '-'}}</td>{% endif %}<td>{{'Disabled' if x.off else 'Enabled'}}</td></tr>
-{% else %}<tr><td colspan="{{ 4 if k=='Active' else 5 }}" class="mut">No employees.</td></tr>{% endfor %}</table></div></div>{% endfor %}</div></div>"""
-TEAM_PLOG = TEAM_STATUS_TOP + TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all employees</h2>
+TEAM_PLOG = TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all employees</h2>
 <p class="mut">{{label}} &middot; read-only. Working days are counted from each employee's joining date; weekly offs and holidays are excluded. Click an Employee ID or Name for the complete date-wise details.</p>
 <form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}" title="Month (leave empty to search all dates by process)">
 <input name="emp" placeholder="Employee ID / name" value="{{emp}}"><input name="proc" placeholder="Process name" value="{{proc}}"><button class="primary">Search</button><a href="/employee/team-logs">Reset</a></form>
@@ -10672,19 +10653,20 @@ TEAM_PLOG = TEAM_STATUS_TOP + TEAM_TABS + """<div class="card"><h2>Productivity 
 <td>{% if r.off %}<span class="mut">Off / holiday</span>{% elif not r.rate %}-{% elif r.met %}<span class="tg-badge met">&#9989; Achieved</span>{% else %}<span class="tg-badge miss">&#10060; Not Achieved</span>{% endif %}</td>
 <td>{{ (r.pct ~ '%') if (r.pct is not none and not r.off) else '-' }}</td></tr>
 {% else %}<tr><td colspan="9">No productivity records match this process.</td></tr>{% endfor %}</table></div>
-{% else %}<div style="overflow-x:auto"><table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Joining Date</th><th>Tracking From</th><th>Working Days</th><th>Entries</th><th>Missed</th>{% if not hide_status %}<th>Attendance</th>{% endif %}<th>Productivity</th></tr>
+{% else %}<div style="overflow-x:auto"><table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Status</th><th>Relieving Date</th><th>Joining Date</th><th>Tracking From</th><th>Working Days</th><th>Entries</th><th>Missed</th>{% if not hide_status %}<th>Attendance</th>{% endif %}<th>Productivity</th></tr>
 {% for p in lrows %}<tr><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}">{{p.e['Employee ID']}}</a></td><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
+<td>{% set _st = p.e['Employment Status'] or 'Active' %}<span class="pill" style="{{ 'background:#e6f6ec;color:#15803d' if _st=='Active' else 'background:#fde8e8;color:#b42318' }}">{{_st}}</span></td><td>{{p.e['Relieving Date'] or '-'}}</td>
 <td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}}{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td><td>{{p.pstart.strftime('%d %b %Y')}}</td>
 {% if not p.active %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
 {% elif p.r.vo %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">View only (no productivity entry for this designation)</td>
 {% else %}<td>{{p.r.wd}}</td><td>{{p.entries}}</td><td>{{p.missed}}</td>{% if not hide_status %}<td>{{p.r.att}}%</td>{% endif %}<td><b>{{p.r.pct}}%</b></td>{% endif %}</tr>
-{% else %}<tr><td colspan="10">No employees found.</td></tr>{% endfor %}</table></div>{% endif %}</div>"""
+{% else %}<tr><td colspan="12">No employees found.</td></tr>{% endfor %}</table></div>{% endif %}</div>"""
 
 def _team_plog_page():
     today = today_local()
     emp_q = request.args.get("emp", "").strip(); proc_q = request.args.get("proc", "").strip()
     month_arg = request.args.get("month", "").strip()
-    emps = sorted(rows("Employees"), key=lambda e: str(e.get("Name", "")).lower())
+    emps = sorted([e for e in rows("Employees") if desig_view_only(e.get("Designation", ""))], key=lambda e: str(e.get("Name", "")).lower())      # Update255: only Associate Manager / Team Lead / Senior Team Lead
     if emp_q:
         ql = emp_q.lower(); emps = [e for e in emps if ql in str(e["Employee ID"]).lower() or ql in str(e["Name"]).lower()]
     subs, leaves = load_subs(), rows("Leave")
@@ -10727,6 +10709,8 @@ def _team_plog_page():
 def employee_team_plog(eid):
     if not plog_user(): abort(403)
     prefetch("Employees", "Productivity log", "Leave", "Holidays", "Processes", "Permissions")
+    _te = next((e for e in rows("Employees") if _key(e["Employee ID"]) == _key(eid)), None)      # Update255: only the three designations are listed in Team Logs
+    if _te is None or not desig_view_only(_te.get("Designation", "")): abort(404)
     ctx = plog_ctx(eid, request.args.get("month", "").strip())
     return page(T_PLOG, title=ctx["emp"]["Name"] + " - Productivity Log", back_url="/employee/team-logs", back_label="Team Logs", base_url=request.path, show_personal=False, **ctx)
 

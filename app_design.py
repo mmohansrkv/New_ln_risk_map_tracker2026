@@ -1,4 +1,6 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update254: Employee Panel > Team Logs (main Productivity Log page only, Associate Manager / Team Lead / Senior Team Lead) - three status categories Active / Resigned / NCNS are shown at the TOP of the page with the matching employees (ID, name, designation, relieving date, login access), followed by the existing Team Logs details. Only employees whose Designation is Associate Manager / Team Lead / Senior Team Lead are listed; status comes from the Admin-set Employment Status. Read-only; no other employee page, route or Admin feature changed.
+  * Update253: SPEED / no endless loading. (1) Google Sheets calls give up after a total time limit (SHEETS_RETRY_BUDGET, default 25 s; request timeout 30 s) instead of retrying for minutes, so a slow Google answer ends as a clear error message, not a page that never opens. (2) Login pages: if sign-in has not finished within 25 s the button and animation are released with a notice (Employee + Admin); the screen-lock permission wait is 8 s instead of 20 s. (3) Admin pages: the automatic 2-minute reload no longer runs while the tab is hidden or while the Admin is typing in a field (it used to reload and re-read every sheet in hidden tabs); Online-employees poll is 10 s and paused in hidden tabs; Overview change-check is 60 s (it re-reads 7 sheets each time). (4) Sheet read cache TTL 4 s -> 10 s (ROWS_CACHE_TTL env overrides; your own saves and all Admin report pages still read live). Design, animations, data, routes and permissions are unchanged.
   * Update252: Admin > Employee Info > Employee Login Access - for Associate Manager / Team Lead / Senior Team Lead the Admin (ONLY) can mark an employee Resigned or NCNS and must enter the Relieving Date (new Employees columns \"Employment Status\" and \"Relieving Date\", added automatically). Saving either status DISABLES the employee login automatically (existing \"Account locked\" flag, so an open session is also ended). The tab now shows Designation, Employment Status, Relieving Date and Login Access Status (Enabled / Disabled) for every employee, with a filter for the three designations. Clearing the status does not re-enable login - the Admin enables it manually. Server-side Admin check; nothing else changed.
   * Update251: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the 3D e-mail animation now flies from the LEFT picture (glasses, white suit, thumbs-up) to the RIGHT picture (clipboard) as soon as the username is recognised, and repeats until the next page has loaded (the report sheets from the server are no longer shown for them). All other designations and the Admin login keep the Update247 animation; a generation counter prevents two animation loops running at once. Display only - form, lookup and every route unchanged.
   * Update246: Admin > Work Time page lag fixed - the shared-employee list was re-read (and every Employee row copied) for EACH Lock Event row and for EACH employee, and the per-employee event number was counted with a nested loop; now read once / counted with a dict. Output unchanged.
@@ -802,15 +804,17 @@ def _no_store_private(resp):
 # few seconds so 20 people loading the same page doesn't mean 20 API calls.
 
 _RETRYABLE_CODES = {429, 500, 502, 503, 504}
+SHEETS_RETRY_BUDGET = float(os.getenv("SHEETS_RETRY_BUDGET", "25"))      # Update253
+SHEETS_HTTP_TIMEOUT = float(os.getenv("SHEETS_HTTP_TIMEOUT", "30"))
 
 def _with_retry(fn, *args, **kwargs):
     """Call a gspread function, retrying on rate-limit / transient errors."""
-    delay = 0.5
+    delay = 0.5; t_end = time.monotonic() + SHEETS_RETRY_BUDGET      # Update253: total time limit - never retry for minutes
     for attempt in range(6):
         try:
             return fn(*args, **kwargs)
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:      # Update175: stalled / dropped connection -> retry instead of hanging or failing
-            if attempt < 5: time.sleep(delay + random.uniform(0, 0.3)); delay = min(delay * 2, 8); continue
+            if attempt < 5 and time.monotonic() + delay < t_end: time.sleep(delay + random.uniform(0, 0.3)); delay = min(delay * 2, 8); continue
             raise
         except APIError as e:
             code = None
@@ -818,7 +822,7 @@ def _with_retry(fn, *args, **kwargs):
                 code = e.response.status_code
             except Exception:
                 pass
-            if code in _RETRYABLE_CODES and attempt < 5:
+            if code in _RETRYABLE_CODES and attempt < 5 and time.monotonic() + delay < t_end:
                 time.sleep(delay + random.uniform(0, 0.3))
                 delay = min(delay * 2, 8)
                 continue
@@ -835,9 +839,9 @@ def book():
                 creds = Credentials.from_service_account_file(
                     CREDS_FILE, scopes=["https://www.googleapis.com/auth/spreadsheets"])
                 client = gspread.authorize(creds)
-                try: client.set_timeout(60)                              # Update175: without a timeout one stalled request to Google hangs a thread forever
+                try: client.set_timeout(SHEETS_HTTP_TIMEOUT)                              # Update175: without a timeout one stalled request to Google hangs a thread forever
                 except Exception:
-                    try: client.http_client.timeout = 60
+                    try: client.http_client.timeout = SHEETS_HTTP_TIMEOUT
                     except Exception: pass
                 b = _with_retry(client.open_by_key, SHEET_ID)
                 have = {w.title for w in _with_retry(b.worksheets)}
@@ -880,7 +884,7 @@ def ws_of(name):
 # Short-lived cache for reads: cuts repeated-page-load API calls under
 # concurrent traffic. Any write (see invalidate_cache) clears the relevant
 # entry immediately, so nobody sees stale data after their own action.
-_ROWS_CACHE_TTL = float(os.getenv("ROWS_CACHE_TTL", "4"))
+_ROWS_CACHE_TTL = float(os.getenv("ROWS_CACHE_TTL", "10"))
 _rows_cache = {}
 LIVE_TTL = 10.0   # Update203
 _rows_cache_lock = threading.Lock()
@@ -3832,7 +3836,7 @@ poll();
 })();
 </script>{% endif %}
 {% if session.role=='admin' and request.path not in ['/admin/welcome'] %}<script>/* Update88: Admin page auto-refresh every 2 minutes (same as F5), repeating. Admin browser only. */
-setInterval(function(){location.reload()},120000);
+setInterval(function(){if(document.hidden)return;var a=document.activeElement,tg=a&&a.tagName;if(tg==='INPUT'||tg==='TEXTAREA'||tg==='SELECT'||(a&&a.isContentEditable))return;location.reload()},120000);      /* Update253: not in hidden tabs, not while typing */
 </script>{% endif %}
 {% if session.role and request.path not in ['/employee/welcome','/admin/welcome'] %}<script>
 /* Update79: one short, identical click sound for every button / link / control on the Admin and Employee pages. No music here. */
@@ -4175,7 +4179,7 @@ LOGIN_CLASSIC = """<div class="win admin" data-role="{{role}}"><div class="wbar"
     if (ok) return;
     e.preventDefault(); e.stopImmediatePropagation();
     var go = function(){ if (ok) return; ok = true; try { fm.requestSubmit(); } catch (x) { fm.submit(); } };
-    var t = setTimeout(go, 20000);
+    var t = setTimeout(go, 8000);
     navigator.permissions.query({name:'idle-detection'}).then(function(p){
       if (p.state !== 'prompt') { clearTimeout(t); go(); return; }
       IdleDetector.requestPermission().then(function(){ clearTimeout(t); go(); }, function(){ clearTimeout(t); go(); });
@@ -4819,7 +4823,24 @@ LOGIN_MAIL_FX = r"""<style>
 })();
 </script>
 """
-LOGIN = LOGIN_NEW_HEAD + _LOGIN_FORM + LOGIN_NEW_MID + _LOGIN_WT + _LOGIN_MAIN + LOGIN_NEW_JS + LOGIN_CHR_JS + LOGIN_CHR_PICK + LOGIN_ANIM_JS + LOGIN_MAIL_FX
+LOGIN_SAFETY = r"""<script>
+/* Update253: a sign-in that has not finished in 25 s never leaves the page loading for ever - the button and animations are released and a notice is shown. */
+(function(){
+  var fm = document.querySelector('form'); if (!fm) return; var tm = 0;
+  function release(){
+    var b = fm.querySelector('button:not([type=button])'); if (b) b.disabled = false;
+    var lx = document.querySelector('.lx'); if (lx) lx.classList.remove('go');
+    var sc = document.querySelector('.scene'); if (sc) sc.classList.remove('dp-paused');
+    try { document.dispatchEvent(new Event('lxclear')); } catch (x) {}
+    var n = document.getElementById('lg_slow');
+    if (!n) { n = document.createElement('div'); n.id = 'lg_slow'; n.setAttribute('role', 'alert'); n.style.cssText = 'margin:8px 0;padding:8px 10px;border-radius:8px;background:#fff4e5;color:#92400e;font-size:13px'; fm.insertBefore(n, fm.firstChild); }
+    n.textContent = 'This is taking longer than expected. Please check your connection and click Log in again.';
+  }
+  fm.addEventListener('submit', function(){ clearTimeout(tm); tm = setTimeout(release, 25000); });
+  window.addEventListener('pageshow', function(){ clearTimeout(tm); });
+})();
+</script>"""
+LOGIN = LOGIN_NEW_HEAD + _LOGIN_FORM + LOGIN_NEW_MID + _LOGIN_WT + _LOGIN_MAIN + LOGIN_NEW_JS + LOGIN_CHR_JS + LOGIN_CHR_PICK + LOGIN_ANIM_JS + LOGIN_MAIL_FX + LOGIN_SAFETY
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}{% if h=='Target count / hour' %} (count in 1 hr, e.g. 1000){% endif %}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
@@ -8118,7 +8139,7 @@ function draw(list){while(t.rows.length>1)t.deleteRow(1);n.textContent=list.leng
  if(!list.length){var r=t.insertRow(),c=r.insertCell();c.colSpan=3;c.textContent='No employees are online right now.';return}
  list.forEach(function(e){var r=t.insertRow();cell(r,e.id+' · '+e.name);cell(r,'● '+e.status,e.status==='Online'?'in':'act');cell(r,e.since)})}
 function poll(){fetch('/admin/online/poll',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(j){draw(j.items)}).catch(function(){})}
-setInterval(poll,5000);document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()})})();
+setInterval(function(){if(!document.hidden)poll()},10000);document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()})})();
 </script>
 <p class="mut no-print" style="margin:4px 0">&#9679; Live from the Google Sheet &middot; checked <span id="ov_at">just now</span> &middot; updates automatically when the sheet changes.</p>
 <table id="ovt" data-sig="{{sig}}"><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th>
@@ -8135,7 +8156,7 @@ function redraw(){fetch(location.pathname+q,{credentials:'same-origin',cache:'no
  if(!nt)return;t.innerHTML=nt.innerHTML;sig=nt.getAttribute('data-sig');t.setAttribute('data-sig',sig);if(ok&&ck)ck.innerHTML=ok.innerHTML}).catch(function(){})}
 function poll(){if(busy||document.hidden)return;busy=true;
  fetch('/admin/summary/poll'+q,{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(j){stamp(j.at);if(j.sig!==sig)redraw()}).catch(function(){}).then(function(){busy=false})}
-setInterval(poll,30000);document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()})})();
+setInterval(poll,60000);document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()})})();
 </script>"""
 
 LEAVE_EMP = """<style>
@@ -10621,7 +10642,26 @@ def plog_user():
     try: return bool(team_log_access() and desig_view_only(my_emp_row().get("Designation", "")))
     except Exception: return False
 
-TEAM_PLOG = TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all employees</h2>
+def team_status_groups():
+    """Update254: {Active, Resigned, NCNS} -> employees (Associate Manager / Team Lead / Senior Team Lead only) for the top of Team Logs."""
+    g = {"Active": [], "Resigned": [], "NCNS": []}
+    for e in sorted(rows("Employees"), key=lambda x: str(x.get("Name", "")).lower()):
+        if not desig_view_only(e.get("Designation", "")): continue
+        st = str(e.get("Employment Status", "")).strip()
+        st = "Resigned" if st.lower() == "resigned" else ("NCNS" if st.upper() == "NCNS" else "Active")
+        g[st].append(dict(id=e.get("Employee ID", ""), name=e.get("Name", ""), desig=e.get("Designation", ""),
+                          rel=str(e.get("Relieving Date", "") or "").strip(), off=emp_locked(e)))
+    return g
+app.jinja_env.globals["team_status_groups"] = team_status_groups
+
+TEAM_STATUS_TOP = """{% set tsg = team_status_groups() %}<div class="card" id="tl_status"><h2 style="margin-top:0">Employee Status</h2>
+<div class="kpis">{% for k in ['Active','Resigned','NCNS'] %}<div class="kpi"><span>{{'NCNS (No Call, No Show)' if k=='NCNS' else k}}</span><b>{{tsg[k]|length}}</b></div>{% endfor %}</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:10px">
+{% for k in ['Active','Resigned','NCNS'] %}<div><h3 style="margin:0 0 6px">{{'NCNS (No Call, No Show)' if k=='NCNS' else k}} ({{tsg[k]|length}})</h3>
+<div style="overflow-x:auto;max-height:260px;overflow-y:auto"><table><tr><th>Employee ID</th><th>Name</th><th>Designation</th>{% if k!='Active' %}<th>Relieving Date</th>{% endif %}<th>Login</th></tr>
+{% for x in tsg[k] %}<tr><td>{{x.id}}</td><td><b>{{x.name}}</b></td><td>{{x.desig}}</td>{% if k!='Active' %}<td>{{x.rel or '-'}}</td>{% endif %}<td>{{'Disabled' if x.off else 'Enabled'}}</td></tr>
+{% else %}<tr><td colspan="{{ 4 if k=='Active' else 5 }}" class="mut">No employees.</td></tr>{% endfor %}</table></div></div>{% endfor %}</div></div>"""
+TEAM_PLOG = TEAM_STATUS_TOP + TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all employees</h2>
 <p class="mut">{{label}} &middot; read-only. Working days are counted from each employee's joining date; weekly offs and holidays are excluded. Click an Employee ID or Name for the complete date-wise details.</p>
 <form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}" title="Month (leave empty to search all dates by process)">
 <input name="emp" placeholder="Employee ID / name" value="{{emp}}"><input name="proc" placeholder="Process name" value="{{proc}}"><button class="primary">Search</button><a href="/employee/team-logs">Reset</a></form>

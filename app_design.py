@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update252b: Admin > Productivity Log - the Employee column shows the employee's NAME (read from the Employees sheet by Employee ID; falls back to the name saved on the log row, then the ID) instead of the Employee ID; it still links to the employee's complete Productivity Log. Columns, order, calculations and data are unchanged (new read-only key master_name, used only for this display).
   * Update252: Resigned / NCNS (Admin only). Employee Info > Employee Login Access: new 'Status (Resigned / NCNS)' and 'Relieving Date' (both required) per employee; saving disables the login automatically (Account locked = Yes) and the login cannot be enabled again until the Admin clears the status. The details also show in Employee Info > Managers & Leads. Associate Manager / Team Lead / Senior Team Lead see the Login Access Status (Enabled / Disabled) plus Resigned / NCNS and the relieving date of ALL employees, read-only, in Employee Details. New columns 'Separation status' and 'Relieving date' are added to the Employees sheet automatically.
   * Update251: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the 3D e-mail animation now flies from the LEFT picture (glasses, white suit, thumbs-up) to the RIGHT picture (clipboard) as soon as the username is recognised, and repeats until the next page has loaded (the report sheets from the server are no longer shown for them). All other designations and the Admin login keep the Update247 animation; a generation counter prevents two animation loops running at once. Display only - form, lookup and every route unchanged.
   * Update246: Admin > Work Time page lag fixed - the shared-employee list was re-read (and every Employee row copied) for EACH Lock Event row and for EACH employee, and the per-employee event number was counted with a nested loop; now read once / counted with a dict. Output unchanged.
@@ -1201,6 +1202,7 @@ def load_subs(emp_id=None):
     want = _key(emp_id) if emp_id is not None else None
     emps_ = rows("Employees")                                              # Update170: every log row is tied to a REAL employee (ID first, then Name + Band)
     known = {_key(e.get("Employee ID", "")): str(e.get("Employee ID", "")).strip() for e in emps_}
+    nm_ = {_key(e.get("Employee ID", "")): str(e.get("Name", "")).strip() for e in emps_}      # Update252b: Employee ID -> name from the Employees sheet
     by_name = {}
     for e in emps_: by_name.setdefault((_key(e.get("Name", "")), _key(e.get("Band", ""))), []).append(str(e.get("Employee ID", "")).strip())
     by_name1 = {}
@@ -1218,7 +1220,7 @@ def load_subs(emp_id=None):
         sid_ = str(g_("submissionid")).strip() or ("%s|%s" % (_key(eid_), date_))
         s = subs.setdefault((sid_, _key(eid_)), dict(
             id=sid_, date=date_, band=g_("band"), emp_id=eid_,
-            emp_name=g_("employeename"), designation=dm.get(_key(eid_), ""),
+            emp_name=g_("employeename"), master_name=nm_.get(_key(eid_), ""), designation=dm.get(_key(eid_), ""),
             procs=[], notes=[], rows=[], subat=""))
         s["rows"].append(r0["_row"])
         s["subat"] = max(s["subat"], str(g_("submittedat")).strip())      # Update208: latest save time of this entry
@@ -4869,7 +4871,7 @@ SAVED_ANIM = """{% if saved_anim %}<script>window.__cmSaved={{ session.name|tojs
 
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th><th>Designation</th>{% endif %}
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Target count</th><th>Completed</th><th>Target status</th><th>Productivity</th><th></th></tr>
-{% for s in subs %}<tr{% if s.late %} class="late-row" title="Submitted / updated on {{s.subat}} - after the entry date"{% endif %}><td>{{s.date}}</td>{% if session.role=='admin' %}<td><a href="/admin/employee-info/{{s.emp_id|urlencode}}/productivity-log" title="Open this employee's complete Productivity Log"><b>{{s.emp_id}}</b></a></td><td>{{s.designation}}</td>{% endif %}
+{% for s in subs %}<tr{% if s.late %} class="late-row" title="Submitted / updated on {{s.subat}} - after the entry date"{% endif %}><td>{{s.date}}</td>{% if session.role=='admin' %}<td><a href="/admin/employee-info/{{s.emp_id|urlencode}}/productivity-log" title="Open this employee's complete Productivity Log ({{s.emp_id}})"><b>{{s.master_name or s.emp_name or s.emp_id}}</b></a></td><td>{{s.designation}}</td>{% endif %}
 <td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
 <td>{{ (s.tgt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td><td>{{ (s.cnt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td>
 <td>{% if s.tgt_state=='met' %}<span class="tg-badge met">&#9989; Achieved</span>{% elif s.tgt_state=='miss' %}<span class="tg-badge miss" title="Below target: {{s.tgt_miss|join(', ')}}">&#10060; Not Achieved</span>{% else %}-{% endif %}</td>
@@ -11745,7 +11747,7 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
  var ed=document.getElementById('mn-ed'), bar=document.getElementById('mn-tb'), rich=document.getElementById('mn-rich'),
      sizeSel=document.getElementById('mn-size'), colorIn=document.getElementById('mn-color'), saved=null, pendingPx=16, clean='', tmr=null, seq=0;
  var PH='<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>';
- function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
+ function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
  function paint(){
   var v={subject:esc(sub.value.trim())||'Your subject appears here', message:(hasText()&&clean)?clean:PH};
   frame.srcdoc=T.replace(/[{][{](\w+)[}][}]/g,function(m,k){return (k in v)?v[k]:m;});}

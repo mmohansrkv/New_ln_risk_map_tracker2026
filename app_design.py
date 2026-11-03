@@ -1,5 +1,6 @@
 """Productivity Tracker - Flask + Google Sheets.
   * Update252b: Admin > Productivity Log - the Employee column shows the employee's NAME (read from the Employees sheet by Employee ID; falls back to the name saved on the log row, then the ID) instead of the Employee ID; it still links to the employee's complete Productivity Log. Columns, order, calculations and data are unchanged (new read-only key master_name, used only for this display).
+  * Update253: Resigned / NCNS (Employee Info > Employee Login Access > Status) now also switch OFF all Productivity for that employee and keep them out of every reminder: the login is already disabled (existing sessions are signed out on the next click); in addition no productivity entry can be written for them (employee or Admin side), they are never counted as 'missed' / 'pending' (missing_dates), they are skipped by the automatic Missed Entries e-mail, the manual reminder, the Managers' Missed Entries summary and every pending-reminder list, and send_missed_mails() re-checks the live status as a last guard. Clearing the status restores everything.
   * Update252: Resigned / NCNS (Admin only). Employee Info > Employee Login Access: new 'Status (Resigned / NCNS)' and 'Relieving Date' (both required) per employee; saving disables the login automatically (Account locked = Yes) and the login cannot be enabled again until the Admin clears the status. The details also show in Employee Info > Managers & Leads. Associate Manager / Team Lead / Senior Team Lead see the Login Access Status (Enabled / Disabled) plus Resigned / NCNS and the relieving date of ALL employees, read-only, in Employee Details. New columns 'Separation status' and 'Relieving date' are added to the Employees sheet automatically.
   * Update251: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the 3D e-mail animation now flies from the LEFT picture (glasses, white suit, thumbs-up) to the RIGHT picture (clipboard) as soon as the username is recognised, and repeats until the next page has loaded (the report sheets from the server are no longer shown for them). All other designations and the Admin login keep the Update247 animation; a generation counter prevents two animation loops running at once. Display only - form, lookup and every route unchanged.
   * Update246: Admin > Work Time page lag fixed - the shared-employee list was re-read (and every Employee row copied) for EACH Lock Event row and for EACH employee, and the per-employee event number was counted with a nested loop; now read once / counted with a dict. Output unchanged.
@@ -1172,6 +1173,15 @@ def view_only_ids():
     return _vo_cache[1]
 def is_view_only(eid): return _key(eid) in view_only_ids()
 VIEW_ONLY_MSG = "Your designation has View Only access to Productivity - entries cannot be added or edited."
+# ---- Update253: Resigned / NCNS employees have NO Productivity access and are excluded from every pending-productivity calculation and every Missed Entries reminder e-mail ----
+_sep_cache = [0.0, frozenset()]
+def separated_ids():
+    """Employee IDs (normalised) whose 'Separation status' is Resigned or NCNS. Re-read every few seconds, so a status change applies automatically."""
+    if time.monotonic() - _sep_cache[0] > 8:
+        ids = frozenset(_key(e.get("Employee ID", "")) for e in rows("Employees") if emp_sep(e))
+        _sep_cache[0], _sep_cache[1] = time.monotonic(), ids
+    return _sep_cache[1]
+def is_separated(eid): return _key(eid) in separated_ids()
 
 def _day_pct(prod, avail, tph, procs):
     """Productivity % of one day's entry. Hours-based (available hrs logged = 100%) unless the entry has processes with an Admin count target,
@@ -1381,6 +1391,7 @@ def duplicate_entry(emp_id, date, skip_sid=None, fresh=False):
 
 def write_sub(sid, date, emp, procs, notes):
     if is_view_only(emp[1]): raise PermissionError("View Only designation: productivity entry is not allowed")      # Update105
+    if is_separated(emp[1]): raise PermissionError("Resigned / NCNS employee: productivity access is disabled")      # Update253
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
     base = [sid, date, *emp]      # emp = (band, id, name)
     try: tgts, dpct = entry_metrics(date, emp[1], [(n, h, c) for n, h, c, _d in procs])      # Update137: never blocks a save
@@ -5322,6 +5333,8 @@ def admin_log_add():
     emp_id, name, band = str(e["Employee ID"]).strip(), str(e.get("Name", "")), str(e.get("Band", ""))
     if is_view_only(emp_id):                                         # Update105
         flash(f"{name} has a View Only designation - productivity entries cannot be added.", "error"); return redirect("/admin/log")
+    if is_separated(emp_id):                                         # Update253
+        flash(f"{name} is marked Resigned / NCNS - productivity access is disabled, so entries cannot be added.", "error"); return redirect("/admin/log")
     action = "/admin/log/add?emp=" + urllib.parse.quote(emp_id, safe="")
     if request.method == "POST":
         try:
@@ -7914,6 +7927,7 @@ def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
     """Working days (weekly offs and holidays excluded) in start..end with no entry and no leave."""
     eid = str(eid)
     if is_view_only(eid): return []                    # Update105: no Missed Productivity Entry for View-Only designations
+    if is_separated(eid): return []                    # Update253: Resigned / NCNS - never "missed" / "pending" (dashboards, lists, reminder e-mails)
     if start < PROD_TRACKING_START: start = PROD_TRACKING_START      # Update165: never flag September 2026 or earlier as missing
     jd = join_date(eid)
     if jd and start < jd: start = jd                  # Update97: dates before the joining date are never "missed" / "pending"
@@ -10155,6 +10169,7 @@ _WORKER_ID = uuid.uuid4().hex[:8]
 def productivity_access(eid, access_rows):
     """Everyone may submit the Daily Productivity Entry unless the 'Productivity Access' sheet has a row for them with Enabled = No."""
     if is_view_only(eid): return False                  # Update105: View-Only designations get no productivity reminder / missed-entry e-mails
+    if is_separated(eid): return False                  # Update253: Resigned / NCNS - no productivity access, no reminder / summary e-mails
     for r in access_rows:
         if _key(r.get("Employee ID", "")) == _key(eid):
             return str(r.get("Enabled", "")).strip().lower() not in ("no", "n", "false", "0", "disabled")
@@ -10428,6 +10443,10 @@ def _admin_only_mail():
 def send_missed_mails(items, mode, by):
     """items = [(emp, [dates])] -> one 3D missed-entry e-mail each (manual, Admin only). Returns {eid: status}."""
     _admin_only_mail()
+    try: sep_ = {_key(x.get("Employee ID", "")) for x in _fetch_rows("Employees") if emp_sep(x)}      # Update253: live re-check - Resigned / NCNS never receive a Missed Entries reminder
+    except Exception: sep_ = set(separated_ids())
+    items = [(e, d) for e, d in items if _key(e.get("eid", "")) not in sep_]
+    if not items: return {}
     return send_logged([(e, missed_message(e, d), ", ".join(d), len(d)) for e, d in items], mode, by)
 
 def _pretty_date(d):
@@ -10888,7 +10907,7 @@ def run_auto_missed_mail(force=False):
         per_emp, noaddr = [], []
         for e in _fetch_rows("Employees"):
             eid = str(e.get("Employee ID", "")).strip(); k = _key(eid)
-            if not eid or not productivity_access(eid, access): continue
+            if not eid or emp_sep(e) or not productivity_access(eid, access): continue      # Update253: Resigned / NCNS never get a reminder
             mail = employee_office_email(e)
             ds = missing_dates(eid, [x for x in subs if _key(x["emp_id"]) == k], [l for l in leaves if _key(l["Employee ID"]) == k], start, end, fmt="%Y-%m-%d")
             pending = sorted(d for d in ds if force or (k, d) not in sent_today)      # ONLY dates still pending (read live: a date submitted since yesterday is simply gone)
@@ -10964,7 +10983,7 @@ def manager_summary_rows(today=None):
     out = []
     for e in _fetch_rows("Employees"):
         eid = str(e.get("Employee ID", "")).strip(); k = _key(eid)
-        if not eid or not productivity_access(eid, access): continue
+        if not eid or emp_sep(e) or not productivity_access(eid, access): continue      # Update253: Resigned / NCNS are left out of the Missed Entries summary
         ds = missing_dates(eid, [x for x in subs if _key(x["emp_id"]) == k], [l for l in leaves if _key(l["Employee ID"]) == k], start, end, fmt="%Y-%m-%d")
         ds = sorted({d for d in ds if d not in covered.get(k, set()) and d not in hol and not is_off(d)}, reverse=True)
         if ds: out.append((eid, str(e.get("Name", "")).strip(), ds))
@@ -11195,6 +11214,7 @@ def admin_email_controls_send():
     eid = (request.form.get("eid") or "").strip()
     e = next((x for x in rows("Employees") if _key(x["Employee ID"]) == _key(eid)), None)
     if not e: flash("Choose an employee.", "error"); return redirect(back)
+    if emp_sep(e): flash(f"{e['Name']} is marked Resigned / NCNS - no Missed Entries reminder is sent.", "error"); return redirect(back)      # Update253
     mail = employee_office_email(e)
     if not EMAIL_RE.match(mail): flash(f"{e['Name']} has no valid Office Email ID.", "error"); return redirect(back)
     asked = {d for d in request.form.getlist("dates") if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d)}

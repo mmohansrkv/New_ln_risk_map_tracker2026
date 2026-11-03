@@ -1,5 +1,6 @@
 """Productivity Tracker - Flask + Google Sheets.
   * Update252b: Admin > Productivity Log - the Employee column shows the employee's NAME (read from the Employees sheet by Employee ID; falls back to the name saved on the log row, then the ID) instead of the Employee ID; it still links to the employee's complete Productivity Log. Columns, order, calculations and data are unchanged (new read-only key master_name, used only for this display).
+  * Update256: (1) Team Logs gets a read-only 'Leave & Permission' tab (all employees' Leave and Permission requests with status; month / employee / status filters) for Associate Manager / Team Lead / Senior Team Lead only. (2) Admin > Employee Info > Productivity (and the Team Logs Productivity table): an employee marked Resigned / NCNS by the Admin (effective from the Relieving date) shows 'Resigned' / 'NCNS' in the Working Days column instead of working-day figures; they stay out of pending / reminder calculations (Update253). (3) Admin Productivity pages no longer list the names or records of Associate Manager / Team Lead / Senior Team Lead. Status and relieving date stay Admin-only; all other employees' calculations are unchanged.
   * Update255: Leave / Permission e-mails (applicant's OWN Office Email ID only, no CC; 3D template; logged in Email Controls): (1) e-mail the moment an employee APPLIES (status Pending); (2) e-mail on every Admin APPROVE and every Admin REJECT (once per real status change) with type, date, duration / hours, reason, applied-on and status. Admin Approve / Reject buttons unchanged. (3) Permission never blocks the Daily Productivity entry and never marks it completed (missing_dates() counts only a submitted entry or a full-day leave) - verified, unchanged.
   * Update253: Resigned / NCNS (Employee Info > Employee Login Access > Status) now also switch OFF all Productivity for that employee and keep them out of every reminder: the login is already disabled (existing sessions are signed out on the next click); in addition no productivity entry can be written for them (employee or Admin side), they are never counted as 'missed' / 'pending' (missing_dates), they are skipped by the automatic Missed Entries e-mail, the manual reminder, the Managers' Missed Entries summary and every pending-reminder list, and send_missed_mails() re-checks the live status as a last guard. Clearing the status restores everything.
   * Update252: Resigned / NCNS (Admin only). Employee Info > Employee Login Access: new 'Status (Resigned / NCNS)' and 'Relieving Date' (both required) per employee; saving disables the login automatically (Account locked = Yes) and the login cannot be enabled again until the Admin clears the status. The details also show in Employee Info > Managers & Leads. Associate Manager / Team Lead / Senior Team Lead see the Login Access Status (Enabled / Disabled) plus Resigned / NCNS and the relieving date of ALL employees, read-only, in Employee Details. New columns 'Separation status' and 'Relieving date' are added to the Employees sheet automatically.
@@ -5315,8 +5316,8 @@ def admin_log():
     d, e = request.args.get("date", ""), request.args.get("emp", "").strip().lower()
     rep_month, _on = report_scope()
     subs = [s for s in load_subs() if (not d or s["date"] == d) and (not rep_month or str(s["date"]).startswith(rep_month)) and
-            (not e or e in (str(s["emp_id"]).lower(), str(s["emp_name"]).lower()))]
-    emp_list = sorted(rows("Employees"), key=lambda x: str(x.get("Name", "")).lower())
+            (not e or e in (str(s["emp_id"]).lower(), str(s["emp_name"]).lower())) and not is_view_only(s["emp_id"])]      # Update256: no names / records of Associate Manager / Team Lead / Senior Team Lead here
+    emp_list = sorted((x for x in rows("Employees") if not desig_view_only(x.get("Designation", ""))), key=lambda x: str(x.get("Name", "")).lower())
     return page(LOG_MANAGE + LOG_TOP + LIST + LOG_MISSED, title="Productivity log", subs=subs, emp=request.args.get("emp", "").strip(), **log_missed_section(),
                 emp_list=emp_list, sel_emp=request.args.get("emp", "").strip(), today_str=str(today_local()),
                 nxt=request.full_path.rstrip("?"),
@@ -5671,7 +5672,8 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 {% for p in prows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
 <td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}} <span class="pill act">New joiner</span>{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td>
 <td>{{p.pstart.strftime('%d %b %Y')}}</td>
-{% if not p.active %}<td colspan="5" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
+{% if p.sepst %}<td><span class="pill" style="{{ 'background:#fde8e8;color:#b42318' if p.sepst=='Resigned' else 'background:#fff1db;color:#b45309' }}">{{p.sepst}}</span></td><td colspan="4" class="mut">{% if p.e.rel_txt %}Relieving date: {{p.e.rel_txt}} &mdash; {% endif %}not counted in working days, pending entries or reminders</td>
+{% elif not p.active %}<td colspan="5" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
 {% elif p.r.vo %}<td colspan="5" class="mut">View only (no productivity entry for this designation)</td>
 {% else %}<td>{{p.r.wd}}</td><td>{{p.entries}}</td><td>{{p.missed}}</td><td>{{p.r.att}}%</td><td><b>{{p.r.pct}}%</b></td>{% endif %}</tr>
 {% else %}<tr><td colspan="10">No employees found.</td></tr>{% endfor %}</table>
@@ -7978,11 +7980,18 @@ def admin_productivity_overview(emps, q):
     end_m = min(m1, today - dt.timedelta(days=1)); prow = []
     for e in emps:
         eid = str(e["Employee ID"]).strip(); k = _key(eid)
+        if desig_view_only(e.get("Designation", "")): continue      # Update256: Associate Manager / Team Lead / Senior Team Lead are not listed in the Admin Productivity Log
         pstart, jd, basis = prod_start_info(eid); r = reps.get(k, {})
         ea = max(m0, jd) if jd else m0
         entries = len({s["date"] for s in by_emp.get(k, []) if not s["off"] and str(ea) <= s["date"] <= str(m1)})
         missed = len(missing_dates(eid, by_emp.get(k, []), lv_by.get(k, []), m0, end_m)) if end_m >= m0 else 0
-        prow.append(dict(e=e, jd=jd, pstart=pstart, basis=basis, active=(not jd or jd <= m1), r=r, entries=entries, missed=missed))
+        sepst = ""      # Update256: Resigned / NCNS set by the Admin, effective from the relieving date -> shown in the Working Days column
+        sep_ = emp_sep(e)
+        if sep_:
+            rel_ = str(e.get("Relieving date", "")).strip()[:10]
+            if not rel_ or rel_ <= str(m1): sepst = sep_
+        sep_fields(e)
+        prow.append(dict(e=e, jd=jd, pstart=pstart, basis=basis, active=(not jd or jd <= m1), r=r, entries=entries, missed=missed, sepst=sepst))
     return page(EMP_LIST, title="Employee Info", view="productivity", emps=emps, q=request.args.get("q", ""), prows=prow,
                 month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), new_count=sum(1 for r in update_log() if r["new"]))
 
@@ -10619,7 +10628,7 @@ def admin_leads_overview(emps, q):
     return page(EMP_LIST, title="Employee Info", view="leads", emps=emps, q=request.args.get("q", ""), lrows=out,
                 month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), new_count=sum(1 for r in update_log() if r["new"]))
 
-TEAM_TABS = """<div class="tabs no-print"><a href="/employee/team-logs" class="{{'on' if tl=='prod' else ''}}">Productivity Log</a><a href="/employee/team-logs/missed" class="{{'on' if tl=='missed' else ''}}">Missed Entries Log</a></div>"""
+TEAM_TABS = """<div class="tabs no-print"><a href="/employee/team-logs" class="{{'on' if tl=='prod' else ''}}">Productivity Log</a><a href="/employee/team-logs/missed" class="{{'on' if tl=='missed' else ''}}">Missed Entries Log</a>{% if team_leave_tab() %}<a href="/employee/team-logs/leave" class="{{'on' if tl=='leave' else ''}}">Leave &amp; Permission</a>{% endif %}</div>"""
 TEAM_PROD = TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all employees</h2>
 <p class="mut">{{label}} &middot; read-only. Weekly-off / holiday entries are shown but not counted.</p>
 <form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><input name="emp" placeholder="Employee ID / name" value="{{emp}}"><button class="primary">Show</button><a href="/employee/team-logs">Reset</a></form>
@@ -10718,7 +10727,8 @@ TEAM_PLOG = TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all em
 {% else %}<div style="overflow-x:auto"><table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Joining Date</th><th>Tracking From</th><th>Working Days</th><th>Entries</th><th>Missed</th>{% if not hide_status %}<th>Attendance</th>{% endif %}<th>Productivity</th></tr>
 {% for p in lrows %}<tr><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}">{{p.e['Employee ID']}}</a></td><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
 <td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}}{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td><td>{{p.pstart.strftime('%d %b %Y')}}</td>
-{% if not p.active %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
+{% if p.sepst %}<td><span class="pill" style="{{ 'background:#fde8e8;color:#b42318' if p.sepst=='Resigned' else 'background:#fff1db;color:#b45309' }}">{{p.sepst}}</span></td><td colspan="{{ 3 if hide_status else 4 }}" class="mut">{% if p.e.rel_txt %}Relieving date: {{p.e.rel_txt}} &mdash; {% endif %}not counted in working days, pending entries or reminders</td>
+{% elif not p.active %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
 {% elif p.r.vo %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">View only (no productivity entry for this designation)</td>
 {% else %}<td>{{p.r.wd}}</td><td>{{p.entries}}</td><td>{{p.missed}}</td>{% if not hide_status %}<td>{{p.r.att}}%</td>{% endif %}<td><b>{{p.r.pct}}%</b></td>{% endif %}</tr>
 {% else %}<tr><td colspan="10">No employees found.</td></tr>{% endfor %}</table></div>{% endif %}</div>"""
@@ -10761,7 +10771,12 @@ def _team_plog_page():
         ea = max(m0, jd) if jd else m0
         entries = len({x["date"] for x in by_emp.get(k, []) if not x["off"] and str(ea) <= x["date"] <= str(m1)})
         missed = len(missing_dates(eid, by_emp.get(k, []), lv_by.get(k, []), m0, end_m)) if end_m >= m0 else 0
-        lrows.append(dict(e=e, jd=jd, pstart=pstart, active=(not jd or jd <= m1), r=r, entries=entries, missed=missed))
+        sepst = ""      # Update256: Resigned / NCNS (Admin-set, effective from the relieving date) shown in the Working Days column
+        if emp_sep(e):
+            rel_ = str(e.get("Relieving date", "")).strip()[:10]
+            if not rel_ or rel_ <= str(m1): sepst = emp_sep(e)
+        sep_fields(e)
+        lrows.append(dict(e=e, jd=jd, pstart=pstart, active=(not jd or jd <= m1), r=r, entries=entries, missed=missed, sepst=sepst))
     return page(TEAM_PLOG, title="Team Logs - Productivity Log", tl="prod", month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), emp=emp_q, proc="", lrows=lrows, prows=[], more=False, pemps=0)
 
 @app.route("/employee/team-logs/employee/<eid>")
@@ -10786,6 +10801,58 @@ def employee_team_prod():
     total = len(subs); subs = subs[:600]
     return page(TEAM_PROD, title="Team Logs - Productivity Log", tl="prod", month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), emp=request.args.get("emp", ""),
                 subs=subs, total=total, more=total > len(subs))
+
+app.jinja_env.globals["team_leave_tab"] = lambda: plog_user()      # Update256: the tab is offered only to Associate Manager / Team Lead / Senior Team Lead
+
+TEAM_LEAVE = TEAM_TABS + """<div class="card"><h2>Leave &amp; Permission &mdash; all employees</h2>
+<p class="mut">{{label}} &middot; read-only. Leave and Permission requests of every employee with their status (the Admin approves / rejects).</p>
+<form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><input name="emp" placeholder="Employee ID / name" value="{{emp}}">
+<select name="status"><option value="">All status</option>{% for x in ['Pending','Approved','Rejected'] %}<option {{'selected' if status==x else ''}}>{{x}}</option>{% endfor %}</select>
+<button class="primary">Show</button><a href="/employee/team-logs/leave">This month</a><a href="/employee/team-logs/leave?month=all">All time</a></form>
+<div class="kpis"><div class="kpi"><span>Leave requests</span><b>{{lv|length}}</b></div><div class="kpi"><span>Permission requests</span><b>{{pm|length}}</b></div>
+<div class="kpi"><span>Pending</span><b>{{n_pend}}</b></div><div class="kpi"><span>Approved</span><b>{{n_appr}}</b></div><div class="kpi"><span>Rejected</span><b>{{n_rej}}</b></div></div>
+<h2>Leave</h2><div style="overflow-x:auto"><table><tr><th>Date</th><th>Day</th><th>Employee ID</th><th>Name</th><th>Designation</th><th>Day type</th><th>Reason</th><th>Status</th><th>Applied at</th><th>Reviewed at</th></tr>
+{% for r in lv %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}}</td><td><b>{{r.name}}</b></td><td>{{r.desig or '-'}}</td><td>{{r.dtype}}</td><td>{{r.reason or '-'}}</td>
+<td><span class="pill {{r.status|ppill}}">{{r.status}}</span></td><td>{{(r.applied or '-')|t12}}</td><td>{{(r.reviewed or '-')|t12}}</td></tr>
+{% else %}<tr><td colspan="10">No leave requests for this selection.</td></tr>{% endfor %}</table></div>
+<h2>Permission</h2><div style="overflow-x:auto"><table><tr><th>Date</th><th>Day</th><th>Employee ID</th><th>Name</th><th>Designation</th><th>Hours</th><th>Reason</th><th>Status</th><th>Applied at</th><th>Reviewed at</th></tr>
+{% for r in pm %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}}</td><td><b>{{r.name}}</b></td><td>{{r.desig or '-'}}</td><td>{{r.hours|g}}</td><td>{{r.reason or '-'}}</td>
+<td><span class="pill {{r.status|ppill}}">{{r.status}}</span></td><td>{{(r.applied or '-')|t12}}</td><td>{{(r.reviewed or '-')|t12}}</td></tr>
+{% else %}<tr><td colspan="10">No permission requests for this selection.</td></tr>{% endfor %}</table></div></div>"""
+
+@app.route("/employee/team-logs/leave")
+@need("employee")
+@team_need
+def employee_team_leave():
+    """Update256: read-only Leave & Permission of ALL employees (from the existing Leave / Permissions sheets) for Associate Manager / Team Lead / Senior Team Lead."""
+    if not plog_user(): abort(403)
+    prefetch("Employees", "Leave", "Permissions")
+    month_arg = request.args.get("month", "").strip(); q = request.args.get("emp", "").strip().lower(); status = request.args.get("status", "").strip()
+    if month_arg == "all": month, label, m0, m1 = "", "All time", None, None
+    else:
+        m0, m1 = month_range(month_arg or today_local().strftime("%Y-%m")); month = m0.strftime("%Y-%m"); label = m0.strftime("%B %Y")
+    desig = {_key(e["Employee ID"]): e.get("Designation", "") for e in rows("Employees")}
+    def keep(eid, name, d):
+        if q and q not in str(eid).lower() and q not in str(name).lower(): return False
+        return not m0 or str(m0) <= norm_date(d) <= str(m1)
+    def dayname(d):
+        try: return dt.date.fromisoformat(norm_date(d)).strftime("%a")
+        except ValueError: return ""
+    lv, pm = [], []
+    for r in rows("Leave"):
+        st = leave_status(r)
+        if (status and st != status) or not keep(r["Employee ID"], r.get("Employee name", ""), r.get("Date", "")): continue
+        lv.append(dict(date=norm_date(r.get("Date", "")), day=dayname(r.get("Date", "")), id=r["Employee ID"], name=r.get("Employee name", ""), desig=desig.get(_key(r["Employee ID"]), ""),
+                       dtype="Half day" if leave_is_half(r) else "Full day", reason=r.get("Reason", ""), status=st, applied=r.get("Applied at", ""), reviewed=r.get("Reviewed at", "")))
+    for r in rows("Permissions"):
+        st = str(r.get("Status", "")).strip() or "Pending"
+        if (status and st != status) or not keep(r["Employee ID"], r.get("Employee name", ""), r.get("Date", "")): continue
+        pm.append(dict(date=norm_date(r.get("Date", "")), day=dayname(r.get("Date", "")), id=r["Employee ID"], name=r.get("Employee name", ""), desig=desig.get(_key(r["Employee ID"]), ""),
+                       hours=num(r.get("Hours")), reason=r.get("Reason", ""), status=st, applied=r.get("Applied at", ""), reviewed=r.get("Decided at", "")))
+    lv.sort(key=lambda x: (x["date"], x["name"]), reverse=True); pm.sort(key=lambda x: (x["date"], x["name"]), reverse=True)
+    allr = lv + pm
+    return page(TEAM_LEAVE, title="Team Logs - Leave & Permission", tl="leave", month=month, label=label, emp=request.args.get("emp", ""), status=status, lv=lv, pm=pm,
+                n_pend=sum(1 for x in allr if x["status"] == "Pending"), n_appr=sum(1 for x in allr if x["status"] == "Approved"), n_rej=sum(1 for x in allr if x["status"] == "Rejected"))
 
 @app.route("/employee/team-logs/missed")
 @need("employee")

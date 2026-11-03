@@ -1,6 +1,6 @@
 """Productivity Tracker - Flask + Google Sheets.
   * Update252b: Admin > Productivity Log - the Employee column shows the employee's NAME (read from the Employees sheet by Employee ID; falls back to the name saved on the log row, then the ID) instead of the Employee ID; it still links to the employee's complete Productivity Log. Columns, order, calculations and data are unchanged (new read-only key master_name, used only for this display).
-  * Update254: Local run block - python <file> serves on 192.168.0.178, port 4443 (env PORT / HOST override it). Admin: http://192.168.0.178:4443/admin ; Employee: http://192.168.0.178:4443/employee/login. Nothing else changed.
+  * Update255: Leave / Permission e-mails (applicant's OWN Office Email ID only, no CC; 3D template; logged in Email Controls): (1) e-mail the moment an employee APPLIES (status Pending); (2) e-mail on every Admin APPROVE and every Admin REJECT (once per real status change) with type, date, duration / hours, reason, applied-on and status. Admin Approve / Reject buttons unchanged. (3) Permission never blocks the Daily Productivity entry and never marks it completed (missing_dates() counts only a submitted entry or a full-day leave) - verified, unchanged.
   * Update253: Resigned / NCNS (Employee Info > Employee Login Access > Status) now also switch OFF all Productivity for that employee and keep them out of every reminder: the login is already disabled (existing sessions are signed out on the next click); in addition no productivity entry can be written for them (employee or Admin side), they are never counted as 'missed' / 'pending' (missing_dates), they are skipped by the automatic Missed Entries e-mail, the manual reminder, the Managers' Missed Entries summary and every pending-reminder list, and send_missed_mails() re-checks the live status as a last guard. Clearing the status restores everything.
   * Update252: Resigned / NCNS (Admin only). Employee Info > Employee Login Access: new 'Status (Resigned / NCNS)' and 'Relieving Date' (both required) per employee; saving disables the login automatically (Account locked = Yes) and the login cannot be enabled again until the Admin clears the status. The details also show in Employee Info > Managers & Leads. Associate Manager / Team Lead / Senior Team Lead see the Login Access Status (Enabled / Disabled) plus Resigned / NCNS and the relieving date of ALL employees, read-only, in Employee Details. New columns 'Separation status' and 'Relieving date' are added to the Employees sheet automatically.
   * Update251: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the 3D e-mail animation now flies from the LEFT picture (glasses, white suit, thumbs-up) to the RIGHT picture (clipboard) as soon as the username is recognised, and repeats until the next page has loaded (the report sheets from the server are no longer shown for them). All other designations and the Admin login keep the Update247 animation; a generation counter prevents two animation loops running at once. Display only - form, lookup and every route unchanged.
@@ -5492,7 +5492,7 @@ def admin_leave_review():
     if not mine:
         flash("Leave request not found - the employee may have cancelled it.")
     else:
-        newly = status == "Approved" and any(leave_status(r) != "Approved" for r in mine)      # Update100: e-mail only on a real approval, never again
+        newly = any(leave_status(r) != status for r in mine)      # Update255: e-mail on a real Approve OR Reject (a change of status), never again for the same decision
         now = now_local().strftime("%Y-%m-%d %H:%M:%S")
         _with_retry(ws_of("Leave").batch_update,
                     [{"range": f"G{r['_row']}:I{r['_row']}", "values": [[status, now, "Admin"]]} for r in mine],
@@ -5506,7 +5506,7 @@ def admin_leave_review():
                 days_ = sum(0.5 if leave_is_half(r) else 1 for r in mine)
                 dtxt = _pretty_date(ds_[0]) if len(ds_) == 1 else f"{_pretty_date(ds_[0])} to {_pretty_date(ds_[-1])}"
                 dur = ("Half day (4 hrs)" if all(leave_is_half(r) for r in mine) and len(mine) == 1 else f"{days_:g} day{'s' if days_ != 1 else ''}")
-                msg_, cat_ = notify_approved(emp_row, "Leave", dtxt, dur, len(mine))
+                msg_, cat_ = notify_request(emp_row, "Leave", status, dtxt, dur, len(mine), reason=mine[0].get("Reason", ""), applied_at=str(mine[0].get("Applied at", "")))
                 flash(msg_, "error") if cat_ == "error" else flash(msg_)
     nxt = request.form.get("next", "")
     return redirect(nxt if nxt.startswith("/admin/") else "/admin/leave-permission")
@@ -6129,9 +6129,10 @@ def _review_permission(eid, row, status):
                                            values=[[status, now, "Admin"]], value_input_option="RAW")
     invalidate_cache("Permissions")
     flash(f"Permission request {status.lower()}.")
-    if status == "Approved" and prev != "Approved":      # Update100: approval e-mail (never on Reject, never twice)
+    if status in ("Approved", "Rejected") and prev != status:      # Update255: decision e-mail on Approve AND Reject (once per real change)
         hrs = num(r.get("Hours"))
-        msg_, cat_ = notify_approved(emp, "Permission", _pretty_date(r.get("Date", "")), f"{hrs:g} hr{'s' if hrs != 1 else ''}", 1)
+        msg_, cat_ = notify_request(emp, "Permission", status, _pretty_date(r.get("Date", "")), f"{hrs:g} hr{'s' if hrs != 1 else ''}", 1,
+                                    reason=r.get("Reason", ""), applied_at=str(r.get("Applied at", "")))
         flash(msg_, "error") if cat_ == "error" else flash(msg_)
     nxt = request.form.get("next", "")
     return redirect(nxt if nxt.startswith("/admin/") else f"/admin/employee-info/{eid}?tab=leave")
@@ -8522,6 +8523,14 @@ def employee_leave():
                 log_change(SEC_LEAVE, "Added", f"{'Half-day leave' if request.form.get('daytype', '').lower().startswith('half') else 'Leave'} {d1 if d1 == d2 else d1 + ' to ' + d2} ({n} day(s)) \u2013 {_short(why, 80)}")
             flash(("Half-day leave submitted" if request.form.get('daytype', '').lower().startswith('half') and n else f"{n} leave day(s) submitted") + " - waiting for admin approval." +
                   (f" Holiday date(s) {', '.join(skipped)} were skipped (leave is not needed on a holiday)." if skipped else ""))
+            if n:      # Update255: e-mail the applicant (own Office Email ID only) that the request was received
+                try:
+                    d1_, d2_ = request.form['d1'], request.form['d2']; half_ = request.form.get('daytype', '').lower().startswith('half')
+                    msg_, cat_ = notify_request(my_emp_row(), "Leave", "Pending", _pretty_date(d1_) if d1_ == d2_ else f"{_pretty_date(d1_)} to {_pretty_date(d2_)}",
+                                                "Half day (4 hrs)" if half_ and n == 1 else f"{n} day{'s' if n != 1 else ''}", n,
+                                                reason=request.form['reason'].strip() or "Leave", applied_at=now_local().strftime("%Y-%m-%d %H:%M:%S"))
+                    if cat_ == "ok": flash(msg_)
+                except Exception as ex_: print("Leave application e-mail error:", ex_)
         except ValueError as e:
             flash(str(e))
         return redirect("/employee/leave")
@@ -8560,6 +8569,12 @@ def employee_permission():
         log_change(SEC_LEAVE, "Added", f"Permission request for {pdate} ({_fmt_num(round(float(request.form.get('hours', 0)), 2))} hr) "
                                         f"\u2013 {_short(request.form.get('reason', '').strip() or 'Permission', 80)}")
         flash("Permission request submitted for today." if pdate == str(today_local()) else f"Permission request submitted for {pdate}.")
+        try:      # Update255: e-mail the applicant (own Office Email ID only) that the request was received. Permission never blocks or completes the Productivity entry.
+            hrs_ = round(float(request.form.get("hours", 0)), 2)
+            msg_, cat_ = notify_request(my_emp_row(), "Permission", "Pending", _pretty_date(pdate), f"{hrs_:g} hr{'s' if hrs_ != 1 else ''}", 1,
+                                        reason=request.form.get("reason", "").strip() or "Permission", applied_at=now_local().strftime("%Y-%m-%d %H:%M:%S"))
+            if cat_ == "ok": flash(msg_)
+        except Exception as ex_: print("Permission application e-mail error:", ex_)
     except ValueError as e:
         flash(str(e))
     return redirect("/employee/leave")
@@ -10369,25 +10384,43 @@ def _missed_html(nm, ds, pretty, link):
                    f'{summary}{table}', link,
                    "Please log in to the Productivity Tracker and complete the required entr" + ("y" if n == 1 else "ies") + ":")
 
-def approval_message(emp, kind, date_txt, duration_txt):
-    """Update100: 'Leave' / 'Permission' APPROVED e-mail - same 3D template. Fields: employee name, request type, date, duration / hours, approval status."""
+def request_message(emp, kind, status, date_txt, duration_txt, reason="", applied_at=""):
+    """Update255: ONE 3D e-mail for a Leave / Permission request, sent to the applicant only (no CC).
+    status 'Pending' = application received (waiting for the Admin), 'Approved' / 'Rejected' = the Admin's decision.
+    Fields: employee name, request type, date, duration / hours, reason, applied on, status."""
     import html as _h
     F = "font-family:'Segoe UI',Arial,Helvetica,sans-serif;"
     name = str(emp["name"])
-    badge = ('<span style="display:inline-block;padding:4px 10px;border-radius:99px;background:#16a34a;border-bottom:3px solid #166534;'
-             f'color:#ffffff;{F}font-size:13px;font-weight:bold;letter-spacing:.5px">&#10003; Approved</span>')
+    look = {"Pending": ("#d97706", "#92400e", "&#9203; Pending approval", "submitted", "#b45309", "Your {k} request has been submitted and is waiting for the Admin's approval."),
+            "Approved": ("#16a34a", "#166534", "&#10003; Approved", "approved", "#15803d", "Your {k} request has been approved."),
+            "Rejected": ("#dc2626", "#991b1b", "&#10007; Rejected", "rejected", "#b91c1c", "Your {k} request has been rejected.")}[status]
+    bg, bd, label, word, colr, plain_line = look
+    badge = (f'<span style="display:inline-block;padding:4px 10px;border-radius:99px;background:{bg};border-bottom:3px solid {bd};'
+             f'color:#ffffff;{F}font-size:13px;font-weight:bold;letter-spacing:.5px">{label}</span>')
     fields = [("Employee Name", _h.escape(name)), ("Request Type", _h.escape(kind)), ("Date", _h.escape(date_txt)),
               ("Duration / Hours", _h.escape(duration_txt)), ("Status", badge)]
     card = _orange_row(fields, F)
+    reason = " ".join(str(reason or "").split())
+    extra = ""
+    if reason or applied_at:
+        extra = (f'<div style="max-width:532px;margin-top:10px;{F}font-size:13px;color:#431407;text-align:left">'
+                 + (f'<div><b>Reason:</b> {_h.escape(reason)}</div>' if reason else "")
+                 + (f'<div><b>Applied on:</b> {_h.escape(str(applied_at))}</div>' if applied_at else "") + '</div>')
     msg = EmailMessage()
-    msg["Subject"] = f"{kind} request approved - {date_txt}"
+    msg["Subject"] = f"{kind} request {word} - {date_txt}"
     msg["From"] = formataddr(mail_sender()); msg["To"] = emp["email"]
-    msg.set_content(f"Hello {name},\n\nYour {kind} request has been approved.\n\n"
-                    f"Employee Name: {name}\nRequest Type: {kind}\nDate: {date_txt}\nDuration / Hours: {duration_txt}\nApproval Status: Approved\n\n"
+    msg.set_content(f"Hello {name},\n\n{plain_line.format(k=kind)}\n\n"
+                    f"Employee Name: {name}\nRequest Type: {kind}\nDate: {date_txt}\nDuration / Hours: {duration_txt}\n"
+                    + (f"Reason: {reason}\n" if reason else "") + (f"Applied on: {applied_at}\n" if applied_at else "")
+                    + f"Status: {'Pending approval' if status == 'Pending' else status}\n\n"
                     "This is an automated email. Please do not reply to this email.\n\nThanks,\nProductivity Tracker (LN_Map)")
-    msg.add_alternative(_html3d(_h.escape(name), f"Your {kind} request has been approved ({date_txt}).",
-                                f'Your <b>{_h.escape(kind)}</b> request has been <b style="color:#15803d">approved</b>.', card, "", ""), subtype="html")
+    msg.add_alternative(_html3d(_h.escape(name), f"Your {kind} request has been {word} ({date_txt}).",
+                                f'Your <b>{_h.escape(kind)}</b> request has been <b style="color:{colr}">{word}</b>'
+                                + (" and is waiting for the Admin's approval." if status == "Pending" else "."), card + extra, "", ""), subtype="html")
     return msg
+
+def approval_message(emp, kind, date_txt, duration_txt):      # kept for compatibility (Update100 name)
+    return request_message(emp, kind, "Approved", date_txt, duration_txt)
 
 def missed_message(emp, dates):
     """Update99: the single missed-entry e-mail (3D template) - used by Manual AND Automatic sending."""
@@ -10454,15 +10487,23 @@ def _pretty_date(d):
     try: return dt.date.fromisoformat(str(d)).strftime("%d %b %Y (%a)")
     except ValueError: return str(d)
 
-def notify_approved(emp_row, kind, date_txt, duration_txt, count):
-    """Send the 'approved' e-mail for a Leave / Permission request. Never raises. Returns a flash-ready (text, category)."""
+def notify_request(emp_row, kind, status, date_txt, duration_txt, count, reason="", applied_at=""):
+    """Update255: e-mail the APPLICANT (their own Office Email ID only) about a Leave / Permission request: status 'Pending' (just applied),
+    'Approved' or 'Rejected' (Admin decision). Never raises. Returns a flash-ready (text, category)."""
     mail = employee_office_email(emp_row); name = str(emp_row.get("Name", ""))
-    if not EMAIL_RE.match(mail): return (f"No approval e-mail sent: {name} has no valid Office Email ID.", "error")
+    what = {"Pending": "confirmation", "Approved": "approval", "Rejected": "rejection"}[status]
+    if not EMAIL_RE.match(mail): return (f"No {what} e-mail sent: {name} has no valid Office Email ID.", "error")
     e = dict(eid=str(emp_row["Employee ID"]), name=name, email=mail)
-    try: st = send_logged([(e, approval_message(e, kind, date_txt, duration_txt), date_txt, count)], f"{kind} approval", session.get("name", "Admin"))[e["eid"]]
-    except Exception as ex_: st = "Failed: " + str(ex_)[:150]; print("Approval mail error:", ex_)
-    if st == "Sent": return (f"Approval e-mail sent to {name} ({mail}).", "ok")
-    return (f"The request was approved, but the approval e-mail to {name} could not be sent: {st}", "error")
+    mode = f"{kind} request" if status == "Pending" else f"{kind} {what}"
+    try: st = send_logged([(e, request_message(e, kind, status, date_txt, duration_txt, reason, applied_at), date_txt, count)], mode, session.get("name", "System"))[e["eid"]]
+    except Exception as ex_: st = "Failed: " + str(ex_)[:150]; print("Request mail error:", ex_)
+    if st == "Sent":
+        return ((f"A confirmation e-mail was sent to {mail}.", "ok") if status == "Pending" else (f"{what.capitalize()} e-mail sent to {name} ({mail}).", "ok"))
+    if status == "Pending": return (f"The request was submitted, but the confirmation e-mail could not be sent: {st}", "error")
+    return (f"The request was {status.lower()}, but the {what} e-mail to {name} could not be sent: {st}", "error")
+
+def notify_approved(emp_row, kind, date_txt, duration_txt, count):      # kept for compatibility (Update100 name)
+    return notify_request(emp_row, kind, "Approved", date_txt, duration_txt, count)
 
 @app.route("/admin/missed/send", methods=["POST"])
 @need("admin")
@@ -13195,7 +13236,4 @@ if __name__ == "__main__":
     # (4 worker processes x 4 threads comfortably covers 20 concurrent users;
     # gspread calls are I/O-bound so threads work well here.)
     debug = os.getenv("FLASK_DEBUG", "0") == "1"
-    # Update254: run on the LAN IP address (Admin: http://192.168.0.178:4443/admin , Employee: http://192.168.0.178:4443/employee/login).
-    # Host / port can still be overridden with the HOST and PORT environment variables (e.g. HOST=0.0.0.0 to listen on every network card).
-    port = int(os.environ.get("PORT", 4443))
-    app.run(host=os.environ.get("HOST", "192.168.0.178"), port=port, debug=debug, threaded=True)
+    app.run(host="0.0.0.0", port=5000, debug=debug, threaded=True)

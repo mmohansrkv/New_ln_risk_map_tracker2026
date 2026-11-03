@@ -1,5 +1,10 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update259: SPEED ONLY - no screen, text, permission or feature was changed. (1) Start-up: the spreadsheet is opened with 3 Google calls instead of ~63 (one call lists the sheets, one call reads every header row, the Productivity log column migration runs only when its header is still the old one), and it is opened in the background as soon as the server process starts - the first Admin / Employee login after a deploy or a Render wake-up no longer waits for it (before, 30 sheets x 2 calls in a row could run past Gunicorn's 30 s timeout and hit the Sheets read quota). (2) Save: the 'already submitted for this date?' check reads only the 3 columns it needs (Submission ID, Date, Employee ID) live instead of the whole Productivity log; Edit / Delete row lookup and the 'did the rows land?' check read only column A. (3) Login: the Attendance 'close sessions left open' clean-up runs once per employee per day (it re-read the whole Attendance sheet on EVERY login) and reads only columns A:G. (4) Admin pages that read their sheets live (@live_data) and the Employee Info pages now read the sheets they need AT THE SAME TIME instead of one after another, and share an in-flight read instead of asking Google twice.
   * Update252b: Admin > Productivity Log - the Employee column shows the employee's NAME (read from the Employees sheet by Employee ID; falls back to the name saved on the log row, then the ID) instead of the Employee ID; it still links to the employee's complete Productivity Log. Columns, order, calculations and data are unchanged (new read-only key master_name, used only for this display).
+  * Update258: (1) Smooth natural eye blinking on the sidebar profile characters - employee male / female and the supplied pictures of Associate Manager / Team Lead / Senior Team Lead (feathered skin-coloured eyelids, transform only, each character on its own rhythm); the Admin character's blink uses the same softer curve; pictures / 3D layers unchanged. (2) Admin > Employee Info > Employee Login Access > Action (Admin only): one dropdown Active / Resigned / NCNS (No Call, No Show) + relieving date (needed for Resigned / NCNS) + Save action; 'Active' clears the status (the login stays disabled until the Admin clicks Enable Login). (3) The Status column now shows Active / Resigned / NCNS for Associate Manager / Team Lead / Senior Team Lead (Login Access and Managers & Leads tables, and the Employee Details page they see); all read the same Employees sheet column, so they stay in sync. Admin only; login access rules unchanged.
+  * Update257: Admin sidebar dropdowns (Log, Employee Info): only ONE open at a time (opening one closes the other), choosing a submenu item closes its dropdown and opens the page (the page loads with the dropdown closed; the group holding the current page gets a light border), a click anywhere outside - or Esc - closes an open dropdown. Menu items, links and every other function unchanged.
+  * Update256: (1) Team Logs gets a read-only 'Leave & Permission' tab (all employees' Leave and Permission requests with status; month / employee / status filters) for Associate Manager / Team Lead / Senior Team Lead only. (2) Admin > Employee Info > Productivity (and the Team Logs Productivity table): an employee marked Resigned / NCNS by the Admin (effective from the Relieving date) shows 'Resigned' / 'NCNS' in the Working Days column instead of working-day figures; they stay out of pending / reminder calculations (Update253). (3) Admin Productivity pages no longer list the names or records of Associate Manager / Team Lead / Senior Team Lead. Status and relieving date stay Admin-only; all other employees' calculations are unchanged.
+  * Update255: Leave / Permission e-mails (applicant's OWN Office Email ID only, no CC; 3D template; logged in Email Controls): (1) e-mail the moment an employee APPLIES (status Pending); (2) e-mail on every Admin APPROVE and every Admin REJECT (once per real status change) with type, date, duration / hours, reason, applied-on and status. Admin Approve / Reject buttons unchanged. (3) Permission never blocks the Daily Productivity entry and never marks it completed (missing_dates() counts only a submitted entry or a full-day leave) - verified, unchanged.
   * Update253: Resigned / NCNS (Employee Info > Employee Login Access > Status) now also switch OFF all Productivity for that employee and keep them out of every reminder: the login is already disabled (existing sessions are signed out on the next click); in addition no productivity entry can be written for them (employee or Admin side), they are never counted as 'missed' / 'pending' (missing_dates), they are skipped by the automatic Missed Entries e-mail, the manual reminder, the Managers' Missed Entries summary and every pending-reminder list, and send_missed_mails() re-checks the live status as a last guard. Clearing the status restores everything.
   * Update252: Resigned / NCNS (Admin only). Employee Info > Employee Login Access: new 'Status (Resigned / NCNS)' and 'Relieving Date' (both required) per employee; saving disables the login automatically (Account locked = Yes) and the login cannot be enabled again until the Admin clears the status. The details also show in Employee Info > Managers & Leads. Associate Manager / Team Lead / Senior Team Lead see the Login Access Status (Enabled / Disabled) plus Resigned / NCNS and the relieving date of ALL employees, read-only, in Employee Details. New columns 'Separation status' and 'Relieving date' are added to the Employees sheet automatically.
   * Update251: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the 3D e-mail animation now flies from the LEFT picture (glasses, white suit, thumbs-up) to the RIGHT picture (clipboard) as soon as the username is recognised, and repeats until the next page has loaded (the report sheets from the server are no longer shown for them). All other designations and the Admin login keep the Update247 animation; a generation counter prevents two animation loops running at once. Display only - form, lookup and every route unchanged.
@@ -841,17 +846,35 @@ def book():
                     try: client.http_client.timeout = 60
                     except Exception: pass
                 b = _with_retry(client.open_by_key, SHEET_ID)
-                have = {w.title for w in _with_retry(b.worksheets)}
+                wss = {w.title: w for w in _with_retry(b.worksheets)}      # Update259: ONE call lists every worksheet (was one extra call per sheet)
+                heads = _first_rows(b, [n for n in HEADERS if n in wss])      # Update259: ONE call reads row 1 of every sheet (was one call per sheet)
                 for name, h in HEADERS.items():
-                    if name not in have:
-                        _with_retry(b.add_worksheet, title=name, rows=1000, cols=max(12, len(h)))
-                    ws = _with_retry(b.worksheet, name)
+                    ws = wss.get(name)
+                    if ws is None:
+                        ws = _with_retry(b.add_worksheet, title=name, rows=1000, cols=max(12, len(h))); wss[name] = ws; cur = []
+                    else:
+                        cur = heads.get(name)
+                        if cur is None: cur = _with_retry(ws.row_values, 1)      # batch read not available -> the old one-sheet-at-a-time read
                     if ws.col_count < len(h): _with_retry(ws.add_cols, len(h) - ws.col_count)
-                    if name == "Productivity log": _migrate_log_columns(ws)      # Update169: move rows still in the Update160 column order BEFORE the header is renamed
-                    if _with_retry(ws.row_values, 1) != h:
+                    if cur != h:
+                        if name == "Productivity log": _migrate_log_columns(ws)      # Update169: move rows still in the Update160 column order BEFORE the header is renamed (Update259: only while the header is still the old one)
                         _with_retry(ws.update, range_name="A1", values=[h])
+                _ws_cache.update(wss)      # Update259: every worksheet object is kept, so ws_of() never needs its own lookup call
                 _book = b
     return _book
+
+def _first_rows(b, names):
+    """Update259: {sheet name: row 1 as a list} for many sheets in ONE Google call. Returns {} when the batch read is not possible (the caller then reads each sheet itself)."""
+    if not names: return {}
+    try:
+        res = _with_retry(b.values_batch_get, ["'%s'!1:1" % n.replace("'", "''") for n in names])
+        out = {}
+        for n, v in zip(names, res.get("valueRanges", [])):
+            vals = v.get("values") or [[]]
+            out[n] = [str(x) for x in vals[0]]
+        return out if len(out) == len(names) else {}
+    except Exception as ex:
+        print("batch header read skipped:", repr(ex)); return {}
 
 _LOG_TS = re.compile(r"^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}")
 def _log_row_is_old(r):
@@ -982,15 +1005,51 @@ class live_sheets:
         if "Holidays" in self.n: _holidays_cache = None
     def __exit__(self, *a): _tl.live = self.old
 
+def _live_parallel(names):
+    """Update259: a page wrapped in @live_data read its sheets live ONE AFTER ANOTHER (7 sheets = 7 round trips in a row). The sheets that are due are now read at the SAME time;
+    a sheet that another thread is already reading is waited for instead of being asked from Google a second time. The result is stored in the request's live-read memo,
+    so rows() behaves exactly as before (one live read per sheet per request, own writes always visible)."""
+    if not has_request_context(): return
+    try:
+        from flask import g as _g
+        memo = getattr(_g, "_rows_live", None)
+        if memo is None: memo = _g._rows_live = {}
+        now_t, now_w = time.monotonic(), time.time()
+        sf = session.get("fresh") or {}; all_fresh = session.get("fresh_all", 0) > now_w
+        forced, due = {}, []
+        for n in names:
+            if n in memo: continue
+            f_ = bool(all_fresh or sf.get(n, 0) > now_w)
+            c = _rows_cache.get(n)
+            if f_ or not c or now_t - c[0] >= LIVE_TTL: due.append(n); forced[n] = f_
+        if len(due) < 2: return
+        res = {}
+        def run(n):
+            try:
+                if forced[n]: res[n] = _fetch_rows(n)                 # the user just wrote this sheet: must be a brand-new read
+                else:
+                    _safe_fetch(n)                                    # single flight: joins a read that is already running
+                    c2 = _rows_cache.get(n)
+                    if c2 and time.monotonic() - c2[0] < LIVE_TTL + 20: res[n] = c2[1]
+            except Exception as ex: print("live prefetch error:", n, repr(ex))
+        ths = [threading.Thread(target=run, args=(n,), daemon=True) for n in due]
+        for t in ths: t.start()
+        for t in ths: t.join(timeout=40)
+        for n, v in res.items(): memo.setdefault(n, v)
+    except Exception as ex: print("live prefetch skipped:", repr(ex))
+
 def live_data(*names):
     def deco(f):
         @wraps(f)
         def w(*a, **k):
-            with live_sheets(*names): return f(*a, **k)
+            with live_sheets(*names):
+                _live_parallel(names)      # Update259
+                return f(*a, **k)
         return w
     return deco
 LIVE_REPORT_SHEETS = ("Productivity log", "Leave", "Permissions", "Employees", "Settings", "Holidays", "Processes")
 
+ADMIN_EMP_SHEETS = ("Employees", "Notifications", "Productivity log", "Leave", "Permissions", "Processes", "Settings", "Holidays")      # Update259: what the Admin Employee Info pages read
 EMP_PAGE_SHEETS = ("Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays", "Mahizhchi Access")
 
 def _prewarm_employees():
@@ -1370,7 +1429,10 @@ def parse_form(emp_id):
 
 def live_rows_of(sid):
     """Update103: current sheet row numbers of one submission, read live (cached row numbers can be stale after another Add/Delete)."""
-    return [r["_row"] for r in _fetch_rows("Productivity log") if str(r["Submission ID"]) == str(sid)]
+    try: return _sid_rows_live(sid)      # Update259: reads column A only
+    except Exception as ex:
+        print("narrow row lookup failed, reading the full sheet:", repr(ex))
+        return [r["_row"] for r in _fetch_rows("Productivity log") if str(r["Submission ID"]) == str(sid)]
 
 def norm_date(v):
     """Update171: ONE canonical YYYY-MM-DD for any date text found in the sheet. Slash dates follow the sheet's locale (10/01/2026 = 1 Oct on a US sheet),
@@ -1383,11 +1445,39 @@ def norm_date(v):
         except ValueError: pass
     return _iso_date(re.sub(r"[ T]\d{1,2}:\d{2}.*$", "", t))
 
+def _sid_rows_live(sid):
+    """Update259: sheet row numbers of one submission, from a live read of column A only (the whole log used to be downloaded for this)."""
+    col = _with_retry(ws_of("Productivity log").col_values, 1)
+    t = str(sid)
+    return [i for i, v in enumerate(col, start=1) if i > 1 and str(v) == t]
+
+def _sid_landed(sid):
+    """Update259: did the rows of this submission reach the sheet? (live, column A only)"""
+    try: return bool(_sid_rows_live(sid))
+    except Exception: return any(str(r["Submission ID"]) == str(sid) for r in _fetch_rows("Productivity log"))
+
+def _log_keys_live():
+    """Update259: [(Submission ID, Date, Employee ID)] of every Productivity log row, read live - only the 3 columns the duplicate check needs."""
+    heads = HEADERS["Productivity log"]
+    ix = [heads.index("Submission ID"), heads.index("Date"), heads.index("Employee ID")]
+    last = max(ix) + 1
+    from gspread.utils import rowcol_to_a1
+    end = re.sub(r"\d+", "", rowcol_to_a1(1, last))
+    out = []
+    for r in _with_retry(ws_of("Productivity log").get_values, "A2:%s" % end):
+        r = list(r) + [""] * (last - len(r))
+        out.append((r[ix[0]], r[ix[1]], r[ix[2]]))
+    return out
+
 def duplicate_entry(emp_id, date, skip_sid=None, fresh=False):
-    """Update96: reads just the Productivity log (live from the sheet when fresh=True) instead of building every employee's submissions."""
+    """Update96: reads just the Productivity log (live from the sheet when fresh=True) instead of building every employee's submissions.
+    Update259: the live check downloads only 3 columns (was the whole sheet)."""
+    k, nd = _key(emp_id), norm_date(date)
+    if fresh:
+        try: return any(_key(e) == k and norm_date(d) == nd and str(s_) != str(skip_sid) for s_, d, e in _log_keys_live())
+        except Exception as ex: print("narrow duplicate check failed, reading the full sheet:", repr(ex))
     recs = _fetch_rows("Productivity log") if fresh else rows("Productivity log")
-    k = _key(emp_id)
-    return any(_key(r["Employee ID"]) == k and norm_date(r["Date"]) == norm_date(date) and str(r["Submission ID"]) != str(skip_sid) for r in recs)
+    return any(_key(r["Employee ID"]) == k and norm_date(r["Date"]) == nd and str(r["Submission ID"]) != str(skip_sid) for r in recs)
 
 def write_sub(sid, date, emp, procs, notes):
     if is_view_only(emp[1]): raise PermissionError("View Only designation: productivity entry is not allowed")      # Update105
@@ -1403,7 +1493,7 @@ def write_sub(sid, date, emp, procs, notes):
         try:
             if attempt:
                 time.sleep(2.0 * attempt)
-                if any(str(r["Submission ID"]) == str(sid) for r in _fetch_rows("Productivity log")):
+                if _sid_landed(sid):
                     invalidate_cache("Productivity log"); return
             ws_of("Productivity log").append_rows(out, value_input_option="RAW"); invalidate_cache("Productivity log"); return
         except Exception as ex:
@@ -1571,13 +1661,16 @@ def _act_q_put_raw(vals):
             _act_q = queue_mod.Queue(); threading.Thread(target=_act_worker, daemon=True).start()
         _act_q.put(dict(vals=vals))
 
+_stale_done = set()      # Update259
 def _close_stale(emp_id, now):
     """Sessions from earlier days that never logged out (browser/computer closed, etc.)
     are marked so - the system closed these itself, so they're tagged as an automatic logout."""
+    key = (str(emp_id), str(now.date()))
+    if key in _stale_done: return      # Update259: sessions of EARLIER days are closed once per employee per day (this used to re-read the whole Attendance sheet on every login)
     with _att_lock:
         ws = ws_of("Attendance")
         fixes = []
-        for i, r in enumerate(ws.get_all_values()[1:], start=2):
+        for i, r in enumerate(_with_retry(ws.get_values, "A:G")[1:], start=2):      # Update259: only columns A:G are used
             r = r + [""] * 9
             if r[2] == emp_id and r[1] < str(now.date()) and not r[6].strip():
                 fixes.append({"range": f"G{i}:I{i}", "values": [["Not recorded", "", "Auto (Session left open)"]]})
@@ -1586,6 +1679,8 @@ def _close_stale(emp_id, now):
                     _act_q_put_raw([r[1], "Not recorded", r[2], r[3], "Logoff", "App", "Automatic logoff (session left open - time not recorded)", int(d_.timestamp())])
                 except Exception as ex: print("stale logoff row error:", ex)
         if fixes: ws.batch_update(fixes, value_input_option="RAW")
+    if len(_stale_done) > 5000: _stale_done.clear()
+    _stale_done.add(key)
 
 def _log_login(sid, emp_id, name, band, now):
     with _att_lock:
@@ -2538,6 +2633,25 @@ html body .app aside.emp .prof .av3d.chr3{width:92px;height:92px;margin:2px 0 6p
 .chr3.cl3 .c3-disc{background:radial-gradient(circle at 35% 25%,#fff7 0,transparent 45%),radial-gradient(circle at 50% 60%,#f472b6,#7e22ce 88%)}
 @keyframes c3Sway{0%,100%{transform:rotate(-2.2deg) translateY(0)}50%{transform:rotate(2.2deg) translateY(-2px)}}
 @media(prefers-reduced-motion:reduce){.chr3.cl3 .c3-img,.chr3.cn3 .c3-img{animation:none!important}}
+/* Update258: smooth, natural eye blinking on the profile characters (employee male / female, and the supplied pictures of Associate Manager / Team Lead / Senior Team Lead).
+   Same pictures, same 3D layers: the picture box is sized to the picture's own proportions and two feathered skin-coloured eyelids (transform only) close and open over the eyes. */
+.chr3.cf3 .c3-body,.chr3.cm3 .c3-body,.chr3.cl3 .c3-body,.chr3.cn3 .c3-body{display:flex;align-items:flex-end;justify-content:center}
+.chr3.cf3 .c3-img,.chr3.cm3 .c3-img,.chr3.cl3 .c3-img,.chr3.cn3 .c3-img{position:relative;inset:auto;flex:none;background-size:100% 100%;background-position:0 0}
+.chr3.cf3 .c3-img{width:100%;height:auto;aspect-ratio:431/410}
+.chr3.cm3 .c3-img{height:100%;width:auto;aspect-ratio:460/615}
+.chr3.cl3 .c3-img{height:100%;width:auto;aspect-ratio:317/539}
+.chr3.cn3 .c3-img{height:100%;width:auto;aspect-ratio:307/528}
+.c3-lid{position:absolute;display:block;border-radius:50%;transform:scaleY(0);transform-origin:50% 0;pointer-events:none;box-shadow:inset 0 -1.5px 0 #3d241899;will-change:transform}
+.chr3.cf3 .c3-lid{background:radial-gradient(ellipse at 50% 30%,#f8bd9b 0,#eba583 100%);animation:c3Blink 5.3s ease-in-out infinite}
+.chr3.cf3 .c3-lid.l1{left:49.6%;top:27%;width:4.8%;height:5.2%}.chr3.cf3 .c3-lid.l2{left:58.5%;top:29.8%;width:7%;height:5.4%}
+.chr3.cm3 .c3-lid{background:radial-gradient(ellipse at 50% 30%,#d69267 0,#c68256 100%);animation:c3Blink 4.7s ease-in-out -1.3s infinite}
+.chr3.cm3 .c3-lid.l1{left:39.9%;top:20.5%;width:7.2%;height:3.7%}.chr3.cm3 .c3-lid.l2{left:52.1%;top:19.3%;width:5.4%;height:3.4%}
+.chr3.cl3 .c3-lid{background:radial-gradient(ellipse at 50% 30%,#f3a47e 0,#ea9378 100%);animation:c3Blink 5.9s ease-in-out -2s infinite}
+.chr3.cl3 .c3-lid.l1{left:42%;top:17.2%;width:9.6%;height:5.8%}.chr3.cl3 .c3-lid.l2{left:61.4%;top:17.7%;width:9.8%;height:5.5%}
+.chr3.cn3 .c3-lid{background:radial-gradient(ellipse at 50% 30%,#f7d5c2 0,#f4cdb8 100%);animation:c3Blink 5.1s ease-in-out -.8s infinite}
+.chr3.cn3 .c3-lid.l1{left:22.3%;top:36.8%;width:18%;height:9.2%}.chr3.cn3 .c3-lid.l2{left:54.6%;top:35%;width:19.2%;height:9.2%}
+@keyframes c3Blink{0%,90%,100%{transform:scaleY(0)}92.4%{transform:scaleY(1)}93.4%{transform:scaleY(1)}97%{transform:scaleY(.1)}98.6%{transform:scaleY(0)}}
+@media(prefers-reduced-motion:reduce){.c3-lid{animation:none!important}}
 /* Update239: plain (normal) name above Logout for these designations - no 3D, no animation */
 .prof-name .nm-plain{font-weight:500;letter-spacing:0;text-shadow:none}
 @media(max-width:800px){html body .app aside.emp .prof .av3d.chr3,aside .prof .av3d.chr3{width:48px;height:48px;margin:0}.chr3 .c3-ring{display:none}}
@@ -2550,13 +2664,13 @@ html body .app aside.emp .prof .av3d.chr3{width:92px;height:92px;margin:2px 0 6p
 .a3-p{position:absolute;inset:0;background:url(/char/a2.webp) 0 0/100% 100% no-repeat}
 .a3-lap{-webkit-mask-image:radial-gradient(ellipse 36% 21% at 66% 63%,#000 64%,transparent 100%);mask-image:radial-gradient(ellipse 36% 21% at 66% 63%,#000 64%,transparent 100%);transform-origin:40% 70%;animation:a3Type 1.7s ease-in-out infinite}
 .a3-hd{-webkit-mask-image:radial-gradient(ellipse 25% 26% at 32% 20%,#000 62%,transparent 100%);mask-image:radial-gradient(ellipse 25% 26% at 32% 20%,#000 62%,transparent 100%);transform-origin:33% 41%;animation:a3Head 8s ease-in-out infinite}
-.a3-lid{position:absolute;display:block;border-radius:50%;background:radial-gradient(ellipse at 50% 30%,#eec1aa 0,#e2b399 100%);transform:scaleY(0);transform-origin:50% 0;animation:a3Blink 4.6s infinite}
+.a3-lid{position:absolute;display:block;border-radius:50%;background:radial-gradient(ellipse at 50% 30%,#eec1aa 0,#e2b399 100%);transform:scaleY(0);transform-origin:50% 0;animation:a3Blink 4.6s ease-in-out infinite}
 .a3-lid.l1{left:31.8%;top:23.4%;width:4.6%;height:4.2%}.a3-lid.l2{left:42%;top:25.8%;width:4.6%;height:4.2%}
 .a3-shine{-webkit-mask-image:url(/char/a2.webp);mask-image:url(/char/a2.webp);-webkit-mask-size:100% 100%;mask-size:100% 100%;background:linear-gradient(105deg,transparent 42%,#ffffff66 50%,transparent 58%) 130% 0/260% 100% no-repeat;animation:c3Sh 6s ease-in-out infinite}
 @keyframes a3Sway{0%,100%{transform:rotate(-1deg) translateX(-1%)}50%{transform:rotate(1.2deg) translateX(1%)}}
 @keyframes a3Head{0%,100%{transform:rotate(0) translate(0,0)}20%{transform:rotate(-2.2deg) translate(-.4%,.3%)}45%{transform:rotate(1.8deg) translate(.5%,-.2%)}70%{transform:rotate(-.8deg) translate(0,.5%)}}
 @keyframes a3Type{0%,100%{transform:translateY(0) rotate(0)}30%{transform:translateY(.9%) rotate(.5deg)}60%{transform:translateY(-.3%) rotate(-.3deg)}}
-@keyframes a3Blink{0%,92%,100%{transform:scaleY(0)}95%{transform:scaleY(1)}97.5%{transform:scaleY(.15)}}
+@keyframes a3Blink{0%,90%,100%{transform:scaleY(0)}92.4%{transform:scaleY(1)}93.4%{transform:scaleY(1)}97%{transform:scaleY(.1)}98.6%{transform:scaleY(0)}}
 html body .app aside.emp .prof .av3d.chr3.ca3,html body .win.admin .lcard-top .lav .av3d.chr3.ca3{width:76px;height:76px;margin:0 0 5px}
 @media(max-width:800px){html body .app aside.emp .prof .av3d.chr3.ca3{width:44px;height:44px;margin:0}}
 @media(prefers-reduced-motion:reduce){.a3-fig,.a3-lap,.a3-hd,.a3-lid,.a3-shine{animation:none!important}.a3-shine{display:none}}
@@ -2749,6 +2863,8 @@ aside .ng>a.ng-h{display:flex;justify-content:space-between;align-items:center;b
 aside .ng>a.ng-h .chev{font-size:11px;opacity:.85;transition:transform .2s;transform:rotate(180deg)}
 aside .ng.open>a.ng-h{border:1.5px solid #fff;background:transparent;color:#fff;box-shadow:none;transform:none}
 aside .ng.open>a.ng-h .chev{transform:rotate(0deg)}
+/* Update257: the dropdown holding the current page stays closed after navigation; a light border marks it */
+aside .ng.ng-act:not(.open)>a.ng-h{border-color:#8ea8ff}
 aside .ng .kids{display:none;flex-direction:column;gap:2px;padding:4px 0 4px 14px}
 aside .ng.open .kids{display:flex}
 aside .ng .kids a{font-size:13px;padding:7px 12px}
@@ -3333,14 +3449,15 @@ html body .app.emp3d table tbody tr:hover td{background:#f4f3ff}
 {% if bare %}{{body|safe}}
 {% elif session.role %}<div class="app{{' emp3d' if session.role=='employee' else ''}}">{% if session.role=='employee' %}<script>document.documentElement.classList.add('fit188')</script><div id="fly3d" aria-hidden="true"><div class="fo" style="--s:64px;--x0:-12vw;--y0:78vh;--x1:112vw;--y1:-14vh;--z0:-380px;--z1:160px;--d:46s;--dl:0s;--c1:#6366f1;--c2:#a78bfa;--t:24s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:44px;--x0:110vw;--y0:64vh;--x1:-14vw;--y1:20vh;--z0:-120px;--z1:220px;--d:38s;--dl:-9s;--c1:#ec4899;--c2:#f9a8d4;--t:21s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:86px;--x0:-10vw;--y0:22vh;--x1:112vw;--y1:88vh;--z0:-420px;--z1:-60px;--d:58s;--dl:-21s;--c1:#06b6d4;--c2:#67e8f9;--t:28s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:52px;--x0:30vw;--y0:112vh;--x1:70vw;--y1:-16vh;--z0:-200px;--z1:240px;--d:34s;--dl:-14s;--c1:#f59e0b;--c2:#fcd34d;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:72px;--x0:112vw;--y0:92vh;--x1:-12vw;--y1:40vh;--z0:-340px;--z1:120px;--d:52s;--dl:-30s;--c1:#8b5cf6;--c2:#c4b5fd;--t:26s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:38px;--x0:-10vw;--y0:48vh;--x1:110vw;--y1:6vh;--z0:-60px;--z1:260px;--d:30s;--dl:-4s;--c1:#10b981;--c2:#6ee7b7;--t:20s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:58px;--x0:60vw;--y0:-14vh;--x1:16vw;--y1:114vh;--z0:-260px;--z1:180px;--d:44s;--dl:-26s;--c1:#3b82f6;--c2:#93c5fd;--t:23s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:48px;--x0:88vw;--y0:112vh;--x1:40vw;--y1:-14vh;--z0:-160px;--z1:200px;--d:36s;--dl:-17s;--c1:#f43f5e;--c2:#fda4af;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:90px;--x0:-14vw;--y0:60vh;--x1:112vw;--y1:20vh;--z0:-300px;--z1:140px;--d:50s;--dl:-6s;--c1:#6366f1;--c2:#6366f1;--t:29s"><div class="fr"></div></div><div class="fo" style="--s:64px;--x0:112vw;--y0:18vh;--x1:-14vw;--y1:80vh;--z0:-180px;--z1:200px;--d:42s;--dl:-19s;--c1:#ec4899;--c2:#ec4899;--t:24s"><div class="fr"></div></div><div class="fo" style="--s:110px;--x0:20vw;--y0:114vh;--x1:84vw;--y1:-18vh;--z0:-400px;--z1:60px;--d:60s;--dl:-33s;--c1:#06b6d4;--c2:#06b6d4;--t:32s"><div class="fr"></div></div><div class="fo" style="--s:56px;--x0:80vw;--y0:-14vh;--x1:6vw;--y1:100vh;--z0:-100px;--z1:240px;--d:40s;--dl:-12s;--c1:#f59e0b;--c2:#f59e0b;--t:23s"><div class="fr"></div></div><div class="fo" style="--s:54px;--x0:-12vw;--y0:34vh;--x1:112vw;--y1:70vh;--z0:-240px;--z1:180px;--d:48s;--dl:-2s;--c1:#6366f1;--c2:#22d3ee;--t:23s"><div class="ft"></div></div><div class="fo" style="--s:40px;--x0:112vw;--y0:50vh;--x1:-12vw;--y1:8vh;--z0:-80px;--z1:240px;--d:34s;--dl:-23s;--c1:#ec4899;--c2:#f59e0b;--t:20s"><div class="ft"></div></div><div class="fo" style="--s:70px;--x0:46vw;--y0:-14vh;--x1:92vw;--y1:114vh;--z0:-320px;--z1:100px;--d:54s;--dl:-36s;--c1:#8b5cf6;--c2:#06b6d4;--t:25s"><div class="ft"></div></div><div class="fo" style="--s:46px;--x0:-12vw;--y0:104vh;--x1:114vw;--y1:30vh;--z0:-140px;--z1:220px;--d:40s;--dl:-28s;--c1:#10b981;--c2:#3b82f6;--t:21s"><div class="ft"></div></div></div>{% endif %}<aside class="emp{{' tlside' if hol_only else ''}}">
 <div class="panel-ttl">{{ 'Admin Panel' if session.role=='admin' else 'Employee Panel' }}</div>
-{% for h,l,on,kids in nav %}{% if kids %}<div class="ng{{' open' if on else ''}}"><a class="ng-h" href="{{h}}" role="button" aria-expanded="{{'true' if on else 'false'}}" onclick="var g=this.parentNode;var o=g.classList.toggle('open');this.setAttribute('aria-expanded',o);return false">{{l}}<span class="chev">&#9650;</span></a>
-<div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
+{% for h,l,on,kids in nav %}{% if kids %}<div class="ng{{' open' if (on and session.role!='admin') else ''}}{{' ng-act' if on else ''}}"><a class="ng-h" href="{{h}}" role="button" aria-expanded="{{'true' if (on and session.role!='admin') else 'false'}}" onclick="var g=this.parentNode;var w=!g.classList.contains('open');document.querySelectorAll('.ng.open').forEach(function(x){x.classList.remove('open');x.firstElementChild.setAttribute('aria-expanded','false')});if(w){g.classList.add('open');this.setAttribute('aria-expanded','true')}return false">{{l}}<span class="chev">&#9650;</span></a>
+<div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}" onclick="var g=this.closest('.ng');g.classList.remove('open');g.firstElementChild.setAttribute('aria-expanded','false')">{{kl}}</a>{% endfor %}</div></div>
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
 <details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-up" id="cal_up" hidden></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
 <div class="prof{{' prof-emp' if session.role=='employee' else ''}}"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name" title="{{side_name or session.name}}">{% if side_name_html %}{{side_name_html|safe}}{% else %}{{session.name}}{% endif %}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
+<script>document.addEventListener('click',function(e){if(e.target.closest&&e.target.closest('.ng'))return;document.querySelectorAll('.ng.open').forEach(function(x){x.classList.remove('open');x.firstElementChild.setAttribute('aria-expanded','false')})});document.addEventListener('keydown',function(e){if(e.key==='Escape')document.querySelectorAll('.ng.open').forEach(function(x){x.classList.remove('open');x.firstElementChild.setAttribute('aria-expanded','false')})});</script>
 <main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></main></div>
 {% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}<div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></div>{% endif %}
 {% if att_json %}<script>window.ATT={{att_json|safe}};window.HOL={{hol_json|safe}};window.PRM={{prm_json|safe}};window.SRVTODAY="{{srv_today}}";{% if hol_only %}window.HOLONLY=true;{% endif %}</script>{% endif %}
@@ -5314,8 +5431,8 @@ def admin_log():
     d, e = request.args.get("date", ""), request.args.get("emp", "").strip().lower()
     rep_month, _on = report_scope()
     subs = [s for s in load_subs() if (not d or s["date"] == d) and (not rep_month or str(s["date"]).startswith(rep_month)) and
-            (not e or e in (str(s["emp_id"]).lower(), str(s["emp_name"]).lower()))]
-    emp_list = sorted(rows("Employees"), key=lambda x: str(x.get("Name", "")).lower())
+            (not e or e in (str(s["emp_id"]).lower(), str(s["emp_name"]).lower())) and not is_view_only(s["emp_id"])]      # Update256: no names / records of Associate Manager / Team Lead / Senior Team Lead here
+    emp_list = sorted((x for x in rows("Employees") if not desig_view_only(x.get("Designation", ""))), key=lambda x: str(x.get("Name", "")).lower())
     return page(LOG_MANAGE + LOG_TOP + LIST + LOG_MISSED, title="Productivity log", subs=subs, emp=request.args.get("emp", "").strip(), **log_missed_section(),
                 emp_list=emp_list, sel_emp=request.args.get("emp", "").strip(), today_str=str(today_local()),
                 nxt=request.full_path.rstrip("?"),
@@ -5491,7 +5608,7 @@ def admin_leave_review():
     if not mine:
         flash("Leave request not found - the employee may have cancelled it.")
     else:
-        newly = status == "Approved" and any(leave_status(r) != "Approved" for r in mine)      # Update100: e-mail only on a real approval, never again
+        newly = any(leave_status(r) != status for r in mine)      # Update255: e-mail on a real Approve OR Reject (a change of status), never again for the same decision
         now = now_local().strftime("%Y-%m-%d %H:%M:%S")
         _with_retry(ws_of("Leave").batch_update,
                     [{"range": f"G{r['_row']}:I{r['_row']}", "values": [[status, now, "Admin"]]} for r in mine],
@@ -5505,7 +5622,7 @@ def admin_leave_review():
                 days_ = sum(0.5 if leave_is_half(r) else 1 for r in mine)
                 dtxt = _pretty_date(ds_[0]) if len(ds_) == 1 else f"{_pretty_date(ds_[0])} to {_pretty_date(ds_[-1])}"
                 dur = ("Half day (4 hrs)" if all(leave_is_half(r) for r in mine) and len(mine) == 1 else f"{days_:g} day{'s' if days_ != 1 else ''}")
-                msg_, cat_ = notify_approved(emp_row, "Leave", dtxt, dur, len(mine))
+                msg_, cat_ = notify_request(emp_row, "Leave", status, dtxt, dur, len(mine), reason=mine[0].get("Reason", ""), applied_at=str(mine[0].get("Applied at", "")))
                 flash(msg_, "error") if cat_ == "error" else flash(msg_)
     nxt = request.form.get("next", "")
     return redirect(nxt if nxt.startswith("/admin/") else "/admin/leave-permission")
@@ -5653,12 +5770,12 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <table><tr><th>Employee ID</th><th>Employee Name</th><th>Designation</th><th>Office Email ID</th><th>Login Access Status</th><th>Status (Resigned / NCNS)</th><th>Relieving Date</th><th class="no-print">Action (Admin only)</th></tr>
 {% for e in emps %}{% set off = e.login_off %}<tr><td>{{e['Employee ID']}}</td><td><b>{{e['Name']}}</b></td><td>{{e['Designation'] or '-'}}</td><td>{{e['Email'] or '-'}}</td>
 <td>{% if off %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% endif %}</td>
-<td>{% if e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% else %}-{% endif %}</td><td>{{ e.rel_txt or '-' }}</td>
+<td>{% if e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% elif is_plog_desig(e['Designation']) %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% else %}-{% endif %}</td><td>{{ e.rel_txt or '-' }}</td>
 <td class="act no-print">
-<form method="post" action="/admin/employee-info/login-access/{{e['_row']}}/separation" onsubmit="var f=this,st=f.status.value;if(!st){alert('Choose Resigned or NCNS.');return false}if(!f.relieving.value){alert('Enter the relieving date.');return false}return confirm('Mark {{e['Employee ID']}} ({{e['Name']}}) as '+st+' with relieving date '+f.relieving.value+'? Login access will be disabled automatically.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}">
-<select name="status" title="Status" style="width:auto"><option value="">Status</option><option {{'selected' if e.sep=='Resigned'}}>Resigned</option><option {{'selected' if e.sep=='NCNS'}}>NCNS</option></select>
-<input type="date" name="relieving" required title="Relieving date" value="{{e.rel_iso}}" style="width:auto"><button class="danger sm" type="submit">Save status</button></form>
-{% if e.sep %}<form method="post" action="/admin/employee-info/login-access/{{e['_row']}}/separation" onsubmit="return confirm('Clear the {{e.sep}} status of {{e['Employee ID']}}? The login stays disabled until you enable it.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="status" value="clear"><button class="back sm" type="submit">Clear status</button></form>{% endif %}
+<form method="post" action="/admin/employee-info/login-access/{{e['_row']}}/separation" onsubmit="var f=this,st=f.status.value;if(st==='clear'){return confirm('Set {{e['Employee ID']}} ({{e['Name']}}) to Active? The Resigned / NCNS status is cleared; the login stays disabled until you click Enable Login.')}if(!f.relieving.value){alert('Enter the relieving date.');return false}return confirm('Mark {{e['Employee ID']}} ({{e['Name']}}) as '+st+' with relieving date '+f.relieving.value+'? Login access will be disabled automatically.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}">
+<select name="status" title="Action (Admin only)" style="width:auto"><option value="clear" {{'selected' if not e.sep else ''}}>Active</option><option value="Resigned" {{'selected' if e.sep=='Resigned' else ''}}>Resigned</option><option value="NCNS" {{'selected' if e.sep=='NCNS' else ''}}>NCNS (No Call, No Show)</option></select>
+<input type="date" name="relieving" title="Relieving date (needed for Resigned / NCNS)" value="{{e.rel_iso}}" style="width:auto"><button class="danger sm" type="submit">Save action</button></form>
+
 <form method="post" action="/admin/employee-info/login-access/{{e['_row']}}"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="do" value="enable"><button class="primary sm" type="submit" title="{{'Clear the Resigned / NCNS status first' if e.sep else ''}}" {{'disabled' if (e.sep or not off) else ''}}>Enable Login</button></form>
 <form method="post" action="/admin/employee-info/login-access/{{e['_row']}}" onsubmit="return confirm('Disable login for {{e['Employee ID']}} ({{e['Name']}})? This employee will not be able to log in until you enable it again. Their data is not changed.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="do" value="disable"><button class="danger sm" type="submit" {{'disabled' if off else ''}}>Disable Login</button></form>
 <form method="post" action="/admin/employees/{{e['_row']}}/reset-password" onsubmit="var p=prompt('Set password for {{e['Employee ID']}} (leave empty to generate one):','');if(p===null)return false;this.newpw.value=p;return true"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="newpw" value=""><button class="back sm" type="submit">Set Password</button></form></td></tr>
@@ -5670,7 +5787,8 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 {% for p in prows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
 <td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}} <span class="pill act">New joiner</span>{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td>
 <td>{{p.pstart.strftime('%d %b %Y')}}</td>
-{% if not p.active %}<td colspan="5" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
+{% if p.sepst %}<td><span class="pill" style="{{ 'background:#fde8e8;color:#b42318' if p.sepst=='Resigned' else 'background:#fff1db;color:#b45309' }}">{{p.sepst}}</span></td><td colspan="4" class="mut">{% if p.e.rel_txt %}Relieving date: {{p.e.rel_txt}} &mdash; {% endif %}not counted in working days, pending entries or reminders</td>
+{% elif not p.active %}<td colspan="5" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
 {% elif p.r.vo %}<td colspan="5" class="mut">View only (no productivity entry for this designation)</td>
 {% else %}<td>{{p.r.wd}}</td><td>{{p.entries}}</td><td>{{p.missed}}</td><td>{{p.r.att}}%</td><td><b>{{p.r.pct}}%</b></td>{% endif %}</tr>
 {% else %}<tr><td colspan="10">No employees found.</td></tr>{% endfor %}</table>
@@ -5679,7 +5797,7 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <p class="mut">{{label}} &middot; Associate Managers, Managers, Team Leads and Senior Team Leads: their own Productivity Log and Missed Entries Log. These employees also see the read-only <b>Team Logs</b> (Productivity Log + Missed Entries Log of all employees) in their own panel when they log in. Access follows the Designation automatically.</p>
 <table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Login Access</th><th>Status</th><th>Relieving Date</th><th>Entries</th><th>Productivity</th><th>Missed entries</th><th>Missed dates</th><th>Logs</th></tr>
 {% for p in lrows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
-<td>{% if p.e.login_on %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% else %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% endif %}</td><td>{% if p.e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif p.e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% else %}-{% endif %}</td><td>{{ p.e.rel_txt or '-' }}</td>
+<td>{% if p.e.login_on %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% else %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% endif %}</td><td>{% if p.e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif p.e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td><td>{{ p.e.rel_txt or '-' }}</td>
 {% if not p.active %}<td colspan="3" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>{% elif p.vo %}<td colspan="3" class="mut">View only</td>{% else %}<td>{{p.entries}}</td><td><b>{{p.pct}}%</b></td><td>{{p.missed|length}}</td>{% endif %}
 <td>{{p.missed|join(', ') or '-'}}</td>
 <td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}{% endif %}">Productivity Log</a> &middot; <a href="/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=missed&amp;month={{month}}">Missed Entries Log</a></td></tr>
@@ -5794,6 +5912,7 @@ T_NOTIF = """<p class="mut">Everything this employee added, updated or deleted, 
 @app.route("/admin/employee-info")
 @need("admin")
 def admin_employee_info():
+    prefetch(*ADMIN_EMP_SHEETS)      # Update259: cold cache -> all sheets are read together, not one by one
     if request.args.get("view") == "notifications":
         log = update_log()
         return page(EMP_LIST, title="Employee Info", view="notifications", log=log,
@@ -5893,6 +6012,9 @@ def admin_login_separation(row):
     if _admin_emp(row, eid) is None:
         flash("That employee changed - please refresh and try again.", "error"); return redirect(_acct_back())
     if st == "clear":
+        cur_ = next((x for x in rows("Employees") if x["_row"] == row), None)
+        if cur_ is not None and not emp_sep(cur_):      # Update258: already Active - nothing to change
+            flash(f"{eid} is already Active."); return redirect(_acct_back())
         set_employee_cell(row, eid, "Separation status", ""); set_employee_cell(row, eid, "Relieving date", "")
         try: log_change("Employees", "Resigned / NCNS cleared", f"Employee ID {eid}")
         except Exception as ex: print("log_change failed:", ex)
@@ -5931,6 +6053,7 @@ def admin_set_joining(eid):
 @app.route("/admin/employee-info/<eid>")
 @need("admin")
 def admin_employee_detail(eid):
+    prefetch(*ADMIN_EMP_SHEETS)      # Update259
     emp = emp_or_404(eid); eid = str(emp["Employee ID"])
     if "tab" not in request.args and desig_view_only(emp.get("Designation", "")):      # Update235: Associate Manager / Team Lead / Senior Team Lead -> name click opens ONLY the detailed Productivity Log
         return redirect("/admin/employee-info/%s/productivity-log" % urllib.parse.quote(eid, safe=""))
@@ -6060,6 +6183,7 @@ def admin_employee_plog(eid):
 
 def plog_ctx(eid, month):
     """Update237: everything the detailed date-wise Productivity Log page shows for ONE employee (read from the existing Productivity log via load_subs)."""
+    prefetch(*ADMIN_EMP_SHEETS)      # Update259
     emp = emp_or_404(eid); eid = str(emp["Employee ID"])
     subs = load_subs(eid)
     label = "All time"
@@ -6128,9 +6252,10 @@ def _review_permission(eid, row, status):
                                            values=[[status, now, "Admin"]], value_input_option="RAW")
     invalidate_cache("Permissions")
     flash(f"Permission request {status.lower()}.")
-    if status == "Approved" and prev != "Approved":      # Update100: approval e-mail (never on Reject, never twice)
+    if status in ("Approved", "Rejected") and prev != status:      # Update255: decision e-mail on Approve AND Reject (once per real change)
         hrs = num(r.get("Hours"))
-        msg_, cat_ = notify_approved(emp, "Permission", _pretty_date(r.get("Date", "")), f"{hrs:g} hr{'s' if hrs != 1 else ''}", 1)
+        msg_, cat_ = notify_request(emp, "Permission", status, _pretty_date(r.get("Date", "")), f"{hrs:g} hr{'s' if hrs != 1 else ''}", 1,
+                                    reason=r.get("Reason", ""), applied_at=str(r.get("Applied at", "")))
         flash(msg_, "error") if cat_ == "error" else flash(msg_)
     nxt = request.form.get("next", "")
     return redirect(nxt if nxt.startswith("/admin/") else f"/admin/employee-info/{eid}?tab=leave")
@@ -7675,7 +7800,7 @@ def _employee_save_impl():
     except Exception as ex:
         import traceback; traceback.print_exc()
         landed = False
-        try: landed = any(str(r["Submission ID"]) == str(sid_new) for r in _fetch_rows("Productivity log"))      # Update157: the rows may have been written even though the reply failed
+        try: landed = _sid_landed(sid_new)      # Update157: the rows may have been written even though the reply failed
         except Exception: pass
         if landed:
             invalidate_cache("Productivity log"); session["saved_anim"] = True; flash("Saved.")
@@ -7976,11 +8101,18 @@ def admin_productivity_overview(emps, q):
     end_m = min(m1, today - dt.timedelta(days=1)); prow = []
     for e in emps:
         eid = str(e["Employee ID"]).strip(); k = _key(eid)
+        if desig_view_only(e.get("Designation", "")): continue      # Update256: Associate Manager / Team Lead / Senior Team Lead are not listed in the Admin Productivity Log
         pstart, jd, basis = prod_start_info(eid); r = reps.get(k, {})
         ea = max(m0, jd) if jd else m0
         entries = len({s["date"] for s in by_emp.get(k, []) if not s["off"] and str(ea) <= s["date"] <= str(m1)})
         missed = len(missing_dates(eid, by_emp.get(k, []), lv_by.get(k, []), m0, end_m)) if end_m >= m0 else 0
-        prow.append(dict(e=e, jd=jd, pstart=pstart, basis=basis, active=(not jd or jd <= m1), r=r, entries=entries, missed=missed))
+        sepst = ""      # Update256: Resigned / NCNS set by the Admin, effective from the relieving date -> shown in the Working Days column
+        sep_ = emp_sep(e)
+        if sep_:
+            rel_ = str(e.get("Relieving date", "")).strip()[:10]
+            if not rel_ or rel_ <= str(m1): sepst = sep_
+        sep_fields(e)
+        prow.append(dict(e=e, jd=jd, pstart=pstart, basis=basis, active=(not jd or jd <= m1), r=r, entries=entries, missed=missed, sepst=sepst))
     return page(EMP_LIST, title="Employee Info", view="productivity", emps=emps, q=request.args.get("q", ""), prows=prow,
                 month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), new_count=sum(1 for r in update_log() if r["new"]))
 
@@ -8023,7 +8155,7 @@ ADMIN_AVATAR = ('<div class="av-adm" role="img" aria-label="Admin profile pictur
 
 AVATAR3D = """{% if gender or newpic %}<div class="av3d chr3 {{ 'cl3' if newpic=='f' else ('cn3' if newpic=='m' else ('cf3' if gender=='female' else 'cm3')) }}" role="img" aria-label="{{ gender|capitalize }} 3D character of the signed-in employee"><div class="av-stage">
 <span class="c3-disc"></span><span class="c3-ring"></span>
-<span class="c3-body"><span class="c3-img"></span><span class="c3-shine"></span></span>
+<span class="c3-body"><span class="c3-img"><i class="c3-lid l1"></i><i class="c3-lid l2"></i></span><span class="c3-shine"></span></span>
 </div></div>{% else %}<div class="av3d" role="img" aria-label="Employee profile picture"><div class="av-stage">
 <svg class="av-l" style="--z:0px" viewBox="0 0 200 200" aria-hidden="true"><defs><radialGradient id="avbg" cx="35%" cy="28%" r="85%"><stop offset="0" stop-color="#ccfbf1"/><stop offset=".55" stop-color="#5eead4"/><stop offset="1" stop-color="#0d9488"/></radialGradient></defs><circle cx="100" cy="100" r="98" fill="url(#avbg)"/><ellipse cx="70" cy="48" rx="46" ry="20" fill="#fff" opacity=".3" transform="rotate(-24 70 48)"/></svg>
 <svg class="av-l" style="--z:26px" viewBox="0 0 200 200" aria-hidden="true"><text x="100" y="124" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="78" font-weight="700" fill="#fff">{{initials}}</text></svg>
@@ -8521,6 +8653,14 @@ def employee_leave():
                 log_change(SEC_LEAVE, "Added", f"{'Half-day leave' if request.form.get('daytype', '').lower().startswith('half') else 'Leave'} {d1 if d1 == d2 else d1 + ' to ' + d2} ({n} day(s)) \u2013 {_short(why, 80)}")
             flash(("Half-day leave submitted" if request.form.get('daytype', '').lower().startswith('half') and n else f"{n} leave day(s) submitted") + " - waiting for admin approval." +
                   (f" Holiday date(s) {', '.join(skipped)} were skipped (leave is not needed on a holiday)." if skipped else ""))
+            if n:      # Update255: e-mail the applicant (own Office Email ID only) that the request was received
+                try:
+                    d1_, d2_ = request.form['d1'], request.form['d2']; half_ = request.form.get('daytype', '').lower().startswith('half')
+                    msg_, cat_ = notify_request(my_emp_row(), "Leave", "Pending", _pretty_date(d1_) if d1_ == d2_ else f"{_pretty_date(d1_)} to {_pretty_date(d2_)}",
+                                                "Half day (4 hrs)" if half_ and n == 1 else f"{n} day{'s' if n != 1 else ''}", n,
+                                                reason=request.form['reason'].strip() or "Leave", applied_at=now_local().strftime("%Y-%m-%d %H:%M:%S"))
+                    if cat_ == "ok": flash(msg_)
+                except Exception as ex_: print("Leave application e-mail error:", ex_)
         except ValueError as e:
             flash(str(e))
         return redirect("/employee/leave")
@@ -8559,6 +8699,12 @@ def employee_permission():
         log_change(SEC_LEAVE, "Added", f"Permission request for {pdate} ({_fmt_num(round(float(request.form.get('hours', 0)), 2))} hr) "
                                         f"\u2013 {_short(request.form.get('reason', '').strip() or 'Permission', 80)}")
         flash("Permission request submitted for today." if pdate == str(today_local()) else f"Permission request submitted for {pdate}.")
+        try:      # Update255: e-mail the applicant (own Office Email ID only) that the request was received. Permission never blocks or completes the Productivity entry.
+            hrs_ = round(float(request.form.get("hours", 0)), 2)
+            msg_, cat_ = notify_request(my_emp_row(), "Permission", "Pending", _pretty_date(pdate), f"{hrs_:g} hr{'s' if hrs_ != 1 else ''}", 1,
+                                        reason=request.form.get("reason", "").strip() or "Permission", applied_at=now_local().strftime("%Y-%m-%d %H:%M:%S"))
+            if cat_ == "ok": flash(msg_)
+        except Exception as ex_: print("Permission application e-mail error:", ex_)
     except ValueError as e:
         flash(str(e))
     return redirect("/employee/leave")
@@ -10368,25 +10514,43 @@ def _missed_html(nm, ds, pretty, link):
                    f'{summary}{table}', link,
                    "Please log in to the Productivity Tracker and complete the required entr" + ("y" if n == 1 else "ies") + ":")
 
-def approval_message(emp, kind, date_txt, duration_txt):
-    """Update100: 'Leave' / 'Permission' APPROVED e-mail - same 3D template. Fields: employee name, request type, date, duration / hours, approval status."""
+def request_message(emp, kind, status, date_txt, duration_txt, reason="", applied_at=""):
+    """Update255: ONE 3D e-mail for a Leave / Permission request, sent to the applicant only (no CC).
+    status 'Pending' = application received (waiting for the Admin), 'Approved' / 'Rejected' = the Admin's decision.
+    Fields: employee name, request type, date, duration / hours, reason, applied on, status."""
     import html as _h
     F = "font-family:'Segoe UI',Arial,Helvetica,sans-serif;"
     name = str(emp["name"])
-    badge = ('<span style="display:inline-block;padding:4px 10px;border-radius:99px;background:#16a34a;border-bottom:3px solid #166534;'
-             f'color:#ffffff;{F}font-size:13px;font-weight:bold;letter-spacing:.5px">&#10003; Approved</span>')
+    look = {"Pending": ("#d97706", "#92400e", "&#9203; Pending approval", "submitted", "#b45309", "Your {k} request has been submitted and is waiting for the Admin's approval."),
+            "Approved": ("#16a34a", "#166534", "&#10003; Approved", "approved", "#15803d", "Your {k} request has been approved."),
+            "Rejected": ("#dc2626", "#991b1b", "&#10007; Rejected", "rejected", "#b91c1c", "Your {k} request has been rejected.")}[status]
+    bg, bd, label, word, colr, plain_line = look
+    badge = (f'<span style="display:inline-block;padding:4px 10px;border-radius:99px;background:{bg};border-bottom:3px solid {bd};'
+             f'color:#ffffff;{F}font-size:13px;font-weight:bold;letter-spacing:.5px">{label}</span>')
     fields = [("Employee Name", _h.escape(name)), ("Request Type", _h.escape(kind)), ("Date", _h.escape(date_txt)),
               ("Duration / Hours", _h.escape(duration_txt)), ("Status", badge)]
     card = _orange_row(fields, F)
+    reason = " ".join(str(reason or "").split())
+    extra = ""
+    if reason or applied_at:
+        extra = (f'<div style="max-width:532px;margin-top:10px;{F}font-size:13px;color:#431407;text-align:left">'
+                 + (f'<div><b>Reason:</b> {_h.escape(reason)}</div>' if reason else "")
+                 + (f'<div><b>Applied on:</b> {_h.escape(str(applied_at))}</div>' if applied_at else "") + '</div>')
     msg = EmailMessage()
-    msg["Subject"] = f"{kind} request approved - {date_txt}"
+    msg["Subject"] = f"{kind} request {word} - {date_txt}"
     msg["From"] = formataddr(mail_sender()); msg["To"] = emp["email"]
-    msg.set_content(f"Hello {name},\n\nYour {kind} request has been approved.\n\n"
-                    f"Employee Name: {name}\nRequest Type: {kind}\nDate: {date_txt}\nDuration / Hours: {duration_txt}\nApproval Status: Approved\n\n"
+    msg.set_content(f"Hello {name},\n\n{plain_line.format(k=kind)}\n\n"
+                    f"Employee Name: {name}\nRequest Type: {kind}\nDate: {date_txt}\nDuration / Hours: {duration_txt}\n"
+                    + (f"Reason: {reason}\n" if reason else "") + (f"Applied on: {applied_at}\n" if applied_at else "")
+                    + f"Status: {'Pending approval' if status == 'Pending' else status}\n\n"
                     "This is an automated email. Please do not reply to this email.\n\nThanks,\nProductivity Tracker (LN_Map)")
-    msg.add_alternative(_html3d(_h.escape(name), f"Your {kind} request has been approved ({date_txt}).",
-                                f'Your <b>{_h.escape(kind)}</b> request has been <b style="color:#15803d">approved</b>.', card, "", ""), subtype="html")
+    msg.add_alternative(_html3d(_h.escape(name), f"Your {kind} request has been {word} ({date_txt}).",
+                                f'Your <b>{_h.escape(kind)}</b> request has been <b style="color:{colr}">{word}</b>'
+                                + (" and is waiting for the Admin's approval." if status == "Pending" else "."), card + extra, "", ""), subtype="html")
     return msg
+
+def approval_message(emp, kind, date_txt, duration_txt):      # kept for compatibility (Update100 name)
+    return request_message(emp, kind, "Approved", date_txt, duration_txt)
 
 def missed_message(emp, dates):
     """Update99: the single missed-entry e-mail (3D template) - used by Manual AND Automatic sending."""
@@ -10453,15 +10617,23 @@ def _pretty_date(d):
     try: return dt.date.fromisoformat(str(d)).strftime("%d %b %Y (%a)")
     except ValueError: return str(d)
 
-def notify_approved(emp_row, kind, date_txt, duration_txt, count):
-    """Send the 'approved' e-mail for a Leave / Permission request. Never raises. Returns a flash-ready (text, category)."""
+def notify_request(emp_row, kind, status, date_txt, duration_txt, count, reason="", applied_at=""):
+    """Update255: e-mail the APPLICANT (their own Office Email ID only) about a Leave / Permission request: status 'Pending' (just applied),
+    'Approved' or 'Rejected' (Admin decision). Never raises. Returns a flash-ready (text, category)."""
     mail = employee_office_email(emp_row); name = str(emp_row.get("Name", ""))
-    if not EMAIL_RE.match(mail): return (f"No approval e-mail sent: {name} has no valid Office Email ID.", "error")
+    what = {"Pending": "confirmation", "Approved": "approval", "Rejected": "rejection"}[status]
+    if not EMAIL_RE.match(mail): return (f"No {what} e-mail sent: {name} has no valid Office Email ID.", "error")
     e = dict(eid=str(emp_row["Employee ID"]), name=name, email=mail)
-    try: st = send_logged([(e, approval_message(e, kind, date_txt, duration_txt), date_txt, count)], f"{kind} approval", session.get("name", "Admin"))[e["eid"]]
-    except Exception as ex_: st = "Failed: " + str(ex_)[:150]; print("Approval mail error:", ex_)
-    if st == "Sent": return (f"Approval e-mail sent to {name} ({mail}).", "ok")
-    return (f"The request was approved, but the approval e-mail to {name} could not be sent: {st}", "error")
+    mode = f"{kind} request" if status == "Pending" else f"{kind} {what}"
+    try: st = send_logged([(e, request_message(e, kind, status, date_txt, duration_txt, reason, applied_at), date_txt, count)], mode, session.get("name", "System"))[e["eid"]]
+    except Exception as ex_: st = "Failed: " + str(ex_)[:150]; print("Request mail error:", ex_)
+    if st == "Sent":
+        return ((f"A confirmation e-mail was sent to {mail}.", "ok") if status == "Pending" else (f"{what.capitalize()} e-mail sent to {name} ({mail}).", "ok"))
+    if status == "Pending": return (f"The request was submitted, but the confirmation e-mail could not be sent: {st}", "error")
+    return (f"The request was {status.lower()}, but the {what} e-mail to {name} could not be sent: {st}", "error")
+
+def notify_approved(emp_row, kind, date_txt, duration_txt, count):      # kept for compatibility (Update100 name)
+    return notify_request(emp_row, kind, "Approved", date_txt, duration_txt, count)
 
 @app.route("/admin/missed/send", methods=["POST"])
 @need("admin")
@@ -10577,7 +10749,7 @@ def admin_leads_overview(emps, q):
     return page(EMP_LIST, title="Employee Info", view="leads", emps=emps, q=request.args.get("q", ""), lrows=out,
                 month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), new_count=sum(1 for r in update_log() if r["new"]))
 
-TEAM_TABS = """<div class="tabs no-print"><a href="/employee/team-logs" class="{{'on' if tl=='prod' else ''}}">Productivity Log</a><a href="/employee/team-logs/missed" class="{{'on' if tl=='missed' else ''}}">Missed Entries Log</a></div>"""
+TEAM_TABS = """<div class="tabs no-print"><a href="/employee/team-logs" class="{{'on' if tl=='prod' else ''}}">Productivity Log</a><a href="/employee/team-logs/missed" class="{{'on' if tl=='missed' else ''}}">Missed Entries Log</a>{% if team_leave_tab() %}<a href="/employee/team-logs/leave" class="{{'on' if tl=='leave' else ''}}">Leave &amp; Permission</a>{% endif %}</div>"""
 TEAM_PROD = TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all employees</h2>
 <p class="mut">{{label}} &middot; read-only. Weekly-off / holiday entries are shown but not counted.</p>
 <form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><input name="emp" placeholder="Employee ID / name" value="{{emp}}"><button class="primary">Show</button><a href="/employee/team-logs">Reset</a></form>
@@ -10615,7 +10787,7 @@ PEOPLE_LIST = """<div class="head"><div><h1>Employee Details</h1><p class="mut">
 <div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Designation</th><th>Gender</th><th>Address Line_1</th><th>Address Line_2</th><th>City</th><th>PIN</th><th>Phone</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID</th><th>Profile Name</th><th>Login Access Status</th><th>Status (Resigned / NCNS)</th><th>Relieving Date</th><th>Last updated</th><th></th></tr>
 {% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td><a href="/employee/people/{{e['_row']}}"><b>{{e['Name']}}</b></a></td><td>{{e['Designation'] or '-'}}</td><td>{{e['Gender'] or '-'}}</td><td>{{e['Address Line_1'] or '-'}}</td><td>{{e['Address Line_2'] or '-'}}</td>
 <td>{{e['City'] or '-'}}</td><td>{{e['PIN'] or '-'}}</td><td>{{e['Phone Number'] or '-'}}</td><td>{{e['Emergency no'] or '-'}}</td><td>{{e['Personal Email ID'] or '-'}}</td><td>{{e['Email'] or '-'}}</td><td>{{e['Profile Name'] or '-'}}</td>
-<td>{% if e.login_on %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% else %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% endif %}</td><td>{% if e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% else %}-{% endif %}</td><td>{{ e.rel_txt or '-' }}</td>
+<td>{% if e.login_on %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% else %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% endif %}</td><td>{% if e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td><td>{{ e.rel_txt or '-' }}</td>
 <td>{{(e['Profile updated at'] or '-')|t12}}</td><td class="act"><a href="/employee/people/{{e['_row']}}">Edit</a></td></tr>
 {% else %}<tr><td colspan="18">No employees found.</td></tr>{% endfor %}</table></div>"""
 
@@ -10676,7 +10848,8 @@ TEAM_PLOG = TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all em
 {% else %}<div style="overflow-x:auto"><table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Joining Date</th><th>Tracking From</th><th>Working Days</th><th>Entries</th><th>Missed</th>{% if not hide_status %}<th>Attendance</th>{% endif %}<th>Productivity</th></tr>
 {% for p in lrows %}<tr><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}">{{p.e['Employee ID']}}</a></td><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
 <td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}}{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td><td>{{p.pstart.strftime('%d %b %Y')}}</td>
-{% if not p.active %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
+{% if p.sepst %}<td><span class="pill" style="{{ 'background:#fde8e8;color:#b42318' if p.sepst=='Resigned' else 'background:#fff1db;color:#b45309' }}">{{p.sepst}}</span></td><td colspan="{{ 3 if hide_status else 4 }}" class="mut">{% if p.e.rel_txt %}Relieving date: {{p.e.rel_txt}} &mdash; {% endif %}not counted in working days, pending entries or reminders</td>
+{% elif not p.active %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
 {% elif p.r.vo %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">View only (no productivity entry for this designation)</td>
 {% else %}<td>{{p.r.wd}}</td><td>{{p.entries}}</td><td>{{p.missed}}</td>{% if not hide_status %}<td>{{p.r.att}}%</td>{% endif %}<td><b>{{p.r.pct}}%</b></td>{% endif %}</tr>
 {% else %}<tr><td colspan="10">No employees found.</td></tr>{% endfor %}</table></div>{% endif %}</div>"""
@@ -10719,7 +10892,12 @@ def _team_plog_page():
         ea = max(m0, jd) if jd else m0
         entries = len({x["date"] for x in by_emp.get(k, []) if not x["off"] and str(ea) <= x["date"] <= str(m1)})
         missed = len(missing_dates(eid, by_emp.get(k, []), lv_by.get(k, []), m0, end_m)) if end_m >= m0 else 0
-        lrows.append(dict(e=e, jd=jd, pstart=pstart, active=(not jd or jd <= m1), r=r, entries=entries, missed=missed))
+        sepst = ""      # Update256: Resigned / NCNS (Admin-set, effective from the relieving date) shown in the Working Days column
+        if emp_sep(e):
+            rel_ = str(e.get("Relieving date", "")).strip()[:10]
+            if not rel_ or rel_ <= str(m1): sepst = emp_sep(e)
+        sep_fields(e)
+        lrows.append(dict(e=e, jd=jd, pstart=pstart, active=(not jd or jd <= m1), r=r, entries=entries, missed=missed, sepst=sepst))
     return page(TEAM_PLOG, title="Team Logs - Productivity Log", tl="prod", month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), emp=emp_q, proc="", lrows=lrows, prows=[], more=False, pemps=0)
 
 @app.route("/employee/team-logs/employee/<eid>")
@@ -10744,6 +10922,58 @@ def employee_team_prod():
     total = len(subs); subs = subs[:600]
     return page(TEAM_PROD, title="Team Logs - Productivity Log", tl="prod", month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), emp=request.args.get("emp", ""),
                 subs=subs, total=total, more=total > len(subs))
+
+app.jinja_env.globals["team_leave_tab"] = lambda: plog_user()      # Update256: the tab is offered only to Associate Manager / Team Lead / Senior Team Lead
+
+TEAM_LEAVE = TEAM_TABS + """<div class="card"><h2>Leave &amp; Permission &mdash; all employees</h2>
+<p class="mut">{{label}} &middot; read-only. Leave and Permission requests of every employee with their status (the Admin approves / rejects).</p>
+<form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><input name="emp" placeholder="Employee ID / name" value="{{emp}}">
+<select name="status"><option value="">All status</option>{% for x in ['Pending','Approved','Rejected'] %}<option {{'selected' if status==x else ''}}>{{x}}</option>{% endfor %}</select>
+<button class="primary">Show</button><a href="/employee/team-logs/leave">This month</a><a href="/employee/team-logs/leave?month=all">All time</a></form>
+<div class="kpis"><div class="kpi"><span>Leave requests</span><b>{{lv|length}}</b></div><div class="kpi"><span>Permission requests</span><b>{{pm|length}}</b></div>
+<div class="kpi"><span>Pending</span><b>{{n_pend}}</b></div><div class="kpi"><span>Approved</span><b>{{n_appr}}</b></div><div class="kpi"><span>Rejected</span><b>{{n_rej}}</b></div></div>
+<h2>Leave</h2><div style="overflow-x:auto"><table><tr><th>Date</th><th>Day</th><th>Employee ID</th><th>Name</th><th>Designation</th><th>Day type</th><th>Reason</th><th>Status</th><th>Applied at</th><th>Reviewed at</th></tr>
+{% for r in lv %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}}</td><td><b>{{r.name}}</b></td><td>{{r.desig or '-'}}</td><td>{{r.dtype}}</td><td>{{r.reason or '-'}}</td>
+<td><span class="pill {{r.status|ppill}}">{{r.status}}</span></td><td>{{(r.applied or '-')|t12}}</td><td>{{(r.reviewed or '-')|t12}}</td></tr>
+{% else %}<tr><td colspan="10">No leave requests for this selection.</td></tr>{% endfor %}</table></div>
+<h2>Permission</h2><div style="overflow-x:auto"><table><tr><th>Date</th><th>Day</th><th>Employee ID</th><th>Name</th><th>Designation</th><th>Hours</th><th>Reason</th><th>Status</th><th>Applied at</th><th>Reviewed at</th></tr>
+{% for r in pm %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}}</td><td><b>{{r.name}}</b></td><td>{{r.desig or '-'}}</td><td>{{r.hours|g}}</td><td>{{r.reason or '-'}}</td>
+<td><span class="pill {{r.status|ppill}}">{{r.status}}</span></td><td>{{(r.applied or '-')|t12}}</td><td>{{(r.reviewed or '-')|t12}}</td></tr>
+{% else %}<tr><td colspan="10">No permission requests for this selection.</td></tr>{% endfor %}</table></div></div>"""
+
+@app.route("/employee/team-logs/leave")
+@need("employee")
+@team_need
+def employee_team_leave():
+    """Update256: read-only Leave & Permission of ALL employees (from the existing Leave / Permissions sheets) for Associate Manager / Team Lead / Senior Team Lead."""
+    if not plog_user(): abort(403)
+    prefetch("Employees", "Leave", "Permissions")
+    month_arg = request.args.get("month", "").strip(); q = request.args.get("emp", "").strip().lower(); status = request.args.get("status", "").strip()
+    if month_arg == "all": month, label, m0, m1 = "", "All time", None, None
+    else:
+        m0, m1 = month_range(month_arg or today_local().strftime("%Y-%m")); month = m0.strftime("%Y-%m"); label = m0.strftime("%B %Y")
+    desig = {_key(e["Employee ID"]): e.get("Designation", "") for e in rows("Employees")}
+    def keep(eid, name, d):
+        if q and q not in str(eid).lower() and q not in str(name).lower(): return False
+        return not m0 or str(m0) <= norm_date(d) <= str(m1)
+    def dayname(d):
+        try: return dt.date.fromisoformat(norm_date(d)).strftime("%a")
+        except ValueError: return ""
+    lv, pm = [], []
+    for r in rows("Leave"):
+        st = leave_status(r)
+        if (status and st != status) or not keep(r["Employee ID"], r.get("Employee name", ""), r.get("Date", "")): continue
+        lv.append(dict(date=norm_date(r.get("Date", "")), day=dayname(r.get("Date", "")), id=r["Employee ID"], name=r.get("Employee name", ""), desig=desig.get(_key(r["Employee ID"]), ""),
+                       dtype="Half day" if leave_is_half(r) else "Full day", reason=r.get("Reason", ""), status=st, applied=r.get("Applied at", ""), reviewed=r.get("Reviewed at", "")))
+    for r in rows("Permissions"):
+        st = str(r.get("Status", "")).strip() or "Pending"
+        if (status and st != status) or not keep(r["Employee ID"], r.get("Employee name", ""), r.get("Date", "")): continue
+        pm.append(dict(date=norm_date(r.get("Date", "")), day=dayname(r.get("Date", "")), id=r["Employee ID"], name=r.get("Employee name", ""), desig=desig.get(_key(r["Employee ID"]), ""),
+                       hours=num(r.get("Hours")), reason=r.get("Reason", ""), status=st, applied=r.get("Applied at", ""), reviewed=r.get("Decided at", "")))
+    lv.sort(key=lambda x: (x["date"], x["name"]), reverse=True); pm.sort(key=lambda x: (x["date"], x["name"]), reverse=True)
+    allr = lv + pm
+    return page(TEAM_LEAVE, title="Team Logs - Leave & Permission", tl="leave", month=month, label=label, emp=request.args.get("emp", ""), status=status, lv=lv, pm=pm,
+                n_pend=sum(1 for x in allr if x["status"] == "Pending"), n_appr=sum(1 for x in allr if x["status"] == "Approved"), n_rej=sum(1 for x in allr if x["status"] == "Rejected"))
 
 @app.route("/employee/team-logs/missed")
 @need("employee")
@@ -11767,7 +11997,7 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
  var ed=document.getElementById('mn-ed'), bar=document.getElementById('mn-tb'), rich=document.getElementById('mn-rich'),
      sizeSel=document.getElementById('mn-size'), colorIn=document.getElementById('mn-color'), saved=null, pendingPx=16, clean='', tmr=null, seq=0;
  var PH='<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>';
- function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
+ function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
  function paint(){
   var v={subject:esc(sub.value.trim())||'Your subject appears here', message:(hasText()&&clean)?clean:PH};
   frame.srcdoc=T.replace(/[{][{](\w+)[}][}]/g,function(m,k){return (k in v)?v[k]:m;});}
@@ -13183,6 +13413,13 @@ def admin_notes_status(nid):
     return redirect("/admin/notes")
 
 
+def _boot_warm():
+    """Update259: open the spreadsheet and read the Employees sheet as soon as this server process starts (background), so the first login after a deploy / Render wake-up is not the request that pays for it."""
+    try:
+        time.sleep(0.5); book(); _fetch_rows("Employees")
+    except Exception as ex: print("boot warm-up skipped:", repr(ex))
+threading.Thread(target=_boot_warm, daemon=True).start()
+
 if __name__ == "__main__":
     # NOTE: Flask's built-in dev server (even with threaded=True) is still not
     # meant for real concurrent traffic, and debug=True is a security risk in
@@ -13190,7 +13427,8 @@ if __name__ == "__main__":
     # For local testing with a few users this is fine; for the real deployment
     # run with a production WSGI server instead, e.g.:
     #   pip install gunicorn
-    #   gunicorn -w 4 --threads 4 -b 0.0.0.0:5000 app:app
+    #   gunicorn -k gthread -w 2 --threads 8 --timeout 120 --graceful-timeout 30 --keep-alive 5 -b 0.0.0.0:$PORT <this file name without .py>:app
+    #   (Update259: do NOT add --preload - the background loops are started at import and would not survive the fork)
     # (4 worker processes x 4 threads comfortably covers 20 concurrent users;
     # gspread calls are I/O-bound so threads work well here.)
     debug = os.getenv("FLASK_DEBUG", "0") == "1"

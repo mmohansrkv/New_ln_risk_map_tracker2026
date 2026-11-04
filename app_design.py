@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update261: Celebrations - NEW 'Continuous' mode (How often = "Continuous - until the Admin clicks Stop"). The greeting (e.g. "Happy Birthday, <name>! Wishing you a wonderful year ahead filled with joy and success. From all of us!") shows as a SMALL-font banner at the very TOP of the Employee page with fireworks / crackers (and the other effects) repeating non-stop - no time limit and no close button for the employee. It disappears, together with every animation, within about half a minute after the Admin clicks 'Stop' (Admin > Notes & Messages > Celebrations; also ends at an optional Stop date & time, 'Switch off' or Delete). The employee's page is never blocked (animation layer is click-through). Birthday now defaults to Fireworks + Crackers and Continuous. Existing celebrations and all other pages unchanged.
   * Update260: NEW Admin > Notes & Messages > Celebrations. The Admin creates celebration animations for the Employee page - Fireworks, Crackers (ladi strings + flower pots), Fireworks + Crackers, Fireworks + Confetti, Confetti or Balloons - for occasions such as Birthday, Pongal, Diwali, New Year or a work anniversary (ready-made wishes included; type {name} to greet each employee by first name). Per celebration: greeting title / message, intensity (Gentle / Normal / Grand), play time (5-30 s), who sees it (all employees or only the ones ticked - e.g. the birthday person), Display / Stop date & time or 'Start now' / 'Stop now', 'Switch off', Delete, Preview, and how often it plays (once per employee / once a day / every login). It plays full-screen with a greeting card on the page employees land on after login (the Daily Entry page; the Leave page for Associate Manager / Team Lead / Senior Team Lead); work underneath stays clickable, the card has a close button (Esc also closes), and it is skipped as animation (card only) for people whose device asks for reduced motion. A celebration the Admin starts while an employee is already on the page appears within about a minute (a light check that does NOT reset the idle auto-logout timer). New sheets 'Celebrations' and 'Celebration Seen' are created automatically. Nothing else was changed.
   * Update259: SPEED ONLY - no screen, text, permission or feature was changed. (1) Start-up: the spreadsheet is opened with 3 Google calls instead of ~63 (one call lists the sheets, one call reads every header row, the Productivity log column migration runs only when its header is still the old one), and it is opened in the background as soon as the server process starts - the first Admin / Employee login after a deploy or a Render wake-up no longer waits for it (before, 30 sheets x 2 calls in a row could run past Gunicorn's 30 s timeout and hit the Sheets read quota). (2) Save: the 'already submitted for this date?' check reads only the 3 columns it needs (Submission ID, Date, Employee ID) live instead of the whole Productivity log; Edit / Delete row lookup and the 'did the rows land?' check read only column A. (3) Login: the Attendance 'close sessions left open' clean-up runs once per employee per day (it re-read the whole Attendance sheet on EVERY login) and reads only columns A:G. (4) Admin pages that read their sheets live (@live_data) and the Employee Info pages now read the sheets they need AT THE SAME TIME instead of one after another, and share an in-flight read instead of asking Google twice.
   * Update252b: Admin > Productivity Log - the Employee column shows the employee's NAME (read from the Employees sheet by Employee ID; falls back to the name saved on the log row, then the ID) instead of the Employee ID; it still links to the employee's complete Productivity Log. Columns, order, calculations and data are unchanged (new read-only key master_name, used only for this display).
@@ -13433,8 +13434,8 @@ def admin_notes_status(nid):
 CL_SHEET, CL_SEEN = "Celebrations", "Celebration Seen"
 CL_FX = (("fireworks", "Fireworks"), ("crackers", "Crackers (ladi strings + flower pots)"), ("grand", "Fireworks + Crackers"), ("party", "Fireworks + Confetti"), ("confetti", "Confetti"), ("balloons", "Balloons"))
 CL_LVL = (("low", "Gentle"), ("mid", "Normal"), ("high", "Grand"))
-CL_FREQ = (("once", "Once per employee"), ("day", "Once a day (first visit of the day)"), ("login", "Every login (once per browser session)"))
-CL_OCC = (("birthday", "Birthday", "Happy Birthday, {name}!", "Wishing you a wonderful year ahead filled with joy and success. From all of us!", "party"),
+CL_FREQ = (("continuous", "Continuous - until the Admin clicks Stop"), ("once", "Once per employee"), ("day", "Once a day (first visit of the day)"), ("login", "Every login (once per browser session)"))
+CL_OCC = (("birthday", "Birthday", "Happy Birthday, {name}!", "Wishing you a wonderful year ahead filled with joy and success. From all of us!", "grand"),
           ("pongal", "Pongal", "Happy Pongal!", "Pongalo Pongal! May this harvest festival bring happiness, prosperity and sweetness to you and your family.", "crackers"),
           ("diwali", "Diwali", "Happy Diwali!", "May the festival of lights brighten your life with joy and prosperity.", "grand"),
           ("newyear", "New Year", "Happy New Year!", "Wishing you a year full of success, health and happiness.", "fireworks"),
@@ -13468,8 +13469,9 @@ def cl_for(eid, name=""):
         if fr == "once" and cid in seen: continue
         out.append(dict(id=cid, title=str(c.get("Title", "")).replace("{name}", first).strip(), text=str(c.get("Message", "")).replace("{name}", first).strip(),
                         occ=_cl_pick(c.get("Occasion"), CL_OCC_KEYS, "custom"), fx=_cl_pick(c.get("Effect"), CL_FX_KEYS, "fireworks"), lvl=_cl_pick(c.get("Intensity"), CL_LVL_KEYS, "mid"),
-                        dur=_cl_int(c.get("Duration sec"), 5, 30, 12), freq=fr, at=(str(c.get("Display from", "")).strip() or str(c.get("Created at", "")).strip())))
-    out.sort(key=lambda x: x["at"]); return out[-3:]
+                        dur=_cl_int(c.get("Duration sec"), 5, 30, 12), freq=fr, cont=(fr == "continuous"), at=(str(c.get("Display from", "")).strip() or str(c.get("Created at", "")).strip())))
+    out.sort(key=lambda x: x["at"]); co = [x for x in out if x["cont"]]; ot = [x for x in out if not x["cont"]]
+    return ot[-3:] + co[-2:]      # Update261: a Continuous celebration is never trimmed away
 
 CL_ENGINE_JS = r'''(function(){
 if(window.__clPlay) return;
@@ -13492,38 +13494,52 @@ function css(){
   +'.clx-m{display:block;margin-top:6px;font-size:14.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word;opacity:.97}'
   +'.clx-x{position:absolute;top:8px;right:10px;width:30px;height:30px;border:0;border-radius:50%;background:#ffffff33;color:#fff;font-size:18px;line-height:1;cursor:pointer}.clx-x:hover{background:#ffffff55}'
   +'@keyframes clxB{50%{transform:translateY(-6px) scale(1.08)}}'
-  +'@media(prefers-reduced-motion:reduce){.clx-ic{animation:none}.clx-card{transition:none}}@media print{.clx{display:none}}';
+  +'.clx-bn{box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:4px 8px;flex-wrap:wrap;margin:0 0 10px;padding:6px 14px;border-radius:10px;color:#fff;text-align:center;background:linear-gradient(135deg,var(--a),var(--b));box-shadow:0 4px 14px -6px var(--a);font-size:12px;line-height:1.4;animation:clxP 2.4s ease-in-out infinite}'
+  +'.clx-bn b{font-size:12.5px;font-weight:700}.clx-bn span{font-size:11.5px;opacity:.96}.clx-bn i{font-style:normal;font-size:14px}'
+  +'.clx-bn.fix{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:2147483001;max-width:92vw;margin:0}'
+  +'@keyframes clxP{50%{box-shadow:0 4px 22px -2px var(--a)}}'
+  +'@media(prefers-reduced-motion:reduce){.clx-ic,.clx-bn{animation:none}.clx-card{transition:none}}@media print{.clx,.clx-bn{display:none}}';
   document.head.appendChild(s);
 }
+window.__clStop=function(){ var r=document.getElementById('clx-root'); if(r&&r.__fin) r.__fin() };
 window.__clPlay=function(c,done){
   css();
   var old=document.getElementById('clx-root'); if(old&&old.__fin) old.__fin(true);
   var root=document.createElement('div'); root.id='clx-root'; root.className='clx'; root.setAttribute('role','status'); root.setAttribute('aria-live','polite');
   var th=THEME[c.occ]||THEME.custom; root.style.setProperty('--a',th[0]); root.style.setProperty('--b',th[1]);
   var reduce=false; try{reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}
+  var cont=!!c.cont, inf=cont&&!c.prev, bn=null;
+  if(cont){
+    bn=document.createElement('div'); bn.className='clx-bn'; bn.setAttribute('role','status'); bn.style.setProperty('--a',th[0]); bn.style.setProperty('--b',th[1]);
+    var bi=document.createElement('i'); bi.setAttribute('aria-hidden','true'); bi.textContent=String.fromCodePoint(EMO[c.occ]||0x2728); bn.appendChild(bi);
+    if(c.title){var bt=document.createElement('b'); bt.textContent=c.title; bn.appendChild(bt)}
+    if(c.text){var bm=document.createElement('span'); bm.textContent=c.text; bn.appendChild(bm)}
+    var an=window.__clAnchor;
+    if(!c.prev&&an&&an.parentNode) an.parentNode.insertBefore(bn,an); else { bn.className+=' fix'; document.body.appendChild(bn) }
+  }
   var cv=null,ctx=null; if(!reduce){cv=document.createElement('canvas'); cv.className='clx-cv'; root.appendChild(cv); ctx=cv.getContext('2d')}
   var card=document.createElement('div'); card.className='clx-card';
   var ic=document.createElement('span'); ic.className='clx-ic'; ic.setAttribute('aria-hidden','true'); ic.textContent=String.fromCodePoint(EMO[c.occ]||0x2728); card.appendChild(ic);
   if(c.title){var t=document.createElement('span'); t.className='clx-t'; t.textContent=c.title; card.appendChild(t)}
   if(c.text){var m=document.createElement('span'); m.className='clx-m'; m.textContent=c.text; card.appendChild(m)}
   var x=document.createElement('button'); x.type='button'; x.className='clx-x'; x.setAttribute('aria-label','Close'); x.textContent='\u00d7'; card.appendChild(x);
-  root.appendChild(card); document.body.appendChild(root);
+  if(!cont) root.appendChild(card); document.body.appendChild(root);
   setTimeout(function(){root.className='clx on'},30);
   var dur=Math.max(5,Math.min(30,+c.dur||12)), fin=false, raf=0, hard=0, W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2);
   function finish(quick){
     if(fin) return; fin=true; cancelAnimationFrame(raf); clearTimeout(hard);
     window.removeEventListener('resize',size); document.removeEventListener('keydown',key);
-    root.className='clx'; var wait=quick?0:450;
+    root.className='clx'; var wait=quick?0:450; if(bn&&bn.parentNode) bn.parentNode.removeChild(bn);
     setTimeout(function(){ if(root.parentNode) root.parentNode.removeChild(root); if(done) done() },wait);
   }
   root.__fin=finish; x.addEventListener('click',function(){finish()});
-  function key(e){if(e.key==='Escape') finish()} document.addEventListener('keydown',key);
-  if(reduce){ hard=setTimeout(function(){finish()},Math.min(dur,8)*1000); return }
+  function key(e){if(e.key==='Escape'&&!inf) finish()} document.addEventListener('keydown',key);
+  if(reduce){ if(!inf) hard=setTimeout(function(){finish()},Math.min(dur,8)*1000); return }
   function size(){W=window.innerWidth;H=window.innerHeight;cv.width=Math.round(W*DPR);cv.height=Math.round(H*DPR);ctx.setTransform(DPR,0,0,DPR,0,0)}
   size(); window.addEventListener('resize',size);
   var L=({low:.55,mid:1,high:1.7})[c.lvl]||1, fx={}; (FXMAP[c.fx]||FXMAP.fireworks).forEach(function(k){fx[k]=1});
   var sp=[],rk=[],cf=[],bl=[],fo=[],ld=[];
-  var t0=performance.now(), last=t0, end=t0+dur*1000, quiet=end-2200;
+  var t0=performance.now(), last=t0, end=inf?Infinity:t0+dur*1000, quiet=inf?Infinity:end-2200;
   var nRk=t0+300, nCr=t0+200, nCf=t0, nBl=t0;
   function burst(x0,y0,col,n,sp0,sp1,g,life,ring){
     for(var i=0;i<n;i++){ var a=ring?(i/n)*Math.PI*2:rnd(0,Math.PI*2), v=ring?sp1:rnd(sp0,sp1);
@@ -13576,17 +13592,19 @@ window.__clPlay=function(c,done){
     for(i=0;i<sp.length;i++){ var s=sp[i]; ctx.globalAlpha=Math.max(Math.min(s.l/(s.m*.6),1),0); ctx.strokeStyle=s.c; ctx.lineWidth=s.w; ctx.beginPath(); ctx.moveTo(s.px,s.py); ctx.lineTo(s.x,s.y); ctx.stroke() }
     ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over';
   }
-  hard=setTimeout(function(){finish()},(dur+8)*1000);
+  if(!inf) hard=setTimeout(function(){finish()},(dur+8)*1000);
   raf=requestAnimationFrame(step);
 };
 })();
 '''
 CL_RUNNER_JS = r'''(function(){
-var CFG=__DATA__, q=[], busy=false, played={};
+window.__clAnchor=document.currentScript;
+var CFG=__DATA__, q=[], busy=false, played={}, ACT='';
 function ls(){try{return window.localStorage}catch(e){return null}}
 function ss(){try{return window.sessionStorage}catch(e){return null}}
 function kk(c){return 'cl:'+c.id+':'+CFG.eid}
 function due(c){
+  if(c.cont) return ACT!==c.id;
   if(played[c.id]) return false;
   try{
     if(c.freq==='day'){var a=ls(); if(a&&a.getItem(kk(c))===CFG.today) return false}
@@ -13595,6 +13613,7 @@ function due(c){
   return true;
 }
 function mark(c){
+  if(c.cont) return;
   played[c.id]=1;
   try{ if(c.freq==='day'){var a=ls(); if(a) a.setItem(kk(c),CFG.today)} else if(c.freq==='login'){var b=ss(); if(b) b.setItem(kk(c),'1')} }catch(e){}
   if(c.freq==='once'){ try{ fetch('/employee/celebration/seen',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:c.id})}) }catch(e){} }
@@ -13602,15 +13621,24 @@ function mark(c){
 function next(){
   if(busy) return; var c=null;
   while(q.length){ c=q.shift(); if(due(c)) break; c=null }
-  if(!c) return; busy=true; mark(c);
-  window.__clPlay(c,function(){ busy=false; setTimeout(next,600) });
+  if(!c) return; busy=true; mark(c); if(c.cont) ACT=c.id;
+  window.__clPlay(c,function(){ busy=false; if(c.cont&&ACT===c.id) ACT=''; setTimeout(next,600) });
 }
-function add(list){ (list||[]).forEach(function(c){ if(due(c)&&!q.some(function(x){return x.id===c.id})) q.push(c) }); next() }
+function add(list){
+  (list||[]).slice().sort(function(a,b){return (a.cont?1:0)-(b.cont?1:0)}).forEach(function(c){ if(due(c)&&!q.some(function(x){return x.id===c.id})) q.push(c) });
+  next();
+}
+function chk(){
+  if(document.hidden) return;
+  fetch('/employee/celebration/poll',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(d){
+    if(!d||!d.items) return;
+    if(ACT&&!d.items.some(function(x){return x.id===ACT})){ if(window.__clStop) window.__clStop() }      /* Admin clicked Stop (or it ended / was switched off): remove the message and every animation */
+    add(d.items);
+  }).catch(function(){});
+}
 setTimeout(function(){ add(CFG.items) },900);
-setInterval(function(){
-  if(document.hidden||busy) return;
-  fetch('/employee/celebration/poll',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(d){ if(d&&d.items) add(d.items) }).catch(function(){});
-},45000);
+setInterval(chk,20000);
+document.addEventListener('visibilitychange',function(){ if(!document.hidden) chk() });
 })();
 '''
 CL_EMP_JS = "<script>" + CL_ENGINE_JS + CL_RUNNER_JS + "</script>"
@@ -13664,7 +13692,7 @@ CELEB_ADM = _nt_tabs("c") + r'''<style>
 <label>Occasion<select name="occ" id="cl-occ">{% for k,l in occs %}<option value="{{k}}" {{'selected' if f.occ==k}}>{{l}}</option>{% endfor %}</select></label>
 <label>Animation<select name="fx" id="cl-fx">{% for k,l in fxs %}<option value="{{k}}" {{'selected' if f.fx==k}}>{{l}}</option>{% endfor %}</select></label>
 <label>Intensity<select name="lvl" id="cl-lvl">{% for k,l in lvls %}<option value="{{k}}" {{'selected' if f.lvl==k}}>{{l}}</option>{% endfor %}</select></label>
-<label>Plays for (seconds, 5-30)<input type="number" name="dur" id="cl-dur" min="5" max="30" value="{{f.dur}}"></label>
+<label>Plays for (seconds, 5-30; not used for Continuous)<input type="number" name="dur" id="cl-dur" min="5" max="30" value="{{f.dur}}"></label>
 <label>How often<select name="freq">{% for k,l in freqs %}<option value="{{k}}" {{'selected' if f.freq==k}}>{{l}}</option>{% endfor %}</select></label>
 </div>
 <label>Title <span class="mut">(shown on the greeting card)</span><input type="text" name="title" id="cl-title" maxlength="120" value="{{f.title}}" placeholder="e.g. Happy Pongal!"></label>
@@ -13687,13 +13715,13 @@ CELEB_ADM = _nt_tabs("c") + r'''<style>
 <table><tr><th>Created</th><th>Celebration</th><th>Animation</th><th>Schedule</th><th>Viewers</th><th>Shown to</th><th>How often</th><th>Status</th><th></th></tr>
 {% for n in items %}<tr><td>{{n.at|t12}}{% if n.upd %}<br><small class="mut">edited {{n.upd|t12}}</small>{% endif %}</td>
 <td style="max-width:280px"><b>{{n.title or '(no title)'}}</b><br><span class="cl-tag">{{n.occ}}</span><br><span class="mut">{{n.message[:110]}}{{'...' if n.message|length>110}}</span></td>
-<td>{{n.fx}}<br><small class="mut">{{n.lvl}} &middot; {{n.dur}} s</small></td>
+<td>{{n.fx}}<br><small class="mut">{{n.lvl}}{% if n.freq[:10]!='Continuous' %} &middot; {{n.dur}} s{% endif %}</small></td>
 <td style="white-space:nowrap"><small class="mut">Display</small> {{ (n.start|t12) if n.start else 'Immediately' }}<br><small class="mut">Stop</small> {{ (n.stop|t12) if n.stop else 'Not set' }}</td>
 <td>{% if n.sel %}Selected ({{n.total}}){% else %}All employees ({{n.total}}){% endif %}</td>
 <td>{% if n.seen_n is not none %}<b>{{n.seen_n}}</b> / {{n.total}}{% else %}<span class="mut">-</span>{% endif %}</td>
 <td>{{n.freq}}</td><td class="cl-st-{{n.state}}">{{n.state}}</td>
 <td class="cl-act"><button type="button" class="back sm" data-pv='{{ n.pv|tojson }}'>&#9654; Preview</button> <a class="back sm" href="/admin/notes/celebrations?edit={{n.id}}#cl-form">Edit</a>
-{% if n.state=='Scheduled' %}<form method="post" action="/admin/notes/celebrations/{{n.id}}/status"><input type="hidden" name="to" value="startnow"><button class="back sm">Start now</button></form>{% elif n.state=='Live' %}<form method="post" action="/admin/notes/celebrations/{{n.id}}/status"><input type="hidden" name="to" value="stopnow"><button class="back sm">Stop now</button></form>{% endif %}
+{% if n.state=='Scheduled' %}<form method="post" action="/admin/notes/celebrations/{{n.id}}/status"><input type="hidden" name="to" value="startnow"><button class="back sm">Start now</button></form>{% elif n.state=='Live' %}<form method="post" action="/admin/notes/celebrations/{{n.id}}/status"><input type="hidden" name="to" value="stopnow"><button class="back sm" style="background:#dc2626;color:#fff;border-color:#dc2626">&#9632; Stop</button></form>{% endif %}
 <form method="post" action="/admin/notes/celebrations/{{n.id}}/status"><input type="hidden" name="to" value="{{ 'restore' if n.status=='Archived' else 'archive' }}"><button class="back sm">{{ 'Switch on again' if n.status=='Archived' else 'Switch off' }}</button></form>
 <form method="post" action="/admin/notes/celebrations/{{n.id}}/status" onsubmit="return confirm('Delete this celebration permanently?')"><input type="hidden" name="to" value="delete"><button class="back sm">Delete</button></form></td></tr>{% endfor %}</table>{% endif %}</div>
 <script>window.CL_PRESETS={{ presets|tojson }};window.CL_NOW='{{now_str}}';</script>
@@ -13704,8 +13732,8 @@ CELEB_ADM = _nt_tabs("c") + r'''<style>
   var P=window.CL_PRESETS||{}, occ=document.getElementById('cl-occ'), fx=document.getElementById('cl-fx'), lvl=document.getElementById('cl-lvl'), dur=document.getElementById('cl-dur'), ti=document.getElementById('cl-title'), ms=document.getElementById('cl-msg');
   function same(v,k){ v=v.trim(); if(!v) return true; return Object.keys(P).some(function(o){ return P[o][k]===v; }); }
   occ.addEventListener('change',function(){ var p=P[occ.value]; if(!p) return; if(same(ti.value,'title')) ti.value=p.title; if(same(ms.value,'message')) ms.value=p.message; fx.value=p.fx; });
-  function play(c){ if(!window.__clPlay) return; c.title=(c.title||'').replace(/\{name\}/g,'Employee'); c.text=(c.text||'').replace(/\{name\}/g,'Employee'); window.__clPlay(c); }
-  document.getElementById('cl-pv').addEventListener('click',function(){ play({id:'pv',title:ti.value.trim()||'Preview',text:ms.value.trim(),occ:occ.value,fx:fx.value,lvl:lvl.value,dur:Math.max(5,Math.min(30,+dur.value||12))}); });
+  function play(c){ if(!window.__clPlay) return; c.prev=true; c.title=(c.title||'').replace(/\{name\}/g,'Employee'); c.text=(c.text||'').replace(/\{name\}/g,'Employee'); window.__clPlay(c); }
+  document.getElementById('cl-pv').addEventListener('click',function(){ play({id:'pv',title:ti.value.trim()||'Preview',text:ms.value.trim(),occ:occ.value,fx:fx.value,lvl:lvl.value,dur:Math.max(5,Math.min(30,+dur.value||12)),cont:(f.querySelector('[name=freq]').value==='continuous')}); });
   document.querySelectorAll('[data-pv]').forEach(function(b){ b.addEventListener('click',function(){ try{ play(JSON.parse(b.getAttribute('data-pv'))); }catch(e){} }); });
   var pick=document.getElementById('cl-pick'), q=document.getElementById('cl-q'), nn=document.getElementById('cl-n');
   function boxes(){ return f.querySelectorAll('input[name=to]'); }
@@ -13746,9 +13774,9 @@ def admin_celebrations():
                           occ=lab(CL_OCC, occ), fx=lab(CL_FX, fxk), lvl=lab(CL_LVL, lv), dur=du, freq=lab(CL_FREQ, fr), sel=sel, status=st,
                           start=(w[0].strftime("%Y-%m-%d %H:%M") if w[0] else ""), stop=(w[1].strftime("%Y-%m-%d %H:%M") if w[1] else ""), state=_nt_state(c), total=len(aud),
                           seen_n=(sum(1 for e in aud if e["key"] in sd) if fr == "once" else None),
-                          pv=dict(id="pv", title=str(c.get("Title", "")).strip(), text=str(c.get("Message", "")).strip(), occ=occ, fx=fxk, lvl=lv, dur=du)))
+                          pv=dict(id="pv", title=str(c.get("Title", "")).strip(), text=str(c.get("Message", "")).strip(), occ=occ, fx=fxk, lvl=lv, dur=du, cont=(fr == "continuous"))))
     items.sort(key=lambda x: x["at"], reverse=True)
-    f = dict(id="", occ="birthday", fx=CL_OCC[0][4], lvl="mid", dur=12, freq="once", title=CL_OCC[0][2], message=CL_OCC[0][3], aud="all", to=set(), start="", stop="")
+    f = dict(id="", occ="birthday", fx=CL_OCC[0][4], lvl="mid", dur=12, freq="continuous", title=CL_OCC[0][2], message=CL_OCC[0][3], aud="all", to=set(), start="", stop="")
     eid = request.args.get("edit", "").strip()
     if eid:
         for c in rows(CL_SHEET):
@@ -13818,7 +13846,7 @@ def admin_celebrations_status(cid):
         flash("Started - it plays on the employees' pages within a minute.")
     elif act == "stopnow":
         ws.update(range_name="%s%d" % (col["Stop at"], r), values=[[now_s]], value_input_option="RAW")
-        flash("Stopped - it will not play any more.")
+        flash("Stopped - the birthday / greeting message and all animations disappear from the Employee page within about half a minute.")
     else:
         ws.update(range_name="%s%d" % (col["Status"], r), values=[[val]], value_input_option="RAW")
         flash({"Archived": "Switched off - employees will not see it.", "Active": "Switched on again (it follows its Display / Stop times).", "Deleted": "Deleted."}[val])

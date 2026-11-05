@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update263: Employee menu for Associate Manager / Team Lead / Senior Team Lead (matched live by Designation, active login) is now EXACTLY, in this order: 1. Team Logs  2. Employee Details  3. Personal Details  4. Leave & Permission. Nothing else is listed (no Daily entry / Productivity Info / Audit Log / Mahizhchi / Game links). Their first page after login is Team Logs (it also carries the Admin notes ticker and celebration, as the first page did before). /employee and /employee/productivity send them to Team Logs. All other employees and the Admin menu are unchanged. The menu label "Personal details" is now "Personal Details" for these three designations only.
   * Update262: Admin > Overview - NEW card "Senior Team Leads, Team Leads & Associate Managers with Productivity entry access". By default these three designations are View Only (Update105). The Admin can now GRANT (or take back) Productivity entry access for an individual lead with the Grant / Revoke buttons under 'Manage entry access' in that card (new sheet 'Lead Productivity Access', created automatically). The card lists ONLY the leads who have been granted access, with their Overview details (present / leave / absent, attendance, productive / non-productive hours, productivity %); leads without the grant are not shown (they stay View Only). A granted lead gets the Daily entry / Productivity Info pages, missed-entry tracking and reminders like any other employee and is counted in the Overview averages; Revoke restores View Only. Resigned / NCNS leads cannot be granted. Every other employee and page unchanged.
   * Update261: Celebrations - NEW 'Continuous' mode (How often = "Continuous - until the Admin clicks Stop"). The greeting (e.g. "Happy Birthday, <name>! Wishing you a wonderful year ahead filled with joy and success. From all of us!") shows as a SMALL-font banner at the very TOP of the Employee page with fireworks / crackers (and the other effects) repeating non-stop - no time limit and no close button for the employee. It disappears, together with every animation, within about half a minute after the Admin clicks 'Stop' (Admin > Notes & Messages > Celebrations; also ends at an optional Stop date & time, 'Switch off' or Delete). The employee's page is never blocked (animation layer is click-through). Birthday now defaults to Fireworks + Crackers and Continuous. Existing celebrations and all other pages unchanged.
   * Update260: NEW Admin > Notes & Messages > Celebrations. The Admin creates celebration animations for the Employee page - Fireworks, Crackers (ladi strings + flower pots), Fireworks + Crackers, Fireworks + Confetti, Confetti or Balloons - for occasions such as Birthday, Pongal, Diwali, New Year or a work anniversary (ready-made wishes included; type {name} to greet each employee by first name). Per celebration: greeting title / message, intensity (Gentle / Normal / Grand), play time (5-30 s), who sees it (all employees or only the ones ticked - e.g. the birthday person), Display / Stop date & time or 'Start now' / 'Stop now', 'Switch off', Delete, Preview, and how often it plays (once per employee / once a day / every login). It plays full-screen with a greeting card on the page employees land on after login (the Daily Entry page; the Leave page for Associate Manager / Team Lead / Senior Team Lead); work underneath stays clickable, the card has a close button (Esc also closes), and it is skipped as animation (card only) for people whose device asks for reduced motion. A celebration the Admin starts while an employee is already on the page appears within about a minute (a light check that does NOT reset the idle auto-logout timer). New sheets 'Celebrations' and 'Celebration Seen' are created automatically. Nothing else was changed.
@@ -4204,7 +4205,12 @@ def page(body, title="Productivity Tracker", **ctx):
     p = request.path
     items = list(NAVS.get(session.get("role"), []))
     if hide_entry_pages(): items = [it for it in items if it[0] not in ("/employee", "/employee/productivity")]      # Update236
-    if session.get("role") == "employee":
+    lead_menu = False
+    try: lead_menu = session.get("role") == "employee" and team_log_access()      # Update263
+    except Exception: lead_menu = False
+    if lead_menu:      # Update263: Associate Manager / Team Lead / Senior Team Lead - exactly these four menu items, in this order
+        items = [("/employee/team-logs", "Team Logs"), ("/employee/people", "Employee Details"), ("/employee/profile", "Personal Details"), ("/employee/leave", "Leave & Permission")]
+    elif session.get("role") == "employee":
         try:      # Admin-controlled: the menu item exists only while Audit Log access is enabled for this employee
             if audit_active(audit_access(session.get("emp_id", ""))): items.append(("/employee/audit", "Audit Log"))
         except Exception:
@@ -4296,7 +4302,7 @@ def page(body, title="Productivity Tracker", **ctx):
                 prm_json = _json.dumps(employee_perm_map(session.get("emp_id", "")), separators=(",", ":"))
         except Exception as ex: print("attendance calendar error:", repr(ex))
     _ntm = ""
-    if session.get("role") == "employee" and not ctx.get("bare") and (p == "/employee" or (ctx["hide_status"] and p == "/employee/leave")):      # Update250: Admin notes scroll at the top of the Daily Entry page (Associate Manager / Team Lead / Senior Team Lead have no Daily Entry - their first page shows it)
+    if session.get("role") == "employee" and not ctx.get("bare") and (p == "/employee" or p == "/employee/team-logs" or (ctx["hide_status"] and p == "/employee/leave")):      # Update250: Admin notes scroll at the top of the Daily Entry page (Associate Manager / Team Lead / Senior Team Lead have no Daily Entry - their first page shows it)
         try: _ntm = nt_marquee_html()
         except Exception as ex_: print("Messages marquee failed:", repr(ex_))
         try: _ntm += cl_html()      # Update260: celebration animations (Admin > Notes & Messages > Celebrations)
@@ -7685,7 +7691,7 @@ def employee_welcome():
 @app.route("/employee")
 @need("employee")
 def employee_home():
-    if hide_entry_pages(): return redirect("/employee/leave")      # Update236: no Daily entry page for Associate Manager / Team Lead / Senior Team Lead
+    if hide_entry_pages(): return redirect("/employee/team-logs")      # Update263 (was /employee/leave): first page is Team Logs. Update236: no Daily entry page for Associate Manager / Team Lead / Senior Team Lead
     prefetch(*EMP_PAGE_SHEETS)          # cold cache: fetch all sheets together instead of one by one
     today = str(today_local())
     session["designation"] = find_designation(session["emp_id"], session["name"], session["band"])
@@ -7732,7 +7738,7 @@ def prod_months():
 def employee_productivity():
     """Productivity Info: this employee's submissions for the chosen month (current month by default; the previous month is also
     available from the month picker, with View / Edit / Delete on every entry). Only the employee's OWN entries are ever listed."""
-    if hide_entry_pages(): return redirect("/employee/leave")      # Update236: no Productivity Info page for Associate Manager / Team Lead / Senior Team Lead
+    if hide_entry_pages(): return redirect("/employee/team-logs")      # Update263 / Update236: no Productivity Info page for Associate Manager / Team Lead / Senior Team Lead
     prefetch("Productivity log", "Processes", "Employees", "Settings", "Permissions", "Holidays")
     today = today_local()
     months = prod_months()

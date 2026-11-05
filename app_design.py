@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update264: Productivity entry is never held up by a Leave / Permission that is still waiting for Admin approval. When an entry is saved or edited, the required working hours now already allow for a PENDING permission (e.g. 2 hrs) or PENDING half-day leave (4 hrs) - before, only APPROVED ones were allowed for, so an employee with a pending 2-hr permission who logged 6 hrs got "Entry incomplete: 6 of the required 8 hours" until the Admin approved it. Same rule in the entry page's "Required ... hrs" hint and the 100% bloom. A pending full-day leave never blocked entry and still does not. A Rejected request counts for nothing (full day required again). Reports, Productivity %, Missed entries, attendance and calendars are unchanged and still follow APPROVED requests only.
   * Update263: Employee menu for Associate Manager / Team Lead / Senior Team Lead (matched live by Designation, active login) is now EXACTLY, in this order: 1. Team Logs  2. Employee Details  3. Personal Details  4. Leave & Permission. Nothing else is listed (no Daily entry / Productivity Info / Audit Log / Mahizhchi / Game links). Their first page after login is Team Logs (it also carries the Admin notes ticker and celebration, as the first page did before). /employee and /employee/productivity send them to Team Logs. All other employees and the Admin menu are unchanged. The menu label "Personal details" is now "Personal Details" for these three designations only.
   * Update262: Admin > Overview - NEW card "Senior Team Leads, Team Leads & Associate Managers with Productivity entry access". By default these three designations are View Only (Update105). The Admin can now GRANT (or take back) Productivity entry access for an individual lead with the Grant / Revoke buttons under 'Manage entry access' in that card (new sheet 'Lead Productivity Access', created automatically). The card lists ONLY the leads who have been granted access, with their Overview details (present / leave / absent, attendance, productive / non-productive hours, productivity %); leads without the grant are not shown (they stay View Only). A granted lead gets the Daily entry / Productivity Info pages, missed-entry tracking and reminders like any other employee and is counted in the Overview averages; Revoke restores View Only. Resigned / NCNS leads cannot be granted. Every other employee and page unchanged.
   * Update261: Celebrations - NEW 'Continuous' mode (How often = "Continuous - until the Admin clicks Stop"). The greeting (e.g. "Happy Birthday, <name>! Wishing you a wonderful year ahead filled with joy and success. From all of us!") shows as a SMALL-font banner at the very TOP of the Employee page with fireworks / crackers (and the other effects) repeating non-stop - no time limit and no close button for the employee. It disappears, together with every animation, within about half a minute after the Admin clicks 'Stop' (Admin > Notes & Messages > Celebrations; also ends at an optional Stop date & time, 'Switch off' or Delete). The employee's page is never blocked (animation layer is click-through). Birthday now defaults to Fireworks + Crackers and Continuous. Existing celebrations and all other pages unchanged.
@@ -1383,32 +1384,33 @@ def leave_is_half(l):
     return str(l.get("Day type", "")).strip().lower().startswith("half")
 app.jinja_env.filters["lhalf"] = leave_is_half
 
-def deduction_map(emp_id=None):
+def deduction_map(emp_id=None, pending=False):
     """{(EMPLOYEE ID key, 'YYYY-MM-DD'): hours taken OFF that working day} = APPROVED permission hours + 4 hrs for an APPROVED
     Half-Day Leave. One pass over the (cached) Permissions + Leave sheets; pass emp_id to look at one employee only."""
     want = _key(emp_id) if emp_id is not None else None
     out = {}
+    ok_ = ("Approved", "Pending") if pending else ("Approved",)      # Update264: pending=True (entry validation only) also allows for requests still waiting for Admin approval
     for r in rows("Permissions"):
-        if str(r.get("Status", "")).strip() != "Approved": continue
+        if str(r.get("Status", "")).strip() not in ok_: continue
         k = _key(r.get("Employee ID", ""))
         if want is not None and k != want: continue
         key = (k, norm_date(r.get("Date", "")))
         out[key] = out.get(key, 0.0) + num(r.get("Hours"))
     for l in rows("Leave"):
-        if leave_status(l) != "Approved" or not leave_is_half(l): continue
+        if leave_status(l) not in ok_ or not leave_is_half(l): continue
         k = _key(l.get("Employee ID", ""))
         if want is not None and k != want: continue
         key = (k, norm_date(l.get("Date", "")))
         out[key] = out.get(key, 0.0) + HALF_DAY_HOURS
     return {k: min(v, float(DAY_HOURS)) for k, v in out.items()}
 
-def day_deduction(emp_id, date):
-    return deduction_map(emp_id).get((_key(emp_id), str(date)), 0.0)
+def day_deduction(emp_id, date, pending=False):
+    return deduction_map(emp_id, pending=pending).get((_key(emp_id), str(date)), 0.0)
 
-def required_hours(emp_id, date):
+def required_hours(emp_id, date, pending=False):
     """Hours that must be logged for a day to be complete: the 8-hour working day minus approved permission / half-day leave
     (2-hr permission = 6 hrs, half-day leave = 4 hrs)."""
-    return max(float(DAY_HOURS) - day_deduction(emp_id, date), 0.0)
+    return max(float(DAY_HOURS) - day_deduction(emp_id, date, pending=pending), 0.0)
 
 def parse_form(emp_id):
     f = request.form; g = f.getlist
@@ -1438,10 +1440,10 @@ def parse_form(emp_id):
     elif tot > day_limit():
         err = f"Total {tot:g} hrs is more than {day_limit():g} hrs."
     else:
-        need_h = required_hours(emp_id, date)
+        need_h = required_hours(emp_id, date, pending=True)      # Update264: a pending permission / half-day leave does not hold up the entry
         if tot + 1e-9 < need_h:
             cut = float(DAY_HOURS) - need_h
-            why = f" ({DAY_HOURS:g}-hour day less {cut:g} hr approved permission / half-day leave)" if cut > 0 else ""
+            why = f" ({DAY_HOURS:g}-hour day less {cut:g} hr permission / half-day leave)" if cut > 0 else ""
             err = (f"Entry incomplete: {tot:g} of the required {need_h:g} working hours logged{why} "
                    f"({need_h - tot:g} hrs remaining). Complete all {need_h:g} hours before saving.")
     return date, procs, notes, err
@@ -6364,7 +6366,7 @@ def form_page(sub, action, heading):
     if not any(is_poc(n) for n in names): names.insert(max(len(names) - 1, 0), POC_SAMPLE_PROCESS)       # Update94: "POC_Sample" is always available (Hour, Count, Description required)
     if not any(is_training(n) for n in names): names.insert(max(len(names) - 1, 0), TRAINING_PROCESS)       # Update93: "Training" is always available (just before "Other")
     tph = process_rates()
-    perm = {d: h for (_k, d), h in deduction_map(sub.get("emp_id")).items()}      # approved permission + half-day leave hours, by date
+    perm = {d: h for (_k, d), h in deduction_map(sub.get("emp_id"), pending=True).items()}      # approved + pending (Update264) permission + half-day leave hours, by date
     maxdate = ""          # no upper limit on the entry date - employees may pick any date they need
     jd_ = join_date(sub.get("emp_id")) if session.get("role") == "employee" else None
     mindate = str(jd_) if jd_ else ""      # Update97: no entry before the joining date
@@ -7842,7 +7844,7 @@ def _employee_save_impl():
         miss = [] if is_off(date) else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
         if miss: flash(target_alert_text(miss), "error")           # employee is told straight away that the target was missed
         # Update94: 100% = not a weekly off, every Admin target met, and all required working hours logged -> flower animation (3 s)
-        if not is_off(date) and not miss and sum(p_[1] for p_ in procs) + sum(n_[1] for n_ in notes) + 1e-9 >= required_hours(session["emp_id"], date):
+        if not is_off(date) and not miss and sum(p_[1] for p_ in procs) + sum(n_[1] for n_ in notes) + 1e-9 >= required_hours(session["emp_id"], date, pending=True):
             session["bloom"] = True
     except Exception as ex:
         print("post-save checks failed:", ex)

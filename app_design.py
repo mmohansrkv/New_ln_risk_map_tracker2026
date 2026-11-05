@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update262: Admin > Overview - NEW card "Senior Team Leads, Team Leads & Associate Managers with Productivity entry access". By default these three designations are View Only (Update105). The Admin can now GRANT (or take back) Productivity entry access for an individual lead with the Grant / Revoke buttons under 'Manage entry access' in that card (new sheet 'Lead Productivity Access', created automatically). The card lists ONLY the leads who have been granted access, with their Overview details (present / leave / absent, attendance, productive / non-productive hours, productivity %); leads without the grant are not shown (they stay View Only). A granted lead gets the Daily entry / Productivity Info pages, missed-entry tracking and reminders like any other employee and is counted in the Overview averages; Revoke restores View Only. Resigned / NCNS leads cannot be granted. Every other employee and page unchanged.
   * Update261: Celebrations - NEW 'Continuous' mode (How often = "Continuous - until the Admin clicks Stop"). The greeting (e.g. "Happy Birthday, <name>! Wishing you a wonderful year ahead filled with joy and success. From all of us!") shows as a SMALL-font banner at the very TOP of the Employee page with fireworks / crackers (and the other effects) repeating non-stop - no time limit and no close button for the employee. It disappears, together with every animation, within about half a minute after the Admin clicks 'Stop' (Admin > Notes & Messages > Celebrations; also ends at an optional Stop date & time, 'Switch off' or Delete). The employee's page is never blocked (animation layer is click-through). Birthday now defaults to Fireworks + Crackers and Continuous. Existing celebrations and all other pages unchanged.
   * Update260: NEW Admin > Notes & Messages > Celebrations. The Admin creates celebration animations for the Employee page - Fireworks, Crackers (ladi strings + flower pots), Fireworks + Crackers, Fireworks + Confetti, Confetti or Balloons - for occasions such as Birthday, Pongal, Diwali, New Year or a work anniversary (ready-made wishes included; type {name} to greet each employee by first name). Per celebration: greeting title / message, intensity (Gentle / Normal / Grand), play time (5-30 s), who sees it (all employees or only the ones ticked - e.g. the birthday person), Display / Stop date & time or 'Start now' / 'Stop now', 'Switch off', Delete, Preview, and how often it plays (once per employee / once a day / every login). It plays full-screen with a greeting card on the page employees land on after login (the Daily Entry page; the Leave page for Associate Manager / Team Lead / Senior Team Lead); work underneath stays clickable, the card has a close button (Esc also closes), and it is skipped as animation (card only) for people whose device asks for reduced motion. A celebration the Admin starts while an employee is already on the page appears within about a minute (a light check that does NOT reset the idle auto-logout timer). New sheets 'Celebrations' and 'Celebration Seen' are created automatically. Nothing else was changed.
   * Update259: SPEED ONLY - no screen, text, permission or feature was changed. (1) Start-up: the spreadsheet is opened with 3 Google calls instead of ~63 (one call lists the sheets, one call reads every header row, the Productivity log column migration runs only when its header is still the old one), and it is opened in the background as soon as the server process starts - the first Admin / Employee login after a deploy or a Render wake-up no longer waits for it (before, 30 sheets x 2 calls in a row could run past Gunicorn's 30 s timeout and hit the Sheets read quota). (2) Save: the 'already submitted for this date?' check reads only the 3 columns it needs (Submission ID, Date, Employee ID) live instead of the whole Productivity log; Edit / Delete row lookup and the 'did the rows land?' check read only column A. (3) Login: the Attendance 'close sessions left open' clean-up runs once per employee per day (it re-read the whole Attendance sheet on EVERY login) and reads only columns A:G. (4) Admin pages that read their sheets live (@live_data) and the Employee Info pages now read the sheets they need AT THE SAME TIME instead of one after another, and share an in-flight read instead of asking Google twice.
@@ -567,6 +568,7 @@ HEADERS = {
     # Update85: Connection Game (bonus round after all 5 Sets are won). 4 rows per Game = 4 groups of 4 words.
     "Mahizhchi Connections": ["Game", "Group name", "Word 1", "Word 2", "Word 3", "Word 4"],
     # Update90: optional list to SWITCH OFF the Daily Productivity Entry for an employee (Enabled = No). No row / Enabled = Yes -> has access.
+    "Lead Productivity Access": ["Employee ID", "Employee name", "Granted", "Updated at", "Updated by"],      # Update262
     "Productivity Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
     # Update90: one row per reminder e-mail (and one \"__RUN__\" row per day = the worker that sends that day's batch, so workers never double-send)
     "Email Log": ["Date", "Employee ID", "Employee name", "Email", "Sent at", "Status"],
@@ -1228,13 +1230,24 @@ VIEW_ONLY_DESIGNATIONS = ("Senior Team Lead", "Team Lead", "Associate Manager")
 def _norm_desig(d): return re.sub(r"[^a-z]+", " ", str(d or "").lower()).strip()      # case / spacing / punctuation insensitive
 _VIEW_ONLY_SET = {_norm_desig(x) for x in VIEW_ONLY_DESIGNATIONS}
 def desig_view_only(d): return _norm_desig(d) in _VIEW_ONLY_SET
-_vo_cache = [0.0, frozenset()]
+_vo_cache = [0.0, frozenset(), frozenset()]
+LEAD_ACCESS_SHEET = "Lead Productivity Access"      # Update262: Admin grants Productivity entry access to an individual Senior Team Lead / Team Lead / Associate Manager
+def _lead_granted_now():
+    try: return frozenset(_key(r.get("Employee ID", "")) for r in rows(LEAD_ACCESS_SHEET) if str(r.get("Granted", "")).strip().lower() in ("yes", "y", "true", "1", "granted"))
+    except Exception as ex:
+        print("Lead Productivity Access read failed:", repr(ex)); return frozenset()
 def view_only_ids():
-    """Employee IDs (normalised) whose Designation is view-only. Re-read every few seconds, so a Designation change applies automatically."""
+    """Employee IDs (normalised) whose Designation is view-only AND who have not been granted entry access by the Admin (Update262). Re-read every few seconds."""
     if time.monotonic() - _vo_cache[0] > 8:
-        ids = frozenset(_key(e.get("Employee ID", "")) for e in rows("Employees") if desig_view_only(e.get("Designation", "")))
-        _vo_cache[0], _vo_cache[1] = time.monotonic(), ids
+        gr = _lead_granted_now()
+        ids = frozenset(_key(e.get("Employee ID", "")) for e in rows("Employees") if desig_view_only(e.get("Designation", "")) and _key(e.get("Employee ID", "")) not in gr)
+        _vo_cache[0], _vo_cache[1], _vo_cache[2] = time.monotonic(), ids, gr
     return _vo_cache[1]
+def lead_granted_ids():
+    view_only_ids(); return _vo_cache[2]
+def desig_vo_eff(e):
+    """Update262: the Employees row is a View-Only designation and has NOT been granted entry access."""
+    return desig_view_only(e.get("Designation", "")) and _key(e.get("Employee ID", "")) not in lead_granted_ids()
 def is_view_only(eid): return _key(eid) in view_only_ids()
 VIEW_ONLY_MSG = "Your designation has View Only access to Productivity - entries cannot be added or edited."
 # ---- Update253: Resigned / NCNS employees have NO Productivity access and are excluded from every pending-productivity calculation and every Missed Entries reminder e-mail ----
@@ -5439,7 +5452,7 @@ def admin_log():
     rep_month, _on = report_scope()
     subs = [s for s in load_subs() if (not d or s["date"] == d) and (not rep_month or str(s["date"]).startswith(rep_month)) and
             (not e or e in (str(s["emp_id"]).lower(), str(s["emp_name"]).lower())) and not is_view_only(s["emp_id"])]      # Update256: no names / records of Associate Manager / Team Lead / Senior Team Lead here
-    emp_list = sorted((x for x in rows("Employees") if not desig_view_only(x.get("Designation", ""))), key=lambda x: str(x.get("Name", "")).lower())
+    emp_list = sorted((x for x in rows("Employees") if not desig_vo_eff(x)), key=lambda x: str(x.get("Name", "")).lower())
     return page(LOG_MANAGE + LOG_TOP + LIST + LOG_MISSED, title="Productivity log", subs=subs, emp=request.args.get("emp", "").strip(), **log_missed_section(),
                 emp_list=emp_list, sel_emp=request.args.get("emp", "").strip(), today_str=str(today_local()),
                 nxt=request.full_path.rstrip("?"),
@@ -7676,7 +7689,7 @@ def employee_home():
     prefetch(*EMP_PAGE_SHEETS)          # cold cache: fetch all sheets together instead of one by one
     today = str(today_local())
     session["designation"] = find_designation(session["emp_id"], session["name"], session["band"])
-    if desig_view_only(session["designation"]) or is_view_only(session["emp_id"]):      # Update105: View Only - no entry form, no Productivity %
+    if is_view_only(session["emp_id"]):      # Update105 / Update262 (a lead granted entry access gets the normal entry form): View Only - no entry form, no Productivity %
         first_ = today_local().replace(day=1)
         today_perm_ = next((r for r in rows("Permissions") if str(r["Employee ID"]) == session["emp_id"] and r["Date"] == today), None)
         return page(EMP_TOP + VIEW_ONLY_CARD, title="Daily productivity", today=today, month_label=first_.strftime("%B %Y"),
@@ -7939,7 +7952,7 @@ def report(employees, subs, leaves, start, end):
                         pct=min(round(earned_ / base * 100), 100) if base else (100 if prod_hrs > 0 else 0),
                         prod=round(prod_hrs, 2), non=round(non_hrs, 2), perm=perm_hrs))
     for r_, e_ in zip(out, employees):      # Update105: Senior Team Lead / Team Lead / Associate Manager -> View Only, no Productivity %
-        if desig_view_only(e_.get("Designation", "")) or is_view_only(r_["id"]):
+        if desig_vo_eff(e_) or is_view_only(r_["id"]):
             r_.update(vo=True, pct=None, att=None, present="-", absent="-", prod=0, non=0)
         else:
             r_["vo"] = False
@@ -8108,7 +8121,7 @@ def admin_productivity_overview(emps, q):
     end_m = min(m1, today - dt.timedelta(days=1)); prow = []
     for e in emps:
         eid = str(e["Employee ID"]).strip(); k = _key(eid)
-        if desig_view_only(e.get("Designation", "")): continue      # Update256: Associate Manager / Team Lead / Senior Team Lead are not listed in the Admin Productivity Log
+        if desig_vo_eff(e): continue      # Update256: Associate Manager / Team Lead / Senior Team Lead are not listed in the Admin Productivity Log
         pstart, jd, basis = prod_start_info(eid); r = reps.get(k, {})
         ea = max(m0, jd) if jd else m0
         entries = len({s["date"] for s in by_emp.get(k, []) if not s["off"] and str(ea) <= s["date"] <= str(m1)})
@@ -8301,11 +8314,22 @@ setInterval(poll,5000);document.addEventListener('visibilitychange',function(){i
 <td>{{r.prod|g}}</td><td>{{r.non|g}}</td>
 <td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td>{% endif %}<td class="no-print"><a href="/admin/summary/check?emp={{r.id|urlencode}}&month={{month}}">Check</a></td></tr>
 {% else %}<tr><td colspan="11">No employees yet.</td></tr>{% endfor %}</table>
+<div class="card" id="ovl"><h2 style="margin:0 0 6px">Senior Team Leads, Team Leads &amp; Associate Managers with Productivity entry access <span class="pill in">{{lead_granted|length}}</span></h2>
+<p class="mut" style="margin:0 0 8px">Only leads the Admin has granted Productivity entry access are listed. Leads without the grant stay View Only and are not shown here.</p>
+<table><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th><th>Productive Hours</th><th>Non-productive Hours</th><th>Productivity (%)</th></tr>
+{% for r in lead_granted %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>
+<td>{{r.att}}%<i class="bar {{r.att|tone}}"><u style="width:{{r.att}}%"></u></i></td><td>{{r.prod|g}}</td><td>{{r.non|g}}</td><td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td></tr>
+{% else %}<tr><td colspan="10">No Senior Team Lead / Team Lead / Associate Manager has been granted Productivity entry access.</td></tr>{% endfor %}</table>
+<details class="no-print" style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Manage entry access ({{lead_all|length}})</summary>
+<table style="margin-top:8px"><tr><th>Employee</th><th>Designation</th><th>Entry access</th><th></th></tr>
+{% for l in lead_all %}<tr><td>{{l.id}} &middot; {{l.name}}</td><td>{{l.desig}}</td><td><span class="pill {{'in' if l.granted else 'act'}}">{{'Granted' if l.granted else 'View Only'}}</span></td>
+<td><form method="post" action="/admin/summary/lead-access" style="margin:0"><input type="hidden" name="emp" value="{{l.id}}"><input type="hidden" name="month" value="{{month}}"><input type="hidden" name="to" value="{{'revoke' if l.granted else 'grant'}}"><button class="back sm">{{'Revoke access' if l.granted else 'Grant access'}}</button></form></td></tr>
+{% else %}<tr><td colspan="4">No Senior Team Lead / Team Lead / Associate Manager found.</td></tr>{% endfor %}</table></details></div>
 <script>(function(){var t=document.getElementById('ovt');if(!t)return;var sig=t.getAttribute('data-sig'),busy=false,q=location.search||'';
 function stamp(x){var e=document.getElementById('ov_at');if(e)e.textContent=x}
 function redraw(){fetch(location.pathname+q,{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.text()}).then(function(h){
  var d=new DOMParser().parseFromString(h,'text/html'),nt=d.getElementById('ovt'),ok=d.querySelector('.kpis'),ck=document.querySelector('.kpis');
- if(!nt)return;t.innerHTML=nt.innerHTML;sig=nt.getAttribute('data-sig');t.setAttribute('data-sig',sig);if(ok&&ck)ck.innerHTML=ok.innerHTML}).catch(function(){})}
+ if(!nt)return;var ol=d.getElementById('ovl'),cl=document.getElementById('ovl');if(ol&&cl)cl.innerHTML=ol.innerHTML;t.innerHTML=nt.innerHTML;sig=nt.getAttribute('data-sig');t.setAttribute('data-sig',sig);if(ok&&ck)ck.innerHTML=ok.innerHTML}).catch(function(){})}
 function poll(){if(busy||document.hidden)return;busy=true;
  fetch('/admin/summary/poll'+q,{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(j){stamp(j.at);if(j.sig!==sig)redraw()}).catch(function(){}).then(function(){busy=false})}
 setInterval(poll,30000);document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()})})();
@@ -8420,8 +8444,13 @@ def _overview_ctx(month):
     n = len(std) or 1
     a1, a2 = round(sum(r["att"] for r in std) / n), round(sum(r["pct"] for r in std) / n)
     extra = [("Employees", len(rep)), ("Total leave days", sum(r["leave"] for r in rep))]
-    sig = _ih.md5(json.dumps([rep, a1, a2, label], sort_keys=True, default=str).encode()).hexdigest()
-    return dict(rep=rep, month=month, label=label, wd=workdays(start, end), lab1="Average attendance", lab2="Average productivity",
+    gr = lead_granted_ids()      # Update262: leads the Admin granted Productivity entry access -> shown in their own Overview card; all leads listed for Grant / Revoke
+    lead_all = [dict(id=str(e.get("Employee ID", "")).strip(), name=str(e.get("Name", "")), desig=str(e.get("Designation", "")).strip(), granted=_key(e.get("Employee ID", "")) in gr)
+                for e in emps if desig_view_only(e.get("Designation", "")) and not emp_sep(e)]
+    lead_all.sort(key=lambda x: x["name"].lower())
+    lead_granted = [r for r in rep if _key(r["id"]) in gr and any(_key(x["id"]) == _key(r["id"]) for x in lead_all)]
+    sig = _ih.md5(json.dumps([rep, a1, a2, label, lead_all], sort_keys=True, default=str).encode()).hexdigest()
+    return dict(lead_all=lead_all, lead_granted=lead_granted, rep=rep, month=month, label=label, wd=workdays(start, end), lab1="Average attendance", lab2="Average productivity",
                 a1=a1, a2=a2, extra=extra, target=target_hours(), sig=sig)
 
 @app.route("/admin/summary")
@@ -8431,6 +8460,28 @@ def admin_summary():
     month = request.args.get("month") or today_local().strftime("%Y-%m")
     ctx = _overview_ctx(month)
     return page(SUMMARY, title="Overview", online=online_list(), **ctx)
+
+@app.route("/admin/summary/lead-access", methods=["POST"])
+@need("admin")
+def admin_lead_access():
+    """Update262: Admin grants / revokes Productivity entry access for ONE Senior Team Lead / Team Lead / Associate Manager."""
+    eid = request.form.get("emp", "").strip(); act = request.form.get("to", ""); mo = request.form.get("month", "").strip()
+    back = "/admin/summary" + (("?month=" + mo) if (mo == "all" or re.fullmatch(r"\d{4}-\d{2}", mo)) else "")
+    e = next((x for x in rows("Employees") if _key(x.get("Employee ID", "")) == _key(eid)), None)
+    if e is None or act not in ("grant", "revoke") or not desig_view_only(e.get("Designation", "")):
+        flash("Nothing changed - choose a Senior Team Lead, Team Lead or Associate Manager.", "error"); return redirect(back)
+    if act == "grant" and emp_sep(e):
+        flash("A Resigned / NCNS employee cannot be granted Productivity entry access.", "error"); return redirect(back)
+    val = "Yes" if act == "grant" else "No"; now = now_local().strftime("%Y-%m-%d %H:%M:%S"); ws = ws_of(LEAD_ACCESS_SHEET)
+    cur = next((r for r in _fetch_rows(LEAD_ACCESS_SHEET) if _key(r.get("Employee ID", "")) == _key(eid)), None)
+    try:
+        if cur: ws.update(range_name="C%d:E%d" % (cur["_row"], cur["_row"]), values=[[val, now, "Admin"]], value_input_option="RAW")
+        else: ws.append_row([str(e.get("Employee ID", "")).strip(), str(e.get("Name", "")), val, now, "Admin"], value_input_option="RAW")
+    except Exception as ex:
+        print("Lead access save failed:", repr(ex)); flash("Could not save - please try again.", "error"); return redirect(back)
+    invalidate_cache(LEAD_ACCESS_SHEET); _vo_cache[0] = 0.0
+    flash("%s - Productivity entry access %s." % (e.get("Name", eid), "granted (they now get the Daily entry page)" if act == "grant" else "taken back (View Only again)"))
+    return redirect(back)
 
 @app.route("/admin/summary/poll")
 @need("admin")

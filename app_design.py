@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update265: Admin - a bold notification bar at the TOP of every Admin page whenever an employee submits a Leave or Permission request (who, what, dates / hours, reason, time). It stays on every Admin page, and keeps appearing after logout / login, until the Admin clicks Clear (one request) or Clear all; cleared notifications disappear for good. New ones appear within about 30 seconds without reloading the page. 'Review requests' opens Admin > Leave & Permission Log. Stored in the new sheet 'Admin Alerts' (created automatically). An alert never blocks or delays the employee's submission.
   * Update264: Productivity entry is never held up by a Leave / Permission that is still waiting for Admin approval. When an entry is saved or edited, the required working hours now already allow for a PENDING permission (e.g. 2 hrs) or PENDING half-day leave (4 hrs) - before, only APPROVED ones were allowed for, so an employee with a pending 2-hr permission who logged 6 hrs got "Entry incomplete: 6 of the required 8 hours" until the Admin approved it. Same rule in the entry page's "Required ... hrs" hint and the 100% bloom. A pending full-day leave never blocked entry and still does not. A Rejected request counts for nothing (full day required again). Reports, Productivity %, Missed entries, attendance and calendars are unchanged and still follow APPROVED requests only.
   * Update263: Employee menu for Associate Manager / Team Lead / Senior Team Lead (matched live by Designation, active login) is now EXACTLY, in this order: 1. Team Logs  2. Employee Details  3. Personal Details  4. Leave & Permission. Nothing else is listed (no Daily entry / Productivity Info / Audit Log / Mahizhchi / Game links). Their first page after login is Team Logs (it also carries the Admin notes ticker and celebration, as the first page did before). /employee and /employee/productivity send them to Team Logs. All other employees and the Admin menu are unchanged. The menu label "Personal details" is now "Personal Details" for these three designations only.
   * Update262: Admin > Overview - NEW card "Senior Team Leads, Team Leads & Associate Managers with Productivity entry access". By default these three designations are View Only (Update105). The Admin can now GRANT (or take back) Productivity entry access for an individual lead with the Grant / Revoke buttons under 'Manage entry access' in that card (new sheet 'Lead Productivity Access', created automatically). The card lists ONLY the leads who have been granted access, with their Overview details (present / leave / absent, attendance, productive / non-productive hours, productivity %); leads without the grant are not shown (they stay View Only). A granted lead gets the Daily entry / Productivity Info pages, missed-entry tracking and reminders like any other employee and is counted in the Overview averages; Revoke restores View Only. Resigned / NCNS leads cannot be granted. Every other employee and page unchanged.
@@ -570,6 +571,7 @@ HEADERS = {
     # Update85: Connection Game (bonus round after all 5 Sets are won). 4 rows per Game = 4 groups of 4 words.
     "Mahizhchi Connections": ["Game", "Group name", "Word 1", "Word 2", "Word 3", "Word 4"],
     # Update90: optional list to SWITCH OFF the Daily Productivity Entry for an employee (Enabled = No). No row / Enabled = Yes -> has access.
+    "Admin Alerts": ["Alert ID", "Type", "Employee ID", "Employee name", "Details", "Created at", "Status", "Cleared at"],      # Update265
     "Lead Productivity Access": ["Employee ID", "Employee name", "Granted", "Updated at", "Updated by"],      # Update262
     "Productivity Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
     # Update90: one row per reminder e-mail (and one \"__RUN__\" row per day = the worker that sends that day's batch, so workers never double-send)
@@ -4309,6 +4311,9 @@ def page(body, title="Productivity Tracker", **ctx):
         except Exception as ex_: print("Messages marquee failed:", repr(ex_))
         try: _ntm += cl_html()      # Update260: celebration animations (Admin > Notes & Messages > Celebrations)
         except Exception as ex_: print("Celebration overlay failed:", repr(ex_))
+    if session.get("role") == "admin" and not ctx.get("bare"):      # Update265: Leave / Permission notifications at the top of every Admin page
+        try: _ntm = admin_alert_box() + _ntm
+        except Exception as ex_: print("Admin alert bar failed:", repr(ex_))
     _html = render_fast(BASE, body=_ntm + render_fast(body, **ctx), title=title, nav=nav,
                                   side_avatar=side_avatar, side_name=side_name, side_name_html=side_name_html, welcome_html=welcome_html, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, hol_only=bool(ctx["hide_status"]), srv_today=str(today_local()), theme_css=_theme_css())
     return _html
@@ -8707,6 +8712,76 @@ def employee_password():
         flash("Could not change the password - please reload the page and try again.")
     return redirect("/employee/profile")
 
+# ---------------------------------------------------------------- Update265: Admin notifications for new Leave / Permission requests
+ADM_ALERT_T = """{% if items %}<div class="admal" role="alert" aria-live="assertive">
+<div class="admal-h"><span class="admal-bell" aria-hidden="true">&#128276;</span><b>{{items|length + more}} new Leave &amp; Permission request{{'' if items|length + more == 1 else 's'}} to review</b>
+<a class="admal-go" href="/admin/leave-permission">Review requests</a>
+<form method="post" action="/admin/alerts/clear" onsubmit="this.nx.value=location.pathname+location.search"><input type="hidden" name="nx"><input type="hidden" name="id" value="all"><button type="submit" class="admal-b">Clear all</button></form></div>
+<ul>{% for a in items %}<li><span class="admal-t {{a.kind|lower}}">{{a.kind}}</span><span class="admal-m"><b>{{a.name}}</b> ({{a.eid}}) &middot; {{a.details}}</span><small>{{a.at}}</small>
+<form method="post" action="/admin/alerts/clear" onsubmit="this.nx.value=location.pathname+location.search"><input type="hidden" name="nx"><input type="hidden" name="id" value="{{a.id}}"><button type="submit" class="admal-b">Clear</button></form></li>{% endfor %}</ul>
+{% if more %}<p class="admal-more">+ {{more}} older notification{{'' if more == 1 else 's'}} - use Clear all or Clear to see them.</p>{% endif %}</div>{% endif %}"""
+
+ADM_ALERT_CSS = """<style>.admal{margin:0 0 14px;border-radius:12px;overflow:hidden;color:#fff;background:linear-gradient(135deg,#dc2626,#f97316);box-shadow:0 8px 26px -10px rgba(220,38,38,.7);animation:admalP 2.2s ease-in-out infinite}
+@keyframes admalP{50%{box-shadow:0 8px 34px -4px rgba(249,115,22,.95)}}
+.admal-h{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px;font-size:15px}.admal-h b{flex:1 1 auto}.admal-bell{font-size:20px;display:inline-block;animation:admalR 1.6s ease-in-out infinite;transform-origin:50% 0}
+@keyframes admalR{0%,60%,100%{transform:rotate(0)}10%,30%{transform:rotate(14deg)}20%,40%{transform:rotate(-14deg)}}
+.admal form{margin:0}.admal-go{color:#fff;background:rgba(255,255,255,.22);border-radius:8px;padding:5px 12px;text-decoration:none;font-weight:600;font-size:13px}
+.admal-b{cursor:pointer;border:0;border-radius:8px;padding:5px 12px;font-weight:600;font-size:13px;background:#fff;color:#b91c1c}
+.admal ul{list-style:none;margin:0;padding:0;background:rgba(0,0,0,.16);max-height:260px;overflow:auto}.admal li{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 14px;border-top:1px solid rgba(255,255,255,.18);font-size:13.5px}
+.admal-m{flex:1 1 260px}.admal li small{opacity:.85}.admal-t{border-radius:999px;padding:2px 10px;font-weight:700;font-size:12px;background:#fff;color:#b45309}.admal-t.permission{color:#6d28d9}
+.admal-more{margin:0;padding:6px 14px;font-size:12.5px;background:rgba(0,0,0,.16)}@media(prefers-reduced-motion:reduce){.admal,.admal-bell{animation:none}}@media print{#adm-alerts{display:none}}</style>"""
+
+ADM_ALERT_JS = """<script>(function(){var b=document.getElementById('adm-alerts');if(!b)return;function go(){if(document.hidden)return;
+fetch('/admin/alerts/poll',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.text():null}).then(function(h){if(h!==null&&h!==b.getAttribute('data-h')){b.innerHTML=h;b.setAttribute('data-h',h)}}).catch(function(){})}
+setInterval(go,30000);document.addEventListener('visibilitychange',function(){if(!document.hidden)go()})})();</script>"""
+
+def admin_alert_add(kind, emp, details):
+    """Update265: record a new Leave / Permission request for the Admin's notification bar. Never raises - a failure here must not affect the employee's request."""
+    try:
+        ws = ws_of("Admin Alerts")
+        ws.append_row([uuid.uuid4().hex[:10], kind, str((emp or {}).get("Employee ID", "")).strip(), str((emp or {}).get("Name", "")),
+                       _short(str(details), 220), now_local().strftime("%Y-%m-%d %H:%M:%S"), "New", ""], value_input_option="RAW")
+        invalidate_cache("Admin Alerts")
+    except Exception as ex:
+        print("Admin alert not saved:", repr(ex))
+
+def _admin_alert_items(limit=25):
+    live = [r for r in rows("Admin Alerts") if str(r.get("Status", "")).strip().lower() != "cleared" and str(r.get("Alert ID", "")).strip()]
+    live.sort(key=lambda r: str(r.get("Created at", "")), reverse=True)
+    items = [dict(id=str(r["Alert ID"]), kind=str(r.get("Type", "")), eid=str(r.get("Employee ID", "")), name=str(r.get("Employee name", "")),
+                  details=str(r.get("Details", "")), at=str(r.get("Created at", ""))[:16]) for r in live[:limit]]
+    return items, max(len(live) - limit, 0)
+
+def admin_alert_html():
+    try: items, more = _admin_alert_items()
+    except Exception as ex:
+        print("Admin alerts read failed:", repr(ex)); items, more = [], 0
+    return render_fast(ADM_ALERT_T, items=items, more=more)
+
+def admin_alert_box():
+    return ADM_ALERT_CSS + '<div id="adm-alerts" data-h="">' + admin_alert_html() + '</div>' + ADM_ALERT_JS
+
+@app.route("/admin/alerts/poll")
+@need("admin")
+def admin_alerts_poll():
+    return Response(admin_alert_html(), mimetype="text/html", headers={"Cache-Control": "no-store"})
+
+@app.route("/admin/alerts/clear", methods=["POST"])
+@need("admin")
+def admin_alerts_clear():
+    aid = request.form.get("id", "").strip(); nx = request.form.get("nx", "")
+    back = nx if (nx.startswith("/admin") and "//" not in nx[:3] and "\\" not in nx) else "/admin/summary"
+    try:
+        now = now_local().strftime("%Y-%m-%d %H:%M:%S"); ups = []
+        for r in _fetch_rows("Admin Alerts"):
+            if str(r.get("Status", "")).strip().lower() == "cleared" or not str(r.get("Alert ID", "")).strip(): continue
+            if aid == "all" or str(r.get("Alert ID")) == aid: ups.append({"range": "G%d:H%d" % (r["_row"], r["_row"]), "values": [["Cleared", now]]})
+        if ups: ws_of("Admin Alerts").batch_update(ups, value_input_option="RAW")
+        invalidate_cache("Admin Alerts")
+    except Exception as ex:
+        print("Admin alert clear failed:", repr(ex)); flash("Could not clear the notification - please try again.", "error")
+    return redirect(back)
+
 @app.route("/employee/leave", methods=["GET", "POST"])
 @need("employee")
 def employee_leave():
@@ -8719,6 +8794,11 @@ def employee_leave():
                 log_change(SEC_LEAVE, "Added", f"{'Half-day leave' if request.form.get('daytype', '').lower().startswith('half') else 'Leave'} {d1 if d1 == d2 else d1 + ' to ' + d2} ({n} day(s)) \u2013 {_short(why, 80)}")
             flash(("Half-day leave submitted" if request.form.get('daytype', '').lower().startswith('half') and n else f"{n} leave day(s) submitted") + " - waiting for admin approval." +
                   (f" Holiday date(s) {', '.join(skipped)} were skipped (leave is not needed on a holiday)." if skipped else ""))
+            if n:
+                try:      # Update265: notify the Admin (top bar) - leave request received
+                    _d1, _d2 = request.form['d1'], request.form['d2']; _hf = request.form.get('daytype', '').lower().startswith('half')
+                    admin_alert_add("Leave", my_emp_row(), f"{'Half-day leave' if _hf else str(n) + ' day(s)'}: {_pretty_date(_d1) if _d1 == _d2 else _pretty_date(_d1) + ' to ' + _pretty_date(_d2)} - {request.form['reason'].strip() or 'Leave'}")
+                except Exception as ex_: print("Admin alert (leave) error:", repr(ex_))
             if n:      # Update255: e-mail the applicant (own Office Email ID only) that the request was received
                 try:
                     d1_, d2_ = request.form['d1'], request.form['d2']; half_ = request.form.get('daytype', '').lower().startswith('half')
@@ -8765,6 +8845,9 @@ def employee_permission():
         log_change(SEC_LEAVE, "Added", f"Permission request for {pdate} ({_fmt_num(round(float(request.form.get('hours', 0)), 2))} hr) "
                                         f"\u2013 {_short(request.form.get('reason', '').strip() or 'Permission', 80)}")
         flash("Permission request submitted for today." if pdate == str(today_local()) else f"Permission request submitted for {pdate}.")
+        try:      # Update265: notify the Admin (top bar) - permission request received
+            admin_alert_add("Permission", my_emp_row(), f"{_fmt_num(round(float(request.form.get('hours', 0)), 2))} hr on {_pretty_date(pdate)} - {request.form.get('reason', '').strip() or 'Permission'}")
+        except Exception as ex_: print("Admin alert (permission) error:", repr(ex_))
         try:      # Update255: e-mail the applicant (own Office Email ID only) that the request was received. Permission never blocks or completes the Productivity entry.
             hrs_ = round(float(request.form.get("hours", 0)), 2)
             msg_, cat_ = notify_request(my_emp_row(), "Permission", "Pending", _pretty_date(pdate), f"{hrs_:g} hr{'s' if hrs_ != 1 else ''}", 1,

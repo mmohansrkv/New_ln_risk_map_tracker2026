@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update266: NEW Admin > Log > "Celebrations Log" - the ONE place for every celebration control (the Celebrations tab is removed from Notes & Messages; the old address redirects here). Admin picks a THEME - Pongal (mango-leaf toran, marigolds, sun, kolam, sugarcane / pot border, falling petals), Diwali (string lights, hanging lanterns, flickering diyas, sparkles), Birthday (bunting, rising balloons, cake & gifts), New Year, Work anniversary, Other festival - or adds / edits / deletes his OWN themes (name, wish, colours, emoji, animation, decoration style) under "Celebration themes". Start now / Stop, custom title + message, schedule and duration (now 5-120 s, or Continuous until Stop) are as before. The Employee page shows the chosen theme's background decoration + animations automatically, and removes ALL of it (also while it is still playing) within about 20-30 s after the Admin clicks Stop / Switch off / Delete. New sheet 'Celebration Themes' (created automatically). Employee pages and every other page unchanged.
   * Update265: Admin - a bold notification bar at the TOP of every Admin page whenever an employee submits a Leave or Permission request (who, what, dates / hours, reason, time). It stays on every Admin page, and keeps appearing after logout / login, until the Admin clicks Clear (one request) or Clear all; cleared notifications disappear for good. New ones appear within about 30 seconds without reloading the page. 'Review requests' opens Admin > Leave & Permission Log. Stored in the new sheet 'Admin Alerts' (created automatically). An alert never blocks or delays the employee's submission.
   * Update264: Productivity entry is never held up by a Leave / Permission that is still waiting for Admin approval. When an entry is saved or edited, the required working hours now already allow for a PENDING permission (e.g. 2 hrs) or PENDING half-day leave (4 hrs) - before, only APPROVED ones were allowed for, so an employee with a pending 2-hr permission who logged 6 hrs got "Entry incomplete: 6 of the required 8 hours" until the Admin approved it. Same rule in the entry page's "Required ... hrs" hint and the 100% bloom. A pending full-day leave never blocked entry and still does not. A Rejected request counts for nothing (full day required again). Reports, Productivity %, Missed entries, attendance and calendars are unchanged and still follow APPROVED requests only.
   * Update263: Employee menu for Associate Manager / Team Lead / Senior Team Lead (matched live by Designation, active login) is now EXACTLY, in this order: 1. Team Logs  2. Employee Details  3. Personal Details  4. Leave & Permission. Nothing else is listed (no Daily entry / Productivity Info / Audit Log / Mahizhchi / Game links). Their first page after login is Team Logs (it also carries the Admin notes ticker and celebration, as the first page did before). /employee and /employee/productivity send them to Team Logs. All other employees and the Admin menu are unchanged. The menu label "Personal details" is now "Personal Details" for these three designations only.
@@ -571,6 +572,7 @@ HEADERS = {
     # Update85: Connection Game (bonus round after all 5 Sets are won). 4 rows per Game = 4 groups of 4 words.
     "Mahizhchi Connections": ["Game", "Group name", "Word 1", "Word 2", "Word 3", "Word 4"],
     # Update90: optional list to SWITCH OFF the Daily Productivity Entry for an employee (Enabled = No). No row / Enabled = Yes -> has access.
+    "Celebration Themes": ["Theme ID", "Name", "Title", "Message", "Effect", "Decor", "Color 1", "Color 2", "Emoji", "Status", "Created at", "Updated at"],      # Update266
     "Admin Alerts": ["Alert ID", "Type", "Employee ID", "Employee name", "Details", "Created at", "Status", "Cleared at"],      # Update265
     "Lead Productivity Access": ["Employee ID", "Employee name", "Granted", "Updated at", "Updated by"],      # Update262
     "Productivity Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
@@ -4245,7 +4247,7 @@ def page(body, title="Productivity Tracker", **ctx):
                for h, l, on, _k in nav]
         # Update103: Productivity Log / Leave & Permission Log / Audit Log / Email Controls are grouped under one expandable "Log" menu.
         # Every URL is unchanged - only the sidebar grouping changed. Overview, Processes and Employee Info stay as main menu items.
-        LOG_KIDS = [("/admin/log", "Productivity Log"), ("/admin/leave-permission", "Leave & Permission Log"),
+        LOG_KIDS = [("/admin/log", "Productivity Log"), ("/admin/leave-permission", "Leave & Permission Log"), ("/admin/celebrations-log", "Celebrations Log"),
                     ("/admin/audit", "Audit Log"), ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes"), ("/admin/work-time", "Work Time")]
         def _on(h): return p == h or p.startswith(h + "/")
         log_kids = [(h, l, _on(h) and not (h == "/admin/work-time" and p.startswith("/admin/work-time/access"))) for h, l in LOG_KIDS]
@@ -12146,7 +12148,7 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
  var ed=document.getElementById('mn-ed'), bar=document.getElementById('mn-tb'), rich=document.getElementById('mn-rich'),
      sizeSel=document.getElementById('mn-size'), colorIn=document.getElementById('mn-color'), saved=null, pendingPx=16, clean='', tmr=null, seq=0;
  var PH='<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>';
- function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
+ function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
  function paint(){
   var v={subject:esc(sub.value.trim())||'Your subject appears here', message:(hasText()&&clean)?clean:PH};
   frame.srcdoc=T.replace(/[{][{](\w+)[}][}]/g,function(m,k){return (k in v)?v[k]:m;});}
@@ -13282,10 +13284,11 @@ def _nt_emps():
     return out
 
 def _nt_tabs(active):
-    """Update260: Notes & Messages | Celebrations tab bar (Admin)."""
+    """Update260 / Update266: the Notes & Messages | Celebrations tab bar is gone - Celebrations live under Admin > Log > Celebrations Log."""
+    return ""
     base = "display:inline-block;padding:8px 16px;border-radius:99px;font-weight:700;font-size:13px;text-decoration:none;margin:0 8px 14px 0;"
     on, off = "background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;", "background:#eef0fb;color:#4f46e5;"
-    return ('<div class="nt-tabs"><a href="/admin/notes" style="%s%s">Notes &amp; Messages</a><a href="/admin/notes/celebrations" style="%s%s">&#127881; Celebrations</a></div>'
+    return ('<div class="nt-tabs"><a href="/admin/notes" style="%s%s">Notes &amp; Messages</a><a href="/admin/celebrations-log" style="%s%s">&#127881; Celebrations</a></div>'
             % (base, on if active == "n" else off, base, on if active == "c" else off))
 
 NOTES_ADM = _nt_tabs("n") + r"""<style>
@@ -13586,6 +13589,40 @@ CL_OCC = (("birthday", "Birthday", "Happy Birthday, {name}!", "Wishing you a won
           ("custom", "Custom", "", "", "fireworks"))
 CL_OCC_KEYS = {o[0] for o in CL_OCC}; CL_FX_KEYS = {o[0] for o in CL_FX}; CL_LVL_KEYS = {o[0] for o in CL_LVL}; CL_FREQ_KEYS = {o[0] for o in CL_FREQ}
 CL_PRESETS = {o[0]: dict(label=o[1], title=o[2], message=o[3], fx=o[4]) for o in CL_OCC}
+# ---- Update266: themes = decoration style + colours + emoji + default wish. Built-in ones are fixed; the Admin adds his own (sheet 'Celebration Themes').
+CL_THEME_SHEET = "Celebration Themes"
+CL_DECOR_OF = {"birthday": "birthday", "pongal": "pongal", "diwali": "diwali", "newyear": "stars", "anniversary": "stars", "festival": "lights", "custom": "lights"}
+CL_DECOR_OPTS = (("pongal", "Pongal - toran, sun, kolam, sugarcane, petals"), ("diwali", "Diwali - string lights, lanterns, diyas"), ("birthday", "Birthday - bunting, balloons, cake"),
+                 ("lights", "Festive string lights"), ("floral", "Flowers & falling petals"), ("stars", "Sparkling stars"), ("none", "No decoration (animation only)"))
+CL_DECOR_KEYS = {o[0] for o in CL_DECOR_OPTS}
+def _cl_hex(v, d):
+    v = str(v or "").strip(); return v.lower() if re.fullmatch(r"#[0-9a-fA-F]{6}", v) else d
+def _cl_themes():
+    out = {}
+    try:
+        for r in rows(CL_THEME_SHEET):
+            tid = str(r.get("Theme ID", "")).strip().lower()
+            if not tid or str(r.get("Status", "")).strip() == "Deleted": continue
+            out[tid] = dict(id=tid, name=str(r.get("Name", "")).strip() or "Theme", title=str(r.get("Title", "")), message=str(r.get("Message", "")),
+                            fx=_cl_pick(r.get("Effect"), CL_FX_KEYS, "fireworks"), decor=_cl_pick(r.get("Decor"), CL_DECOR_KEYS, "lights"),
+                            c1=_cl_hex(r.get("Color 1"), "#4f46e5"), c2=_cl_hex(r.get("Color 2"), "#7c3aed"), em=str(r.get("Emoji", "")).strip()[:8], at=str(r.get("Created at", "")))
+    except Exception as ex: print("Celebration Themes read failed:", repr(ex))
+    return out
+def _cl_occ(v):
+    v = str(v or "").strip().lower()
+    return v if (v in CL_OCC_KEYS or v in _cl_themes()) else "custom"
+def _cl_look(occ):
+    t = _cl_themes().get(occ)
+    if t: return dict(th=[t["c1"], t["c2"]], em=t["em"], decor=t["decor"])
+    return dict(decor=CL_DECOR_OF.get(occ, "lights"))
+def _cl_label(occ):
+    t = _cl_themes().get(occ)
+    return t["name"] if t else next((o[1] for o in CL_OCC if o[0] == occ), occ)
+def _cl_occ_options(): return [(o[0], o[1]) for o in CL_OCC] + [(t["id"], "\u2605 " + t["name"]) for t in sorted(_cl_themes().values(), key=lambda x: x["name"].lower())]
+def _cl_presets():
+    p = {k: dict(v, decor=CL_DECOR_OF.get(k, "lights")) for k, v in CL_PRESETS.items()}
+    for t in _cl_themes().values(): p[t["id"]] = dict(label=t["name"], title=t["title"], message=t["message"], fx=t["fx"], decor=t["decor"], th=[t["c1"], t["c2"]], em=t["em"])
+    return p
 
 def _cl_int(v, lo, hi, d):
     try: return max(lo, min(hi, int(float(str(v).strip()))))
@@ -13609,9 +13646,9 @@ def cl_for(eid, name=""):
     for c in cs:
         cid = str(c["Celebration ID"]).strip(); fr = _cl_freq(c)
         if fr == "once" and cid in seen: continue
-        out.append(dict(id=cid, title=str(c.get("Title", "")).replace("{name}", first).strip(), text=str(c.get("Message", "")).replace("{name}", first).strip(),
-                        occ=_cl_pick(c.get("Occasion"), CL_OCC_KEYS, "custom"), fx=_cl_pick(c.get("Effect"), CL_FX_KEYS, "fireworks"), lvl=_cl_pick(c.get("Intensity"), CL_LVL_KEYS, "mid"),
-                        dur=_cl_int(c.get("Duration sec"), 5, 30, 12), freq=fr, cont=(fr == "continuous"), at=(str(c.get("Display from", "")).strip() or str(c.get("Created at", "")).strip())))
+        out.append(dict(_cl_look(_cl_occ(c.get("Occasion"))), id=cid, title=str(c.get("Title", "")).replace("{name}", first).strip(), text=str(c.get("Message", "")).replace("{name}", first).strip(),
+                        occ=_cl_occ(c.get("Occasion")), fx=_cl_pick(c.get("Effect"), CL_FX_KEYS, "fireworks"), lvl=_cl_pick(c.get("Intensity"), CL_LVL_KEYS, "mid"),
+                        dur=_cl_int(c.get("Duration sec"), 5, 120, 12), freq=fr, cont=(fr == "continuous"), at=(str(c.get("Display from", "")).strip() or str(c.get("Created at", "")).strip())))
     out.sort(key=lambda x: x["at"]); co = [x for x in out if x["cont"]]; ot = [x for x in out if not x["cont"]]
     return ot[-3:] + co[-2:]      # Update261: a Continuous celebration is never trimmed away
 
@@ -13619,11 +13656,33 @@ CL_ENGINE_JS = r'''(function(){
 if(window.__clPlay) return;
 var EMO={birthday:0x1F382,pongal:0x1F33E,diwali:0x1FA94,newyear:0x1F389,anniversary:0x1F3C6,festival:0x2728,custom:0x2728};
 var THEME={birthday:['#ec4899','#7c3aed'],pongal:['#f59e0b','#15803d'],diwali:['#f97316','#9f1239'],newyear:['#4f46e5','#0ea5e9'],anniversary:['#0ea5e9','#0d9488'],festival:['#8b5cf6','#ec4899'],custom:['#4f46e5','#7c3aed']};
+var DECOR={birthday:'birthday',pongal:'pongal',diwali:'diwali',newyear:'stars',anniversary:'stars',festival:'lights',custom:'lights'};
+var KOL='<svg viewBox="0 0 100 100"><g fill="none" stroke="#e11d48" stroke-width="2.2"><path d="M50 6 L94 50 L50 94 L6 50Z"/><path d="M50 22 L78 50 L50 78 L22 50Z" stroke="#f59e0b"/><circle cx="50" cy="50" r="9" stroke="#15803d"/></g><g fill="#e11d48"><circle cx="50" cy="2" r="2.6"/><circle cx="98" cy="50" r="2.6"/><circle cx="50" cy="98" r="2.6"/><circle cx="2" cy="50" r="2.6"/></g></svg>';
 var FXMAP={fireworks:['fw'],crackers:['cr'],grand:['fw','cr'],party:['fw','cf'],confetti:['cf'],balloons:['bl']};
 var PAL=['#ff595e','#ffca3a','#8ac926','#1982c4','#a855f7','#ff924c','#f72585','#4cc9f0','#ffffff'];
 var GOLD=['#ffd166','#ff9f1c','#ffbf69','#fff3b0','#ff6b35'];
 function rnd(a,b){return a+Math.random()*(b-a)}
 function pick(a){return a[(Math.random()*a.length)|0]}
+function esc(t){return String(t).replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]})}
+function mkDecor(dk,th,em){
+  var d=document.createElement('div'); d.className='clx-dc';
+  var n=Math.max(8,Math.min(22,Math.round((window.innerWidth||1000)/70)));
+  function rp(a,k){var o=[];for(var i=0;i<k;i++)o.push(a[i%a.length]);return o}
+  function row(cls,arr){return '<div class="'+cls+'">'+arr.map(function(e,i){return '<i style="--i:'+i+'">'+e+'</i>'}).join('')+'</div>'}
+  function drift(cls,arr,k,t0,t1){var o='';for(var i=0;i<k;i++){o+='<span class="'+cls+'" style="left:'+(rnd(2,96)|0)+'%;--dx:'+(rnd(-40,40)|0)+'px;animation-duration:'+rnd(t0,t1).toFixed(1)+'s;animation-delay:-'+rnd(0,t1).toFixed(1)+'s;font-size:'+(rnd(18,34)|0)+'px">'+arr[i%arr.length]+'</span>'}return o}
+  function scatter(arr,k){var o='';for(var i=0;i<k;i++){o+='<span class="tws" style="left:'+(rnd(2,96)|0)+'%;top:'+(rnd(4,92)|0)+'%;animation-delay:-'+rnd(0,2).toFixed(1)+'s;font-size:'+(rnd(14,28)|0)+'px">'+arr[i%arr.length]+'</span>'}return o}
+  var wash={pongal:'linear-gradient(180deg,rgba(253,224,71,.22),rgba(253,224,71,0) 38%,rgba(34,197,94,.10))',diwali:'radial-gradient(ellipse at 50% 0,rgba(251,146,60,.24),rgba(0,0,0,0) 58%),linear-gradient(0deg,rgba(190,24,93,.10),rgba(0,0,0,0) 30%)',birthday:'linear-gradient(180deg,rgba(236,72,153,.14),rgba(124,58,237,0) 40%,rgba(14,165,233,.09))'}[dk]||('linear-gradient(180deg,'+th[0]+'26,rgba(0,0,0,0) 42%)');
+  var h='<div class="ws" style="background:'+wash+'"></div>';
+  if(dk==='pongal'){ h+=row('tp',rp(['\ud83c\udf43','\ud83c\udf3c','\ud83c\udf43','\ud83c\udf38'],n))+'<div class="sun">\ud83c\udf1e</div>'+row('bt',rp(['\ud83c\udf3e','\ud83e\udd6d','\ud83c\udf4c','\ud83c\udf3e','\ud83c\udf72','\ud83c\udf3e'],n))+'<div class="kol">'+KOL+'</div>'+drift('fd',['\ud83c\udf3c','\ud83c\udf3e'],7,9,15) }
+  else if(dk==='diwali'){ h+='<div class="wire"></div>'+row('tp tw',rp(['\ud83d\udd34','\ud83d\udfe1','\ud83d\udfe2','\ud83d\udd35','\ud83d\udfe0','\ud83d\udfe3'],n*2))+'<div class="lan l1">\ud83c\udfee</div><div class="lan l2">\ud83c\udfee</div>'+row('bt gl',rp(['\ud83e\ude94'],n))+drift('fl',['\u2728'],8,8,14) }
+  else if(dk==='birthday'){ var cl=['#ef4444','#f59e0b','#22c55e','#3b82f6','#a855f7','#ec4899'],m=24,tri=''; for(var i=0;i<m;i++){tri+='<polygon points="'+(i*1000/m)+',4 '+((i+1)*1000/m)+',4 '+((i+.5)*1000/m)+',46" fill="'+cl[i%6]+'"/>'}
+    h+='<svg class="bun" viewBox="0 0 1000 50" preserveAspectRatio="none"><path d="M0 4 L1000 4" stroke="#7c3aed" stroke-width="2"/>'+tri+'</svg>'+drift('fl',['\ud83c\udf88'],9,9,16)+row('bt',rp(['\ud83c\udf81','\ud83c\udf82','\ud83c\udf89','\ud83c\udf8a','\ud83c\udf81','\ud83c\udf82'],Math.max(6,n>>1))) }
+  else if(dk==='floral'){ h+=row('tp',rp(['\ud83c\udf38','\ud83c\udf3a','\ud83c\udf3c'],n))+drift('fd',['\ud83c\udf38','\ud83c\udf3a'],9,9,15) }
+  else if(dk==='stars'){ h+=scatter(['\u2728','\u2b50','\u2728'],16) }
+  else { h+='<div class="wire"></div>'+row('tp tw',rp(['\ud83d\udd34','\ud83d\udfe1','\ud83d\udfe2','\ud83d\udd35','\ud83d\udfe0','\ud83d\udfe3'],n*2)) }
+  if(em) h+=drift('fd',[esc(em)],6,9,15);
+  d.innerHTML=h; return d;
+}
 function css(){
   if(document.getElementById('clx-css')) return;
   var s=document.createElement('style'); s.id='clx-css';
@@ -13640,6 +13699,16 @@ function css(){
   +'.clx-bn b{font-size:12.5px;font-weight:700}.clx-bn span{font-size:11.5px;opacity:.96}.clx-bn i{font-style:normal;font-size:14px}'
   +'.clx-bn.fix{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:2147483001;max-width:92vw;margin:0}'
   +'@keyframes clxP{50%{box-shadow:0 4px 22px -2px var(--a)}}'
+  +'.clx-dc{position:absolute;inset:0;overflow:hidden;pointer-events:none}.clx-dc .ws{position:absolute;inset:0}.clx-dc i{font-style:normal;display:inline-block}'
+  +'.clx-dc .tp,.clx-dc .bt{position:absolute;left:0;right:0;display:flex;justify-content:space-around}.clx-dc .tp{top:0;font-size:clamp(18px,3vw,30px)}.clx-dc .bt{bottom:0;font-size:clamp(22px,3.6vw,38px)}'
+  +'.clx-dc .tp i{transform-origin:50% 0;animation:clxSw 3s ease-in-out infinite;animation-delay:calc(var(--i)*.15s)}.clx-dc .tp.tw{top:8px;font-size:clamp(10px,1.6vw,16px)}.clx-dc .tp.tw i{animation:clxTw 1.3s ease-in-out infinite;animation-delay:calc(var(--i)*.11s)}'
+  +'.clx-dc .bt.gl i{animation:clxFl .8s ease-in-out infinite alternate;animation-delay:calc(var(--i)*.13s)}'
+  +'.clx-dc .wire{position:absolute;top:12px;left:0;right:0;height:2px;background:#7c4a1e;opacity:.7}.clx-dc .sun{position:absolute;top:34px;right:3%;font-size:clamp(40px,7vw,84px);animation:clxSpin 24s linear infinite}'
+  +'.clx-dc .kol{position:absolute;left:10px;bottom:46px;width:clamp(70px,10vw,120px);animation:clxSpin 40s linear infinite;opacity:.85}.clx-dc .lan{position:absolute;top:30px;font-size:clamp(30px,5vw,54px);transform-origin:50% 0;animation:clxSw 3.2s ease-in-out infinite}.clx-dc .l1{left:2%}.clx-dc .l2{right:2%;animation-delay:-1.4s}'
+  +'.clx-dc .bun{position:absolute;top:0;left:0;width:100%;height:46px;transform-origin:50% 0;animation:clxSw2 6s ease-in-out infinite}'
+  +'.clx-dc .fl{position:absolute;bottom:-48px;animation:clxUp linear infinite;opacity:.9}.clx-dc .fd{position:absolute;top:-48px;animation:clxDn linear infinite;opacity:.85}.clx-dc .tws{position:absolute;animation:clxTw 1.6s ease-in-out infinite}'
+  +'@keyframes clxUp{to{transform:translate(var(--dx,0),-120vh)}}@keyframes clxDn{to{transform:translate(var(--dx,0),120vh) rotate(360deg)}}@keyframes clxSw{0%,100%{transform:rotate(-7deg)}50%{transform:rotate(7deg)}}@keyframes clxSw2{0%,100%{transform:skewX(-1.2deg)}50%{transform:skewX(1.2deg)}}@keyframes clxSpin{to{transform:rotate(360deg)}}@keyframes clxTw{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1.15)}}@keyframes clxFl{from{filter:drop-shadow(0 0 3px #ffb703)}to{filter:drop-shadow(0 0 12px #ff7b00)}}'
+  +'@media(prefers-reduced-motion:reduce){.clx-dc *{animation:none!important}}'
   +'@media(prefers-reduced-motion:reduce){.clx-ic,.clx-bn{animation:none}.clx-card{transition:none}}@media print{.clx,.clx-bn{display:none}}';
   document.head.appendChild(s);
 }
@@ -13648,26 +13717,27 @@ window.__clPlay=function(c,done){
   css();
   var old=document.getElementById('clx-root'); if(old&&old.__fin) old.__fin(true);
   var root=document.createElement('div'); root.id='clx-root'; root.className='clx'; root.setAttribute('role','status'); root.setAttribute('aria-live','polite');
-  var th=THEME[c.occ]||THEME.custom; root.style.setProperty('--a',th[0]); root.style.setProperty('--b',th[1]);
+  var th=c.th||THEME[c.occ]||THEME.custom; root.style.setProperty('--a',th[0]); root.style.setProperty('--b',th[1]);
   var reduce=false; try{reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}
   var cont=!!c.cont, inf=cont&&!c.prev, bn=null;
   if(cont){
     bn=document.createElement('div'); bn.className='clx-bn'; bn.setAttribute('role','status'); bn.style.setProperty('--a',th[0]); bn.style.setProperty('--b',th[1]);
-    var bi=document.createElement('i'); bi.setAttribute('aria-hidden','true'); bi.textContent=String.fromCodePoint(EMO[c.occ]||0x2728); bn.appendChild(bi);
+    var bi=document.createElement('i'); bi.setAttribute('aria-hidden','true'); bi.textContent=c.em||String.fromCodePoint(EMO[c.occ]||0x2728); bn.appendChild(bi);
     if(c.title){var bt=document.createElement('b'); bt.textContent=c.title; bn.appendChild(bt)}
     if(c.text){var bm=document.createElement('span'); bm.textContent=c.text; bn.appendChild(bm)}
     var an=window.__clAnchor;
     if(!c.prev&&an&&an.parentNode) an.parentNode.insertBefore(bn,an); else { bn.className+=' fix'; document.body.appendChild(bn) }
   }
+  var dk=c.decor||DECOR[c.occ]||'lights'; if(dk!=='none') root.appendChild(mkDecor(dk,th,c.em||''));
   var cv=null,ctx=null; if(!reduce){cv=document.createElement('canvas'); cv.className='clx-cv'; root.appendChild(cv); ctx=cv.getContext('2d')}
   var card=document.createElement('div'); card.className='clx-card';
-  var ic=document.createElement('span'); ic.className='clx-ic'; ic.setAttribute('aria-hidden','true'); ic.textContent=String.fromCodePoint(EMO[c.occ]||0x2728); card.appendChild(ic);
+  var ic=document.createElement('span'); ic.className='clx-ic'; ic.setAttribute('aria-hidden','true'); ic.textContent=c.em||String.fromCodePoint(EMO[c.occ]||0x2728); card.appendChild(ic);
   if(c.title){var t=document.createElement('span'); t.className='clx-t'; t.textContent=c.title; card.appendChild(t)}
   if(c.text){var m=document.createElement('span'); m.className='clx-m'; m.textContent=c.text; card.appendChild(m)}
   var x=document.createElement('button'); x.type='button'; x.className='clx-x'; x.setAttribute('aria-label','Close'); x.textContent='\u00d7'; card.appendChild(x);
   if(!cont) root.appendChild(card); document.body.appendChild(root);
   setTimeout(function(){root.className='clx on'},30);
-  var dur=Math.max(5,Math.min(30,+c.dur||12)), fin=false, raf=0, hard=0, W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2);
+  var dur=Math.max(5,Math.min(120,+c.dur||12)), fin=false, raf=0, hard=0, W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2);
   function finish(quick){
     if(fin) return; fin=true; cancelAnimationFrame(raf); clearTimeout(hard);
     window.removeEventListener('resize',size); document.removeEventListener('keydown',key);
@@ -13763,8 +13833,8 @@ function mark(c){
 function next(){
   if(busy) return; var c=null;
   while(q.length){ c=q.shift(); if(due(c)) break; c=null }
-  if(!c) return; busy=true; mark(c); if(c.cont) ACT=c.id;
-  window.__clPlay(c,function(){ busy=false; if(c.cont&&ACT===c.id) ACT=''; setTimeout(next,600) });
+  if(!c) return; busy=true; mark(c); ACT=c.id;
+  window.__clPlay(c,function(){ busy=false; if(ACT===c.id) ACT=''; setTimeout(next,600) });
 }
 function add(list){
   (list||[]).slice().sort(function(a,b){return (a.cont?1:0)-(b.cont?1:0)}).forEach(function(c){ if(due(c)&&!q.some(function(x){return x.id===c.id})) q.push(c) });
@@ -13774,7 +13844,7 @@ function chk(){
   if(document.hidden) return;
   fetch('/employee/celebration/poll',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(d){
     if(!d||!d.items) return;
-    if(ACT&&!d.items.some(function(x){return x.id===ACT})){ if(window.__clStop) window.__clStop() }      /* Admin clicked Stop (or it ended / was switched off): remove the message and every animation */
+    var lv=d.live||d.items.map(function(x){return x.id}); if(ACT&&lv.indexOf(ACT)<0){ if(window.__clStop) window.__clStop() }      /* Admin clicked Stop (or it ended / was switched off): remove the message and every animation */
     add(d.items);
   }).catch(function(){});
 }
@@ -13791,10 +13861,16 @@ def cl_html():
     data = json.dumps(dict(eid=str(eid), today=str(today_local()), items=cl_for(eid, session.get("name", ""))), separators=(",", ":"))
     return CL_EMP_JS.replace("__DATA__", data.replace("</", "<\\/"))
 
+def cl_live_ids(eid):
+    """Update266: IDs of every celebration that is Live for this employee right now (even ones already shown) - lets an open page drop a celebration the Admin stopped."""
+    try: return [str(c["Celebration ID"]).strip() for c in rows(CL_SHEET) if str(c.get("Celebration ID", "")).strip() and _nt_visible(c, eid)]
+    except Exception: return None
+
 @app.route("/employee/celebration/poll")
 @need("employee")
 def employee_celebration_poll():
-    r = jsonify(items=cl_for(session["emp_id"], session.get("name", ""))); r.headers["Cache-Control"] = "no-store"; return r
+    _lv = cl_live_ids(session["emp_id"])
+    r = jsonify(items=cl_for(session["emp_id"], session.get("name", "")), **({"live": _lv} if _lv is not None else {})); r.headers["Cache-Control"] = "no-store"; return r
 
 @app.route("/employee/celebration/seen", methods=["POST"])
 @need("employee")
@@ -13809,7 +13885,7 @@ def employee_celebration_seen():
             print("Celebration Seen save failed:", repr(ex)); return jsonify(ok=False), 500
     return jsonify(ok=True, added=0 if have else 1)
 
-CELEB_ADM = _nt_tabs("c") + r'''<style>
+CELEB_ADM = r'''<style>
 .cl-f label{display:block;font-weight:600;font-size:13px;margin:12px 0 4px}
 .cl-f input[type=text],.cl-f input[type=number],.cl-f select,.cl-f textarea{width:100%;box-sizing:border-box}
 .cl-f textarea{min-height:90px;resize:vertical;line-height:1.5}
@@ -13824,17 +13900,37 @@ CELEB_ADM = _nt_tabs("c") + r'''<style>
 .cl-sel{font-size:12px;color:#4f46e5;font-weight:700;margin-top:6px}
 .cl-st-Live{color:#047857;font-weight:700}.cl-st-Scheduled{color:#1d4ed8;font-weight:700}.cl-st-Ended{color:#6b7280;font-weight:700}.cl-st-Hidden{color:#b45309;font-weight:700}
 .cl-act form{display:inline}.cl-act button,.cl-act a{font-size:12px;padding:4px 10px;margin:2px;cursor:pointer}
+.cl-tiles{display:flex;flex-wrap:wrap;gap:8px}.cl-tile{border:0;cursor:pointer;border-radius:99px;padding:8px 16px;font-weight:700;font-size:13px;background:#eef0fb;color:#4f46e5}.cl-tile:hover{background:#4f46e5;color:#fff}
 .cl-tag{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700;color:#fff;background:linear-gradient(135deg,#4f46e5,#7c3aed)}
 </style>
+<div class="card" id="themes"><h2>Celebration themes</h2>
+<p class="mut">Choose a theme and start it below. The Employee page then shows that theme's background decorations and animation until you stop it. Click a theme to select it in the form, or add your own theme for any other celebration.</p>
+<div class="cl-tiles">{% for k,l in occs %}<button type="button" class="cl-tile" data-occ="{{k}}">{{l}}</button>{% endfor %}</div>
+<h3 style="margin:16px 0 6px">Your own themes</h3>
+{% if themes %}<table><tr><th>Theme</th><th>Decoration</th><th>Animation</th><th>Colours</th><th>Emoji</th><th></th></tr>
+{% for t in themes %}<tr><td><b>{{t.name}}</b><br><small class="mut">{{t.title}}</small></td><td>{{ (decors|selectattr(0,'equalto',t.decor)|first)[1] }}</td><td>{{ (fxs|selectattr(0,'equalto',t.fx)|first)[1] }}</td>
+<td><span style="display:inline-block;width:22px;height:22px;border-radius:6px;background:{{t.c1}};vertical-align:middle"></span> <span style="display:inline-block;width:22px;height:22px;border-radius:6px;background:{{t.c2}};vertical-align:middle"></span></td><td style="font-size:22px">{{t.em}}</td>
+<td class="cl-act"><a class="back sm" href="/admin/celebrations-log?theme={{t.id}}#themes">Edit</a><form method="post" action="/admin/celebrations-log/theme/{{t.id}}/delete" onsubmit="return confirm('Delete this theme?')"><button class="back sm">Delete</button></form></td></tr>{% endfor %}</table>
+{% else %}<p class="mut">No themes of your own yet.</p>{% endif %}
+<form method="post" action="/admin/celebrations-log/theme/save" class="cl-f" style="margin-top:12px"><input type="hidden" name="id" value="{{tf.id}}">
+<h3 style="margin:0 0 6px">{{ 'Edit theme' if tf.id else 'Add a theme' }}</h3>
+<div class="cl-row"><label>Theme name<input type="text" name="name" maxlength="40" value="{{tf.name}}" placeholder="e.g. Christmas, Holi, Independence Day" required></label>
+<label>Decoration style<select name="decor">{% for k,l in decors %}<option value="{{k}}" {{'selected' if tf.decor==k}}>{{l}}</option>{% endfor %}</select></label>
+<label>Animation<select name="fx">{% for k,l in fxs %}<option value="{{k}}" {{'selected' if tf.fx==k}}>{{l}}</option>{% endfor %}</select></label>
+<label>Colour 1<input type="color" name="c1" value="{{tf.c1}}"></label><label>Colour 2<input type="color" name="c2" value="{{tf.c2}}"></label>
+<label>Emoji (falls like petals)<input type="text" name="em" maxlength="8" value="{{tf.em}}" placeholder="e.g. &#127876;"></label></div>
+<label>Default title<input type="text" name="title" maxlength="120" value="{{tf.title}}" placeholder="e.g. Merry Christmas!"></label>
+<label>Default message<textarea name="message" maxlength="500" placeholder="The wish shown with this theme (you can still change it for each celebration)">{{tf.message}}</textarea></label>
+<p><button class="primary">{{ 'Save theme' if tf.id else 'Add theme' }}</button> {% if tf.id %}<a class="back sm" href="/admin/celebrations-log#themes">Cancel</a>{% endif %}</p></form></div>
 <div class="card cl-f"><h2>{{ 'Edit celebration' if f.id else 'Create a celebration' }}</h2>
-<p class="mut">A celebration plays on the Employee page (the page employees land on after login) as a full-screen animation with a greeting card. It only plays between the Display and Stop times, for the employees you choose. Type <b>{name}</b> in the title or message to greet each employee by first name.</p>
-<form method="post" action="/admin/notes/celebrations/save" id="cl-form">
+<p class="mut">A celebration shows the chosen theme on the Employee page (the page employees land on after login): background decorations, animation and a greeting card. It only plays between the Display and Stop times, for the employees you choose. Type <b>{name}</b> in the title or message to greet each employee by first name.</p>
+<form method="post" action="/admin/celebrations-log/save" id="cl-form">
 <input type="hidden" name="id" value="{{f.id}}">
 <div class="cl-row">
 <label>Occasion<select name="occ" id="cl-occ">{% for k,l in occs %}<option value="{{k}}" {{'selected' if f.occ==k}}>{{l}}</option>{% endfor %}</select></label>
 <label>Animation<select name="fx" id="cl-fx">{% for k,l in fxs %}<option value="{{k}}" {{'selected' if f.fx==k}}>{{l}}</option>{% endfor %}</select></label>
 <label>Intensity<select name="lvl" id="cl-lvl">{% for k,l in lvls %}<option value="{{k}}" {{'selected' if f.lvl==k}}>{{l}}</option>{% endfor %}</select></label>
-<label>Plays for (seconds, 5-30; not used for Continuous)<input type="number" name="dur" id="cl-dur" min="5" max="30" value="{{f.dur}}"></label>
+<label>Plays for (seconds, 5-120; not used for Continuous)<input type="number" name="dur" id="cl-dur" min="5" max="120" value="{{f.dur}}"></label>
 <label>How often<select name="freq">{% for k,l in freqs %}<option value="{{k}}" {{'selected' if f.freq==k}}>{{l}}</option>{% endfor %}</select></label>
 </div>
 <label>Title <span class="mut">(shown on the greeting card)</span><input type="text" name="title" id="cl-title" maxlength="120" value="{{f.title}}" placeholder="e.g. Happy Pongal!"></label>
@@ -13850,7 +13946,7 @@ CELEB_ADM = _nt_tabs("c") + r'''<style>
 <div class="cl-tools"><input type="text" id="cl-q" placeholder="Search by ID, name or designation"><button type="button" class="back sm" id="cl-all">Select shown</button><button type="button" class="back sm" id="cl-none">Clear all</button></div>
 <div class="cl-list">{% for e in emps %}<label class="cl-pk" data-s="{{(e.id ~ ' ' ~ e.name ~ ' ' ~ e.desig)|lower}}"><input type="checkbox" name="to" value="{{e.id}}" {{'checked' if e.ck}}><b>{{e.id}}</b> &middot; {{e.name}}{% if e.locked %} <em class="mut">(locked)</em>{% endif %}<small>{{e.desig}}</small></label>{% endfor %}</div>
 <div class="cl-sel"><span id="cl-n">0</span> employee(s) selected</div></div></fieldset>
-<p style="margin-top:14px"><button class="primary">{{ 'Save changes' if f.id else 'Save celebration' }}</button> <button type="button" class="back sm" id="cl-pv" style="padding:9px 16px">&#9654; Preview animation</button> {% if f.id %}<a class="back sm" href="/admin/notes/celebrations">Cancel</a>{% endif %}</p>
+<p style="margin-top:14px"><button class="primary">{{ 'Save changes' if f.id else 'Save celebration' }}</button> <button type="button" class="back sm" id="cl-pv" style="padding:9px 16px">&#9654; Preview animation</button> {% if f.id %}<a class="back sm" href="/admin/celebrations-log">Cancel</a>{% endif %}</p>
 </form></div>
 <div class="card"><h2>Celebrations</h2>
 {% if not items %}<p class="mut">No celebrations yet. Pick an occasion above - Pongal, Birthday, Diwali and New Year come with ready-made wishes and animations.</p>{% else %}
@@ -13862,10 +13958,10 @@ CELEB_ADM = _nt_tabs("c") + r'''<style>
 <td>{% if n.sel %}Selected ({{n.total}}){% else %}All employees ({{n.total}}){% endif %}</td>
 <td>{% if n.seen_n is not none %}<b>{{n.seen_n}}</b> / {{n.total}}{% else %}<span class="mut">-</span>{% endif %}</td>
 <td>{{n.freq}}</td><td class="cl-st-{{n.state}}">{{n.state}}</td>
-<td class="cl-act"><button type="button" class="back sm" data-pv='{{ n.pv|tojson }}'>&#9654; Preview</button> <a class="back sm" href="/admin/notes/celebrations?edit={{n.id}}#cl-form">Edit</a>
-{% if n.state=='Scheduled' %}<form method="post" action="/admin/notes/celebrations/{{n.id}}/status"><input type="hidden" name="to" value="startnow"><button class="back sm">Start now</button></form>{% elif n.state=='Live' %}<form method="post" action="/admin/notes/celebrations/{{n.id}}/status"><input type="hidden" name="to" value="stopnow"><button class="back sm" style="background:#dc2626;color:#fff;border-color:#dc2626">&#9632; Stop</button></form>{% endif %}
-<form method="post" action="/admin/notes/celebrations/{{n.id}}/status"><input type="hidden" name="to" value="{{ 'restore' if n.status=='Archived' else 'archive' }}"><button class="back sm">{{ 'Switch on again' if n.status=='Archived' else 'Switch off' }}</button></form>
-<form method="post" action="/admin/notes/celebrations/{{n.id}}/status" onsubmit="return confirm('Delete this celebration permanently?')"><input type="hidden" name="to" value="delete"><button class="back sm">Delete</button></form></td></tr>{% endfor %}</table>{% endif %}</div>
+<td class="cl-act"><button type="button" class="back sm" data-pv='{{ n.pv|tojson }}'>&#9654; Preview</button> <a class="back sm" href="/admin/celebrations-log?edit={{n.id}}#cl-form">Edit</a>
+{% if n.state=='Scheduled' %}<form method="post" action="/admin/celebrations-log/{{n.id}}/status"><input type="hidden" name="to" value="startnow"><button class="back sm">Start now</button></form>{% elif n.state=='Live' %}<form method="post" action="/admin/celebrations-log/{{n.id}}/status"><input type="hidden" name="to" value="stopnow"><button class="back sm" style="background:#dc2626;color:#fff;border-color:#dc2626">&#9632; Stop</button></form>{% endif %}
+<form method="post" action="/admin/celebrations-log/{{n.id}}/status"><input type="hidden" name="to" value="{{ 'restore' if n.status=='Archived' else 'archive' }}"><button class="back sm">{{ 'Switch on again' if n.status=='Archived' else 'Switch off' }}</button></form>
+<form method="post" action="/admin/celebrations-log/{{n.id}}/status" onsubmit="return confirm('Delete this celebration permanently?')"><input type="hidden" name="to" value="delete"><button class="back sm">Delete</button></form></td></tr>{% endfor %}</table>{% endif %}</div>
 <script>window.CL_PRESETS={{ presets|tojson }};window.CL_NOW='{{now_str}}';</script>
 {% raw %}<script>''' + CL_ENGINE_JS + r'''</script>
 <script>
@@ -13875,8 +13971,9 @@ CELEB_ADM = _nt_tabs("c") + r'''<style>
   function same(v,k){ v=v.trim(); if(!v) return true; return Object.keys(P).some(function(o){ return P[o][k]===v; }); }
   occ.addEventListener('change',function(){ var p=P[occ.value]; if(!p) return; if(same(ti.value,'title')) ti.value=p.title; if(same(ms.value,'message')) ms.value=p.message; fx.value=p.fx; });
   function play(c){ if(!window.__clPlay) return; c.prev=true; c.title=(c.title||'').replace(/\{name\}/g,'Employee'); c.text=(c.text||'').replace(/\{name\}/g,'Employee'); window.__clPlay(c); }
-  document.getElementById('cl-pv').addEventListener('click',function(){ play({id:'pv',title:ti.value.trim()||'Preview',text:ms.value.trim(),occ:occ.value,fx:fx.value,lvl:lvl.value,dur:Math.max(5,Math.min(30,+dur.value||12)),cont:(f.querySelector('[name=freq]').value==='continuous')}); });
+  document.getElementById('cl-pv').addEventListener('click',function(){ play({id:'pv',title:ti.value.trim()||'Preview',text:ms.value.trim(),occ:occ.value,decor:(P[occ.value]||{}).decor,th:(P[occ.value]||{}).th,em:(P[occ.value]||{}).em,fx:fx.value,lvl:lvl.value,dur:Math.max(5,Math.min(120,+dur.value||12)),cont:(f.querySelector('[name=freq]').value==='continuous')}); });
   document.querySelectorAll('[data-pv]').forEach(function(b){ b.addEventListener('click',function(){ try{ play(JSON.parse(b.getAttribute('data-pv'))); }catch(e){} }); });
+  document.querySelectorAll('.cl-tile').forEach(function(b){ b.addEventListener('click',function(){ occ.value=b.getAttribute('data-occ'); occ.dispatchEvent(new Event('change')); var t=document.getElementById('cl-form'); if(t) t.scrollIntoView({behavior:'smooth',block:'start'}); }); });
   var pick=document.getElementById('cl-pick'), q=document.getElementById('cl-q'), nn=document.getElementById('cl-n');
   function boxes(){ return f.querySelectorAll('input[name=to]'); }
   function count(){ var c=0; boxes().forEach(function(b){ if(b.checked) c++; }); nn.textContent=c; }
@@ -13899,7 +13996,7 @@ CELEB_ADM = _nt_tabs("c") + r'''<style>
 })();
 </script>{% endraw %}'''
 
-@app.route("/admin/notes/celebrations")
+@app.route("/admin/celebrations-log")
 @need("admin")
 def admin_celebrations():
     emps = _nt_emps(); seen = {}
@@ -13911,12 +14008,12 @@ def admin_celebrations():
         if not cid or st == "Deleted": continue
         rec = _nt_recips(c); sel = str(c.get("Audience", "")).strip().lower() == "selected"
         aud = [e for e in emps if (e["key"] in rec if sel else not e["locked"])]; sd = seen.get(cid, {}); fr = _cl_freq(c); w = _nt_window(c)
-        occ = _cl_pick(c.get("Occasion"), CL_OCC_KEYS, "custom"); fxk = _cl_pick(c.get("Effect"), CL_FX_KEYS, "fireworks"); lv = _cl_pick(c.get("Intensity"), CL_LVL_KEYS, "mid"); du = _cl_int(c.get("Duration sec"), 5, 30, 12)
+        occ = _cl_occ(c.get("Occasion")); fxk = _cl_pick(c.get("Effect"), CL_FX_KEYS, "fireworks"); lv = _cl_pick(c.get("Intensity"), CL_LVL_KEYS, "mid"); du = _cl_int(c.get("Duration sec"), 5, 120, 12)
         items.append(dict(id=cid, at=str(c.get("Created at", "")).strip(), upd=str(c.get("Updated at", "")).strip(), title=str(c.get("Title", "")).strip(), message=str(c.get("Message", "")),
-                          occ=lab(CL_OCC, occ), fx=lab(CL_FX, fxk), lvl=lab(CL_LVL, lv), dur=du, freq=lab(CL_FREQ, fr), sel=sel, status=st,
+                          occ=_cl_label(occ), fx=lab(CL_FX, fxk), lvl=lab(CL_LVL, lv), dur=du, freq=lab(CL_FREQ, fr), sel=sel, status=st,
                           start=(w[0].strftime("%Y-%m-%d %H:%M") if w[0] else ""), stop=(w[1].strftime("%Y-%m-%d %H:%M") if w[1] else ""), state=_nt_state(c), total=len(aud),
                           seen_n=(sum(1 for e in aud if e["key"] in sd) if fr == "once" else None),
-                          pv=dict(id="pv", title=str(c.get("Title", "")).strip(), text=str(c.get("Message", "")).strip(), occ=occ, fx=fxk, lvl=lv, dur=du, cont=(fr == "continuous"))))
+                          pv=dict(id="pv", title=str(c.get("Title", "")).strip(), text=str(c.get("Message", "")).strip(), occ=occ, fx=fxk, lvl=lv, dur=du, cont=(fr == "continuous"), **_cl_look(occ))))
     items.sort(key=lambda x: x["at"], reverse=True)
     f = dict(id="", occ="birthday", fx=CL_OCC[0][4], lvl="mid", dur=12, freq="continuous", title=CL_OCC[0][2], message=CL_OCC[0][3], aud="all", to=set(), start="", stop="")
     eid = request.args.get("edit", "").strip()
@@ -13924,24 +14021,71 @@ def admin_celebrations():
         for c in rows(CL_SHEET):
             if str(c.get("Celebration ID", "")).strip() == eid and str(c.get("Status", "")).strip() != "Deleted":
                 w = _nt_window(c)
-                f = dict(id=eid, occ=_cl_pick(c.get("Occasion"), CL_OCC_KEYS, "custom"), fx=_cl_pick(c.get("Effect"), CL_FX_KEYS, "fireworks"), lvl=_cl_pick(c.get("Intensity"), CL_LVL_KEYS, "mid"),
-                         dur=_cl_int(c.get("Duration sec"), 5, 30, 12), freq=_cl_freq(c), title=str(c.get("Title", "")), message=str(c.get("Message", "")),
+                f = dict(id=eid, occ=_cl_occ(c.get("Occasion")), fx=_cl_pick(c.get("Effect"), CL_FX_KEYS, "fireworks"), lvl=_cl_pick(c.get("Intensity"), CL_LVL_KEYS, "mid"),
+                         dur=_cl_int(c.get("Duration sec"), 5, 120, 12), freq=_cl_freq(c), title=str(c.get("Title", "")), message=str(c.get("Message", "")),
                          aud=("selected" if str(c.get("Audience", "")).strip().lower() == "selected" else "all"), to=_nt_recips(c),
                          start=(w[0].strftime("%Y-%m-%dT%H:%M") if w[0] else ""), stop=(w[1].strftime("%Y-%m-%dT%H:%M") if w[1] else ""))
                 break
     for e in emps: e["ck"] = e["key"] in f["to"]
-    return page(CELEB_ADM, title="Celebrations", emps=emps, items=items, f=f, occs=[(o[0], o[1]) for o in CL_OCC], fxs=CL_FX, lvls=CL_LVL, freqs=CL_FREQ, presets=CL_PRESETS, now_str=now_local().strftime("%Y-%m-%dT%H:%M"))
+    th_all = sorted(_cl_themes().values(), key=lambda x: x["name"].lower())
+    tf = dict(id="", name="", title="", message="", fx="fireworks", decor="lights", c1="#4f46e5", c2="#7c3aed", em="")
+    _te = request.args.get("theme", "").strip().lower()
+    if _te in _cl_themes(): tf = dict(_cl_themes()[_te])
+    return page(CELEB_ADM, title="Celebrations Log", emps=emps, items=items, f=f, occs=_cl_occ_options(), fxs=CL_FX, lvls=CL_LVL, freqs=CL_FREQ, presets=_cl_presets(), themes=th_all, tf=tf, decors=CL_DECOR_OPTS, now_str=now_local().strftime("%Y-%m-%dT%H:%M"))
 
-@app.route("/admin/notes/celebrations/save", methods=["POST"])
+@app.route("/admin/notes/celebrations")
+@need("admin")
+def admin_celebrations_old():
+    return redirect("/admin/celebrations-log" + (("?" + request.query_string.decode("utf-8", "ignore")) if request.query_string else ""))
+
+@app.route("/admin/celebrations-log/theme/save", methods=["POST"])
+@need("admin")
+def admin_cl_theme_save():
+    """Update266: Admin adds / edits one of his own celebration themes."""
+    fm = request.form; tid = fm.get("id", "").strip().lower(); back = "/admin/celebrations-log#themes"
+    name = _nt_clean(fm.get("name"), 40)
+    if not name:
+        flash("Please give the theme a name.", "error"); return redirect("/admin/celebrations-log" + (("?theme=" + tid) if tid else "") + "#themes")
+    vals = [name, _nt_clean(fm.get("title"), 120), _nt_clean(fm.get("message"), 500), _cl_pick(fm.get("fx"), CL_FX_KEYS, "fireworks"), _cl_pick(fm.get("decor"), CL_DECOR_KEYS, "lights"),
+            _cl_hex(fm.get("c1"), "#4f46e5"), _cl_hex(fm.get("c2"), "#7c3aed"), (fm.get("em") or "").strip()[:8]]
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S"); ws = ws_of(CL_THEME_SHEET); H = HEADERS[CL_THEME_SHEET]
+    try:
+        cur = next((r for r in rows(CL_THEME_SHEET) if str(r.get("Theme ID", "")).strip().lower() == tid and str(r.get("Status", "")).strip() != "Deleted"), None) if tid else None
+        if cur:
+            ws.update(range_name="A%d:%s%d" % (cur["_row"], chr(64 + len(H)), cur["_row"]), values=[[tid] + vals + ["Active", str(cur.get("Created at", "")), now]], value_input_option="RAW")
+            flash("Theme saved. Celebrations using it show the new look right away.")
+        else:
+            tid = "t_" + uuid.uuid4().hex[:8]
+            ws.append_row([tid] + vals + ["Active", now, ""], value_input_option="RAW")
+            flash("Theme added - choose it under Occasion when you create a celebration.")
+        invalidate_cache(CL_THEME_SHEET)
+    except Exception as ex:
+        print("Theme save failed:", repr(ex)); flash("Could not save the theme - please try again.", "error")
+    return redirect(back)
+
+@app.route("/admin/celebrations-log/theme/<tid>/delete", methods=["POST"])
+@need("admin")
+def admin_cl_theme_delete(tid):
+    tid = tid.strip().lower()
+    cur = next((r for r in rows(CL_THEME_SHEET) if str(r.get("Theme ID", "")).strip().lower() == tid and str(r.get("Status", "")).strip() != "Deleted"), None)
+    if cur is None: flash("That theme no longer exists.", "error"); return redirect("/admin/celebrations-log#themes")
+    try:
+        ws_of(CL_THEME_SHEET).update_cell(cur["_row"], HEADERS[CL_THEME_SHEET].index("Status") + 1, "Deleted"); invalidate_cache(CL_THEME_SHEET)
+        flash("Theme deleted. Celebrations that used it keep playing with the default look.")
+    except Exception as ex:
+        print("Theme delete failed:", repr(ex)); flash("Could not delete the theme - please try again.", "error")
+    return redirect("/admin/celebrations-log#themes")
+
+@app.route("/admin/celebrations-log/save", methods=["POST"])
 @need("admin")
 def admin_celebrations_save():
     fm = request.form; cid = fm.get("id", "").strip()
-    back = "/admin/notes/celebrations" + (("?edit=" + cid) if cid else "")
+    back = "/admin/celebrations-log" + (("?edit=" + cid) if cid else "")
     title = _nt_clean(fm.get("title"), 120); msg = _nt_clean(fm.get("message"), 500)
     if not title and not msg:
         flash("Please enter a title or a message for the greeting card.", "error"); return redirect(back)
-    occ = _cl_pick(fm.get("occ"), CL_OCC_KEYS, "custom"); fxk = _cl_pick(fm.get("fx"), CL_FX_KEYS, "fireworks"); lv = _cl_pick(fm.get("lvl"), CL_LVL_KEYS, "mid")
-    du = _cl_int(fm.get("dur"), 5, 30, 12); fr = _cl_pick(fm.get("freq"), CL_FREQ_KEYS, "once")
+    occ = _cl_occ(fm.get("occ")); fxk = _cl_pick(fm.get("fx"), CL_FX_KEYS, "fireworks"); lv = _cl_pick(fm.get("lvl"), CL_LVL_KEYS, "mid")
+    du = _cl_int(fm.get("dur"), 5, 120, 12); fr = _cl_pick(fm.get("freq"), CL_FREQ_KEYS, "once")
     sel = fm.get("audience") == "selected"; valid = {e["key"]: e["id"] for e in _nt_emps()}; to = []
     for x in fm.getlist("to"):
         kx = _key(x)
@@ -13958,7 +14102,7 @@ def admin_celebrations_save():
     if cid:
         cur = next((c for c in rows(CL_SHEET) if str(c.get("Celebration ID", "")).strip() == cid and str(c.get("Status", "")).strip() != "Deleted"), None)
         if cur is None:
-            flash("That celebration no longer exists.", "error"); return redirect("/admin/notes/celebrations")
+            flash("That celebration no longer exists.", "error"); return redirect("/admin/celebrations-log")
         vals = [cid, str(cur.get("Created at", "")), occ, title, msg, fxk, lv, du, fr, "Selected" if sel else "All", ",".join(to) if sel else "", start_s, stop_s,
                 str(cur.get("Status", "")).strip() or "Active", str(cur.get("Created by", "") or "Admin"), now]
         ws.update(range_name="A%d:%s%d" % (cur["_row"], chr(64 + len(H)), cur["_row"]), values=[vals], value_input_option="RAW")
@@ -13970,15 +14114,15 @@ def admin_celebrations_save():
         who = ("%d selected employee(s)" % len(to)) if sel else "all employees"
         flash(("Scheduled for %s - it plays from %s." % (who, start_s)) if (st_d and st_d > now_local()) else ("Live now for %s - it plays on their Employee page within a minute." % who))
     invalidate_cache(CL_SHEET)
-    return redirect("/admin/notes/celebrations")
+    return redirect("/admin/celebrations-log")
 
-@app.route("/admin/notes/celebrations/<cid>/status", methods=["POST"])
+@app.route("/admin/celebrations-log/<cid>/status", methods=["POST"])
 @need("admin")
 def admin_celebrations_status(cid):
     act = request.form.get("to", ""); val = {"archive": "Archived", "restore": "Active", "delete": "Deleted"}.get(act)
     cur = next((c for c in rows(CL_SHEET) if str(c.get("Celebration ID", "")).strip() == cid), None)
     if cur is None or (not val and act not in ("startnow", "stopnow")):
-        flash("Nothing changed.", "error"); return redirect("/admin/notes/celebrations")
+        flash("Nothing changed.", "error"); return redirect("/admin/celebrations-log")
     now_s = now_local().strftime("%Y-%m-%d %H:%M"); ws = ws_of(CL_SHEET); r = cur["_row"]; col = {n: chr(65 + HEADERS[CL_SHEET].index(n)) for n in ("Display from", "Stop at", "Status", "Updated at")}
     if act == "startnow":      # Scheduled -> plays now (a stop time that is already earlier than now is cleared)
         ws.update(range_name="%s%d" % (col["Display from"], r), values=[[now_s]], value_input_option="RAW")
@@ -13994,7 +14138,7 @@ def admin_celebrations_status(cid):
         flash({"Archived": "Switched off - employees will not see it.", "Active": "Switched on again (it follows its Display / Stop times).", "Deleted": "Deleted."}[val])
     ws.update(range_name="%s%d" % (col["Updated at"], r), values=[[now_local().strftime("%Y-%m-%d %H:%M:%S")]], value_input_option="RAW")
     invalidate_cache(CL_SHEET)
-    return redirect("/admin/notes/celebrations")
+    return redirect("/admin/celebrations-log")
 
 
 def _boot_warm():

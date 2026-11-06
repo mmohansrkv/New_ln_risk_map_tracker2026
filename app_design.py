@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update268: Tracking Agent - installation fixed + employee notice & CONSENT. (1) The "Agent credentials were revoked - computer ... must be reinstalled" error kept coming back after the Admin prepared a new installer, because the OLD agent still running on that PC re-reported the error every few minutes. While a new installer is waiting, the employee now shows "Pending Installation" (no more flip back to Error); run the new installer on that PC and it turns Active. (2) CONSENT: the server accepts agent data / enrolment only from employees who have ACCEPTED the tracking notice (new sheet 'Agent Consent'). Admin > Work Time > Install Windows Tracking Agent: Install / Reinstall / Install for All now also sends the employee an in-app notice (banner on every Employee page) and the table shows each employee's consent (Requested / Accepted / Declined / Withdrawn) with a Send / Resend button. (3) The employee reads exactly what is and is not recorded at Employee > /employee/tracking-consent, accepts or declines (can withdraw any time - tracking stops at once), and after accepting can install the agent on their OWN PC from that page (personal installer, no administrator rights) once the Admin has prepared it. deploy_all.ps1 (GPO / Intune) works the same way: an agent only enrols for employees who accepted. Existing installed agents stop reporting until their employee accepts.
   * Update267: Productivity Entry - Save no longer reloads or redirects. The entry is saved in the background (one request instead of save + redirect + second page load + a forced reload 3-4 s later), the employee STAYS on the same Productivity Entry page, every entered value stays in the form, and a green "Saved successfully" line (plus the existing animation) confirms it. After the first save the button becomes "Update entry": further changes update that same entry (no duplicate-date error); changing the Date starts a new entry. Errors (e.g. incomplete hours, duplicate day) are shown on the page without losing anything typed. The Employee-page celebration check runs every 30 s (was 20 s) to lighten the server load.
   * Update266: NEW Admin > Log > "Celebrations Log" - the ONE place for every celebration control (the Celebrations tab is removed from Notes & Messages; the old address redirects here). Admin picks a THEME - Pongal (mango-leaf toran, marigolds, sun, kolam, sugarcane / pot border, falling petals), Diwali (string lights, hanging lanterns, flickering diyas, sparkles), Birthday (bunting, rising balloons, cake & gifts), New Year, Work anniversary, Other festival - or adds / edits / deletes his OWN themes (name, wish, colours, emoji, animation, decoration style) under "Celebration themes". Start now / Stop, custom title + message, schedule and duration (now 5-120 s, or Continuous until Stop) are as before. The Employee page shows the chosen theme's background decoration + animations automatically, and removes ALL of it (also while it is still playing) within about 20-30 s after the Admin clicks Stop / Switch off / Delete. New sheet 'Celebration Themes' (created automatically). Employee pages and every other page unchanged.
   * Update265: Admin - a bold notification bar at the TOP of every Admin page whenever an employee submits a Leave or Permission request (who, what, dates / hours, reason, time). It stays on every Admin page, and keeps appearing after logout / login, until the Admin clicks Clear (one request) or Clear all; cleared notifications disappear for good. New ones appear within about 30 seconds without reloading the page. 'Review requests' opens Admin > Leave & Permission Log. Stored in the new sheet 'Admin Alerts' (created automatically). An alert never blocks or delays the employee's submission.
@@ -574,6 +575,7 @@ HEADERS = {
     "Mahizhchi Connections": ["Game", "Group name", "Word 1", "Word 2", "Word 3", "Word 4"],
     # Update90: optional list to SWITCH OFF the Daily Productivity Entry for an employee (Enabled = No). No row / Enabled = Yes -> has access.
     "Celebration Themes": ["Theme ID", "Name", "Title", "Message", "Effect", "Decor", "Color 1", "Color 2", "Emoji", "Status", "Created at", "Updated at"],      # Update266
+    "Agent Consent": ["Employee ID", "Employee name", "Status", "Requested at", "Requested by", "Decided at", "Notice version", "Decided from IP"],      # Update268
     "Admin Alerts": ["Alert ID", "Type", "Employee ID", "Employee name", "Details", "Created at", "Status", "Cleared at"],      # Update265
     "Lead Productivity Access": ["Employee ID", "Employee name", "Granted", "Updated at", "Updated by"],      # Update262
     "Productivity Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
@@ -2232,6 +2234,38 @@ def _enr_save(changes):
         return True
     except Exception as ex:
         print("agent enrolment save error:", repr(ex)); return False
+
+AGENT_CONSENT_SHEET = "Agent Consent"; AGENT_NOTICE_VER = "1"
+def _consent_row(eid, fresh=False):
+    k = _key(eid)
+    for r in (_fetch_rows(AGENT_CONSENT_SHEET) if fresh else rows(AGENT_CONSENT_SHEET)):
+        if _key(r.get("Employee ID", "")) == k: return r
+    return None
+def _consent_status(eid):
+    try: return str((_consent_row(eid) or {}).get("Status", "")).strip() or "None"
+    except Exception: return "None"
+def _consent_ok(eid): return _consent_status(eid) == "Accepted"
+def _client_ip():
+    return (request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote_addr or "")[:45] if has_request_context() else ""
+def _consent_request_many(people, by="Admin"):
+    """Update268: ask employees for consent (people = [(eid, name)]); already-Accepted ones are left alone. One read, two writes."""
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S"); cur = {_key(r.get("Employee ID", "")): r for r in _fetch_rows(AGENT_CONSENT_SHEET)}
+    ups, adds, n = [], [], 0
+    for eid, name in people:
+        r = cur.get(_key(eid))
+        if r is not None and str(r.get("Status", "")).strip() == "Accepted": continue
+        n += 1
+        if r is None: adds.append([str(eid), name, "Requested", now, by, "", "", ""])
+        else: ups.append({"range": "B%d:H%d" % (r["_row"], r["_row"]), "values": [[name, "Requested", now, by, "", "", ""]]})
+    ws = ws_of(AGENT_CONSENT_SHEET)
+    if ups: ws.batch_update(ups, value_input_option="RAW")
+    if adds: ws.append_rows(adds, value_input_option="RAW")
+    invalidate_cache(AGENT_CONSENT_SHEET); return n
+def _consent_decide(eid, name, status):
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S"); r = _consent_row(eid, fresh=True); ws = ws_of(AGENT_CONSENT_SHEET)
+    if r is None: ws.append_row([str(eid), name, status, "", "", now, AGENT_NOTICE_VER, _client_ip()], value_input_option="RAW")
+    else: ws.update(range_name="B%d:H%d" % (r["_row"], r["_row"]), values=[[name, status, r.get("Requested at", ""), r.get("Requested by", ""), now, AGENT_NOTICE_VER, _client_ip()]], value_input_option="RAW")
+    invalidate_cache(AGENT_CONSENT_SHEET)
 
 def _enr_err(key, name, msg):
     """Remember why an agent could not register / connect (shown as 'Error' to the Admin). Throttled: the same message is written at most every 10 minutes."""
@@ -4317,6 +4351,9 @@ def page(body, title="Productivity Tracker", **ctx):
     if session.get("role") == "admin" and not ctx.get("bare"):      # Update265: Leave / Permission notifications at the top of every Admin page
         try: _ntm = admin_alert_box() + _ntm
         except Exception as ex_: print("Admin alert bar failed:", repr(ex_))
+    elif session.get("role") == "employee" and not ctx.get("bare") and not str(request.path).startswith("/employee/tracking-consent"):      # Update268: tracking notice waiting for the employee's answer
+        try: _ntm = consent_banner() + _ntm
+        except Exception as ex_: print("Consent banner failed:", repr(ex_))
     _html = render_fast(BASE, body=_ntm + render_fast(body, **ctx), title=title, nav=nav,
                                   side_avatar=side_avatar, side_name=side_name, side_name_html=side_name_html, welcome_html=welcome_html, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, hol_only=bool(ctx["hide_status"]), srv_today=str(today_local()), theme_css=_theme_css())
     return _html
@@ -6593,11 +6630,14 @@ def agent_lock():
     except Exception: ok = False
     name = next((str(r.get("Name", "")) for r in rows("Employees") if _key(r.get("Employee ID", "")) == _key(eid)), None) if eid else None
     if not ok:
-        if name is not None and _token_was_revoked(eid, j.get("token", ""), enr):      # Update166: a formerly valid agent is still running -> the Admin sees why (Error)
+        _gen = _fl((enr or {}).get("Generated epoch"))
+        _waiting = bool(_gen) and _gen > _agent_map().get(_key(eid), 0)      # Update268: a new installer is already prepared and not yet run -> show Pending Installation, not Error again
+        if name is not None and not _waiting and _token_was_revoked(eid, j.get("token", ""), enr):      # Update166: a formerly valid agent is still running -> the Admin sees why (Error)
             _enr_err(eid, name, "Agent credentials were revoked - computer %s must be reinstalled" % (str(j.get("host", ""))[:40] or "?"))
         return ("", 403)
     if name is None: return ("", 403)                                  # unknown / deleted employee: the agent drops the event
     if str((enr or {}).get("Status", "")).strip() == "Disabled": return ("", 403)      # Update166: Admin disabled this agent
+    if not _consent_ok(eid): return ("", 403)      # Update268: nothing is recorded until the employee has accepted the tracking notice
     if j.get("e") == "check": return ("", 204)                         # Update166: the installer's registration check - validates the credentials but is NOT a heartbeat
     kind = {"start": "locked", "locked": "locked", "end": "unlocked", "unlocked": "unlocked", "reason": "reason", "hello": "support",
             "display_off": "screen_off", "display_on": "screen_on"}.get(j.get("e"))
@@ -6636,6 +6676,7 @@ def agent_enroll():
         return jsonify(ok=False), 404
     eid = str(hit[0]["Employee ID"]).strip(); enr = _enr_get(eid)
     if str((enr or {}).get("Status", "")).strip() == "Disabled": return jsonify(ok=False), 403      # Update166: a disabled agent cannot re-register
+    if not _consent_ok(eid): return jsonify(ok=False), 403      # Update268: the employee has not accepted the tracking notice
     return jsonify(ok=True, eid=eid, token=wt_agent_token(eid, enr))
 
 @app.route("/admin/work-time/agent/deploy_all.ps1")
@@ -6821,21 +6862,25 @@ def _emp_by_id(eid):
     return next((x for x in rows("Employees") if _key(x.get("Employee ID", "")) == _key(eid)), None)
 def _fname(eid): return "install_%s.ps1" % re.sub(r"[^A-Za-z0-9_-]+", "_", str(eid))
 def _stamp(ep): return dt.datetime.fromtimestamp(ep, TZ).strftime("%Y-%m-%d %H:%M") if ep else ""
-AGENT_TONE = {"Active (agent)": "#166534", "Offline": "#b45309", "Error": "#b91c1c", "Pending Installation": "#1d4ed8", "Disabled": "#6b7280", "Not Installed": "#6b7280"}
+AGENT_TONE = {"Active (agent)": "#166534", "Offline": "#b45309", "Error": "#b91c1c", "Pending Installation": "#1d4ed8", "Awaiting Consent": "#7c3aed", "Consent Declined": "#b91c1c", "Disabled": "#6b7280", "Not Installed": "#6b7280"}
 
 def _agent_rows():
     now = time.time()
     enr = {_key(r.get("Employee ID", "")): r for r in _fetch_rows(ENR_SHEET)}
     dev = {_key(r.get("Employee ID", "")): r for r in _fetch_rows(AGENT_SHEET)}
+    con = {_key(r.get("Employee ID", "")): str(r.get("Status", "")).strip() for r in _fetch_rows(AGENT_CONSENT_SHEET)}
     out = []
     for e in rows("Employees"):
         eid = str(e.get("Employee ID", "")).strip()
         if not eid: continue
         k = _key(eid); er = enr.get(k) or {}; dv = dev.get(k) or {}; contact = _fl(dv.get("Last contact epoch"))
-        st = agent_status(er, contact, now)
-        out.append(dict(eid=eid, name=str(e.get("Name", "")), email=str(e.get("Office Email ID") or e.get("Email") or ""), status=st, tone=AGENT_TONE[st],
+        st = agent_status(er, contact, now); cs = con.get(k, "") or "Not asked"; inst = st in ("Active (agent)", "Offline", "Error")
+        if st != "Disabled":      # Update268: without the employee's consent nothing is recorded, so that is what the Admin sees
+            if cs in ("Declined", "Withdrawn"): st = "Consent Declined"
+            elif cs != "Accepted" and (cs == "Requested" or st != "Not Installed"): st = "Awaiting Consent"
+        out.append(dict(consent=cs, eid=eid, name=str(e.get("Name", "")), email=str(e.get("Office Email ID") or e.get("Email") or ""), status=st, tone=AGENT_TONE[st],
                         last=_stamp(contact), host=str(dv.get("Computer", "")), err=str(er.get("Last error", "")) if st == "Error" else "",
-                        prepared=_stamp(_fl(er.get("Generated epoch"))), disabled=(st == "Disabled"), installed=(st in ("Active (agent)", "Offline", "Error"))))
+                        prepared=_stamp(_fl(er.get("Generated epoch"))), disabled=(st == "Disabled"), installed=inst))
     bad = [dict(who=str(r.get("Employee name", "")), err=str(r.get("Last error", "")), at=_stamp(_fl(r.get("Last error epoch")))) for r in enr.values()
            if str(r.get("Employee ID", "")).startswith("UNMATCHED")]
     return out, bad
@@ -6870,6 +6915,9 @@ def admin_work_time_agent_install():
                                   "Generated epoch": int(now), "Prepared by": "Admin", "Last error": "", "Last error epoch": ""}}):
         flash("The installer could not be prepared (Google Sheets did not answer). Please try again.", "error"); return redirect("/admin/work-time/agent")
     print("work-time agent: installer prepared for", eid, "(new credentials)" if request.form.get("rotate") == "1" else "")
+    try:
+        if _consent_request_many([(eid, name)]): flash("%s has been notified in the Employee page and must accept the tracking notice before the agent can register." % (name or eid))
+    except Exception as ex: print("consent request failed:", repr(ex)); flash("Installer prepared, but the consent request could not be saved - use 'Send consent request'.", "error")
     _wt_approve(eid)
     return redirect("/admin/work-time/agent?ready=" + urllib.parse.quote(eid))
 
@@ -6888,8 +6936,25 @@ def admin_work_time_agent_install_all():
     if ch and not _enr_save(ch):
         flash("Google Sheets did not answer. Please try again.", "error"); return redirect("/admin/work-time/agent")
     print("work-time agent: deploy_all approved,", len(ch), "employees set to Pending Installation")
+    try:
+        n_ = _consent_request_many([(r["eid"], r["name"]) for r in data if not r["disabled"]])
+        flash("%d employee(s) have been notified in the Employee page. The agent only enrols for employees who accept the tracking notice." % n_)
+    except Exception as ex: print("consent request failed:", repr(ex)); flash("Prepared, but the consent requests could not be saved - use 'Send consent request' per employee.", "error")
     _wt_approve("ALL")
     return redirect("/admin/work-time/agent?ready=ALL")
+
+@app.route("/admin/work-time/agent/request-consent", methods=["POST"])
+@need("admin")
+def admin_work_time_agent_request_consent():
+    """Update268: (re)send the tracking notice / consent request to one employee."""
+    if not _same_origin(): abort(403)
+    e = _emp_by_id(request.form.get("eid", "").strip())
+    if not e: abort(404)
+    try:
+        n = _consent_request_many([(str(e["Employee ID"]).strip(), str(e.get("Name", "")))])
+        flash(("%s has been notified in the Employee page." % (e.get("Name") or e["Employee ID"])) if n else "%s has already accepted." % (e.get("Name") or e["Employee ID"]))
+    except Exception as ex: print("consent request failed:", repr(ex)); flash("Could not save the request - please try again.", "error")
+    return redirect("/admin/work-time/agent")
 
 @app.route("/admin/work-time/agent/disable", methods=["POST"])
 @need("admin")
@@ -6920,6 +6985,12 @@ WT_AGENT = """<div class="card"><h2 style="margin-top:0">Install Windows Trackin
 (GPO / Intune / SCCM). An employee is shown as <b>Active (agent)</b> only after the server receives a valid heartbeat or event from the agent.</p>
 <p style="margin:6px 0">{% for s_ in states %}{% if cnt.get(s_) %}<span style="display:inline-block;margin:0 10px 4px 0"><b style="color:{{tones[s_]}}">{{cnt[s_]}}</b> {{s_}}</span>{% endif %}{% endfor %}</p>
 
+<div class="card" style="background:#faf5ff;border:1px solid #d8b4fe"><b>How installation works (with employee notice &amp; consent)</b>
+<ol style="margin:6px 0 0 18px;padding:0"><li>Click <b>Install Agent</b> (one employee) or <b>Install for All Employees</b>. The employees are notified by a banner on their Employee page.</li>
+<li>Each employee reads what the agent records (screen lock / unlock, screen-off / idle periods, computer name - no keystrokes, screenshots, files or websites) and accepts or declines.</li>
+<li>After accepting, the employee installs the agent on their own PC from that page (personal installer, no administrator rights, needs Python 3) - or IT deploys <b>deploy_all.ps1</b> through Group Policy / Intune / SCCM. The agent only registers for employees who accepted.</li>
+<li>The status turns <b>Active (agent)</b> after the first heartbeat. A declined or withdrawn consent stops recording at once.</li></ol>
+<p class="mut" style="margin:6px 0 0">A web app cannot push software onto a PC by itself, so the employee (or IT) runs the installer once. If a PC shows <i>credentials revoked</i>, prepare a new installer with <b>Reinstall Agent</b> and run it on that PC; the status shows Pending Installation until it does.</p></div>
 {% if ready %}<div class="card" style="background:#f0fdf4;border:1px solid #86efac">
 {% if ready.all %}<b>Deployment script ready &middot; all employees</b>
 <p style="margin:6px 0"><a class="btnl" href="/admin/work-time/agent/deploy_all.ps1">&#11015; Download deploy_all.ps1</a></p>
@@ -6946,9 +7017,10 @@ Employees stay <b>Pending Installation</b> until their first heartbeat arrives. 
 <div class="no-print" style="display:flex;gap:10px;flex-wrap:wrap;margin:8px 0">
 <input id="wtq" type="search" placeholder="Search Emp ID / name / e-mail" oninput="wtFilter()" style="min-width:220px">
 <select id="wts" onchange="wtFilter()"><option value="">All statuses</option>{% for s_ in states %}<option>{{s_}}</option>{% endfor %}</select></div>
-<div style="overflow-x:auto"><table id="wtt"><tr><th>Emp ID</th><th>Employee Name</th><th>Office Email ID</th><th>Agent Installation Status</th><th>Last Activity</th><th>Install / Reinstall Agent</th><th>Disable Agent</th></tr>
+<div style="overflow-x:auto"><table id="wtt"><tr><th>Emp ID</th><th>Employee Name</th><th>Office Email ID</th><th>Agent Installation Status</th><th>Employee consent</th><th>Last Activity</th><th>Install / Reinstall Agent</th><th>Disable Agent</th></tr>
 {% for r in data %}<tr data-s="{{r.status}}" data-t="{{(r.eid ~ ' ' ~ r.name ~ ' ' ~ r.email)|lower}}"><td>{{r.eid}}</td><td>{{r.name}}</td><td>{{r.email or '-'}}</td>
 <td><b style="color:{{r.tone}}">{{r.status}}</b>{% if r.err %}<br><small style="color:#b91c1c">{{r.err}}</small>{% elif r.status=='Pending Installation' and r.prepared %}<br><small class="mut">installer prepared {{r.prepared}}</small>{% endif %}{% if r.host and r.installed %}<br><small class="mut">{{r.host}}</small>{% endif %}</td>
+<td><b>{{r.consent}}</b>{% if r.consent!='Accepted' and not r.disabled %}<form method="post" action="/admin/work-time/agent/request-consent" style="margin:4px 0 0"><input type="hidden" name="eid" value="{{r.eid}}"><button class="btnl" type="submit">{{'Resend request' if r.consent=='Requested' else 'Send consent request'}}</button></form>{% endif %}</td>
 <td>{{r.last or '-'}}</td>
 <td>{% if r.disabled %}<span class="mut">Enable first</span>{% else %}<form method="post" action="/admin/work-time/agent/install" style="margin:0" onsubmit="return confirm('Prepare the installer for {{r.name|e}}? Deploy it only with authorized Admin / IT approval.')">
 <input type="hidden" name="eid" value="{{r.eid}}"><button class="btnl" type="submit">{{'Reinstall Agent' if r.status!='Not Installed' else 'Install Agent'}}</button>
@@ -7146,20 +7218,8 @@ while True:
     flush(); time.sleep(1)
 '''
 
-@app.route("/admin/work-time/agent/install.ps1")
-@need("admin")
-def admin_work_time_agent_installer():
-    """Update141: one-click, per-employee installer for the silent lock agent (current user, no admin rights, hidden, runs at every logon)."""
-    eid = request.args.get("eid", "").strip()
-    e = next((x for x in rows("Employees") if _key(x.get("Employee ID", "")) == _key(eid)), None)
-    if not e: abort(404)
-    eid = str(e["Employee ID"]).strip(); base = request.url_root.rstrip("/")
-    er = _enr_get(eid, fresh=True)
-    if str((er or {}).get("Status", "")).strip() == "Disabled":
-        flash("This employee's agent is disabled. Use Enable first.", "error"); return redirect("/admin/work-time/agent")
-    if not _wt_approved(eid):                                     # Update166: Install Agent (with Admin / IT approval) must come first; the link is not usable on its own
-        flash("Click Install Agent for this employee first (the download is released for 10 minutes).", "error"); return redirect("/admin/work-time/agent")
-    print("work-time agent: installer downloaded for", eid)
+def _agent_ps(eid, er, base):
+    """Update268: the personal PowerShell installer (shared by the Admin download and the employee's own consent page)."""
     tok, peid = wt_agent_token(eid, er), eid.replace("'", "''")
     ps = f"""$ErrorActionPreference = 'Stop'
 $dir = Join-Path $env:LOCALAPPDATA 'WorkTimeAgent'
@@ -7189,10 +7249,87 @@ try {{
   Write-Output 'Work Time agent installed and the server accepted it. The Admin page shows Active (agent) after the first heartbeat (about a minute).'
 }} catch {{
   $code = 0; if ($_.Exception.Response) {{ $code = [int]$_.Exception.Response.StatusCode }}
-  if ($code -eq 403) {{ Write-Error 'Installed, but the server REJECTED this agent (credentials revoked, agent disabled or employee unknown). Ask the Admin to prepare a new installer.' }}
+  if ($code -eq 403) {{ Write-Error 'Installed, but the server REJECTED this agent (credentials revoked, agent disabled, employee unknown, or the employee has not accepted the tracking notice yet). Ask the Admin to prepare a new installer, and accept the notice on your Employee page.' }}
   else {{ Write-Error ('Installed, but this PC could not reach the server {base} : ' + $_.Exception.Message) }}
 }}
 """
+
+    return ps
+
+
+EMP_CONSENT = """<div class="card" style="max-width:820px"><h2 style="margin-top:0">Work Time tracking notice</h2>
+<p>Your employer asks to install the <b>Work Time agent</b> on your work computer. Please read what it does, then choose.</p>
+<h3 style="margin:12px 0 4px">What it records</h3>
+<ul style="margin:0 0 0 18px"><li>When your screen is <b>locked</b> and <b>unlocked</b> (and whether you locked it yourself or it locked automatically).</li>
+<li>When the screen turns <b>off</b> / on, or you have been <b>idle</b> (no keyboard or mouse use for the idle limit, 5 minutes by default).</li>
+<li>The name of the computer and a regular "agent is running" signal.</li></ul>
+<h3 style="margin:12px 0 4px">What it does NOT record</h3>
+<ul style="margin:0 0 0 18px"><li>No keystrokes, screenshots, screen content, files, e-mails, websites, applications, camera, microphone or location.</li></ul>
+<h3 style="margin:12px 0 4px">Why and who sees it</h3>
+<p style="margin:0">To calculate your working time and break duration for attendance and productivity reports. The Admin can see these records with your Employee ID and date.</p>
+<h3 style="margin:12px 0 4px">Your choice</h3>
+<p style="margin:0">Nothing is recorded until you accept. You can <b>withdraw at any time</b> on this page - recording stops immediately.</p>
+<p style="margin:12px 0 0"><b>Your current choice:</b> <span style="font-weight:700;color:{{'#166534' if cst=='Accepted' else '#b45309'}}">{{ {'Accepted':'Accepted','Declined':'Declined','Withdrawn':'Withdrawn','Requested':'Waiting for your answer','None':'Not asked yet'}[cst] }}</span></p>
+<form method="post" style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
+{% if cst!='Accepted' %}<button class="primary" name="choice" value="accept" type="submit">I agree</button><button class="back" name="choice" value="decline" type="submit">I do not agree</button>
+{% else %}<button class="back" name="choice" value="withdraw" type="submit" onclick="return confirm('Withdraw your consent? Recording stops immediately.')">Withdraw my consent</button>{% endif %}</form></div>
+{% if cst=='Accepted' %}<div class="card" style="max-width:820px"><h3 style="margin-top:0">Install on my computer</h3>
+{% if ready %}<p>The Admin has prepared your installer. Download it on the computer you work on, then run it signed in as yourself (no administrator rights needed; Python 3 must be installed).</p>
+<p><a class="btnl" href="/employee/tracking-agent/install.ps1">&#11015; Download {{fname}}</a></p>
+<p style="margin:6px 0">Command: <code style="user-select:all">{{cmd}}</code></p>
+<p class="mut">The installer is personal to you and contains a private credential - do not share it. It starts at every Windows sign-in and can be removed by deleting the "WorkTimeAgent" scheduled task.</p>
+{% else %}<p class="mut">The Admin has not prepared an installer for you yet. If your IT team deploys the agent to your computer, nothing more is needed from you.</p>{% endif %}</div>{% endif %}"""
+
+@app.route("/employee/tracking-consent", methods=["GET", "POST"])
+@need("employee")
+def employee_tracking_consent():
+    """Update268: the employee's tracking notice - accept / decline / withdraw, and install on their own PC after accepting."""
+    eid, name = session["emp_id"], session.get("name", "")
+    if request.method == "POST":
+        ch = request.form.get("choice", ""); new = {"accept": "Accepted", "decline": "Declined", "withdraw": "Withdrawn"}.get(ch)
+        if new:
+            try:
+                _consent_decide(eid, name, new)
+                flash({"Accepted": "Thank you - your consent is recorded.", "Declined": "Your choice is recorded: nothing will be recorded.", "Withdrawn": "Your consent is withdrawn. Recording has stopped."}[new])
+            except Exception as ex: print("consent save failed:", repr(ex)); flash("Could not save your choice - please try again.", "error")
+        return redirect("/employee/tracking-consent")
+    st = _consent_status(eid); er = _enr_get(eid) or {}
+    ready = st == "Accepted" and str(er.get("Status", "")).strip() != "Disabled" and bool(_fl(er.get("Generated epoch")))
+    return page(EMP_CONSENT, title="Work Time tracking notice", cst=st, ready=ready, fname=_fname(eid), cmd="powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File .\\" + _fname(eid))
+
+@app.route("/employee/tracking-agent/install.ps1")
+@need("employee")
+def employee_agent_installer():
+    eid = session["emp_id"]; er = _enr_get(eid, fresh=True) or {}
+    if not _consent_ok(eid):
+        flash("Please accept the tracking notice first.", "error"); return redirect("/employee/tracking-consent")
+    if str(er.get("Status", "")).strip() == "Disabled" or not _fl(er.get("Generated epoch")):
+        flash("The Admin has not prepared an installer for you yet.", "error"); return redirect("/employee/tracking-consent")
+    print("work-time agent: installer downloaded by the employee", eid)
+    resp = Response("\ufeff" + _agent_ps(eid, er, request.url_root.rstrip("/")), mimetype="text/plain")
+    resp.headers["Content-Disposition"] = "attachment; filename=" + _fname(eid); resp.headers["Cache-Control"] = "no-store"; return resp
+
+def consent_banner():
+    if _consent_status(session.get("emp_id", "")) != "Requested": return ""
+    return ('<div role="alert" style="margin:0 0 12px;padding:10px 14px;border-radius:10px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412">'
+            '<b>Action needed:</b> your employer has asked to install the Work Time tracking agent on your computer. Please read what it records and give or refuse your consent. '
+            '<a href="/employee/tracking-consent" style="font-weight:700">Review &amp; respond</a></div>')
+
+@app.route("/admin/work-time/agent/install.ps1")
+@need("admin")
+def admin_work_time_agent_installer():
+    """Update141: one-click, per-employee installer for the silent lock agent (current user, no admin rights, hidden, runs at every logon)."""
+    eid = request.args.get("eid", "").strip()
+    e = next((x for x in rows("Employees") if _key(x.get("Employee ID", "")) == _key(eid)), None)
+    if not e: abort(404)
+    eid = str(e["Employee ID"]).strip(); base = request.url_root.rstrip("/")
+    er = _enr_get(eid, fresh=True)
+    if str((er or {}).get("Status", "")).strip() == "Disabled":
+        flash("This employee's agent is disabled. Use Enable first.", "error"); return redirect("/admin/work-time/agent")
+    if not _wt_approved(eid):                                     # Update166: Install Agent (with Admin / IT approval) must come first; the link is not usable on its own
+        flash("Click Install Agent for this employee first (the download is released for 10 minutes).", "error"); return redirect("/admin/work-time/agent")
+    print("work-time agent: installer downloaded for", eid)
+    ps = _agent_ps(eid, er, base)
     resp = Response("\ufeff" + ps, mimetype="text/plain"); resp.headers["Content-Disposition"] = f"attachment; filename=install_{re.sub(r'[^A-Za-z0-9_-]+', '_', eid)}.ps1"; resp.headers["Cache-Control"] = "no-store"
     return resp
 

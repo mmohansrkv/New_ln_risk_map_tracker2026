@@ -1,4 +1,25 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update271: Employee login - a username whose account is Locked or Resigned / NCNS (Admin > Employee Login Access) now shows "Your account is locked. Please contact your Manager, Team Lead, or Admin." whatever password is typed, the username stays in the field, the male / female / lead picture still appears for it, and these accounts can never sign in. An unknown username still shows "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." (Update270).
+  * Update270: Employee login messages - an unknown / invalid username OR a locked account (any password) now shows exactly: "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." The typed username stays in the field. A valid, unlocked username with a wrong password shows "Wrong username or password. Please try again." The male / female / lead picture still appears while typing and, for a locked account, still appears whenever the username matches an employee record (the picture lookup ignores the lock). Admin login unchanged.
+  * Update269: Employee login - the username stays in the field after a failed sign-in (also for a locked account) and the cursor moves to the password box. Locked or invalid usernames now show: "Wrong username or password, or the account is locked / not valid. Please contact your Manager, Team Lead, or Admin." A locked account with the correct password shows "Your account is locked. Please contact your Manager, Team Lead, or Admin to unlock it." The message is the same for a locked, unknown or wrong-password attempt, so it never reveals which usernames exist. Admin login also keeps the typed username.
+  * Update268: Tracking Agent - installation fixed + employee notice & CONSENT. (1) The "Agent credentials were revoked - computer ... must be reinstalled" error kept coming back after the Admin prepared a new installer, because the OLD agent still running on that PC re-reported the error every few minutes. While a new installer is waiting, the employee now shows "Pending Installation" (no more flip back to Error); run the new installer on that PC and it turns Active. (2) CONSENT: the server accepts agent data / enrolment only from employees who have ACCEPTED the tracking notice (new sheet 'Agent Consent'). Admin > Work Time > Install Windows Tracking Agent: Install / Reinstall / Install for All now also sends the employee an in-app notice (banner on every Employee page) and the table shows each employee's consent (Requested / Accepted / Declined / Withdrawn) with a Send / Resend button. (3) The employee reads exactly what is and is not recorded at Employee > /employee/tracking-consent, accepts or declines (can withdraw any time - tracking stops at once), and after accepting can install the agent on their OWN PC from that page (personal installer, no administrator rights) once the Admin has prepared it. deploy_all.ps1 (GPO / Intune) works the same way: an agent only enrols for employees who accepted. Existing installed agents stop reporting until their employee accepts.
+  * Update267: Productivity Entry - Save no longer reloads or redirects. The entry is saved in the background (one request instead of save + redirect + second page load + a forced reload 3-4 s later), the employee STAYS on the same Productivity Entry page, every entered value stays in the form, and a green "Saved successfully" line (plus the existing animation) confirms it. After the first save the button becomes "Update entry": further changes update that same entry (no duplicate-date error); changing the Date starts a new entry. Errors (e.g. incomplete hours, duplicate day) are shown on the page without losing anything typed. The Employee-page celebration check runs every 30 s (was 20 s) to lighten the server load.
+  * Update266: NEW Admin > Log > "Celebrations Log" - the ONE place for every celebration control (the Celebrations tab is removed from Notes & Messages; the old address redirects here). Admin picks a THEME - Pongal (mango-leaf toran, marigolds, sun, kolam, sugarcane / pot border, falling petals), Diwali (string lights, hanging lanterns, flickering diyas, sparkles), Birthday (bunting, rising balloons, cake & gifts), New Year, Work anniversary, Other festival - or adds / edits / deletes his OWN themes (name, wish, colours, emoji, animation, decoration style) under "Celebration themes". Start now / Stop, custom title + message, schedule and duration (now 5-120 s, or Continuous until Stop) are as before. The Employee page shows the chosen theme's background decoration + animations automatically, and removes ALL of it (also while it is still playing) within about 20-30 s after the Admin clicks Stop / Switch off / Delete. New sheet 'Celebration Themes' (created automatically). Employee pages and every other page unchanged.
+  * Update265: Admin - a bold notification bar at the TOP of every Admin page whenever an employee submits a Leave or Permission request (who, what, dates / hours, reason, time). It stays on every Admin page, and keeps appearing after logout / login, until the Admin clicks Clear (one request) or Clear all; cleared notifications disappear for good. New ones appear within about 30 seconds without reloading the page. 'Review requests' opens Admin > Leave & Permission Log. Stored in the new sheet 'Admin Alerts' (created automatically). An alert never blocks or delays the employee's submission.
+  * Update264: Productivity entry is never held up by a Leave / Permission that is still waiting for Admin approval. When an entry is saved or edited, the required working hours now already allow for a PENDING permission (e.g. 2 hrs) or PENDING half-day leave (4 hrs) - before, only APPROVED ones were allowed for, so an employee with a pending 2-hr permission who logged 6 hrs got "Entry incomplete: 6 of the required 8 hours" until the Admin approved it. Same rule in the entry page's "Required ... hrs" hint and the 100% bloom. A pending full-day leave never blocked entry and still does not. A Rejected request counts for nothing (full day required again). Reports, Productivity %, Missed entries, attendance and calendars are unchanged and still follow APPROVED requests only.
+  * Update263: Employee menu for Associate Manager / Team Lead / Senior Team Lead (matched live by Designation, active login) is now EXACTLY, in this order: 1. Team Logs  2. Employee Details  3. Personal Details  4. Leave & Permission. Nothing else is listed (no Daily entry / Productivity Info / Audit Log / Mahizhchi / Game links). Their first page after login is Team Logs (it also carries the Admin notes ticker and celebration, as the first page did before). /employee and /employee/productivity send them to Team Logs. All other employees and the Admin menu are unchanged. The menu label "Personal details" is now "Personal Details" for these three designations only.
+  * Update262: Admin > Overview - NEW card "Senior Team Leads, Team Leads & Associate Managers with Productivity entry access". By default these three designations are View Only (Update105). The Admin can now GRANT (or take back) Productivity entry access for an individual lead with the Grant / Revoke buttons under 'Manage entry access' in that card (new sheet 'Lead Productivity Access', created automatically). The card lists ONLY the leads who have been granted access, with their Overview details (present / leave / absent, attendance, productive / non-productive hours, productivity %); leads without the grant are not shown (they stay View Only). A granted lead gets the Daily entry / Productivity Info pages, missed-entry tracking and reminders like any other employee and is counted in the Overview averages; Revoke restores View Only. Resigned / NCNS leads cannot be granted. Every other employee and page unchanged.
+  * Update261: Celebrations - NEW 'Continuous' mode (How often = "Continuous - until the Admin clicks Stop"). The greeting (e.g. "Happy Birthday, <name>! Wishing you a wonderful year ahead filled with joy and success. From all of us!") shows as a SMALL-font banner at the very TOP of the Employee page with fireworks / crackers (and the other effects) repeating non-stop - no time limit and no close button for the employee. It disappears, together with every animation, within about half a minute after the Admin clicks 'Stop' (Admin > Notes & Messages > Celebrations; also ends at an optional Stop date & time, 'Switch off' or Delete). The employee's page is never blocked (animation layer is click-through). Birthday now defaults to Fireworks + Crackers and Continuous. Existing celebrations and all other pages unchanged.
+  * Update260: NEW Admin > Notes & Messages > Celebrations. The Admin creates celebration animations for the Employee page - Fireworks, Crackers (ladi strings + flower pots), Fireworks + Crackers, Fireworks + Confetti, Confetti or Balloons - for occasions such as Birthday, Pongal, Diwali, New Year or a work anniversary (ready-made wishes included; type {name} to greet each employee by first name). Per celebration: greeting title / message, intensity (Gentle / Normal / Grand), play time (5-30 s), who sees it (all employees or only the ones ticked - e.g. the birthday person), Display / Stop date & time or 'Start now' / 'Stop now', 'Switch off', Delete, Preview, and how often it plays (once per employee / once a day / every login). It plays full-screen with a greeting card on the page employees land on after login (the Daily Entry page; the Leave page for Associate Manager / Team Lead / Senior Team Lead); work underneath stays clickable, the card has a close button (Esc also closes), and it is skipped as animation (card only) for people whose device asks for reduced motion. A celebration the Admin starts while an employee is already on the page appears within about a minute (a light check that does NOT reset the idle auto-logout timer). New sheets 'Celebrations' and 'Celebration Seen' are created automatically. Nothing else was changed.
+  * Update259: SPEED ONLY - no screen, text, permission or feature was changed. (1) Start-up: the spreadsheet is opened with 3 Google calls instead of ~63 (one call lists the sheets, one call reads every header row, the Productivity log column migration runs only when its header is still the old one), and it is opened in the background as soon as the server process starts - the first Admin / Employee login after a deploy or a Render wake-up no longer waits for it (before, 30 sheets x 2 calls in a row could run past Gunicorn's 30 s timeout and hit the Sheets read quota). (2) Save: the 'already submitted for this date?' check reads only the 3 columns it needs (Submission ID, Date, Employee ID) live instead of the whole Productivity log; Edit / Delete row lookup and the 'did the rows land?' check read only column A. (3) Login: the Attendance 'close sessions left open' clean-up runs once per employee per day (it re-read the whole Attendance sheet on EVERY login) and reads only columns A:G. (4) Admin pages that read their sheets live (@live_data) and the Employee Info pages now read the sheets they need AT THE SAME TIME instead of one after another, and share an in-flight read instead of asking Google twice.
+  * Update252b: Admin > Productivity Log - the Employee column shows the employee's NAME (read from the Employees sheet by Employee ID; falls back to the name saved on the log row, then the ID) instead of the Employee ID; it still links to the employee's complete Productivity Log. Columns, order, calculations and data are unchanged (new read-only key master_name, used only for this display).
+  * Update258: (1) Smooth natural eye blinking on the sidebar profile characters - employee male / female and the supplied pictures of Associate Manager / Team Lead / Senior Team Lead (feathered skin-coloured eyelids, transform only, each character on its own rhythm); the Admin character's blink uses the same softer curve; pictures / 3D layers unchanged. (2) Admin > Employee Info > Employee Login Access > Action (Admin only): one dropdown Active / Resigned / NCNS (No Call, No Show) + relieving date (needed for Resigned / NCNS) + Save action; 'Active' clears the status (the login stays disabled until the Admin clicks Enable Login). (3) The Status column now shows Active / Resigned / NCNS for Associate Manager / Team Lead / Senior Team Lead (Login Access and Managers & Leads tables, and the Employee Details page they see); all read the same Employees sheet column, so they stay in sync. Admin only; login access rules unchanged.
+  * Update257: Admin sidebar dropdowns (Log, Employee Info): only ONE open at a time (opening one closes the other), choosing a submenu item closes its dropdown and opens the page (the page loads with the dropdown closed; the group holding the current page gets a light border), a click anywhere outside - or Esc - closes an open dropdown. Menu items, links and every other function unchanged.
+  * Update256: (1) Team Logs gets a read-only 'Leave & Permission' tab (all employees' Leave and Permission requests with status; month / employee / status filters) for Associate Manager / Team Lead / Senior Team Lead only. (2) Admin > Employee Info > Productivity (and the Team Logs Productivity table): an employee marked Resigned / NCNS by the Admin (effective from the Relieving date) shows 'Resigned' / 'NCNS' in the Working Days column instead of working-day figures; they stay out of pending / reminder calculations (Update253). (3) Admin Productivity pages no longer list the names or records of Associate Manager / Team Lead / Senior Team Lead. Status and relieving date stay Admin-only; all other employees' calculations are unchanged.
+  * Update255: Leave / Permission e-mails (applicant's OWN Office Email ID only, no CC; 3D template; logged in Email Controls): (1) e-mail the moment an employee APPLIES (status Pending); (2) e-mail on every Admin APPROVE and every Admin REJECT (once per real status change) with type, date, duration / hours, reason, applied-on and status. Admin Approve / Reject buttons unchanged. (3) Permission never blocks the Daily Productivity entry and never marks it completed (missing_dates() counts only a submitted entry or a full-day leave) - verified, unchanged.
+  * Update253: Resigned / NCNS (Employee Info > Employee Login Access > Status) now also switch OFF all Productivity for that employee and keep them out of every reminder: the login is already disabled (existing sessions are signed out on the next click); in addition no productivity entry can be written for them (employee or Admin side), they are never counted as 'missed' / 'pending' (missing_dates), they are skipped by the automatic Missed Entries e-mail, the manual reminder, the Managers' Missed Entries summary and every pending-reminder list, and send_missed_mails() re-checks the live status as a last guard. Clearing the status restores everything.
+  * Update252: Resigned / NCNS (Admin only). Employee Info > Employee Login Access: new 'Status (Resigned / NCNS)' and 'Relieving Date' (both required) per employee; saving disables the login automatically (Account locked = Yes) and the login cannot be enabled again until the Admin clears the status. The details also show in Employee Info > Managers & Leads. Associate Manager / Team Lead / Senior Team Lead see the Login Access Status (Enabled / Disabled) plus Resigned / NCNS and the relieving date of ALL employees, read-only, in Employee Details. New columns 'Separation status' and 'Relieving date' are added to the Employees sheet automatically.
+  * Update251: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the 3D e-mail animation now flies from the LEFT picture (glasses, white suit, thumbs-up) to the RIGHT picture (clipboard) as soon as the username is recognised, and repeats until the next page has loaded (the report sheets from the server are no longer shown for them). All other designations and the Admin login keep the Update247 animation; a generation counter prevents two animation loops running at once. Display only - form, lookup and every route unchanged.
   * Update246: Admin > Work Time page lag fixed - the shared-employee list was re-read (and every Employee row copied) for EACH Lock Event row and for EACH employee, and the per-employee event number was counted with a nested loop; now read once / counted with a dict. Output unchanged.
   * Update245: Associate Manager / Team Lead / Senior Team Lead ONLY - Employee Panel left menu laid out as in the supplied screenshot (menu items, holidays-only Calendar, avatar / name / Logout dock) via a new .tlside class on the sidebar; compact spacing so the Calendar's Today button is no longer hidden behind the profile dock. No new page; all other designations unchanged.
   * Update244b: Leave & Permission - for Associate Manager / Team Lead / Senior Team Lead the remaining status hints (the "Half day" tag on leave rows and the "back to Pending" note on permission rows) are hidden too.
@@ -7,6 +28,10 @@
   * Update242: Employee login page - the two characters now animate: eyes open / close naturally (random single and occasional double blinks) on BOTH pictures, the left character's thumbs-up hand wiggles, the right (clipboard) character's raised fist waves and the hand holding the clipboard adjusts its grip. CSS layers + one tiny script, no new images / libraries; login form, lookup and every route unchanged; reduced-motion users get still pictures.
   * Update241: Employee login page - for Associate Manager / Team Lead / Senior Team Lead (recognised from the typed username, same lookup as the character) the server picture on the right is replaced by the supplied clipboard picture (/char/tl.webp) with 3D depth (shadow layer behind, pointer parallax), 3D sway, floating, breathing, light sweep, aura and floor ring. Login form / logic and every other designation's login page unchanged.
   * Update240: Employee login page - for Associate Manager / Team Lead / Senior Team Lead the female picture is removed; the supplied male picture (glasses, white suit, thumbs-up; /char/lm.webp) is shown above the login box once the username is typed, with the same tilt / breathing / floating / shine animation. Employee panel picture and all other designations / pages unchanged.
+  * Update250: Employee Panel - the Messages page / menu item and the 3D pop-up cards are removed (/employee/messages now goes to Daily Entry). The Admin's live notes / messages (inside their Display - Stop times and chosen viewers) scroll as a smooth, continuous marquee from left to right at the TOP of the Daily Entry page (Associate Manager / Team Lead / Senior Team Lead, who have no Daily Entry, see it on their first page). It pauses on hover, refreshes every minute (new / ended messages appear or leave by themselves) and shows no animation when reduced motion is on. Admin > Notes & Messages now counts 'Seen' (shown to the employee).
+  * Update249: Admin Notes / Messages scheduling - 'Display date & time' (when the message starts appearing in the Employee Panel; blank = immediately) and 'Stop date & time' (when it disappears automatically; blank = stays until stopped). Employees see a message only inside that window (pop-ups, Messages page, unread count). Admin list shows Display / Stop times and a state (Scheduled / Live / Ended / Switched off); Edit changes text, viewers and times; 'Start now' / 'Stop now' / Switch off / Delete. Stop must be after Display. New columns 'Display from' and 'Stop at' are added to the 'Admin Notes' sheet automatically; older notes with only a date keep ending at the end of that day.
+  * Update248: NEW Admin Notes / Messages. Admin > Notes & Messages: write a short note or a longer message (title optional, priority Normal / Important / Urgent, pin, optional 'show until' date) and choose WHO can view it - all employees or only the ticked employees (search, select shown, clear); edit it later (change text or viewers), hide / show again, delete, and see how many and which employees have read it. Employee > Messages: 3D animated cards (short notes as tilted sticky cards, long messages expandable with 'Read full message'), NEW badge, unread count in the menu, filters, Mark all as read; plus 3D pop-up notifications on every Employee page for unread notes (Urgent stay until dismissed). New sheets \"Admin Notes\" and \"Admin Note Reads\" are created automatically on the next start.
+  * Update247: (1) Admin > Productivity log: the Employee column shows the Employee ID only (no name). (2) Employee panel: the name above Logout is plain text for every employee (no 3D / animation). (3) Login pages: Employee - after the username is entered a 3D e-mail flies from the employee picture to the server; Admin - on Log in a 3D e-mail flies from the server to the admin picture (the form is sent right after); Associate Manager / Team Lead / Senior Team Lead - report sheets then fly from the server to their picture. Display only, skipped when reduced motion is on. (4) Employee login: the 3D e-mail animation starts as soon as the username is entered and repeats through the whole sign-in until the next page has loaded (Associate Manager / Team Lead / Senior Team Lead also see the report sheets); Admin: starts on Log in and repeats until the next page has loaded. (5) The captions "Server", "Admin system" and "Employee system" are removed from both login pages.
   * Update239: Associate Manager / Team Lead / Senior Team Lead only (live Designation): (1) Employee panel - the name / nickname above Logout is plain normal text (no 3D, no animation); (2) the panel picture is the supplied male / female cut-out (by Gender) with the existing 3D depth, breathing, shine and ring animation plus a gentle sway; (3) Employee login page - once the username (Employee ID / e-mail) of one of these employees is typed, the supplied female picture is shown above the login box with the same tilt / breathing / floating / shine animation (served at /char/lf.webp; /login-char returns "l"). All other designations, pages and layouts unchanged.
   * Update238: (1) Associate Manager / Team Lead / Senior Team Lead (live Designation) get an "Employee Details" menu: Personal Details of ALL employees (search by ID / name, click a name to view / edit; same editable fields as the Admin form, Employee ID / Name / Designation / Office Email stay read-only; saved through the same save_employee_row; every change is logged in the Admin Notifications under the editor). Server-side 403 for everyone else. (2) Employee panel - the name / nickname above Logout is static 3D letters (flip-in, wave and sheen animations removed). Nothing else changed.
   * Update237: Team Logs > Productivity Log for Associate Manager / Team Lead / Senior Team Lead (live Designation): table of all employees (Employee ID, Name, Designation, Joining Date, Tracking From, Working Days, Entries, Missed, Attendance, Productivity - same figures as Admin > Employee Info > Productivity), month filter, search by Employee ID / Name / Process name (process search lists the matching records with target, completed, status and productivity %). Employee ID / Name opens the complete date-wise details (Date, Day, Processes Worked, Productive / Non-productive / Total hrs, Target Count, Completed Count, Target Status, Productivity %, Submitted At + process-wise rows). All read from the existing Productivity log; read-only. Other designations keep the previous Team Logs page.
@@ -504,7 +529,7 @@ HEADERS = {
     "Employees": ["Employee ID", "Name", "Band", "Email", "Password",
                   "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                   "Emergency no", "Personal Email ID", "Office Email ID", "Designation", "Profile updated at", "Gender",
-                  "Account locked", "Joining date", "Profile Name"],      # Update225: "Profile Name" = nickname shown under the 3D character on the Employee login page. Update96: "Account locked" = Yes / blank; Update97: "Joining date" (YYYY-MM-DD, set by Admin in Employee Info)
+                  "Account locked", "Joining date", "Profile Name", "Separation status", "Relieving date"],      # Update252: "Separation status" = Resigned / NCNS and "Relieving date" are set by the Admin only (setting either also sets "Account locked" = Yes).      # Update225: "Profile Name" = nickname shown under the 3D character on the Employee login page. Update96: "Account locked" = Yes / blank; Update97: "Joining date" (YYYY-MM-DD, set by Admin in Employee Info)
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour", "Target count / 8 hrs"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Target Count", "Productivity %",
@@ -540,12 +565,22 @@ HEADERS = {
     # Mahizhchi (Update62): Admin's questions (A-D options, one ✓ correct answer) and which employees may view them.
     "Mahizhchi Log": ["Question", "A", "B", "C", "D", "Correct Answer"],
     "Mahizhchi Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
+    # Update248: Admin Notes / Messages (Admin > Notes & Messages; Employee > Messages)
+    "Admin Notes": ["Note ID", "Created at", "Title", "Message", "Kind", "Priority", "Audience", "Recipients", "Pinned", "Status", "Created by", "Expires on", "Updated at", "Display from", "Stop at"],
+    "Admin Note Reads": ["Note ID", "Employee ID", "Employee name", "Read at"],
+    # Update260: Admin > Notes & Messages > Celebrations (animations on the Employee page)
+    "Celebrations": ["Celebration ID", "Created at", "Occasion", "Title", "Message", "Effect", "Intensity", "Duration sec", "Frequency", "Audience", "Recipients", "Display from", "Stop at", "Status", "Created by", "Updated at"],
+    "Celebration Seen": ["Celebration ID", "Employee ID", "Employee name", "Seen at"],
     "Mahizhchi Answers": ["Employee ID", "Employee name", "Question ID", "Question", "Answer", "Submitted at"],
     # Update84: one row per employee PER SET: when they pressed Start (timer runs from this SERVER time), when the Set closed, and its result
     "Mahizhchi Attempts": ["Employee ID", "Employee name", "Started at", "Closed at", "Set", "Answered", "Correct", "Result", "Extra seconds"],
     # Update85: Connection Game (bonus round after all 5 Sets are won). 4 rows per Game = 4 groups of 4 words.
     "Mahizhchi Connections": ["Game", "Group name", "Word 1", "Word 2", "Word 3", "Word 4"],
     # Update90: optional list to SWITCH OFF the Daily Productivity Entry for an employee (Enabled = No). No row / Enabled = Yes -> has access.
+    "Celebration Themes": ["Theme ID", "Name", "Title", "Message", "Effect", "Decor", "Color 1", "Color 2", "Emoji", "Status", "Created at", "Updated at"],      # Update266
+    "Agent Consent": ["Employee ID", "Employee name", "Status", "Requested at", "Requested by", "Decided at", "Notice version", "Decided from IP"],      # Update268
+    "Admin Alerts": ["Alert ID", "Type", "Employee ID", "Employee name", "Details", "Created at", "Status", "Cleared at"],      # Update265
+    "Lead Productivity Access": ["Employee ID", "Employee name", "Granted", "Updated at", "Updated by"],      # Update262
     "Productivity Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
     # Update90: one row per reminder e-mail (and one \"__RUN__\" row per day = the worker that sends that day's batch, so workers never double-send)
     "Email Log": ["Date", "Employee ID", "Employee name", "Email", "Sent at", "Status"],
@@ -735,7 +770,7 @@ def _idle_auto_logout():
             session.clear()
             flash(f"You were logged out automatically after {SESSION_IDLE_MINUTES} minutes of inactivity.")
             return redirect("/admin/login" if was_admin else "/employee/login")
-        if request.endpoint in ("employee_ping", "gc_state", "gm_state"):          # heartbeat: shows "online" but must NOT reset the idle timer
+        if request.endpoint in ("employee_ping", "gc_state", "gm_state", "employee_celebration_poll"):          # heartbeat: shows "online" but must NOT reset the idle timer
             online_set(session.get("att_id"), session.get("att_eid"), session.get("att_name"), active=last)
             return
         session["last_seen"] = now_ts
@@ -830,17 +865,35 @@ def book():
                     try: client.http_client.timeout = 60
                     except Exception: pass
                 b = _with_retry(client.open_by_key, SHEET_ID)
-                have = {w.title for w in _with_retry(b.worksheets)}
+                wss = {w.title: w for w in _with_retry(b.worksheets)}      # Update259: ONE call lists every worksheet (was one extra call per sheet)
+                heads = _first_rows(b, [n for n in HEADERS if n in wss])      # Update259: ONE call reads row 1 of every sheet (was one call per sheet)
                 for name, h in HEADERS.items():
-                    if name not in have:
-                        _with_retry(b.add_worksheet, title=name, rows=1000, cols=max(12, len(h)))
-                    ws = _with_retry(b.worksheet, name)
+                    ws = wss.get(name)
+                    if ws is None:
+                        ws = _with_retry(b.add_worksheet, title=name, rows=1000, cols=max(12, len(h))); wss[name] = ws; cur = []
+                    else:
+                        cur = heads.get(name)
+                        if cur is None: cur = _with_retry(ws.row_values, 1)      # batch read not available -> the old one-sheet-at-a-time read
                     if ws.col_count < len(h): _with_retry(ws.add_cols, len(h) - ws.col_count)
-                    if name == "Productivity log": _migrate_log_columns(ws)      # Update169: move rows still in the Update160 column order BEFORE the header is renamed
-                    if _with_retry(ws.row_values, 1) != h:
+                    if cur != h:
+                        if name == "Productivity log": _migrate_log_columns(ws)      # Update169: move rows still in the Update160 column order BEFORE the header is renamed (Update259: only while the header is still the old one)
                         _with_retry(ws.update, range_name="A1", values=[h])
+                _ws_cache.update(wss)      # Update259: every worksheet object is kept, so ws_of() never needs its own lookup call
                 _book = b
     return _book
+
+def _first_rows(b, names):
+    """Update259: {sheet name: row 1 as a list} for many sheets in ONE Google call. Returns {} when the batch read is not possible (the caller then reads each sheet itself)."""
+    if not names: return {}
+    try:
+        res = _with_retry(b.values_batch_get, ["'%s'!1:1" % n.replace("'", "''") for n in names])
+        out = {}
+        for n, v in zip(names, res.get("valueRanges", [])):
+            vals = v.get("values") or [[]]
+            out[n] = [str(x) for x in vals[0]]
+        return out if len(out) == len(names) else {}
+    except Exception as ex:
+        print("batch header read skipped:", repr(ex)); return {}
 
 _LOG_TS = re.compile(r"^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}")
 def _log_row_is_old(r):
@@ -971,16 +1024,52 @@ class live_sheets:
         if "Holidays" in self.n: _holidays_cache = None
     def __exit__(self, *a): _tl.live = self.old
 
+def _live_parallel(names):
+    """Update259: a page wrapped in @live_data read its sheets live ONE AFTER ANOTHER (7 sheets = 7 round trips in a row). The sheets that are due are now read at the SAME time;
+    a sheet that another thread is already reading is waited for instead of being asked from Google a second time. The result is stored in the request's live-read memo,
+    so rows() behaves exactly as before (one live read per sheet per request, own writes always visible)."""
+    if not has_request_context(): return
+    try:
+        from flask import g as _g
+        memo = getattr(_g, "_rows_live", None)
+        if memo is None: memo = _g._rows_live = {}
+        now_t, now_w = time.monotonic(), time.time()
+        sf = session.get("fresh") or {}; all_fresh = session.get("fresh_all", 0) > now_w
+        forced, due = {}, []
+        for n in names:
+            if n in memo: continue
+            f_ = bool(all_fresh or sf.get(n, 0) > now_w)
+            c = _rows_cache.get(n)
+            if f_ or not c or now_t - c[0] >= LIVE_TTL: due.append(n); forced[n] = f_
+        if len(due) < 2: return
+        res = {}
+        def run(n):
+            try:
+                if forced[n]: res[n] = _fetch_rows(n)                 # the user just wrote this sheet: must be a brand-new read
+                else:
+                    _safe_fetch(n)                                    # single flight: joins a read that is already running
+                    c2 = _rows_cache.get(n)
+                    if c2 and time.monotonic() - c2[0] < LIVE_TTL + 20: res[n] = c2[1]
+            except Exception as ex: print("live prefetch error:", n, repr(ex))
+        ths = [threading.Thread(target=run, args=(n,), daemon=True) for n in due]
+        for t in ths: t.start()
+        for t in ths: t.join(timeout=40)
+        for n, v in res.items(): memo.setdefault(n, v)
+    except Exception as ex: print("live prefetch skipped:", repr(ex))
+
 def live_data(*names):
     def deco(f):
         @wraps(f)
         def w(*a, **k):
-            with live_sheets(*names): return f(*a, **k)
+            with live_sheets(*names):
+                _live_parallel(names)      # Update259
+                return f(*a, **k)
         return w
     return deco
 LIVE_REPORT_SHEETS = ("Productivity log", "Leave", "Permissions", "Employees", "Settings", "Holidays", "Processes")
 
-EMP_PAGE_SHEETS = ("Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays", "Mahizhchi Access")
+ADMIN_EMP_SHEETS = ("Employees", "Notifications", "Productivity log", "Leave", "Permissions", "Processes", "Settings", "Holidays")      # Update259: what the Admin Employee Info pages read
+EMP_PAGE_SHEETS = ("Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays", "Mahizhchi Access", "Celebrations")
 
 def _prewarm_employees():
     """Update114: while the Employee login page is open, refresh the Employees list in the background (only if it is not fresh already),
@@ -1153,15 +1242,35 @@ VIEW_ONLY_DESIGNATIONS = ("Senior Team Lead", "Team Lead", "Associate Manager")
 def _norm_desig(d): return re.sub(r"[^a-z]+", " ", str(d or "").lower()).strip()      # case / spacing / punctuation insensitive
 _VIEW_ONLY_SET = {_norm_desig(x) for x in VIEW_ONLY_DESIGNATIONS}
 def desig_view_only(d): return _norm_desig(d) in _VIEW_ONLY_SET
-_vo_cache = [0.0, frozenset()]
+_vo_cache = [0.0, frozenset(), frozenset()]
+LEAD_ACCESS_SHEET = "Lead Productivity Access"      # Update262: Admin grants Productivity entry access to an individual Senior Team Lead / Team Lead / Associate Manager
+def _lead_granted_now():
+    try: return frozenset(_key(r.get("Employee ID", "")) for r in rows(LEAD_ACCESS_SHEET) if str(r.get("Granted", "")).strip().lower() in ("yes", "y", "true", "1", "granted"))
+    except Exception as ex:
+        print("Lead Productivity Access read failed:", repr(ex)); return frozenset()
 def view_only_ids():
-    """Employee IDs (normalised) whose Designation is view-only. Re-read every few seconds, so a Designation change applies automatically."""
+    """Employee IDs (normalised) whose Designation is view-only AND who have not been granted entry access by the Admin (Update262). Re-read every few seconds."""
     if time.monotonic() - _vo_cache[0] > 8:
-        ids = frozenset(_key(e.get("Employee ID", "")) for e in rows("Employees") if desig_view_only(e.get("Designation", "")))
-        _vo_cache[0], _vo_cache[1] = time.monotonic(), ids
+        gr = _lead_granted_now()
+        ids = frozenset(_key(e.get("Employee ID", "")) for e in rows("Employees") if desig_view_only(e.get("Designation", "")) and _key(e.get("Employee ID", "")) not in gr)
+        _vo_cache[0], _vo_cache[1], _vo_cache[2] = time.monotonic(), ids, gr
     return _vo_cache[1]
+def lead_granted_ids():
+    view_only_ids(); return _vo_cache[2]
+def desig_vo_eff(e):
+    """Update262: the Employees row is a View-Only designation and has NOT been granted entry access."""
+    return desig_view_only(e.get("Designation", "")) and _key(e.get("Employee ID", "")) not in lead_granted_ids()
 def is_view_only(eid): return _key(eid) in view_only_ids()
 VIEW_ONLY_MSG = "Your designation has View Only access to Productivity - entries cannot be added or edited."
+# ---- Update253: Resigned / NCNS employees have NO Productivity access and are excluded from every pending-productivity calculation and every Missed Entries reminder e-mail ----
+_sep_cache = [0.0, frozenset()]
+def separated_ids():
+    """Employee IDs (normalised) whose 'Separation status' is Resigned or NCNS. Re-read every few seconds, so a status change applies automatically."""
+    if time.monotonic() - _sep_cache[0] > 8:
+        ids = frozenset(_key(e.get("Employee ID", "")) for e in rows("Employees") if emp_sep(e))
+        _sep_cache[0], _sep_cache[1] = time.monotonic(), ids
+    return _sep_cache[1]
+def is_separated(eid): return _key(eid) in separated_ids()
 
 def _day_pct(prod, avail, tph, procs):
     """Productivity % of one day's entry. Hours-based (available hrs logged = 100%) unless the entry has processes with an Admin count target,
@@ -1192,6 +1301,7 @@ def load_subs(emp_id=None):
     want = _key(emp_id) if emp_id is not None else None
     emps_ = rows("Employees")                                              # Update170: every log row is tied to a REAL employee (ID first, then Name + Band)
     known = {_key(e.get("Employee ID", "")): str(e.get("Employee ID", "")).strip() for e in emps_}
+    nm_ = {_key(e.get("Employee ID", "")): str(e.get("Name", "")).strip() for e in emps_}      # Update252b: Employee ID -> name from the Employees sheet
     by_name = {}
     for e in emps_: by_name.setdefault((_key(e.get("Name", "")), _key(e.get("Band", ""))), []).append(str(e.get("Employee ID", "")).strip())
     by_name1 = {}
@@ -1209,7 +1319,7 @@ def load_subs(emp_id=None):
         sid_ = str(g_("submissionid")).strip() or ("%s|%s" % (_key(eid_), date_))
         s = subs.setdefault((sid_, _key(eid_)), dict(
             id=sid_, date=date_, band=g_("band"), emp_id=eid_,
-            emp_name=g_("employeename"), designation=dm.get(_key(eid_), ""),
+            emp_name=g_("employeename"), master_name=nm_.get(_key(eid_), ""), designation=dm.get(_key(eid_), ""),
             procs=[], notes=[], rows=[], subat=""))
         s["rows"].append(r0["_row"])
         s["subat"] = max(s["subat"], str(g_("submittedat")).strip())      # Update208: latest save time of this entry
@@ -1284,32 +1394,33 @@ def leave_is_half(l):
     return str(l.get("Day type", "")).strip().lower().startswith("half")
 app.jinja_env.filters["lhalf"] = leave_is_half
 
-def deduction_map(emp_id=None):
+def deduction_map(emp_id=None, pending=False):
     """{(EMPLOYEE ID key, 'YYYY-MM-DD'): hours taken OFF that working day} = APPROVED permission hours + 4 hrs for an APPROVED
     Half-Day Leave. One pass over the (cached) Permissions + Leave sheets; pass emp_id to look at one employee only."""
     want = _key(emp_id) if emp_id is not None else None
     out = {}
+    ok_ = ("Approved", "Pending") if pending else ("Approved",)      # Update264: pending=True (entry validation only) also allows for requests still waiting for Admin approval
     for r in rows("Permissions"):
-        if str(r.get("Status", "")).strip() != "Approved": continue
+        if str(r.get("Status", "")).strip() not in ok_: continue
         k = _key(r.get("Employee ID", ""))
         if want is not None and k != want: continue
         key = (k, norm_date(r.get("Date", "")))
         out[key] = out.get(key, 0.0) + num(r.get("Hours"))
     for l in rows("Leave"):
-        if leave_status(l) != "Approved" or not leave_is_half(l): continue
+        if leave_status(l) not in ok_ or not leave_is_half(l): continue
         k = _key(l.get("Employee ID", ""))
         if want is not None and k != want: continue
         key = (k, norm_date(l.get("Date", "")))
         out[key] = out.get(key, 0.0) + HALF_DAY_HOURS
     return {k: min(v, float(DAY_HOURS)) for k, v in out.items()}
 
-def day_deduction(emp_id, date):
-    return deduction_map(emp_id).get((_key(emp_id), str(date)), 0.0)
+def day_deduction(emp_id, date, pending=False):
+    return deduction_map(emp_id, pending=pending).get((_key(emp_id), str(date)), 0.0)
 
-def required_hours(emp_id, date):
+def required_hours(emp_id, date, pending=False):
     """Hours that must be logged for a day to be complete: the 8-hour working day minus approved permission / half-day leave
     (2-hr permission = 6 hrs, half-day leave = 4 hrs)."""
-    return max(float(DAY_HOURS) - day_deduction(emp_id, date), 0.0)
+    return max(float(DAY_HOURS) - day_deduction(emp_id, date, pending=pending), 0.0)
 
 def parse_form(emp_id):
     f = request.form; g = f.getlist
@@ -1339,17 +1450,20 @@ def parse_form(emp_id):
     elif tot > day_limit():
         err = f"Total {tot:g} hrs is more than {day_limit():g} hrs."
     else:
-        need_h = required_hours(emp_id, date)
+        need_h = required_hours(emp_id, date, pending=True)      # Update264: a pending permission / half-day leave does not hold up the entry
         if tot + 1e-9 < need_h:
             cut = float(DAY_HOURS) - need_h
-            why = f" ({DAY_HOURS:g}-hour day less {cut:g} hr approved permission / half-day leave)" if cut > 0 else ""
+            why = f" ({DAY_HOURS:g}-hour day less {cut:g} hr permission / half-day leave)" if cut > 0 else ""
             err = (f"Entry incomplete: {tot:g} of the required {need_h:g} working hours logged{why} "
                    f"({need_h - tot:g} hrs remaining). Complete all {need_h:g} hours before saving.")
     return date, procs, notes, err
 
 def live_rows_of(sid):
     """Update103: current sheet row numbers of one submission, read live (cached row numbers can be stale after another Add/Delete)."""
-    return [r["_row"] for r in _fetch_rows("Productivity log") if str(r["Submission ID"]) == str(sid)]
+    try: return _sid_rows_live(sid)      # Update259: reads column A only
+    except Exception as ex:
+        print("narrow row lookup failed, reading the full sheet:", repr(ex))
+        return [r["_row"] for r in _fetch_rows("Productivity log") if str(r["Submission ID"]) == str(sid)]
 
 def norm_date(v):
     """Update171: ONE canonical YYYY-MM-DD for any date text found in the sheet. Slash dates follow the sheet's locale (10/01/2026 = 1 Oct on a US sheet),
@@ -1362,14 +1476,43 @@ def norm_date(v):
         except ValueError: pass
     return _iso_date(re.sub(r"[ T]\d{1,2}:\d{2}.*$", "", t))
 
+def _sid_rows_live(sid):
+    """Update259: sheet row numbers of one submission, from a live read of column A only (the whole log used to be downloaded for this)."""
+    col = _with_retry(ws_of("Productivity log").col_values, 1)
+    t = str(sid)
+    return [i for i, v in enumerate(col, start=1) if i > 1 and str(v) == t]
+
+def _sid_landed(sid):
+    """Update259: did the rows of this submission reach the sheet? (live, column A only)"""
+    try: return bool(_sid_rows_live(sid))
+    except Exception: return any(str(r["Submission ID"]) == str(sid) for r in _fetch_rows("Productivity log"))
+
+def _log_keys_live():
+    """Update259: [(Submission ID, Date, Employee ID)] of every Productivity log row, read live - only the 3 columns the duplicate check needs."""
+    heads = HEADERS["Productivity log"]
+    ix = [heads.index("Submission ID"), heads.index("Date"), heads.index("Employee ID")]
+    last = max(ix) + 1
+    from gspread.utils import rowcol_to_a1
+    end = re.sub(r"\d+", "", rowcol_to_a1(1, last))
+    out = []
+    for r in _with_retry(ws_of("Productivity log").get_values, "A2:%s" % end):
+        r = list(r) + [""] * (last - len(r))
+        out.append((r[ix[0]], r[ix[1]], r[ix[2]]))
+    return out
+
 def duplicate_entry(emp_id, date, skip_sid=None, fresh=False):
-    """Update96: reads just the Productivity log (live from the sheet when fresh=True) instead of building every employee's submissions."""
+    """Update96: reads just the Productivity log (live from the sheet when fresh=True) instead of building every employee's submissions.
+    Update259: the live check downloads only 3 columns (was the whole sheet)."""
+    k, nd = _key(emp_id), norm_date(date)
+    if fresh:
+        try: return any(_key(e) == k and norm_date(d) == nd and str(s_) != str(skip_sid) for s_, d, e in _log_keys_live())
+        except Exception as ex: print("narrow duplicate check failed, reading the full sheet:", repr(ex))
     recs = _fetch_rows("Productivity log") if fresh else rows("Productivity log")
-    k = _key(emp_id)
-    return any(_key(r["Employee ID"]) == k and norm_date(r["Date"]) == norm_date(date) and str(r["Submission ID"]) != str(skip_sid) for r in recs)
+    return any(_key(r["Employee ID"]) == k and norm_date(r["Date"]) == nd and str(r["Submission ID"]) != str(skip_sid) for r in recs)
 
 def write_sub(sid, date, emp, procs, notes):
     if is_view_only(emp[1]): raise PermissionError("View Only designation: productivity entry is not allowed")      # Update105
+    if is_separated(emp[1]): raise PermissionError("Resigned / NCNS employee: productivity access is disabled")      # Update253
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
     base = [sid, date, *emp]      # emp = (band, id, name)
     try: tgts, dpct = entry_metrics(date, emp[1], [(n, h, c) for n, h, c, _d in procs])      # Update137: never blocks a save
@@ -1381,7 +1524,7 @@ def write_sub(sid, date, emp, procs, notes):
         try:
             if attempt:
                 time.sleep(2.0 * attempt)
-                if any(str(r["Submission ID"]) == str(sid) for r in _fetch_rows("Productivity log")):
+                if _sid_landed(sid):
                     invalidate_cache("Productivity log"); return
             ws_of("Productivity log").append_rows(out, value_input_option="RAW"); invalidate_cache("Productivity log"); return
         except Exception as ex:
@@ -1549,13 +1692,16 @@ def _act_q_put_raw(vals):
             _act_q = queue_mod.Queue(); threading.Thread(target=_act_worker, daemon=True).start()
         _act_q.put(dict(vals=vals))
 
+_stale_done = set()      # Update259
 def _close_stale(emp_id, now):
     """Sessions from earlier days that never logged out (browser/computer closed, etc.)
     are marked so - the system closed these itself, so they're tagged as an automatic logout."""
+    key = (str(emp_id), str(now.date()))
+    if key in _stale_done: return      # Update259: sessions of EARLIER days are closed once per employee per day (this used to re-read the whole Attendance sheet on every login)
     with _att_lock:
         ws = ws_of("Attendance")
         fixes = []
-        for i, r in enumerate(ws.get_all_values()[1:], start=2):
+        for i, r in enumerate(_with_retry(ws.get_values, "A:G")[1:], start=2):      # Update259: only columns A:G are used
             r = r + [""] * 9
             if r[2] == emp_id and r[1] < str(now.date()) and not r[6].strip():
                 fixes.append({"range": f"G{i}:I{i}", "values": [["Not recorded", "", "Auto (Session left open)"]]})
@@ -1564,6 +1710,8 @@ def _close_stale(emp_id, now):
                     _act_q_put_raw([r[1], "Not recorded", r[2], r[3], "Logoff", "App", "Automatic logoff (session left open - time not recorded)", int(d_.timestamp())])
                 except Exception as ex: print("stale logoff row error:", ex)
         if fixes: ws.batch_update(fixes, value_input_option="RAW")
+    if len(_stale_done) > 5000: _stale_done.clear()
+    _stale_done.add(key)
 
 def _log_login(sid, emp_id, name, band, now):
     with _att_lock:
@@ -2090,6 +2238,38 @@ def _enr_save(changes):
     except Exception as ex:
         print("agent enrolment save error:", repr(ex)); return False
 
+AGENT_CONSENT_SHEET = "Agent Consent"; AGENT_NOTICE_VER = "1"
+def _consent_row(eid, fresh=False):
+    k = _key(eid)
+    for r in (_fetch_rows(AGENT_CONSENT_SHEET) if fresh else rows(AGENT_CONSENT_SHEET)):
+        if _key(r.get("Employee ID", "")) == k: return r
+    return None
+def _consent_status(eid):
+    try: return str((_consent_row(eid) or {}).get("Status", "")).strip() or "None"
+    except Exception: return "None"
+def _consent_ok(eid): return _consent_status(eid) == "Accepted"
+def _client_ip():
+    return (request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote_addr or "")[:45] if has_request_context() else ""
+def _consent_request_many(people, by="Admin"):
+    """Update268: ask employees for consent (people = [(eid, name)]); already-Accepted ones are left alone. One read, two writes."""
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S"); cur = {_key(r.get("Employee ID", "")): r for r in _fetch_rows(AGENT_CONSENT_SHEET)}
+    ups, adds, n = [], [], 0
+    for eid, name in people:
+        r = cur.get(_key(eid))
+        if r is not None and str(r.get("Status", "")).strip() == "Accepted": continue
+        n += 1
+        if r is None: adds.append([str(eid), name, "Requested", now, by, "", "", ""])
+        else: ups.append({"range": "B%d:H%d" % (r["_row"], r["_row"]), "values": [[name, "Requested", now, by, "", "", ""]]})
+    ws = ws_of(AGENT_CONSENT_SHEET)
+    if ups: ws.batch_update(ups, value_input_option="RAW")
+    if adds: ws.append_rows(adds, value_input_option="RAW")
+    invalidate_cache(AGENT_CONSENT_SHEET); return n
+def _consent_decide(eid, name, status):
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S"); r = _consent_row(eid, fresh=True); ws = ws_of(AGENT_CONSENT_SHEET)
+    if r is None: ws.append_row([str(eid), name, status, "", "", now, AGENT_NOTICE_VER, _client_ip()], value_input_option="RAW")
+    else: ws.update(range_name="B%d:H%d" % (r["_row"], r["_row"]), values=[[name, status, r.get("Requested at", ""), r.get("Requested by", ""), now, AGENT_NOTICE_VER, _client_ip()]], value_input_option="RAW")
+    invalidate_cache(AGENT_CONSENT_SHEET)
+
 def _enr_err(key, name, msg):
     """Remember why an agent could not register / connect (shown as 'Error' to the Admin). Throttled: the same message is written at most every 10 minutes."""
     now = time.time(); ck = (_key(key), msg)
@@ -2251,7 +2431,19 @@ def next_url():
 
 
 # ---------------------------------------------------------------- Update96: account lock / unlock / password reset / delete (Admin only)
-def emp_locked(e): return str(e.get("Account locked", "")).strip().lower() in ("yes", "y", "true", "locked", "1")
+SEP_STATUSES = ("Resigned", "NCNS")
+def emp_sep(e):
+    """Update252: 'Resigned' / 'NCNS' (set by the Admin) or '' - such an employee's login is always disabled."""
+    v = str(e.get("Separation status", "")).strip().lower()
+    return "Resigned" if v == "resigned" else ("NCNS" if v == "ncns" else "")
+def emp_locked(e): return str(e.get("Account locked", "")).strip().lower() in ("yes", "y", "true", "locked", "1") or bool(emp_sep(e))      # Update252: Resigned / NCNS => login disabled, even if the flag were edited by hand
+def sep_fields(e):
+    """Update252: adds display fields (sep, rel_iso, rel_txt, login_on) used by the Login Access / Managers & Leads / Employee Details tables."""
+    e["sep"] = emp_sep(e); rv = str(e.get("Relieving date", "")).strip()
+    try: d_ = dt.date.fromisoformat(rv[:10]); e["rel_iso"] = d_.isoformat(); e["rel_txt"] = d_.strftime("%d %b %Y")
+    except ValueError: e["rel_iso"] = ""; e["rel_txt"] = rv
+    e["login_on"] = not emp_locked(e)
+    return e
 
 def emp_status(emp_id):
     """'ok' | 'locked' | 'deleted' for a signed-in employee (uses the short-lived sheet cache, so it costs no extra Google call)."""
@@ -2504,6 +2696,25 @@ html body .app aside.emp .prof .av3d.chr3{width:92px;height:92px;margin:2px 0 6p
 .chr3.cl3 .c3-disc{background:radial-gradient(circle at 35% 25%,#fff7 0,transparent 45%),radial-gradient(circle at 50% 60%,#f472b6,#7e22ce 88%)}
 @keyframes c3Sway{0%,100%{transform:rotate(-2.2deg) translateY(0)}50%{transform:rotate(2.2deg) translateY(-2px)}}
 @media(prefers-reduced-motion:reduce){.chr3.cl3 .c3-img,.chr3.cn3 .c3-img{animation:none!important}}
+/* Update258: smooth, natural eye blinking on the profile characters (employee male / female, and the supplied pictures of Associate Manager / Team Lead / Senior Team Lead).
+   Same pictures, same 3D layers: the picture box is sized to the picture's own proportions and two feathered skin-coloured eyelids (transform only) close and open over the eyes. */
+.chr3.cf3 .c3-body,.chr3.cm3 .c3-body,.chr3.cl3 .c3-body,.chr3.cn3 .c3-body{display:flex;align-items:flex-end;justify-content:center}
+.chr3.cf3 .c3-img,.chr3.cm3 .c3-img,.chr3.cl3 .c3-img,.chr3.cn3 .c3-img{position:relative;inset:auto;flex:none;background-size:100% 100%;background-position:0 0}
+.chr3.cf3 .c3-img{width:100%;height:auto;aspect-ratio:431/410}
+.chr3.cm3 .c3-img{height:100%;width:auto;aspect-ratio:460/615}
+.chr3.cl3 .c3-img{height:100%;width:auto;aspect-ratio:317/539}
+.chr3.cn3 .c3-img{height:100%;width:auto;aspect-ratio:307/528}
+.c3-lid{position:absolute;display:block;border-radius:50%;transform:scaleY(0);transform-origin:50% 0;pointer-events:none;box-shadow:inset 0 -1.5px 0 #3d241899;will-change:transform}
+.chr3.cf3 .c3-lid{background:radial-gradient(ellipse at 50% 30%,#f8bd9b 0,#eba583 100%);animation:c3Blink 5.3s ease-in-out infinite}
+.chr3.cf3 .c3-lid.l1{left:49.6%;top:27%;width:4.8%;height:5.2%}.chr3.cf3 .c3-lid.l2{left:58.5%;top:29.8%;width:7%;height:5.4%}
+.chr3.cm3 .c3-lid{background:radial-gradient(ellipse at 50% 30%,#d69267 0,#c68256 100%);animation:c3Blink 4.7s ease-in-out -1.3s infinite}
+.chr3.cm3 .c3-lid.l1{left:39.9%;top:20.5%;width:7.2%;height:3.7%}.chr3.cm3 .c3-lid.l2{left:52.1%;top:19.3%;width:5.4%;height:3.4%}
+.chr3.cl3 .c3-lid{background:radial-gradient(ellipse at 50% 30%,#f3a47e 0,#ea9378 100%);animation:c3Blink 5.9s ease-in-out -2s infinite}
+.chr3.cl3 .c3-lid.l1{left:42%;top:17.2%;width:9.6%;height:5.8%}.chr3.cl3 .c3-lid.l2{left:61.4%;top:17.7%;width:9.8%;height:5.5%}
+.chr3.cn3 .c3-lid{background:radial-gradient(ellipse at 50% 30%,#f7d5c2 0,#f4cdb8 100%);animation:c3Blink 5.1s ease-in-out -.8s infinite}
+.chr3.cn3 .c3-lid.l1{left:22.3%;top:36.8%;width:18%;height:9.2%}.chr3.cn3 .c3-lid.l2{left:54.6%;top:35%;width:19.2%;height:9.2%}
+@keyframes c3Blink{0%,90%,100%{transform:scaleY(0)}92.4%{transform:scaleY(1)}93.4%{transform:scaleY(1)}97%{transform:scaleY(.1)}98.6%{transform:scaleY(0)}}
+@media(prefers-reduced-motion:reduce){.c3-lid{animation:none!important}}
 /* Update239: plain (normal) name above Logout for these designations - no 3D, no animation */
 .prof-name .nm-plain{font-weight:500;letter-spacing:0;text-shadow:none}
 @media(max-width:800px){html body .app aside.emp .prof .av3d.chr3,aside .prof .av3d.chr3{width:48px;height:48px;margin:0}.chr3 .c3-ring{display:none}}
@@ -2516,13 +2727,13 @@ html body .app aside.emp .prof .av3d.chr3{width:92px;height:92px;margin:2px 0 6p
 .a3-p{position:absolute;inset:0;background:url(/char/a2.webp) 0 0/100% 100% no-repeat}
 .a3-lap{-webkit-mask-image:radial-gradient(ellipse 36% 21% at 66% 63%,#000 64%,transparent 100%);mask-image:radial-gradient(ellipse 36% 21% at 66% 63%,#000 64%,transparent 100%);transform-origin:40% 70%;animation:a3Type 1.7s ease-in-out infinite}
 .a3-hd{-webkit-mask-image:radial-gradient(ellipse 25% 26% at 32% 20%,#000 62%,transparent 100%);mask-image:radial-gradient(ellipse 25% 26% at 32% 20%,#000 62%,transparent 100%);transform-origin:33% 41%;animation:a3Head 8s ease-in-out infinite}
-.a3-lid{position:absolute;display:block;border-radius:50%;background:radial-gradient(ellipse at 50% 30%,#eec1aa 0,#e2b399 100%);transform:scaleY(0);transform-origin:50% 0;animation:a3Blink 4.6s infinite}
+.a3-lid{position:absolute;display:block;border-radius:50%;background:radial-gradient(ellipse at 50% 30%,#eec1aa 0,#e2b399 100%);transform:scaleY(0);transform-origin:50% 0;animation:a3Blink 4.6s ease-in-out infinite}
 .a3-lid.l1{left:31.8%;top:23.4%;width:4.6%;height:4.2%}.a3-lid.l2{left:42%;top:25.8%;width:4.6%;height:4.2%}
 .a3-shine{-webkit-mask-image:url(/char/a2.webp);mask-image:url(/char/a2.webp);-webkit-mask-size:100% 100%;mask-size:100% 100%;background:linear-gradient(105deg,transparent 42%,#ffffff66 50%,transparent 58%) 130% 0/260% 100% no-repeat;animation:c3Sh 6s ease-in-out infinite}
 @keyframes a3Sway{0%,100%{transform:rotate(-1deg) translateX(-1%)}50%{transform:rotate(1.2deg) translateX(1%)}}
 @keyframes a3Head{0%,100%{transform:rotate(0) translate(0,0)}20%{transform:rotate(-2.2deg) translate(-.4%,.3%)}45%{transform:rotate(1.8deg) translate(.5%,-.2%)}70%{transform:rotate(-.8deg) translate(0,.5%)}}
 @keyframes a3Type{0%,100%{transform:translateY(0) rotate(0)}30%{transform:translateY(.9%) rotate(.5deg)}60%{transform:translateY(-.3%) rotate(-.3deg)}}
-@keyframes a3Blink{0%,92%,100%{transform:scaleY(0)}95%{transform:scaleY(1)}97.5%{transform:scaleY(.15)}}
+@keyframes a3Blink{0%,90%,100%{transform:scaleY(0)}92.4%{transform:scaleY(1)}93.4%{transform:scaleY(1)}97%{transform:scaleY(.1)}98.6%{transform:scaleY(0)}}
 html body .app aside.emp .prof .av3d.chr3.ca3,html body .win.admin .lcard-top .lav .av3d.chr3.ca3{width:76px;height:76px;margin:0 0 5px}
 @media(max-width:800px){html body .app aside.emp .prof .av3d.chr3.ca3{width:44px;height:44px;margin:0}}
 @media(prefers-reduced-motion:reduce){.a3-fig,.a3-lap,.a3-hd,.a3-lid,.a3-shine{animation:none!important}.a3-shine{display:none}}
@@ -2715,6 +2926,8 @@ aside .ng>a.ng-h{display:flex;justify-content:space-between;align-items:center;b
 aside .ng>a.ng-h .chev{font-size:11px;opacity:.85;transition:transform .2s;transform:rotate(180deg)}
 aside .ng.open>a.ng-h{border:1.5px solid #fff;background:transparent;color:#fff;box-shadow:none;transform:none}
 aside .ng.open>a.ng-h .chev{transform:rotate(0deg)}
+/* Update257: the dropdown holding the current page stays closed after navigation; a light border marks it */
+aside .ng.ng-act:not(.open)>a.ng-h{border-color:#8ea8ff}
 aside .ng .kids{display:none;flex-direction:column;gap:2px;padding:4px 0 4px 14px}
 aside .ng.open .kids{display:flex}
 aside .ng .kids a{font-size:13px;padding:7px 12px}
@@ -3299,14 +3512,15 @@ html body .app.emp3d table tbody tr:hover td{background:#f4f3ff}
 {% if bare %}{{body|safe}}
 {% elif session.role %}<div class="app{{' emp3d' if session.role=='employee' else ''}}">{% if session.role=='employee' %}<script>document.documentElement.classList.add('fit188')</script><div id="fly3d" aria-hidden="true"><div class="fo" style="--s:64px;--x0:-12vw;--y0:78vh;--x1:112vw;--y1:-14vh;--z0:-380px;--z1:160px;--d:46s;--dl:0s;--c1:#6366f1;--c2:#a78bfa;--t:24s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:44px;--x0:110vw;--y0:64vh;--x1:-14vw;--y1:20vh;--z0:-120px;--z1:220px;--d:38s;--dl:-9s;--c1:#ec4899;--c2:#f9a8d4;--t:21s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:86px;--x0:-10vw;--y0:22vh;--x1:112vw;--y1:88vh;--z0:-420px;--z1:-60px;--d:58s;--dl:-21s;--c1:#06b6d4;--c2:#67e8f9;--t:28s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:52px;--x0:30vw;--y0:112vh;--x1:70vw;--y1:-16vh;--z0:-200px;--z1:240px;--d:34s;--dl:-14s;--c1:#f59e0b;--c2:#fcd34d;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:72px;--x0:112vw;--y0:92vh;--x1:-12vw;--y1:40vh;--z0:-340px;--z1:120px;--d:52s;--dl:-30s;--c1:#8b5cf6;--c2:#c4b5fd;--t:26s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:38px;--x0:-10vw;--y0:48vh;--x1:110vw;--y1:6vh;--z0:-60px;--z1:260px;--d:30s;--dl:-4s;--c1:#10b981;--c2:#6ee7b7;--t:20s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:58px;--x0:60vw;--y0:-14vh;--x1:16vw;--y1:114vh;--z0:-260px;--z1:180px;--d:44s;--dl:-26s;--c1:#3b82f6;--c2:#93c5fd;--t:23s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:48px;--x0:88vw;--y0:112vh;--x1:40vw;--y1:-14vh;--z0:-160px;--z1:200px;--d:36s;--dl:-17s;--c1:#f43f5e;--c2:#fda4af;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:90px;--x0:-14vw;--y0:60vh;--x1:112vw;--y1:20vh;--z0:-300px;--z1:140px;--d:50s;--dl:-6s;--c1:#6366f1;--c2:#6366f1;--t:29s"><div class="fr"></div></div><div class="fo" style="--s:64px;--x0:112vw;--y0:18vh;--x1:-14vw;--y1:80vh;--z0:-180px;--z1:200px;--d:42s;--dl:-19s;--c1:#ec4899;--c2:#ec4899;--t:24s"><div class="fr"></div></div><div class="fo" style="--s:110px;--x0:20vw;--y0:114vh;--x1:84vw;--y1:-18vh;--z0:-400px;--z1:60px;--d:60s;--dl:-33s;--c1:#06b6d4;--c2:#06b6d4;--t:32s"><div class="fr"></div></div><div class="fo" style="--s:56px;--x0:80vw;--y0:-14vh;--x1:6vw;--y1:100vh;--z0:-100px;--z1:240px;--d:40s;--dl:-12s;--c1:#f59e0b;--c2:#f59e0b;--t:23s"><div class="fr"></div></div><div class="fo" style="--s:54px;--x0:-12vw;--y0:34vh;--x1:112vw;--y1:70vh;--z0:-240px;--z1:180px;--d:48s;--dl:-2s;--c1:#6366f1;--c2:#22d3ee;--t:23s"><div class="ft"></div></div><div class="fo" style="--s:40px;--x0:112vw;--y0:50vh;--x1:-12vw;--y1:8vh;--z0:-80px;--z1:240px;--d:34s;--dl:-23s;--c1:#ec4899;--c2:#f59e0b;--t:20s"><div class="ft"></div></div><div class="fo" style="--s:70px;--x0:46vw;--y0:-14vh;--x1:92vw;--y1:114vh;--z0:-320px;--z1:100px;--d:54s;--dl:-36s;--c1:#8b5cf6;--c2:#06b6d4;--t:25s"><div class="ft"></div></div><div class="fo" style="--s:46px;--x0:-12vw;--y0:104vh;--x1:114vw;--y1:30vh;--z0:-140px;--z1:220px;--d:40s;--dl:-28s;--c1:#10b981;--c2:#3b82f6;--t:21s"><div class="ft"></div></div></div>{% endif %}<aside class="emp{{' tlside' if hol_only else ''}}">
 <div class="panel-ttl">{{ 'Admin Panel' if session.role=='admin' else 'Employee Panel' }}</div>
-{% for h,l,on,kids in nav %}{% if kids %}<div class="ng{{' open' if on else ''}}"><a class="ng-h" href="{{h}}" role="button" aria-expanded="{{'true' if on else 'false'}}" onclick="var g=this.parentNode;var o=g.classList.toggle('open');this.setAttribute('aria-expanded',o);return false">{{l}}<span class="chev">&#9650;</span></a>
-<div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}">{{kl}}</a>{% endfor %}</div></div>
+{% for h,l,on,kids in nav %}{% if kids %}<div class="ng{{' open' if (on and session.role!='admin') else ''}}{{' ng-act' if on else ''}}"><a class="ng-h" href="{{h}}" role="button" aria-expanded="{{'true' if (on and session.role!='admin') else 'false'}}" onclick="var g=this.parentNode;var w=!g.classList.contains('open');document.querySelectorAll('.ng.open').forEach(function(x){x.classList.remove('open');x.firstElementChild.setAttribute('aria-expanded','false')});if(w){g.classList.add('open');this.setAttribute('aria-expanded','true')}return false">{{l}}<span class="chev">&#9650;</span></a>
+<div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}" onclick="var g=this.closest('.ng');g.classList.remove('open');g.firstElementChild.setAttribute('aria-expanded','false')">{{kl}}</a>{% endfor %}</div></div>
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
 <details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-up" id="cal_up" hidden></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
 <div class="prof{{' prof-emp' if session.role=='employee' else ''}}"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name" title="{{side_name or session.name}}">{% if side_name_html %}{{side_name_html|safe}}{% else %}{{session.name}}{% endif %}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
+<script>document.addEventListener('click',function(e){if(e.target.closest&&e.target.closest('.ng'))return;document.querySelectorAll('.ng.open').forEach(function(x){x.classList.remove('open');x.firstElementChild.setAttribute('aria-expanded','false')})});document.addEventListener('keydown',function(e){if(e.key==='Escape')document.querySelectorAll('.ng.open').forEach(function(x){x.classList.remove('open');x.firstElementChild.setAttribute('aria-expanded','false')})});</script>
 <main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></main></div>
 {% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}<div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></div>{% endif %}
 {% if att_json %}<script>window.ATT={{att_json|safe}};window.HOL={{hol_json|safe}};window.PRM={{prm_json|safe}};window.SRVTODAY="{{srv_today}}";{% if hol_only %}window.HOLONLY=true;{% endif %}</script>{% endif %}
@@ -3973,7 +4187,8 @@ NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"), 
               ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log"),
-              ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes")],   # Update211: Theme & Layout is link-only (/admin/theme), not in the menu
+              ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes"),
+              ("/admin/notes", "Notes & Messages")],   # Update248 / Update211: Theme & Layout is link-only (/admin/theme), not in the menu
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
@@ -4034,7 +4249,12 @@ def page(body, title="Productivity Tracker", **ctx):
     p = request.path
     items = list(NAVS.get(session.get("role"), []))
     if hide_entry_pages(): items = [it for it in items if it[0] not in ("/employee", "/employee/productivity")]      # Update236
-    if session.get("role") == "employee":
+    lead_menu = False
+    try: lead_menu = session.get("role") == "employee" and team_log_access()      # Update263
+    except Exception: lead_menu = False
+    if lead_menu:      # Update263: Associate Manager / Team Lead / Senior Team Lead - exactly these four menu items, in this order
+        items = [("/employee/team-logs", "Team Logs"), ("/employee/people", "Employee Details"), ("/employee/profile", "Personal Details"), ("/employee/leave", "Leave & Permission")]
+    elif session.get("role") == "employee":
         try:      # Admin-controlled: the menu item exists only while Audit Log access is enabled for this employee
             if audit_active(audit_access(session.get("emp_id", ""))): items.append(("/employee/audit", "Audit Log"))
         except Exception:
@@ -4065,14 +4285,14 @@ def page(body, title="Productivity Tracker", **ctx):
                for h, l, on, _k in nav]
         # Update103: Productivity Log / Leave & Permission Log / Audit Log / Email Controls are grouped under one expandable "Log" menu.
         # Every URL is unchanged - only the sidebar grouping changed. Overview, Processes and Employee Info stay as main menu items.
-        LOG_KIDS = [("/admin/log", "Productivity Log"), ("/admin/leave-permission", "Leave & Permission Log"),
+        LOG_KIDS = [("/admin/log", "Productivity Log"), ("/admin/leave-permission", "Leave & Permission Log"), ("/admin/celebrations-log", "Celebrations Log"),
                     ("/admin/audit", "Audit Log"), ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes"), ("/admin/work-time", "Work Time")]
         def _on(h): return p == h or p.startswith(h + "/")
         log_kids = [(h, l, _on(h) and not (h == "/admin/work-time" and p.startswith("/admin/work-time/access"))) for h, l in LOG_KIDS]
         by_h = {n[0]: n for n in nav}
         nav = [by_h["/admin/summary"], by_h["/admin/processes"],
                ("/admin/log", "Log", any(k[2] for k in log_kids), log_kids),
-               by_h["/admin/employee-info"]]      # Update211: Theme & Layout removed from the menu
+               by_h["/admin/employee-info"], by_h["/admin/notes"]]      # Update248: Notes & Messages / Update211: Theme & Layout removed from the menu
     side_avatar = ""
     if session.get("role") == "admin":
         side_avatar = ADMIN3D_HTML
@@ -4125,8 +4345,21 @@ def page(body, title="Productivity Tracker", **ctx):
                 hol_json = employee_holiday_json()
                 prm_json = _json.dumps(employee_perm_map(session.get("emp_id", "")), separators=(",", ":"))
         except Exception as ex: print("attendance calendar error:", repr(ex))
-    return render_fast(BASE, body=render_fast(body, **ctx), title=title, nav=nav,
+    _ntm = ""
+    if session.get("role") == "employee" and not ctx.get("bare") and (p == "/employee" or p == "/employee/team-logs" or (ctx["hide_status"] and p == "/employee/leave")):      # Update250: Admin notes scroll at the top of the Daily Entry page (Associate Manager / Team Lead / Senior Team Lead have no Daily Entry - their first page shows it)
+        try: _ntm = nt_marquee_html()
+        except Exception as ex_: print("Messages marquee failed:", repr(ex_))
+        try: _ntm += cl_html()      # Update260: celebration animations (Admin > Notes & Messages > Celebrations)
+        except Exception as ex_: print("Celebration overlay failed:", repr(ex_))
+    if session.get("role") == "admin" and not ctx.get("bare"):      # Update265: Leave / Permission notifications at the top of every Admin page
+        try: _ntm = admin_alert_box() + _ntm
+        except Exception as ex_: print("Admin alert bar failed:", repr(ex_))
+    elif session.get("role") == "employee" and not ctx.get("bare") and not str(request.path).startswith("/employee/tracking-consent"):      # Update268: tracking notice waiting for the employee's answer
+        try: _ntm = consent_banner() + _ntm
+        except Exception as ex_: print("Consent banner failed:", repr(ex_))
+    _html = render_fast(BASE, body=_ntm + render_fast(body, **ctx), title=title, nav=nav,
                                   side_avatar=side_avatar, side_name=side_name, side_name_html=side_name_html, welcome_html=welcome_html, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, hol_only=bool(ctx["hide_status"]), srv_today=str(today_local()), theme_css=_theme_css())
+    return _html
 
 
 LOGIN_CLASSIC = """<div class="win admin" data-role="{{role}}"><div class="wbar"><i></i><i></i><i></i></div>
@@ -4142,8 +4375,8 @@ LOGIN_CLASSIC = """<div class="win admin" data-role="{{role}}"><div class="wbar"
 <div class="fl hm" style="left:4%;top:48%;--bt:8s;--d:-5s"><div class="sph" style="--s:20px"></div></div>{% if role=='admin' %}<div class="dp adm"><div class="dp-lab"><b>&#9664;&#9664;&#9664;</b>&nbsp; LIVE DATA FEED &middot; INCOMING FROM SERVER</div><div class="dp-node l"><div class="dp-dash"><i></i><i></i><i></i><i></i></div><div class="dp-stand"></div><small>ADMIN DASHBOARD</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% else %}<div class="dp emp"><div class="dp-lab">UPLOADING ENCRYPTED DATA TO SERVER &nbsp;<b>&#9654;&#9654;&#9654;</b></div><div class="dp-node l"><div class="dp-scr"><i></i><i></i><i></i></div><div class="dp-stand"></div><small>EMPLOYEE</small></div><div class="dp-node r"><div class="dp-rack"><i></i><i></i><i></i></div><small>SERVER</small></div><div class="dp-lane" style="--y:26%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:50%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div><div class="dp-lane" style="--y:74%"><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i><i class="dp-pk"></i></div></div>{% endif %}</div>
 {% if role=='admin' %}<div class="adp"><div class="adp-body" aria-hidden="true"><p class="adp-t">{{ 'Admin' if role=='admin' else 'Employee' }} Panel</p><h3>Productivity<br>Dashboard</h3><p class="adp-s">{% if role=='admin' %}Monitor attendance, tasks and team performance in one place.{% else %}Log your daily work, leave and productivity in one place.{% endif %}</p><div class="adp-3d"><div class="adp-st"><div class="adp-c c1"><small>Performance</small><div class="adp-bars"><i style="height:38%"></i><i style="height:62%"></i><i style="height:48%"></i><i style="height:80%"></i><i style="height:58%"></i><i style="height:92%"></i><i style="height:70%"></i></div></div><div class="adp-c c2"><small>Attendance</small><div class="adp-ring"></div></div><div class="adp-c c3"><small>Reports</small><div class="adp-ln"></div><div class="adp-ln s"></div></div></div></div></div></div>{% endif %}<div class="lcard"><div class="lcard-top"><div class="lav">{{admin_avatar|safe}}</div><img class="lcard-logo" src="/logo.png" alt="Mobius Technologies and Services" width="190" height="99"></div><h2>Welcome back</h2><p>{{title}}</p>
 <form method="post">
-<div class="field"><input id="login_u" name="u" placeholder="{{ph}}" required autofocus autocomplete="off"></div>
-<div class="field pw"><input id="login_p" name="p" type="password" placeholder="Password" required autocomplete="off">
+<div class="field"><input id="login_u" name="u" placeholder="{{ph}}" required {{ '' if u else 'autofocus' }} autocomplete="off" value="{{ u or '' }}"></div>
+<div class="field pw"><input id="login_p" name="p" type="password" placeholder="Password" required {{ 'autofocus' if u else '' }} autocomplete="off">
 <button type="button" class="pw-toggle" id="pw_toggle" aria-pressed="false" aria-label="Show password" title="Show password">
 <svg class="eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
 <svg class="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.9 10.9 0 0 1 12 19c-7 0-11-7-11-7a19.8 19.8 0 0 1 5.1-5.9M9.9 4.2A10.6 10.6 0 0 1 12 5c7 0 11 7 11 7a19.7 19.7 0 0 1-3.2 4.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>
@@ -4553,10 +4786,10 @@ html{scrollbar-gutter:stable}
 <linearGradient id="lxRk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#26397a"/><stop offset="1" stop-color="#0f1a40"/></linearGradient>
 <linearGradient id="lxSd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4b5fc4"/><stop offset="1" stop-color="#1b2461"/></linearGradient></defs>
 {% if role=='admin' %}
-<text class="lx-lb" x="150" y="392">Server</text><text class="lx-lb" x="852" y="392">Admin system</text>
+
 <g class="lx-role"><rect x="802" y="34" width="100" height="34" rx="17"/><text x="852" y="58">Boss</text></g>
 {% else %}
-<text class="lx-lb" x="144" y="392">Employee system</text><text class="lx-lb" x="852" y="392">Server</text>
+
 <g class="lx-role"><rect x="94" y="34" width="100" height="34" rx="17"/><text x="144" y="58">FTE</text></g>{% endif %}
 {% set P = ["M250 150C400 70 600 230 750 140","M250 185C420 150 580 260 750 175","M250 220C400 190 600 170 750 210","M250 255C430 300 570 200 750 245","M250 290C400 340 600 260 750 280"] %}
 {% for i in range(5) %}<path id="lxp{{i}}" class="lx-ln" d="{{ P[i] }}" stroke="var(--c{{ i+1 }})" style="animation-delay:-{{ i*0.3 }}s"/>{% endfor %}
@@ -4658,6 +4891,7 @@ LOGIN_CHR_PICK = r"""<script>
   var lx = document.querySelector('.lx.emp'), u = document.getElementById('login_u'), box = lx && lx.querySelector('.chr-box');
   if (!u || !box) return;
   var cur = box.classList.contains('cf') ? 'f' : box.classList.contains('cm') ? 'm' : box.classList.contains('cl') ? 'l' : 'n', timer = 0, seq = 0, last = null, cache = {}, busy = 0;
+  function fx(n, k){ try { document.dispatchEvent(new CustomEvent(n, {detail: {u: k}})); } catch (x) {} }      /* Update247: tells the login animation which username was entered */
   function show(g){
     if (g === cur) return; cur = g; var my = ++busy;
     lx.classList.toggle('tlm', g === 'l');                       /* Update241: server picture -> clipboard picture for these designations */
@@ -4666,12 +4900,12 @@ LOGIN_CHR_PICK = r"""<script>
   }
   function ask(){
     var v = (u.value || '').trim(); if (v === last) return; last = v;
-    if (!v) { seq++; show('n'); return; }
-    var k = v.toLowerCase(); if (cache[k]) { seq++; show(cache[k]); return; }
+    if (!v) { seq++; show('n'); fx('lxclear', ''); return; }
+    var k = v.toLowerCase(); fx('lxmail', k); if (cache[k]) { seq++; show(cache[k]); if (cache[k] === 'l') fx('lxreport', k); return; }
     var my = ++seq;
     fetch('/login-char?u=' + encodeURIComponent(v), {credentials: 'same-origin', cache: 'no-store'})
       .then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(d){ if (!d || my !== seq) return; var g = (d.g === 'f' || d.g === 'm' || d.g === 'l') ? d.g : 'n'; cache[k] = g; show(g); })
+      .then(function(d){ if (!d || my !== seq) return; var g = (d.g === 'f' || d.g === 'm' || d.g === 'l') ? d.g : 'n'; cache[k] = g; show(g); if (g === 'l') fx('lxreport', k); })
       .catch(function(){});
   }
   function sched(){ clearTimeout(timer); timer = setTimeout(ask, 350); }
@@ -4693,7 +4927,116 @@ LOGIN_ANIM_JS = r"""<script>
 })();
 </script>
 """
-LOGIN = LOGIN_NEW_HEAD + _LOGIN_FORM + LOGIN_NEW_MID + _LOGIN_WT + _LOGIN_MAIN + LOGIN_NEW_JS + LOGIN_CHR_JS + LOGIN_CHR_PICK + LOGIN_ANIM_JS
+LOGIN_MAIL_FX = r"""<style>
+/* Update247: 3D e-mail / report flights on the login page. Display only - never touches the form data. */
+.mfx{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden;perspective:800px;perspective-origin:50% 45%}
+.mfx-env{position:absolute;left:0;top:0;width:58px;height:40px;transform-style:preserve-3d;opacity:0;will-change:transform,opacity;filter:drop-shadow(0 8px 8px #000a) drop-shadow(0 0 12px var(--mc,#22d3ee))}
+.mfx-env i{position:absolute;display:block}
+.mfx-env .e-back{inset:0;border-radius:5px;background:linear-gradient(145deg,#fff,#c9d4ff);transform:translateZ(-3px)}
+.mfx-env .e-letter{left:6px;right:6px;top:4px;height:27px;border-radius:2px;background:linear-gradient(#b9c6f7 2px,transparent 2px) 0 7px/100% 6px,#fff;transform:translateZ(-1px)}
+.mfx-env .e-front{inset:0;border-radius:5px;background:linear-gradient(150deg,#eef2ff,#a9b8f3);clip-path:polygon(0 0,50% 56%,100% 0,100% 100%,0 100%);transform:translateZ(1px)}
+.mfx-env .e-flap{left:0;right:0;top:0;height:60%;background:linear-gradient(180deg,#fff,#b7c4fa);clip-path:polygon(0 0,100% 0,50% 100%);transform-origin:50% 0;transform:translateZ(2px)}
+.mfx-env .e-seal{left:50%;top:44%;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;background:var(--mc,#22d3ee);box-shadow:0 0 8px var(--mc,#22d3ee);transform:translateZ(3px)}
+.mfx-doc{position:absolute;left:0;top:0;width:36px;height:46px;border-radius:4px;opacity:0;will-change:transform,opacity;
+  background:linear-gradient(#4f46e5,#4f46e5) 5px 5px/15px 4px no-repeat,linear-gradient(#94a3d8,#94a3d8) 5px 13px/26px 2px no-repeat,linear-gradient(#94a3d8,#94a3d8) 5px 18px/21px 2px no-repeat,
+  linear-gradient(#22d3ee,#22d3ee) 6px 33px/6px 8px no-repeat,linear-gradient(#a78bfa,#a78bfa) 15px 28px/6px 13px no-repeat,linear-gradient(#fbbf24,#fbbf24) 24px 24px/6px 17px no-repeat,#fff;
+  box-shadow:0 8px 10px #0008,0 0 14px #a78bfa99;filter:drop-shadow(0 0 8px #22d3ee88)}
+.mfx-ring{position:absolute;left:0;top:0;width:70px;height:70px;margin:-35px 0 0 -35px;border-radius:50%;border:3px solid var(--mc,#22d3ee);box-shadow:0 0 18px var(--mc,#22d3ee),inset 0 0 14px var(--mc,#22d3ee);opacity:0}
+@media(prefers-reduced-motion:reduce){.mfx{display:none}}
+</style>
+<script>
+(function(){
+  var lx = document.querySelector('.lx'); if (!lx) return;
+  var body = lx.querySelector('.lx-body'); if (!body || !body.animate) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches) return;
+  var adm = lx.classList.contains('adm'), chip = lx.querySelector('.lx-chip span'), MC = adm ? '#34d399' : '#22d3ee';
+  var layer = document.createElement('div'); layer.className = 'mfx'; layer.setAttribute('aria-hidden', 'true'); layer.style.setProperty('--mc', MC); body.appendChild(layer);
+  function pt(el, fy){ var b = body.getBoundingClientRect(), r = el.getBoundingClientRect(); return {x: r.left - b.left + r.width / 2, y: r.top - b.top + r.height * fy}; }
+  function chrEl(){ return lx.querySelector('.chr-box'); }
+  function srvEl(){ var a = lx.querySelectorAll('.lx-srv .srv-box'); return a.length ? a[a.length - 1] : null; }
+  function tlEl(){ return lx.querySelector('.lx-srv .srv-box.srv-new'); }      /* Update251: the clipboard picture (Associate Manager / Team Lead / Senior Team Lead) */
+  function setChip(t){ if (chip && !lx.classList.contains('go')) chip.textContent = t; }
+  function ring(p, delay){ var r = document.createElement('i'); r.className = 'mfx-ring'; r.style.left = p.x + 'px'; r.style.top = p.y + 'px'; layer.appendChild(r);
+    var a = r.animate([{transform: 'scale(.3)', opacity: .95}, {transform: 'scale(2.3)', opacity: 0}], {duration: 700, delay: delay || 0, easing: 'ease-out', fill: 'both'});
+    a.onfinish = function(){ if (r.parentNode) r.parentNode.removeChild(r); }; }
+  function path(a, b, W, H, o){
+    var N = 20, kf = [], dx = b.x - a.x, sg = dx >= 0 ? 1 : -1, lift = Math.min(110, Math.abs(dx) * .2 + 34), cx = (a.x + b.x) / 2, cy = Math.min(a.y, b.y) - lift;
+    for (var i = 0; i <= N; i++){
+      var t = i / N, e = t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2, m = 1 - e;
+      var x = m * m * a.x + 2 * m * e * cx + e * e * b.x, y = m * m * a.y + 2 * m * e * cy + e * e * b.y, s = o.s0 + (o.s1 - o.s0) * t + Math.sin(Math.PI * t) * .3, bell = Math.sin(Math.PI * t);
+      kf.push({offset: t, opacity: t < .08 ? t / .08 : (t > .9 ? (1 - t) / .1 : 1),
+        transform: 'translate3d(' + (x - W / 2).toFixed(1) + 'px,' + (y - H / 2).toFixed(1) + 'px,' + (bell * o.z).toFixed(1) + 'px) rotateX(' + (16 - bell * 34).toFixed(1) + 'deg) rotateY(' + (t * o.spin * sg).toFixed(1) + 'deg) rotateZ(' + (sg * Math.sin(Math.PI * t * 2) * 9).toFixed(1) + 'deg) scale(' + s.toFixed(3) + ')'});
+    }
+    return kf;
+  }
+  /* one 3D e-mail flying from point A to point B (flap closes at the sender / opens at the receiver) */
+  function playMail(fromEl, toEl, closing){
+    if (!fromEl || !toEl) return Promise.resolve();
+    var a = pt(fromEl, .32), b = pt(toEl, .34), n = document.createElement('div'); n.className = 'mfx-env';
+    n.innerHTML = '<i class="e-back"></i><i class="e-letter"></i><i class="e-front"></i><i class="e-flap"></i><i class="e-seal"></i>'; layer.appendChild(n);
+    ring(a, 0);
+    var fl = n.querySelector('.e-flap'), D = 1900;
+    fl.animate(closing ? [{transform: 'translateZ(2px) rotateX(180deg)', offset: 0}, {transform: 'translateZ(2px) rotateX(0deg)', offset: .3}, {transform: 'translateZ(2px) rotateX(0deg)', offset: 1}]
+                       : [{transform: 'translateZ(2px) rotateX(0deg)', offset: 0}, {transform: 'translateZ(2px) rotateX(0deg)', offset: .72}, {transform: 'translateZ(2px) rotateX(180deg)', offset: 1}], {duration: D, easing: 'ease-in-out', fill: 'both'});
+    var an = n.animate(path(a, b, 58, 40, {s0: .5, s1: .85, z: 130, spin: 360}), {duration: D, easing: 'linear', fill: 'both'});
+    return an.finished.then(function(){ ring(b, 0); return new Promise(function(r){ setTimeout(r, 450); }); })
+      .then(function(){ if (n.parentNode) n.parentNode.removeChild(n); }, function(){ if (n.parentNode) n.parentNode.removeChild(n); });
+  }
+  /* report sheets transferred from the server to the person */
+  function playDocs(){
+    var s = srvEl(), c = chrEl(); if (!s || !c) return Promise.resolve();
+    var a = pt(s, .36), b = pt(c, .32), all = [], i;
+    setChip('Reports \u00b7 Receiving from server'); ring(a, 0);
+    for (i = 0; i < 4; i++){
+      (function(k){
+        var d = document.createElement('div'); d.className = 'mfx-doc'; layer.appendChild(d);
+        var an = d.animate(path({x: a.x, y: a.y + (k - 1.5) * 9}, {x: b.x, y: b.y + (k - 1.5) * 7}, 36, 46, {s0: .45, s1: .8, z: 150 + k * 20, spin: 540}), {duration: 1700, delay: k * 300, easing: 'linear', fill: 'both'});
+        all.push(an.finished.then(function(){ if (d.parentNode) d.parentNode.removeChild(d); }, function(){ if (d.parentNode) d.parentNode.removeChild(d); }));
+      })(i);
+    }
+    ring(b, 1700 + 3 * 300 - 200);
+    return Promise.all(all).then(function(){ return new Promise(function(r){ setTimeout(r, 400); }); }).then(function(){ if (chip && chip.textContent.indexOf('Reports') === 0) chip.textContent = chip.getAttribute('data-go') ? (adm ? 'Boss' : 'FTE') + ' \u00b7 Sending to server' : chip.textContent; });
+  }
+  var chain = Promise.resolve(), pending = 0;
+  function enqueue(fn){ if (pending > 3) return; pending++; chain = chain.then(function(){ if (document.hidden || lx.classList.contains('go')) return; return fn(); }).catch(function(){}).then(function(){ pending--; }); }
+  /* ---- Update251: continuous transfer animation. Generation counter = a restarted loop can never run twice at once.
+         Admin: server -> admin picture.  Employee: employee picture -> server.
+         Associate Manager / Team Lead / Senior Team Lead (.tlm): the 3D e-mail flies from the left picture (glasses, white suit) to the right picture (clipboard). ---- */
+  var gen = 0, looping = false;
+  function stopLoop(){ gen++; looping = false; layer.innerHTML = ''; }
+  function loopRun(){
+    if (looping) return; looping = true; var g = ++gen;
+    (function cycle(){
+      if (!looping || g !== gen) return;
+      if (document.hidden) { setTimeout(cycle, 800); return; }
+      var tl = !adm && lx.classList.contains('tlm');
+      var p = adm ? playMail(srvEl(), chrEl(), false) : playMail(chrEl(), tl ? (tlEl() || srvEl()) : srvEl(), true);
+      p.then(function(){ if (looping && g === gen) setTimeout(cycle, 150); });
+    })();
+  }
+  /* Employee: starts as soon as the username is entered and repeats until the next page has loaded.
+     Associate Manager / Team Lead / Senior Team Lead are recognised by the username lookup ('lxreport'): the flight is then (re)started towards the clipboard picture. */
+  if (!adm){
+    var mailTimer = 0;
+    var begin = function(delay){ clearTimeout(mailTimer); mailTimer = setTimeout(function(){ setChip(lx.classList.contains('tlm') ? 'FTE \u00b7 E-mail sending' : 'FTE \u00b7 E-mail sending to server'); loopRun(); }, delay); };
+    document.addEventListener('lxmail', function(e){ var u = e.detail && e.detail.u; if (!u || u.length < 4) return; if (!looping) begin(1000); });
+    document.addEventListener('lxreport', function(){ stopLoop(); begin(450); });
+    document.addEventListener('lxclear', function(){ clearTimeout(mailTimer); stopLoop(); });
+  }
+  var fm = lx.querySelector('form'), sent = false;
+  if (fm){
+    fm.addEventListener('submit', function(e){
+      if (sent || e.defaultPrevented) return;
+      if (!adm) { loopRun(); return; }      /* employee: the animation is already running (or starts now) and carries on until the next page loads */
+      e.preventDefault(); sent = true; loopRun();
+      setTimeout(function(){ try { fm.submit(); } catch (x) { sent = false; stopLoop(); } }, 2200);      /* the animation is seen for one full round, then the form is sent and the animation keeps looping until the sign-in is done */
+    });
+  }
+  window.addEventListener('pageshow', function(e){ if (e.persisted) { stopLoop(); sent = false; } });
+})();
+</script>
+"""
+LOGIN = LOGIN_NEW_HEAD + _LOGIN_FORM + LOGIN_NEW_MID + _LOGIN_WT + _LOGIN_MAIN + LOGIN_NEW_JS + LOGIN_CHR_JS + LOGIN_CHR_PICK + LOGIN_ANIM_JS + LOGIN_MAIL_FX
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}{% if h=='Target count / hour' %} (count in 1 hr, e.g. 1000){% endif %}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
@@ -4732,7 +5075,7 @@ SAVED_ANIM = """{% if saved_anim %}<script>window.__cmSaved={{ session.name|tojs
 
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th><th>Designation</th>{% endif %}
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Target count</th><th>Completed</th><th>Target status</th><th>Productivity</th><th></th></tr>
-{% for s in subs %}<tr{% if s.late %} class="late-row" title="Submitted / updated on {{s.subat}} - after the entry date"{% endif %}><td>{{s.date}}</td>{% if session.role=='admin' %}<td><a href="/admin/employee-info/{{s.emp_id|urlencode}}/productivity-log" title="Open this employee's complete Productivity Log"><b>{{s.emp_id}}</b></a></td><td>{{s.designation}}</td>{% endif %}
+{% for s in subs %}<tr{% if s.late %} class="late-row" title="Submitted / updated on {{s.subat}} - after the entry date"{% endif %}><td>{{s.date}}</td>{% if session.role=='admin' %}<td><a href="/admin/employee-info/{{s.emp_id|urlencode}}/productivity-log" title="Open this employee's complete Productivity Log ({{s.emp_id}})"><b>{{s.master_name or s.emp_name or s.emp_id}}</b></a></td><td>{{s.designation}}</td>{% endif %}
 <td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
 <td>{{ (s.tgt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td><td>{{ (s.cnt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td>
 <td>{% if s.tgt_state=='met' %}<span class="tg-badge met">&#9989; Achieved</span>{% elif s.tgt_state=='miss' %}<span class="tg-badge miss" title="Below target: {{s.tgt_miss|join(', ')}}">&#10060; Not Achieved</span>{% else %}-{% endif %}</td>
@@ -4808,6 +5151,7 @@ function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e
   if(need>0&&ct<need)low.push(nm+': '+ct+' of '+Math.round(need*100)/100)});
  tgtMsg.textContent=low.length?('⚠ Target not achieved (count per hour × hours worked) – '+low.join(' | ')):'';tgtMsg.style.display=low.length?'block':'none'}
 document.querySelector('[name=date]').addEventListener('change',calc);
+const SAVED={sid:'',date:''};      /* Update267: id + date of the entry saved from this page */
 function showErr(m){formerr.textContent=m;formerr.style.display='block';formerr.scrollIntoView({behavior:'smooth',block:'center'})}
 function saveBanner(ok,lines){lines=(lines||[]).map(function(x){return String(x).replace(/^Saved\\.\\s*/,'')}).filter(Boolean);
  if(ok)window.cartoon('ok',{{sub.emp_name|tojson}}+' – Saved Successfully! 🎉',lines.join(' ')||'Your daily productivity entry is saved.',lines.length?3.9:2.9);
@@ -4822,12 +5166,18 @@ document.querySelector('form[action="{{action}}"]').addEventListener('submit',fu
  const t=[...document.querySelectorAll('#procs .r')].reduce((a,r2)=>a+rowH(r2),0)+[...document.querySelectorAll('[name=nh]')].reduce((a,x)=>a+(+x.value||0),0),r=reqHrs();
  if(t+1e-9<r){e.preventDefault();showErr('Entry incomplete: '+t+' of the required '+r+' working hours logged. Complete all '+r+' hours before saving.')}
  if(!e.defaultPrevented){const f=e.target,b=f.querySelector('button.primary');if(b){setTimeout(function(){b.disabled=true;b.textContent='Saving...'},0)}      /* Update96: one click = one save (no double submit) */
-  if(f.getAttribute('action')==='/employee/save'&&window.fetch){e.preventDefault();      /* Update179: save via fetch and show the result at once */
-   fetch(f.action,{method:'POST',body:new FormData(f),credentials:'same-origin',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json()}).then(function(j){
-    const lines=(j.messages||[]).filter(function(m){return !(j.ok&&/^Saved\\.?$/.test(m.text))}).map(function(m){return m.text});
+  if(f.getAttribute('action')==='/employee/save'&&window.fetch){e.preventDefault();      /* Update179 / Update267: save in the background and STAY on this page - nothing is cleared, no redirect */
+   const dNow=document.querySelector('[name=date]').value; if(SAVED.sid&&SAVED.date!==dNow){SAVED.sid=''}
+   const fd=new FormData(f); if(SAVED.sid)fd.append('sid',SAVED.sid);
+   const label=function(){return SAVED.sid?'Update entry':'Save'};
+   const okLine=function(t){let el=document.getElementById('saved-ok');if(!el){el=document.createElement('div');el.id='saved-ok';el.setAttribute('role','status');el.style.cssText='margin-top:10px;padding:10px 14px;border-radius:10px;background:#ecfdf5;color:#047857;font-weight:600;border:1px solid #a7f3d0';b.parentNode.insertBefore(el,b.nextSibling)}el.textContent=t};
+   fetch(f.action,{method:'POST',body:fd,credentials:'same-origin',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json()}).then(function(j){
+    const lines=(j.messages||[]).filter(function(m){return !(j.ok&&/^(Saved|Updated)\\.?$/.test(m.text))}).map(function(m){return m.text});
     saveBanner(!!j.ok,lines);
-    if(j.ok){setTimeout(function(){location.href='/employee'},lines.length?4000:3000)}else if(b){b.disabled=false;b.textContent='Save'}
-   }).catch(function(){saveBanner(false,['Could not reach the server, so the entry was not saved. Check your internet connection and press Save again.']);if(b){b.disabled=false;b.textContent='Save'}})}}
+    if(j.ok){SAVED.sid=j.sid||SAVED.sid;SAVED.date=dNow;okLine('\u2713 Saved successfully at '+new Date().toLocaleTimeString()+'. Your entry is still shown here - change anything and press Update entry to save the changes.')}
+    else{const el=document.getElementById('saved-ok');if(el)el.remove()}
+    if(b){b.disabled=false;b.textContent=label()}
+   }).catch(function(){saveBanner(false,['Could not reach the server, so the entry was not saved. Check your internet connection and press Save again.']);if(b){b.disabled=false;b.textContent=label()}})}}
 });
 window.addEventListener('pageshow',function(){const b=document.querySelector('form button.primary[disabled]');if(b){b.disabled=false;b.textContent='Save'}});
 {{sub.procs|tojson}}.forEach(addProc);{{sub.notes|tojson}}.forEach(addNote);
@@ -4917,7 +5267,7 @@ def admin_login():
             _bg(prefetch, "Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays")   # Update114: dashboard data loads while the welcome animation plays
             return redirect("/admin/summary")             # Update202: straight to the Admin Panel (no welcome page)
         flash("Wrong username or password.")
-    return page(LOGIN, title="Admin login", ph="Admin username", role="admin",
+    return page(LOGIN, title="Admin login", ph="Admin username", role="admin", u=(request.form.get("u", "").strip()[:120] if request.method == "POST" else ""),
                 admin_avatar=render_fast(ADMIN3D))
 
 @app.route("/admin")
@@ -4938,8 +5288,11 @@ def _admin_emp(row, eid):
 @need("admin")
 def admin_emp_lock(row):
     eid = request.form.get("eid", ""); lock = request.form.get("do") == "lock"
-    if _admin_emp(row, eid) is None:
+    cur_ = _admin_emp(row, eid)
+    if cur_ is None:
         flash("That employee changed - please refresh and try again.", "error"); return redirect(_acct_back())
+    if not lock and str(cur_[HEADERS["Employees"].index("Separation status")]).strip().lower() in ("resigned", "ncns"):      # Update252
+        flash(f"{eid} is marked Resigned / NCNS - clear that status first (Employee Info > Employee Login Access) before unlocking the account.", "error"); return redirect(_acct_back())
     set_employee_cell(row, eid, "Account locked", "Yes" if lock else "")
     try: log_change("Employees", "Locked" if lock else "Unlocked", f"Employee ID {eid}")
     except Exception as ex: print("log_change failed:", ex)
@@ -5161,8 +5514,8 @@ def admin_log():
     d, e = request.args.get("date", ""), request.args.get("emp", "").strip().lower()
     rep_month, _on = report_scope()
     subs = [s for s in load_subs() if (not d or s["date"] == d) and (not rep_month or str(s["date"]).startswith(rep_month)) and
-            (not e or e in (str(s["emp_id"]).lower(), str(s["emp_name"]).lower()))]
-    emp_list = sorted(rows("Employees"), key=lambda x: str(x.get("Name", "")).lower())
+            (not e or e in (str(s["emp_id"]).lower(), str(s["emp_name"]).lower())) and not is_view_only(s["emp_id"])]      # Update256: no names / records of Associate Manager / Team Lead / Senior Team Lead here
+    emp_list = sorted((x for x in rows("Employees") if not desig_vo_eff(x)), key=lambda x: str(x.get("Name", "")).lower())
     return page(LOG_MANAGE + LOG_TOP + LIST + LOG_MISSED, title="Productivity log", subs=subs, emp=request.args.get("emp", "").strip(), **log_missed_section(),
                 emp_list=emp_list, sel_emp=request.args.get("emp", "").strip(), today_str=str(today_local()),
                 nxt=request.full_path.rstrip("?"),
@@ -5180,6 +5533,8 @@ def admin_log_add():
     emp_id, name, band = str(e["Employee ID"]).strip(), str(e.get("Name", "")), str(e.get("Band", ""))
     if is_view_only(emp_id):                                         # Update105
         flash(f"{name} has a View Only designation - productivity entries cannot be added.", "error"); return redirect("/admin/log")
+    if is_separated(emp_id):                                         # Update253
+        flash(f"{name} is marked Resigned / NCNS - productivity access is disabled, so entries cannot be added.", "error"); return redirect("/admin/log")
     action = "/admin/log/add?emp=" + urllib.parse.quote(emp_id, safe="")
     if request.method == "POST":
         try:
@@ -5336,7 +5691,7 @@ def admin_leave_review():
     if not mine:
         flash("Leave request not found - the employee may have cancelled it.")
     else:
-        newly = status == "Approved" and any(leave_status(r) != "Approved" for r in mine)      # Update100: e-mail only on a real approval, never again
+        newly = any(leave_status(r) != status for r in mine)      # Update255: e-mail on a real Approve OR Reject (a change of status), never again for the same decision
         now = now_local().strftime("%Y-%m-%d %H:%M:%S")
         _with_retry(ws_of("Leave").batch_update,
                     [{"range": f"G{r['_row']}:I{r['_row']}", "values": [[status, now, "Admin"]]} for r in mine],
@@ -5350,7 +5705,7 @@ def admin_leave_review():
                 days_ = sum(0.5 if leave_is_half(r) else 1 for r in mine)
                 dtxt = _pretty_date(ds_[0]) if len(ds_) == 1 else f"{_pretty_date(ds_[0])} to {_pretty_date(ds_[-1])}"
                 dur = ("Half day (4 hrs)" if all(leave_is_half(r) for r in mine) and len(mine) == 1 else f"{days_:g} day{'s' if days_ != 1 else ''}")
-                msg_, cat_ = notify_approved(emp_row, "Leave", dtxt, dur, len(mine))
+                msg_, cat_ = notify_request(emp_row, "Leave", status, dtxt, dur, len(mine), reason=mine[0].get("Reason", ""), applied_at=str(mine[0].get("Applied at", "")))
                 flash(msg_, "error") if cat_ == "error" else flash(msg_)
     nxt = request.form.get("next", "")
     return redirect(nxt if nxt.startswith("/admin/") else "/admin/leave-permission")
@@ -5472,7 +5827,7 @@ def admin_notify_poll():
 TABS = [("personal", "Personal Details"), ("productivity", "Productivity"), ("missed", "Missed Entries"), ("leave", "Leave Log"),
         ("holidays", "Holidays"), ("mahizhchi", "Mahizhchi Log"), ("notifications", "Notifications")]
 
-EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if view=='notifications' %}A log of what employees have added, updated or deleted, newest first (latest 200).{% elif view=='productivity' %}Every employee's productivity, counted from their own joining date. Dates before it are never required, missed or reported. Click a name for the full productivity log.{% elif view=='access' %}Enable or disable each employee's login. Disabled employees cannot log in; their data is not changed.{% else %}Click an employee's name to open their details. A name in red has unseen login/logout notifications.{% endif %}</p></div>
+EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if view=='notifications' %}A log of what employees have added, updated or deleted, newest first (latest 200).{% elif view=='productivity' %}Every employee's productivity, counted from their own joining date. Dates before it are never required, missed or reported. Click a name for the full productivity log.{% elif view=='access' %}Enable or disable each employee's login. Disabled employees cannot log in; their data is not changed. Only the Admin can mark an employee Resigned or NCNS with the relieving date - that disables the login automatically.{% else %}Click an employee's name to open their details. A name in red has unseen login/logout notifications.{% endif %}</p></div>
 {% if view!='notifications' %}<form class="grid" method="get"><input name="q" placeholder="Search ID / name" value="{{q}}">
 <button class="primary">Search</button><a href="/admin/employee-info">Reset</a></form>{% endif %}</div>
 <div class="tabs no-print"><a href="/admin/employee-info" class="{{'on' if view=='employees' else ''}}">Employees</a>
@@ -5494,15 +5849,20 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <span style="position:relative;display:inline-block"><input id="al_pw" name="pw" type="text" placeholder="Initial password * (min 4)" required minlength="4" maxlength="60" style="padding-right:84px"><button type="button" class="back sm" style="position:absolute;right:4px;top:50%;transform:translateY(-50%)" onclick="var c='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789',o='';for(var i=0;i<8;i++)o+=c[Math.floor(Math.random()*c.length)];document.getElementById('al_pw').value=o">Generate</button></span>
 <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" name="enable" value="1" checked style="width:auto"> Enable login now</label>
 <button class="primary" type="submit">Save login credentials</button></form></div>
-<p class="mut">Login enabled: <b>{{n_on}}</b> &middot; Login disabled: <b>{{n_off}}</b></p>
-<table><tr><th>Employee ID</th><th>Employee Name</th><th>Office Email ID</th><th>Login Access Status</th><th class="no-print">Action (Admin only)</th></tr>
-{% for e in emps %}{% set off = e.login_off %}<tr><td>{{e['Employee ID']}}</td><td><b>{{e['Name']}}</b></td><td>{{e['Email'] or '-'}}</td>
+<p class="mut">Login enabled: <b>{{n_on}}</b> &middot; Login disabled: <b>{{n_off}}</b> &middot; Resigned: <b>{{n_res}}</b> &middot; NCNS: <b>{{n_ncns}}</b></p>
+<table><tr><th>Employee ID</th><th>Employee Name</th><th>Designation</th><th>Office Email ID</th><th>Login Access Status</th><th>Status (Resigned / NCNS)</th><th>Relieving Date</th><th class="no-print">Action (Admin only)</th></tr>
+{% for e in emps %}{% set off = e.login_off %}<tr><td>{{e['Employee ID']}}</td><td><b>{{e['Name']}}</b></td><td>{{e['Designation'] or '-'}}</td><td>{{e['Email'] or '-'}}</td>
 <td>{% if off %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% endif %}</td>
+<td>{% if e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% elif is_plog_desig(e['Designation']) %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% else %}-{% endif %}</td><td>{{ e.rel_txt or '-' }}</td>
 <td class="act no-print">
-<form method="post" action="/admin/employee-info/login-access/{{e['_row']}}"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="do" value="enable"><button class="primary sm" type="submit" {{'' if off else 'disabled'}}>Enable Login</button></form>
+<form method="post" action="/admin/employee-info/login-access/{{e['_row']}}/separation" onsubmit="var f=this,st=f.status.value;if(st==='clear'){return confirm('Set {{e['Employee ID']}} ({{e['Name']}}) to Active? The Resigned / NCNS status is cleared; the login stays disabled until you click Enable Login.')}if(!f.relieving.value){alert('Enter the relieving date.');return false}return confirm('Mark {{e['Employee ID']}} ({{e['Name']}}) as '+st+' with relieving date '+f.relieving.value+'? Login access will be disabled automatically.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}">
+<select name="status" title="Action (Admin only)" style="width:auto"><option value="clear" {{'selected' if not e.sep else ''}}>Active</option><option value="Resigned" {{'selected' if e.sep=='Resigned' else ''}}>Resigned</option><option value="NCNS" {{'selected' if e.sep=='NCNS' else ''}}>NCNS (No Call, No Show)</option></select>
+<input type="date" name="relieving" title="Relieving date (needed for Resigned / NCNS)" value="{{e.rel_iso}}" style="width:auto"><button class="danger sm" type="submit">Save action</button></form>
+
+<form method="post" action="/admin/employee-info/login-access/{{e['_row']}}"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="do" value="enable"><button class="primary sm" type="submit" title="{{'Clear the Resigned / NCNS status first' if e.sep else ''}}" {{'disabled' if (e.sep or not off) else ''}}>Enable Login</button></form>
 <form method="post" action="/admin/employee-info/login-access/{{e['_row']}}" onsubmit="return confirm('Disable login for {{e['Employee ID']}} ({{e['Name']}})? This employee will not be able to log in until you enable it again. Their data is not changed.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="do" value="disable"><button class="danger sm" type="submit" {{'disabled' if off else ''}}>Disable Login</button></form>
 <form method="post" action="/admin/employees/{{e['_row']}}/reset-password" onsubmit="var p=prompt('Set password for {{e['Employee ID']}} (leave empty to generate one):','');if(p===null)return false;this.newpw.value=p;return true"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="newpw" value=""><button class="back sm" type="submit">Set Password</button></form></td></tr>
-{% else %}<tr><td colspan="5">No employees found.</td></tr>{% endfor %}</table>
+{% else %}<tr><td colspan="8">No employees found.</td></tr>{% endfor %}</table>
 {% elif view=='productivity' %}
 <form class="grid no-print" method="get"><input type="hidden" name="view" value="productivity"><input type="month" name="month" value="{{month}}"><button class="primary">Show</button><a href="/admin/employee-info?view=productivity">This month</a></form>
 <p class="mut">{{label}} &middot; working days are counted from each employee's joining date (a new joiner is counted only from that day; existing employees are unchanged). Weekly offs and holidays are excluded.</p>
@@ -5510,19 +5870,21 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 {% for p in prows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
 <td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}} <span class="pill act">New joiner</span>{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td>
 <td>{{p.pstart.strftime('%d %b %Y')}}</td>
-{% if not p.active %}<td colspan="5" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
+{% if p.sepst %}<td><span class="pill" style="{{ 'background:#fde8e8;color:#b42318' if p.sepst=='Resigned' else 'background:#fff1db;color:#b45309' }}">{{p.sepst}}</span></td><td colspan="4" class="mut">{% if p.e.rel_txt %}Relieving date: {{p.e.rel_txt}} &mdash; {% endif %}not counted in working days, pending entries or reminders</td>
+{% elif not p.active %}<td colspan="5" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
 {% elif p.r.vo %}<td colspan="5" class="mut">View only (no productivity entry for this designation)</td>
 {% else %}<td>{{p.r.wd}}</td><td>{{p.entries}}</td><td>{{p.missed}}</td><td>{{p.r.att}}%</td><td><b>{{p.r.pct}}%</b></td>{% endif %}</tr>
 {% else %}<tr><td colspan="10">No employees found.</td></tr>{% endfor %}</table>
 {% elif view=='leads' %}
 <form class="grid no-print" method="get"><input type="hidden" name="view" value="leads"><input type="month" name="month" value="{{month}}"><button class="primary">Show</button><a href="/admin/employee-info?view=leads">This month</a></form>
 <p class="mut">{{label}} &middot; Associate Managers, Managers, Team Leads and Senior Team Leads: their own Productivity Log and Missed Entries Log. These employees also see the read-only <b>Team Logs</b> (Productivity Log + Missed Entries Log of all employees) in their own panel when they log in. Access follows the Designation automatically.</p>
-<table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Entries</th><th>Productivity</th><th>Missed entries</th><th>Missed dates</th><th>Logs</th></tr>
+<table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Login Access</th><th>Status</th><th>Relieving Date</th><th>Entries</th><th>Productivity</th><th>Missed entries</th><th>Missed dates</th><th>Logs</th></tr>
 {% for p in lrows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
+<td>{% if p.e.login_on %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% else %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% endif %}</td><td>{% if p.e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif p.e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td><td>{{ p.e.rel_txt or '-' }}</td>
 {% if not p.active %}<td colspan="3" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>{% elif p.vo %}<td colspan="3" class="mut">View only</td>{% else %}<td>{{p.entries}}</td><td><b>{{p.pct}}%</b></td><td>{{p.missed|length}}</td>{% endif %}
 <td>{{p.missed|join(', ') or '-'}}</td>
 <td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}{% endif %}">Productivity Log</a> &middot; <a href="/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=missed&amp;month={{month}}">Missed Entries Log</a></td></tr>
-{% else %}<tr><td colspan="8">No employee with the designation Associate Manager, Manager, Team Lead or Senior Team Lead.</td></tr>{% endfor %}</table>
+{% else %}<tr><td colspan="11">No employee with the designation Associate Manager, Manager, Team Lead or Senior Team Lead.</td></tr>{% endfor %}</table>
 {% elif view=='notifications' %}
 <table><tr><th>Employee Name</th><th>Date &amp; Time</th><th>Section / Log</th><th>Action</th><th>Details</th><th>Summary</th></tr>
 {% for r in log %}<tr{% if r.new %} style="font-weight:600"{% endif %}>
@@ -5633,6 +5995,7 @@ T_NOTIF = """<p class="mut">Everything this employee added, updated or deleted, 
 @app.route("/admin/employee-info")
 @need("admin")
 def admin_employee_info():
+    prefetch(*ADMIN_EMP_SHEETS)      # Update259: cold cache -> all sheets are read together, not one by one
     if request.args.get("view") == "notifications":
         log = update_log()
         return page(EMP_LIST, title="Employee Info", view="notifications", log=log,
@@ -5640,12 +6003,13 @@ def admin_employee_info():
     q = request.args.get("q", "").strip().lower()
     emps = [e for e in rows("Employees") if not q or q in str(e["Employee ID"]).lower() or q in str(e["Name"]).lower()]
     emps.sort(key=lambda e: str(e["Name"]).lower())
+    for e in emps: sep_fields(e)                                  # Update252
     if request.args.get("view") == "access":            # Update117: Employee Login Access tab (Admin only)
         for e in emps: e["login_off"] = emp_locked(e)
         off = sum(1 for e in emps if e["login_off"])
         return page(EMP_LIST, title="Employee Info", view="access", emps=emps, q=request.args.get("q", ""),
-                    n_on=len(emps) - off, n_off=off, new_count=sum(1 for r in update_log() if r["new"]),
-                    ad=session.pop("_ad", {}), today=str(today_local()))
+                    n_on=len(emps) - off, n_off=off, n_res=sum(1 for e in emps if e["sep"] == "Resigned"), n_ncns=sum(1 for e in emps if e["sep"] == "NCNS"),
+                    new_count=sum(1 for r in update_log() if r["new"]), ad=session.pop("_ad", {}), today=str(today_local()))
     if request.args.get("view") == "productivity":      # Update224: Productivity section of the employee log (Admin only)
         return admin_productivity_overview(emps, q)
     if request.args.get("view") == "leads":             # Update234: Managers & Leads - their Productivity Log + Missed Entries Log (Admin only)
@@ -5710,13 +6074,46 @@ def admin_login_access(row):
     if session.get("role") != "admin": abort(403)
     eid = request.form.get("eid", ""); disable = request.form.get("do") == "disable"
     if request.form.get("do") not in ("enable", "disable"): abort(400)
-    if _admin_emp(row, eid) is None:
+    cur_ = _admin_emp(row, eid)
+    if cur_ is None:
         flash("That employee changed - please refresh and try again.", "error"); return redirect(_acct_back())
+    if not disable and str(cur_[HEADERS["Employees"].index("Separation status")]).strip().lower() in ("resigned", "ncns"):      # Update252: no login while Resigned / NCNS
+        flash(f"{eid} is marked Resigned / NCNS, so the login stays disabled. Clear that status first if this was a mistake.", "error"); return redirect(_acct_back())
     set_employee_cell(row, eid, "Account locked", "Yes" if disable else "")
     try: log_change("Employees", "Login disabled" if disable else "Login enabled", f"Employee ID {eid}")
     except Exception as ex: print("log_change failed:", ex)
     flash(f"Login {'disabled - ' + eid + ' can no longer log in.' if disable else 'enabled - ' + eid + ' can log in again.'}")
     return redirect(request.form.get("back") if (request.form.get("back") or "").startswith("/admin/employee-info") and "//" not in request.form.get("back") else "/admin/employee-info?view=access")
+
+@app.route("/admin/employee-info/login-access/<int:row>/separation", methods=["POST"])
+@need("admin")
+def admin_login_separation(row):
+    """Update252: ADMIN ONLY - mark an employee Resigned / NCNS with the relieving date (both required). The login is disabled automatically
+    ("Account locked" = Yes). 'clear' removes the status and date; the login then stays disabled until the Admin enables it."""
+    if session.get("role") != "admin": abort(403)
+    eid = request.form.get("eid", "").strip(); st = request.form.get("status", "").strip(); rel = request.form.get("relieving", "").strip()
+    if _admin_emp(row, eid) is None:
+        flash("That employee changed - please refresh and try again.", "error"); return redirect(_acct_back())
+    if st == "clear":
+        cur_ = next((x for x in rows("Employees") if x["_row"] == row), None)
+        if cur_ is not None and not emp_sep(cur_):      # Update258: already Active - nothing to change
+            flash(f"{eid} is already Active."); return redirect(_acct_back())
+        set_employee_cell(row, eid, "Separation status", ""); set_employee_cell(row, eid, "Relieving date", "")
+        try: log_change("Employees", "Resigned / NCNS cleared", f"Employee ID {eid}")
+        except Exception as ex: print("log_change failed:", ex)
+        flash(f"Status cleared for {eid}. The login is still disabled - use Enable Login when the employee may sign in again.")
+        return redirect(_acct_back())
+    if st not in SEP_STATUSES:
+        flash("Please choose the status: Resigned or NCNS.", "error"); return redirect(_acct_back())
+    try: rel = dt.date.fromisoformat(rel).isoformat()
+    except ValueError:
+        flash("Please enter the relieving date.", "error"); return redirect(_acct_back())
+    set_employee_cell(row, eid, "Separation status", st); set_employee_cell(row, eid, "Relieving date", rel)
+    set_employee_cell(row, eid, "Account locked", "Yes")                      # login access is disabled automatically
+    try: log_change("Employees", f"Marked {st} (relieving {rel}); login disabled", f"Employee ID {eid}")
+    except Exception as ex: print("log_change failed:", ex)
+    flash(f"{eid} marked {st} - relieving date {dt.date.fromisoformat(rel).strftime('%d %b %Y')}. Login access has been disabled automatically.")
+    return redirect(_acct_back())
 
 def emp_or_404(eid):
     e = next((e for e in rows("Employees") if _key(e["Employee ID"]) == _key(eid)), None)
@@ -5739,6 +6136,7 @@ def admin_set_joining(eid):
 @app.route("/admin/employee-info/<eid>")
 @need("admin")
 def admin_employee_detail(eid):
+    prefetch(*ADMIN_EMP_SHEETS)      # Update259
     emp = emp_or_404(eid); eid = str(emp["Employee ID"])
     if "tab" not in request.args and desig_view_only(emp.get("Designation", "")):      # Update235: Associate Manager / Team Lead / Senior Team Lead -> name click opens ONLY the detailed Productivity Log
         return redirect("/admin/employee-info/%s/productivity-log" % urllib.parse.quote(eid, safe=""))
@@ -5868,6 +6266,7 @@ def admin_employee_plog(eid):
 
 def plog_ctx(eid, month):
     """Update237: everything the detailed date-wise Productivity Log page shows for ONE employee (read from the existing Productivity log via load_subs)."""
+    prefetch(*ADMIN_EMP_SHEETS)      # Update259
     emp = emp_or_404(eid); eid = str(emp["Employee ID"])
     subs = load_subs(eid)
     label = "All time"
@@ -5936,9 +6335,10 @@ def _review_permission(eid, row, status):
                                            values=[[status, now, "Admin"]], value_input_option="RAW")
     invalidate_cache("Permissions")
     flash(f"Permission request {status.lower()}.")
-    if status == "Approved" and prev != "Approved":      # Update100: approval e-mail (never on Reject, never twice)
+    if status in ("Approved", "Rejected") and prev != status:      # Update255: decision e-mail on Approve AND Reject (once per real change)
         hrs = num(r.get("Hours"))
-        msg_, cat_ = notify_approved(emp, "Permission", _pretty_date(r.get("Date", "")), f"{hrs:g} hr{'s' if hrs != 1 else ''}", 1)
+        msg_, cat_ = notify_request(emp, "Permission", status, _pretty_date(r.get("Date", "")), f"{hrs:g} hr{'s' if hrs != 1 else ''}", 1,
+                                    reason=r.get("Reason", ""), applied_at=str(r.get("Applied at", "")))
         flash(msg_, "error") if cat_ == "error" else flash(msg_)
     nxt = request.form.get("next", "")
     return redirect(nxt if nxt.startswith("/admin/") else f"/admin/employee-info/{eid}?tab=leave")
@@ -5989,12 +6389,17 @@ def employee_login():
         return _wrong_area("employee")
     if request.method != "POST": _prewarm_employees()
     if request.method == "POST":
-        u = request.form["u"].strip().lower()
+        u_typed = request.form["u"].strip()[:120]; u = u_typed.lower()      # Update269: u_typed is shown again in the field after a failed sign-in
+        _hit0 = next((x for x in rows("Employees") if u in (str(x["Employee ID"]).lower(), str(x["Email"]).lower())), None)      # Update271
+        if _hit0 is not None and emp_locked(_hit0):      # Locked or Resigned / NCNS: never signs in, whatever the password
+            flash("Your account is locked. Please contact your Manager, Team Lead, or Admin.", "error")
+            return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee", lxg="", u=u_typed,
+                        admin_avatar=render_fast(AVATAR3D, gender="male", initials="E"))
         for e in rows("Employees"):
             if u in (str(e["Employee ID"]).lower(), str(e["Email"]).lower()) and eq(request.form["p"], e["Password"]):
                 if emp_locked(e):                                   # Update96: locked accounts cannot log in
-                    flash("Your account is locked. Please contact the Admin to unlock it.", "error")
-                    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee", lxg="",
+                    flash("Your account is locked. Please contact your Manager, Team Lead, or Admin.", "error")
+                    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee", lxg="", u=u_typed,
                 admin_avatar=render_fast(AVATAR3D, gender="male", initials="E"))
                 track_logout(auto=True, reason="New login")      # closes a previous session in this browser, if any
                 session.clear()
@@ -6009,8 +6414,10 @@ def employee_login():
                     else: resp.delete_cookie("lxg")
                 except Exception: pass
                 return resp
-        flash("Wrong username or password.")
-    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee", lxg="",
+        _hit = next((x for x in rows("Employees") if u in (str(x["Employee ID"]).lower(), str(x["Email"]).lower())), None)      # Update270
+        if _hit is None: flash("Username not found or account locked. Please contact your Manager, Team Lead, or Admin.", "error")      # unknown / invalid username, or locked account (whatever the password)
+        else: flash("Wrong username or password. Please try again.", "error")
+    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee", lxg="", u=(u_typed if request.method == "POST" else ""),
                 admin_avatar=render_fast(AVATAR3D, gender="male", initials="E"))
 
 def form_page(sub, action, heading):
@@ -6021,7 +6428,7 @@ def form_page(sub, action, heading):
     if not any(is_poc(n) for n in names): names.insert(max(len(names) - 1, 0), POC_SAMPLE_PROCESS)       # Update94: "POC_Sample" is always available (Hour, Count, Description required)
     if not any(is_training(n) for n in names): names.insert(max(len(names) - 1, 0), TRAINING_PROCESS)       # Update93: "Training" is always available (just before "Other")
     tph = process_rates()
-    perm = {d: h for (_k, d), h in deduction_map(sub.get("emp_id")).items()}      # approved permission + half-day leave hours, by date
+    perm = {d: h for (_k, d), h in deduction_map(sub.get("emp_id"), pending=True).items()}      # approved + pending (Update264) permission + half-day leave hours, by date
     maxdate = ""          # no upper limit on the entry date - employees may pick any date they need
     jd_ = join_date(sub.get("emp_id")) if session.get("role") == "employee" else None
     mindate = str(jd_) if jd_ else ""      # Update97: no entry before the joining date
@@ -6233,11 +6640,14 @@ def agent_lock():
     except Exception: ok = False
     name = next((str(r.get("Name", "")) for r in rows("Employees") if _key(r.get("Employee ID", "")) == _key(eid)), None) if eid else None
     if not ok:
-        if name is not None and _token_was_revoked(eid, j.get("token", ""), enr):      # Update166: a formerly valid agent is still running -> the Admin sees why (Error)
+        _gen = _fl((enr or {}).get("Generated epoch"))
+        _waiting = bool(_gen) and _gen > _agent_map().get(_key(eid), 0)      # Update268: a new installer is already prepared and not yet run -> show Pending Installation, not Error again
+        if name is not None and not _waiting and _token_was_revoked(eid, j.get("token", ""), enr):      # Update166: a formerly valid agent is still running -> the Admin sees why (Error)
             _enr_err(eid, name, "Agent credentials were revoked - computer %s must be reinstalled" % (str(j.get("host", ""))[:40] or "?"))
         return ("", 403)
     if name is None: return ("", 403)                                  # unknown / deleted employee: the agent drops the event
     if str((enr or {}).get("Status", "")).strip() == "Disabled": return ("", 403)      # Update166: Admin disabled this agent
+    if not _consent_ok(eid): return ("", 403)      # Update268: nothing is recorded until the employee has accepted the tracking notice
     if j.get("e") == "check": return ("", 204)                         # Update166: the installer's registration check - validates the credentials but is NOT a heartbeat
     kind = {"start": "locked", "locked": "locked", "end": "unlocked", "unlocked": "unlocked", "reason": "reason", "hello": "support",
             "display_off": "screen_off", "display_on": "screen_on"}.get(j.get("e"))
@@ -6276,6 +6686,7 @@ def agent_enroll():
         return jsonify(ok=False), 404
     eid = str(hit[0]["Employee ID"]).strip(); enr = _enr_get(eid)
     if str((enr or {}).get("Status", "")).strip() == "Disabled": return jsonify(ok=False), 403      # Update166: a disabled agent cannot re-register
+    if not _consent_ok(eid): return jsonify(ok=False), 403      # Update268: the employee has not accepted the tracking notice
     return jsonify(ok=True, eid=eid, token=wt_agent_token(eid, enr))
 
 @app.route("/admin/work-time/agent/deploy_all.ps1")
@@ -6461,21 +6872,25 @@ def _emp_by_id(eid):
     return next((x for x in rows("Employees") if _key(x.get("Employee ID", "")) == _key(eid)), None)
 def _fname(eid): return "install_%s.ps1" % re.sub(r"[^A-Za-z0-9_-]+", "_", str(eid))
 def _stamp(ep): return dt.datetime.fromtimestamp(ep, TZ).strftime("%Y-%m-%d %H:%M") if ep else ""
-AGENT_TONE = {"Active (agent)": "#166534", "Offline": "#b45309", "Error": "#b91c1c", "Pending Installation": "#1d4ed8", "Disabled": "#6b7280", "Not Installed": "#6b7280"}
+AGENT_TONE = {"Active (agent)": "#166534", "Offline": "#b45309", "Error": "#b91c1c", "Pending Installation": "#1d4ed8", "Awaiting Consent": "#7c3aed", "Consent Declined": "#b91c1c", "Disabled": "#6b7280", "Not Installed": "#6b7280"}
 
 def _agent_rows():
     now = time.time()
     enr = {_key(r.get("Employee ID", "")): r for r in _fetch_rows(ENR_SHEET)}
     dev = {_key(r.get("Employee ID", "")): r for r in _fetch_rows(AGENT_SHEET)}
+    con = {_key(r.get("Employee ID", "")): str(r.get("Status", "")).strip() for r in _fetch_rows(AGENT_CONSENT_SHEET)}
     out = []
     for e in rows("Employees"):
         eid = str(e.get("Employee ID", "")).strip()
         if not eid: continue
         k = _key(eid); er = enr.get(k) or {}; dv = dev.get(k) or {}; contact = _fl(dv.get("Last contact epoch"))
-        st = agent_status(er, contact, now)
-        out.append(dict(eid=eid, name=str(e.get("Name", "")), email=str(e.get("Office Email ID") or e.get("Email") or ""), status=st, tone=AGENT_TONE[st],
+        st = agent_status(er, contact, now); cs = con.get(k, "") or "Not asked"; inst = st in ("Active (agent)", "Offline", "Error")
+        if st != "Disabled":      # Update268: without the employee's consent nothing is recorded, so that is what the Admin sees
+            if cs in ("Declined", "Withdrawn"): st = "Consent Declined"
+            elif cs != "Accepted" and (cs == "Requested" or st != "Not Installed"): st = "Awaiting Consent"
+        out.append(dict(consent=cs, eid=eid, name=str(e.get("Name", "")), email=str(e.get("Office Email ID") or e.get("Email") or ""), status=st, tone=AGENT_TONE[st],
                         last=_stamp(contact), host=str(dv.get("Computer", "")), err=str(er.get("Last error", "")) if st == "Error" else "",
-                        prepared=_stamp(_fl(er.get("Generated epoch"))), disabled=(st == "Disabled"), installed=(st in ("Active (agent)", "Offline", "Error"))))
+                        prepared=_stamp(_fl(er.get("Generated epoch"))), disabled=(st == "Disabled"), installed=inst))
     bad = [dict(who=str(r.get("Employee name", "")), err=str(r.get("Last error", "")), at=_stamp(_fl(r.get("Last error epoch")))) for r in enr.values()
            if str(r.get("Employee ID", "")).startswith("UNMATCHED")]
     return out, bad
@@ -6510,6 +6925,9 @@ def admin_work_time_agent_install():
                                   "Generated epoch": int(now), "Prepared by": "Admin", "Last error": "", "Last error epoch": ""}}):
         flash("The installer could not be prepared (Google Sheets did not answer). Please try again.", "error"); return redirect("/admin/work-time/agent")
     print("work-time agent: installer prepared for", eid, "(new credentials)" if request.form.get("rotate") == "1" else "")
+    try:
+        if _consent_request_many([(eid, name)]): flash("%s has been notified in the Employee page and must accept the tracking notice before the agent can register." % (name or eid))
+    except Exception as ex: print("consent request failed:", repr(ex)); flash("Installer prepared, but the consent request could not be saved - use 'Send consent request'.", "error")
     _wt_approve(eid)
     return redirect("/admin/work-time/agent?ready=" + urllib.parse.quote(eid))
 
@@ -6528,8 +6946,25 @@ def admin_work_time_agent_install_all():
     if ch and not _enr_save(ch):
         flash("Google Sheets did not answer. Please try again.", "error"); return redirect("/admin/work-time/agent")
     print("work-time agent: deploy_all approved,", len(ch), "employees set to Pending Installation")
+    try:
+        n_ = _consent_request_many([(r["eid"], r["name"]) for r in data if not r["disabled"]])
+        flash("%d employee(s) have been notified in the Employee page. The agent only enrols for employees who accept the tracking notice." % n_)
+    except Exception as ex: print("consent request failed:", repr(ex)); flash("Prepared, but the consent requests could not be saved - use 'Send consent request' per employee.", "error")
     _wt_approve("ALL")
     return redirect("/admin/work-time/agent?ready=ALL")
+
+@app.route("/admin/work-time/agent/request-consent", methods=["POST"])
+@need("admin")
+def admin_work_time_agent_request_consent():
+    """Update268: (re)send the tracking notice / consent request to one employee."""
+    if not _same_origin(): abort(403)
+    e = _emp_by_id(request.form.get("eid", "").strip())
+    if not e: abort(404)
+    try:
+        n = _consent_request_many([(str(e["Employee ID"]).strip(), str(e.get("Name", "")))])
+        flash(("%s has been notified in the Employee page." % (e.get("Name") or e["Employee ID"])) if n else "%s has already accepted." % (e.get("Name") or e["Employee ID"]))
+    except Exception as ex: print("consent request failed:", repr(ex)); flash("Could not save the request - please try again.", "error")
+    return redirect("/admin/work-time/agent")
 
 @app.route("/admin/work-time/agent/disable", methods=["POST"])
 @need("admin")
@@ -6560,6 +6995,12 @@ WT_AGENT = """<div class="card"><h2 style="margin-top:0">Install Windows Trackin
 (GPO / Intune / SCCM). An employee is shown as <b>Active (agent)</b> only after the server receives a valid heartbeat or event from the agent.</p>
 <p style="margin:6px 0">{% for s_ in states %}{% if cnt.get(s_) %}<span style="display:inline-block;margin:0 10px 4px 0"><b style="color:{{tones[s_]}}">{{cnt[s_]}}</b> {{s_}}</span>{% endif %}{% endfor %}</p>
 
+<div class="card" style="background:#faf5ff;border:1px solid #d8b4fe"><b>How installation works (with employee notice &amp; consent)</b>
+<ol style="margin:6px 0 0 18px;padding:0"><li>Click <b>Install Agent</b> (one employee) or <b>Install for All Employees</b>. The employees are notified by a banner on their Employee page.</li>
+<li>Each employee reads what the agent records (screen lock / unlock, screen-off / idle periods, computer name - no keystrokes, screenshots, files or websites) and accepts or declines.</li>
+<li>After accepting, the employee installs the agent on their own PC from that page (personal installer, no administrator rights, needs Python 3) - or IT deploys <b>deploy_all.ps1</b> through Group Policy / Intune / SCCM. The agent only registers for employees who accepted.</li>
+<li>The status turns <b>Active (agent)</b> after the first heartbeat. A declined or withdrawn consent stops recording at once.</li></ol>
+<p class="mut" style="margin:6px 0 0">A web app cannot push software onto a PC by itself, so the employee (or IT) runs the installer once. If a PC shows <i>credentials revoked</i>, prepare a new installer with <b>Reinstall Agent</b> and run it on that PC; the status shows Pending Installation until it does.</p></div>
 {% if ready %}<div class="card" style="background:#f0fdf4;border:1px solid #86efac">
 {% if ready.all %}<b>Deployment script ready &middot; all employees</b>
 <p style="margin:6px 0"><a class="btnl" href="/admin/work-time/agent/deploy_all.ps1">&#11015; Download deploy_all.ps1</a></p>
@@ -6586,9 +7027,10 @@ Employees stay <b>Pending Installation</b> until their first heartbeat arrives. 
 <div class="no-print" style="display:flex;gap:10px;flex-wrap:wrap;margin:8px 0">
 <input id="wtq" type="search" placeholder="Search Emp ID / name / e-mail" oninput="wtFilter()" style="min-width:220px">
 <select id="wts" onchange="wtFilter()"><option value="">All statuses</option>{% for s_ in states %}<option>{{s_}}</option>{% endfor %}</select></div>
-<div style="overflow-x:auto"><table id="wtt"><tr><th>Emp ID</th><th>Employee Name</th><th>Office Email ID</th><th>Agent Installation Status</th><th>Last Activity</th><th>Install / Reinstall Agent</th><th>Disable Agent</th></tr>
+<div style="overflow-x:auto"><table id="wtt"><tr><th>Emp ID</th><th>Employee Name</th><th>Office Email ID</th><th>Agent Installation Status</th><th>Employee consent</th><th>Last Activity</th><th>Install / Reinstall Agent</th><th>Disable Agent</th></tr>
 {% for r in data %}<tr data-s="{{r.status}}" data-t="{{(r.eid ~ ' ' ~ r.name ~ ' ' ~ r.email)|lower}}"><td>{{r.eid}}</td><td>{{r.name}}</td><td>{{r.email or '-'}}</td>
 <td><b style="color:{{r.tone}}">{{r.status}}</b>{% if r.err %}<br><small style="color:#b91c1c">{{r.err}}</small>{% elif r.status=='Pending Installation' and r.prepared %}<br><small class="mut">installer prepared {{r.prepared}}</small>{% endif %}{% if r.host and r.installed %}<br><small class="mut">{{r.host}}</small>{% endif %}</td>
+<td><b>{{r.consent}}</b>{% if r.consent!='Accepted' and not r.disabled %}<form method="post" action="/admin/work-time/agent/request-consent" style="margin:4px 0 0"><input type="hidden" name="eid" value="{{r.eid}}"><button class="btnl" type="submit">{{'Resend request' if r.consent=='Requested' else 'Send consent request'}}</button></form>{% endif %}</td>
 <td>{{r.last or '-'}}</td>
 <td>{% if r.disabled %}<span class="mut">Enable first</span>{% else %}<form method="post" action="/admin/work-time/agent/install" style="margin:0" onsubmit="return confirm('Prepare the installer for {{r.name|e}}? Deploy it only with authorized Admin / IT approval.')">
 <input type="hidden" name="eid" value="{{r.eid}}"><button class="btnl" type="submit">{{'Reinstall Agent' if r.status!='Not Installed' else 'Install Agent'}}</button>
@@ -6786,20 +7228,8 @@ while True:
     flush(); time.sleep(1)
 '''
 
-@app.route("/admin/work-time/agent/install.ps1")
-@need("admin")
-def admin_work_time_agent_installer():
-    """Update141: one-click, per-employee installer for the silent lock agent (current user, no admin rights, hidden, runs at every logon)."""
-    eid = request.args.get("eid", "").strip()
-    e = next((x for x in rows("Employees") if _key(x.get("Employee ID", "")) == _key(eid)), None)
-    if not e: abort(404)
-    eid = str(e["Employee ID"]).strip(); base = request.url_root.rstrip("/")
-    er = _enr_get(eid, fresh=True)
-    if str((er or {}).get("Status", "")).strip() == "Disabled":
-        flash("This employee's agent is disabled. Use Enable first.", "error"); return redirect("/admin/work-time/agent")
-    if not _wt_approved(eid):                                     # Update166: Install Agent (with Admin / IT approval) must come first; the link is not usable on its own
-        flash("Click Install Agent for this employee first (the download is released for 10 minutes).", "error"); return redirect("/admin/work-time/agent")
-    print("work-time agent: installer downloaded for", eid)
+def _agent_ps(eid, er, base):
+    """Update268: the personal PowerShell installer (shared by the Admin download and the employee's own consent page)."""
     tok, peid = wt_agent_token(eid, er), eid.replace("'", "''")
     ps = f"""$ErrorActionPreference = 'Stop'
 $dir = Join-Path $env:LOCALAPPDATA 'WorkTimeAgent'
@@ -6829,10 +7259,87 @@ try {{
   Write-Output 'Work Time agent installed and the server accepted it. The Admin page shows Active (agent) after the first heartbeat (about a minute).'
 }} catch {{
   $code = 0; if ($_.Exception.Response) {{ $code = [int]$_.Exception.Response.StatusCode }}
-  if ($code -eq 403) {{ Write-Error 'Installed, but the server REJECTED this agent (credentials revoked, agent disabled or employee unknown). Ask the Admin to prepare a new installer.' }}
+  if ($code -eq 403) {{ Write-Error 'Installed, but the server REJECTED this agent (credentials revoked, agent disabled, employee unknown, or the employee has not accepted the tracking notice yet). Ask the Admin to prepare a new installer, and accept the notice on your Employee page.' }}
   else {{ Write-Error ('Installed, but this PC could not reach the server {base} : ' + $_.Exception.Message) }}
 }}
 """
+
+    return ps
+
+
+EMP_CONSENT = """<div class="card" style="max-width:820px"><h2 style="margin-top:0">Work Time tracking notice</h2>
+<p>Your employer asks to install the <b>Work Time agent</b> on your work computer. Please read what it does, then choose.</p>
+<h3 style="margin:12px 0 4px">What it records</h3>
+<ul style="margin:0 0 0 18px"><li>When your screen is <b>locked</b> and <b>unlocked</b> (and whether you locked it yourself or it locked automatically).</li>
+<li>When the screen turns <b>off</b> / on, or you have been <b>idle</b> (no keyboard or mouse use for the idle limit, 5 minutes by default).</li>
+<li>The name of the computer and a regular "agent is running" signal.</li></ul>
+<h3 style="margin:12px 0 4px">What it does NOT record</h3>
+<ul style="margin:0 0 0 18px"><li>No keystrokes, screenshots, screen content, files, e-mails, websites, applications, camera, microphone or location.</li></ul>
+<h3 style="margin:12px 0 4px">Why and who sees it</h3>
+<p style="margin:0">To calculate your working time and break duration for attendance and productivity reports. The Admin can see these records with your Employee ID and date.</p>
+<h3 style="margin:12px 0 4px">Your choice</h3>
+<p style="margin:0">Nothing is recorded until you accept. You can <b>withdraw at any time</b> on this page - recording stops immediately.</p>
+<p style="margin:12px 0 0"><b>Your current choice:</b> <span style="font-weight:700;color:{{'#166534' if cst=='Accepted' else '#b45309'}}">{{ {'Accepted':'Accepted','Declined':'Declined','Withdrawn':'Withdrawn','Requested':'Waiting for your answer','None':'Not asked yet'}[cst] }}</span></p>
+<form method="post" style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
+{% if cst!='Accepted' %}<button class="primary" name="choice" value="accept" type="submit">I agree</button><button class="back" name="choice" value="decline" type="submit">I do not agree</button>
+{% else %}<button class="back" name="choice" value="withdraw" type="submit" onclick="return confirm('Withdraw your consent? Recording stops immediately.')">Withdraw my consent</button>{% endif %}</form></div>
+{% if cst=='Accepted' %}<div class="card" style="max-width:820px"><h3 style="margin-top:0">Install on my computer</h3>
+{% if ready %}<p>The Admin has prepared your installer. Download it on the computer you work on, then run it signed in as yourself (no administrator rights needed; Python 3 must be installed).</p>
+<p><a class="btnl" href="/employee/tracking-agent/install.ps1">&#11015; Download {{fname}}</a></p>
+<p style="margin:6px 0">Command: <code style="user-select:all">{{cmd}}</code></p>
+<p class="mut">The installer is personal to you and contains a private credential - do not share it. It starts at every Windows sign-in and can be removed by deleting the "WorkTimeAgent" scheduled task.</p>
+{% else %}<p class="mut">The Admin has not prepared an installer for you yet. If your IT team deploys the agent to your computer, nothing more is needed from you.</p>{% endif %}</div>{% endif %}"""
+
+@app.route("/employee/tracking-consent", methods=["GET", "POST"])
+@need("employee")
+def employee_tracking_consent():
+    """Update268: the employee's tracking notice - accept / decline / withdraw, and install on their own PC after accepting."""
+    eid, name = session["emp_id"], session.get("name", "")
+    if request.method == "POST":
+        ch = request.form.get("choice", ""); new = {"accept": "Accepted", "decline": "Declined", "withdraw": "Withdrawn"}.get(ch)
+        if new:
+            try:
+                _consent_decide(eid, name, new)
+                flash({"Accepted": "Thank you - your consent is recorded.", "Declined": "Your choice is recorded: nothing will be recorded.", "Withdrawn": "Your consent is withdrawn. Recording has stopped."}[new])
+            except Exception as ex: print("consent save failed:", repr(ex)); flash("Could not save your choice - please try again.", "error")
+        return redirect("/employee/tracking-consent")
+    st = _consent_status(eid); er = _enr_get(eid) or {}
+    ready = st == "Accepted" and str(er.get("Status", "")).strip() != "Disabled" and bool(_fl(er.get("Generated epoch")))
+    return page(EMP_CONSENT, title="Work Time tracking notice", cst=st, ready=ready, fname=_fname(eid), cmd="powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File .\\" + _fname(eid))
+
+@app.route("/employee/tracking-agent/install.ps1")
+@need("employee")
+def employee_agent_installer():
+    eid = session["emp_id"]; er = _enr_get(eid, fresh=True) or {}
+    if not _consent_ok(eid):
+        flash("Please accept the tracking notice first.", "error"); return redirect("/employee/tracking-consent")
+    if str(er.get("Status", "")).strip() == "Disabled" or not _fl(er.get("Generated epoch")):
+        flash("The Admin has not prepared an installer for you yet.", "error"); return redirect("/employee/tracking-consent")
+    print("work-time agent: installer downloaded by the employee", eid)
+    resp = Response("\ufeff" + _agent_ps(eid, er, request.url_root.rstrip("/")), mimetype="text/plain")
+    resp.headers["Content-Disposition"] = "attachment; filename=" + _fname(eid); resp.headers["Cache-Control"] = "no-store"; return resp
+
+def consent_banner():
+    if _consent_status(session.get("emp_id", "")) != "Requested": return ""
+    return ('<div role="alert" style="margin:0 0 12px;padding:10px 14px;border-radius:10px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412">'
+            '<b>Action needed:</b> your employer has asked to install the Work Time tracking agent on your computer. Please read what it records and give or refuse your consent. '
+            '<a href="/employee/tracking-consent" style="font-weight:700">Review &amp; respond</a></div>')
+
+@app.route("/admin/work-time/agent/install.ps1")
+@need("admin")
+def admin_work_time_agent_installer():
+    """Update141: one-click, per-employee installer for the silent lock agent (current user, no admin rights, hidden, runs at every logon)."""
+    eid = request.args.get("eid", "").strip()
+    e = next((x for x in rows("Employees") if _key(x.get("Employee ID", "")) == _key(eid)), None)
+    if not e: abort(404)
+    eid = str(e["Employee ID"]).strip(); base = request.url_root.rstrip("/")
+    er = _enr_get(eid, fresh=True)
+    if str((er or {}).get("Status", "")).strip() == "Disabled":
+        flash("This employee's agent is disabled. Use Enable first.", "error"); return redirect("/admin/work-time/agent")
+    if not _wt_approved(eid):                                     # Update166: Install Agent (with Admin / IT approval) must come first; the link is not usable on its own
+        flash("Click Install Agent for this employee first (the download is released for 10 minutes).", "error"); return redirect("/admin/work-time/agent")
+    print("work-time agent: installer downloaded for", eid)
+    ps = _agent_ps(eid, er, base)
     resp = Response("\ufeff" + ps, mimetype="text/plain"); resp.headers["Content-Disposition"] = f"attachment; filename=install_{re.sub(r'[^A-Za-z0-9_-]+', '_', eid)}.ps1"; resp.headers["Cache-Control"] = "no-store"
     return resp
 
@@ -7348,11 +7855,11 @@ def employee_welcome():
 @app.route("/employee")
 @need("employee")
 def employee_home():
-    if hide_entry_pages(): return redirect("/employee/leave")      # Update236: no Daily entry page for Associate Manager / Team Lead / Senior Team Lead
+    if hide_entry_pages(): return redirect("/employee/team-logs")      # Update263 (was /employee/leave): first page is Team Logs. Update236: no Daily entry page for Associate Manager / Team Lead / Senior Team Lead
     prefetch(*EMP_PAGE_SHEETS)          # cold cache: fetch all sheets together instead of one by one
     today = str(today_local())
     session["designation"] = find_designation(session["emp_id"], session["name"], session["band"])
-    if desig_view_only(session["designation"]) or is_view_only(session["emp_id"]):      # Update105: View Only - no entry form, no Productivity %
+    if is_view_only(session["emp_id"]):      # Update105 / Update262 (a lead granted entry access gets the normal entry form): View Only - no entry form, no Productivity %
         first_ = today_local().replace(day=1)
         today_perm_ = next((r for r in rows("Permissions") if str(r["Employee ID"]) == session["emp_id"] and r["Date"] == today), None)
         return page(EMP_TOP + VIEW_ONLY_CARD, title="Daily productivity", today=today, month_label=first_.strftime("%B %Y"),
@@ -7395,7 +7902,7 @@ def prod_months():
 def employee_productivity():
     """Productivity Info: this employee's submissions for the chosen month (current month by default; the previous month is also
     available from the month picker, with View / Edit / Delete on every entry). Only the employee's OWN entries are ever listed."""
-    if hide_entry_pages(): return redirect("/employee/leave")      # Update236: no Productivity Info page for Associate Manager / Team Lead / Senior Team Lead
+    if hide_entry_pages(): return redirect("/employee/team-logs")      # Update263 / Update236: no Productivity Info page for Associate Manager / Team Lead / Senior Team Lead
     prefetch("Productivity log", "Processes", "Employees", "Settings", "Permissions", "Holidays")
     today = today_local()
     months = prod_months()
@@ -7449,6 +7956,31 @@ _save_locks_guard = threading.Lock()
 def _save_lock(key):
     with _save_locks_guard: return _save_locks.setdefault(key, threading.Lock())
 
+def _employee_resave_json(sid):
+    """Update267: the employee pressed 'Update entry' on the same page after saving - replace that entry and answer with JSON (no redirect)."""
+    def bad(t): return jsonify(ok=False, messages=[dict(kind="error", text=t)])
+    if is_view_only(session.get("emp_id", "")): return bad(VIEW_ONLY_MSG)
+    try: s = get_sub(sid)
+    except Exception: return bad("That entry could not be found. Reload the page and try again.")
+    if _key(s["emp_id"]) != _key(session["emp_id"]): return bad("That entry belongs to another employee.")
+    date, procs, notes, err = parse_form(s["emp_id"])
+    if err: return bad(err)
+    changed = entry_diff(s, date, procs, notes)
+    with _save_lock((s["emp_id"], "edit")):
+        if duplicate_entry(s["emp_id"], date, skip_sid=sid, fresh=True):
+            return bad(f"An entry for {date} already exists. Choose a different date or edit that entry.")
+        old = live_rows_of(sid)
+        if not old: return bad("This entry no longer exists (it was deleted). Nothing was changed.")
+        delete_rows(old)
+        write_sub(sid, date, (s["band"], s["emp_id"], s["emp_name"]), procs, notes)
+    msgs = [dict(kind="message", text="Updated." + (f" Note: {date} is a weekly off / holiday, so this entry is not counted in calculations." if is_off(date) else ""))]
+    try:
+        if changed: log_change(SEC_PROD, "Updated", changed)
+        miss = [] if is_off(date) else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
+        if miss: msgs.append(dict(kind="error", text=target_alert_text(miss)))
+    except Exception as ex: print("post-update checks failed:", ex)
+    return jsonify(ok=True, sid=sid, messages=msgs)
+
 @app.route("/employee/save", methods=["POST"])
 @need("employee")
 def employee_save():
@@ -7458,10 +7990,14 @@ def employee_save():
     if request.headers.get("X-Requested-With") != "fetch":
         return _employee_save_impl()
     try:
+        _sid = request.form.get("sid", "").strip()
+        if _sid: return _employee_resave_json(_sid)      # Update267
+        from flask import g as _g
         _employee_save_impl()
         msgs = [(c, m) for c, m in session.pop("_flashes", [])]
         ok = bool(session.pop("saved_anim", False))
-        return jsonify(ok=ok, messages=[dict(kind=c, text=m) for c, m in msgs])
+        if ok and session.pop("bloom", False): msgs.append(("message", "\U0001F338 100% Target Achieved!"))      # shown now, not on a later page load
+        return jsonify(ok=ok, sid=(getattr(_g, "saved_sid", None) if ok else None), messages=[dict(kind=c, text=m) for c, m in msgs])
     except Exception as ex:
         import traceback; traceback.print_exc()
         return jsonify(ok=False, messages=[dict(kind="error", text=_error_text(ex))]), 200
@@ -7483,14 +8019,20 @@ def _employee_save_impl():
     except Exception as ex:
         import traceback; traceback.print_exc()
         landed = False
-        try: landed = any(str(r["Submission ID"]) == str(sid_new) for r in _fetch_rows("Productivity log"))      # Update157: the rows may have been written even though the reply failed
+        try: landed = _sid_landed(sid_new)      # Update157: the rows may have been written even though the reply failed
         except Exception: pass
         if landed:
             invalidate_cache("Productivity log"); session["saved_anim"] = True; flash("Saved.")
+            try:
+                from flask import g as _g; _g.saved_sid = sid_new
+            except Exception: pass
             return redirect("/employee")
         flash("Your entry could not be saved right now (the data service is busy). Nothing was lost - please wait a few seconds and press Save again.", "error")
         return redirect("/employee")
     # ---- the data is saved from here on: nothing below may turn a successful save into an error page ----
+    try:
+        from flask import g as _g; _g.saved_sid = sid_new      # Update267: the page keeps this id so 'Update entry' edits the same entry
+    except Exception: pass
     session["saved_anim"] = True       # Update95: 3-second 3D "Saved successfully" animation, shown on the same page after the data is saved
     flash("Saved." + (f" Note: {date} is a weekly off / holiday, so this entry is not counted in calculations." if is_off(date) else ""))
     try: log_change(SEC_PROD, "Added", entry_added_details(date, procs, notes))
@@ -7499,7 +8041,7 @@ def _employee_save_impl():
         miss = [] if is_off(date) else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
         if miss: flash(target_alert_text(miss), "error")           # employee is told straight away that the target was missed
         # Update94: 100% = not a weekly off, every Admin target met, and all required working hours logged -> flower animation (3 s)
-        if not is_off(date) and not miss and sum(p_[1] for p_ in procs) + sum(n_[1] for n_ in notes) + 1e-9 >= required_hours(session["emp_id"], date):
+        if not is_off(date) and not miss and sum(p_[1] for p_ in procs) + sum(n_[1] for n_ in notes) + 1e-9 >= required_hours(session["emp_id"], date, pending=True):
             session["bloom"] = True
     except Exception as ex:
         print("post-save checks failed:", ex)
@@ -7615,7 +8157,7 @@ def report(employees, subs, leaves, start, end):
                         pct=min(round(earned_ / base * 100), 100) if base else (100 if prod_hrs > 0 else 0),
                         prod=round(prod_hrs, 2), non=round(non_hrs, 2), perm=perm_hrs))
     for r_, e_ in zip(out, employees):      # Update105: Senior Team Lead / Team Lead / Associate Manager -> View Only, no Productivity %
-        if desig_view_only(e_.get("Designation", "")) or is_view_only(r_["id"]):
+        if desig_vo_eff(e_) or is_view_only(r_["id"]):
             r_.update(vo=True, pct=None, att=None, present="-", absent="-", prod=0, non=0)
         else:
             r_["vo"] = False
@@ -7735,6 +8277,7 @@ def missing_dates(eid, subs, leaves, start, end, fmt="%d %b"):
     """Working days (weekly offs and holidays excluded) in start..end with no entry and no leave."""
     eid = str(eid)
     if is_view_only(eid): return []                    # Update105: no Missed Productivity Entry for View-Only designations
+    if is_separated(eid): return []                    # Update253: Resigned / NCNS - never "missed" / "pending" (dashboards, lists, reminder e-mails)
     if start < PROD_TRACKING_START: start = PROD_TRACKING_START      # Update165: never flag September 2026 or earlier as missing
     jd = join_date(eid)
     if jd and start < jd: start = jd                  # Update97: dates before the joining date are never "missed" / "pending"
@@ -7783,11 +8326,18 @@ def admin_productivity_overview(emps, q):
     end_m = min(m1, today - dt.timedelta(days=1)); prow = []
     for e in emps:
         eid = str(e["Employee ID"]).strip(); k = _key(eid)
+        if desig_vo_eff(e): continue      # Update256: Associate Manager / Team Lead / Senior Team Lead are not listed in the Admin Productivity Log
         pstart, jd, basis = prod_start_info(eid); r = reps.get(k, {})
         ea = max(m0, jd) if jd else m0
         entries = len({s["date"] for s in by_emp.get(k, []) if not s["off"] and str(ea) <= s["date"] <= str(m1)})
         missed = len(missing_dates(eid, by_emp.get(k, []), lv_by.get(k, []), m0, end_m)) if end_m >= m0 else 0
-        prow.append(dict(e=e, jd=jd, pstart=pstart, basis=basis, active=(not jd or jd <= m1), r=r, entries=entries, missed=missed))
+        sepst = ""      # Update256: Resigned / NCNS set by the Admin, effective from the relieving date -> shown in the Working Days column
+        sep_ = emp_sep(e)
+        if sep_:
+            rel_ = str(e.get("Relieving date", "")).strip()[:10]
+            if not rel_ or rel_ <= str(m1): sepst = sep_
+        sep_fields(e)
+        prow.append(dict(e=e, jd=jd, pstart=pstart, basis=basis, active=(not jd or jd <= m1), r=r, entries=entries, missed=missed, sepst=sepst))
     return page(EMP_LIST, title="Employee Info", view="productivity", emps=emps, q=request.args.get("q", ""), prows=prow,
                 month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), new_count=sum(1 for r in update_log() if r["new"]))
 
@@ -7830,7 +8380,7 @@ ADMIN_AVATAR = ('<div class="av-adm" role="img" aria-label="Admin profile pictur
 
 AVATAR3D = """{% if gender or newpic %}<div class="av3d chr3 {{ 'cl3' if newpic=='f' else ('cn3' if newpic=='m' else ('cf3' if gender=='female' else 'cm3')) }}" role="img" aria-label="{{ gender|capitalize }} 3D character of the signed-in employee"><div class="av-stage">
 <span class="c3-disc"></span><span class="c3-ring"></span>
-<span class="c3-body"><span class="c3-img"></span><span class="c3-shine"></span></span>
+<span class="c3-body"><span class="c3-img"><i class="c3-lid l1"></i><i class="c3-lid l2"></i></span><span class="c3-shine"></span></span>
 </div></div>{% else %}<div class="av3d" role="img" aria-label="Employee profile picture"><div class="av-stage">
 <svg class="av-l" style="--z:0px" viewBox="0 0 200 200" aria-hidden="true"><defs><radialGradient id="avbg" cx="35%" cy="28%" r="85%"><stop offset="0" stop-color="#ccfbf1"/><stop offset=".55" stop-color="#5eead4"/><stop offset="1" stop-color="#0d9488"/></radialGradient></defs><circle cx="100" cy="100" r="98" fill="url(#avbg)"/><ellipse cx="70" cy="48" rx="46" ry="20" fill="#fff" opacity=".3" transform="rotate(-24 70 48)"/></svg>
 <svg class="av-l" style="--z:26px" viewBox="0 0 200 200" aria-hidden="true"><text x="100" y="124" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="78" font-weight="700" fill="#fff">{{initials}}</text></svg>
@@ -7969,11 +8519,22 @@ setInterval(poll,5000);document.addEventListener('visibilitychange',function(){i
 <td>{{r.prod|g}}</td><td>{{r.non|g}}</td>
 <td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td>{% endif %}<td class="no-print"><a href="/admin/summary/check?emp={{r.id|urlencode}}&month={{month}}">Check</a></td></tr>
 {% else %}<tr><td colspan="11">No employees yet.</td></tr>{% endfor %}</table>
+<div class="card" id="ovl"><h2 style="margin:0 0 6px">Senior Team Leads, Team Leads &amp; Associate Managers with Productivity entry access <span class="pill in">{{lead_granted|length}}</span></h2>
+<p class="mut" style="margin:0 0 8px">Only leads the Admin has granted Productivity entry access are listed. Leads without the grant stay View Only and are not shown here.</p>
+<table><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th><th>Productive Hours</th><th>Non-productive Hours</th><th>Productivity (%)</th></tr>
+{% for r in lead_granted %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>
+<td>{{r.att}}%<i class="bar {{r.att|tone}}"><u style="width:{{r.att}}%"></u></i></td><td>{{r.prod|g}}</td><td>{{r.non|g}}</td><td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td></tr>
+{% else %}<tr><td colspan="10">No Senior Team Lead / Team Lead / Associate Manager has been granted Productivity entry access.</td></tr>{% endfor %}</table>
+<details class="no-print" style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Manage entry access ({{lead_all|length}})</summary>
+<table style="margin-top:8px"><tr><th>Employee</th><th>Designation</th><th>Entry access</th><th></th></tr>
+{% for l in lead_all %}<tr><td>{{l.id}} &middot; {{l.name}}</td><td>{{l.desig}}</td><td><span class="pill {{'in' if l.granted else 'act'}}">{{'Granted' if l.granted else 'View Only'}}</span></td>
+<td><form method="post" action="/admin/summary/lead-access" style="margin:0"><input type="hidden" name="emp" value="{{l.id}}"><input type="hidden" name="month" value="{{month}}"><input type="hidden" name="to" value="{{'revoke' if l.granted else 'grant'}}"><button class="back sm">{{'Revoke access' if l.granted else 'Grant access'}}</button></form></td></tr>
+{% else %}<tr><td colspan="4">No Senior Team Lead / Team Lead / Associate Manager found.</td></tr>{% endfor %}</table></details></div>
 <script>(function(){var t=document.getElementById('ovt');if(!t)return;var sig=t.getAttribute('data-sig'),busy=false,q=location.search||'';
 function stamp(x){var e=document.getElementById('ov_at');if(e)e.textContent=x}
 function redraw(){fetch(location.pathname+q,{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.text()}).then(function(h){
  var d=new DOMParser().parseFromString(h,'text/html'),nt=d.getElementById('ovt'),ok=d.querySelector('.kpis'),ck=document.querySelector('.kpis');
- if(!nt)return;t.innerHTML=nt.innerHTML;sig=nt.getAttribute('data-sig');t.setAttribute('data-sig',sig);if(ok&&ck)ck.innerHTML=ok.innerHTML}).catch(function(){})}
+ if(!nt)return;var ol=d.getElementById('ovl'),cl=document.getElementById('ovl');if(ol&&cl)cl.innerHTML=ol.innerHTML;t.innerHTML=nt.innerHTML;sig=nt.getAttribute('data-sig');t.setAttribute('data-sig',sig);if(ok&&ck)ck.innerHTML=ok.innerHTML}).catch(function(){})}
 function poll(){if(busy||document.hidden)return;busy=true;
  fetch('/admin/summary/poll'+q,{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(j){stamp(j.at);if(j.sig!==sig)redraw()}).catch(function(){}).then(function(){busy=false})}
 setInterval(poll,30000);document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()})})();
@@ -8088,8 +8649,13 @@ def _overview_ctx(month):
     n = len(std) or 1
     a1, a2 = round(sum(r["att"] for r in std) / n), round(sum(r["pct"] for r in std) / n)
     extra = [("Employees", len(rep)), ("Total leave days", sum(r["leave"] for r in rep))]
-    sig = _ih.md5(json.dumps([rep, a1, a2, label], sort_keys=True, default=str).encode()).hexdigest()
-    return dict(rep=rep, month=month, label=label, wd=workdays(start, end), lab1="Average attendance", lab2="Average productivity",
+    gr = lead_granted_ids()      # Update262: leads the Admin granted Productivity entry access -> shown in their own Overview card; all leads listed for Grant / Revoke
+    lead_all = [dict(id=str(e.get("Employee ID", "")).strip(), name=str(e.get("Name", "")), desig=str(e.get("Designation", "")).strip(), granted=_key(e.get("Employee ID", "")) in gr)
+                for e in emps if desig_view_only(e.get("Designation", "")) and not emp_sep(e)]
+    lead_all.sort(key=lambda x: x["name"].lower())
+    lead_granted = [r for r in rep if _key(r["id"]) in gr and any(_key(x["id"]) == _key(r["id"]) for x in lead_all)]
+    sig = _ih.md5(json.dumps([rep, a1, a2, label, lead_all], sort_keys=True, default=str).encode()).hexdigest()
+    return dict(lead_all=lead_all, lead_granted=lead_granted, rep=rep, month=month, label=label, wd=workdays(start, end), lab1="Average attendance", lab2="Average productivity",
                 a1=a1, a2=a2, extra=extra, target=target_hours(), sig=sig)
 
 @app.route("/admin/summary")
@@ -8099,6 +8665,28 @@ def admin_summary():
     month = request.args.get("month") or today_local().strftime("%Y-%m")
     ctx = _overview_ctx(month)
     return page(SUMMARY, title="Overview", online=online_list(), **ctx)
+
+@app.route("/admin/summary/lead-access", methods=["POST"])
+@need("admin")
+def admin_lead_access():
+    """Update262: Admin grants / revokes Productivity entry access for ONE Senior Team Lead / Team Lead / Associate Manager."""
+    eid = request.form.get("emp", "").strip(); act = request.form.get("to", ""); mo = request.form.get("month", "").strip()
+    back = "/admin/summary" + (("?month=" + mo) if (mo == "all" or re.fullmatch(r"\d{4}-\d{2}", mo)) else "")
+    e = next((x for x in rows("Employees") if _key(x.get("Employee ID", "")) == _key(eid)), None)
+    if e is None or act not in ("grant", "revoke") or not desig_view_only(e.get("Designation", "")):
+        flash("Nothing changed - choose a Senior Team Lead, Team Lead or Associate Manager.", "error"); return redirect(back)
+    if act == "grant" and emp_sep(e):
+        flash("A Resigned / NCNS employee cannot be granted Productivity entry access.", "error"); return redirect(back)
+    val = "Yes" if act == "grant" else "No"; now = now_local().strftime("%Y-%m-%d %H:%M:%S"); ws = ws_of(LEAD_ACCESS_SHEET)
+    cur = next((r for r in _fetch_rows(LEAD_ACCESS_SHEET) if _key(r.get("Employee ID", "")) == _key(eid)), None)
+    try:
+        if cur: ws.update(range_name="C%d:E%d" % (cur["_row"], cur["_row"]), values=[[val, now, "Admin"]], value_input_option="RAW")
+        else: ws.append_row([str(e.get("Employee ID", "")).strip(), str(e.get("Name", "")), val, now, "Admin"], value_input_option="RAW")
+    except Exception as ex:
+        print("Lead access save failed:", repr(ex)); flash("Could not save - please try again.", "error"); return redirect(back)
+    invalidate_cache(LEAD_ACCESS_SHEET); _vo_cache[0] = 0.0
+    flash("%s - Productivity entry access %s." % (e.get("Name", eid), "granted (they now get the Daily entry page)" if act == "grant" else "taken back (View Only again)"))
+    return redirect(back)
 
 @app.route("/admin/summary/poll")
 @need("admin")
@@ -8316,6 +8904,76 @@ def employee_password():
         flash("Could not change the password - please reload the page and try again.")
     return redirect("/employee/profile")
 
+# ---------------------------------------------------------------- Update265: Admin notifications for new Leave / Permission requests
+ADM_ALERT_T = """{% if items %}<div class="admal" role="alert" aria-live="assertive">
+<div class="admal-h"><span class="admal-bell" aria-hidden="true">&#128276;</span><b>{{items|length + more}} new Leave &amp; Permission request{{'' if items|length + more == 1 else 's'}} to review</b>
+<a class="admal-go" href="/admin/leave-permission">Review requests</a>
+<form method="post" action="/admin/alerts/clear" onsubmit="this.nx.value=location.pathname+location.search"><input type="hidden" name="nx"><input type="hidden" name="id" value="all"><button type="submit" class="admal-b">Clear all</button></form></div>
+<ul>{% for a in items %}<li><span class="admal-t {{a.kind|lower}}">{{a.kind}}</span><span class="admal-m"><b>{{a.name}}</b> ({{a.eid}}) &middot; {{a.details}}</span><small>{{a.at}}</small>
+<form method="post" action="/admin/alerts/clear" onsubmit="this.nx.value=location.pathname+location.search"><input type="hidden" name="nx"><input type="hidden" name="id" value="{{a.id}}"><button type="submit" class="admal-b">Clear</button></form></li>{% endfor %}</ul>
+{% if more %}<p class="admal-more">+ {{more}} older notification{{'' if more == 1 else 's'}} - use Clear all or Clear to see them.</p>{% endif %}</div>{% endif %}"""
+
+ADM_ALERT_CSS = """<style>.admal{margin:0 0 14px;border-radius:12px;overflow:hidden;color:#fff;background:linear-gradient(135deg,#dc2626,#f97316);box-shadow:0 8px 26px -10px rgba(220,38,38,.7);animation:admalP 2.2s ease-in-out infinite}
+@keyframes admalP{50%{box-shadow:0 8px 34px -4px rgba(249,115,22,.95)}}
+.admal-h{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px;font-size:15px}.admal-h b{flex:1 1 auto}.admal-bell{font-size:20px;display:inline-block;animation:admalR 1.6s ease-in-out infinite;transform-origin:50% 0}
+@keyframes admalR{0%,60%,100%{transform:rotate(0)}10%,30%{transform:rotate(14deg)}20%,40%{transform:rotate(-14deg)}}
+.admal form{margin:0}.admal-go{color:#fff;background:rgba(255,255,255,.22);border-radius:8px;padding:5px 12px;text-decoration:none;font-weight:600;font-size:13px}
+.admal-b{cursor:pointer;border:0;border-radius:8px;padding:5px 12px;font-weight:600;font-size:13px;background:#fff;color:#b91c1c}
+.admal ul{list-style:none;margin:0;padding:0;background:rgba(0,0,0,.16);max-height:260px;overflow:auto}.admal li{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 14px;border-top:1px solid rgba(255,255,255,.18);font-size:13.5px}
+.admal-m{flex:1 1 260px}.admal li small{opacity:.85}.admal-t{border-radius:999px;padding:2px 10px;font-weight:700;font-size:12px;background:#fff;color:#b45309}.admal-t.permission{color:#6d28d9}
+.admal-more{margin:0;padding:6px 14px;font-size:12.5px;background:rgba(0,0,0,.16)}@media(prefers-reduced-motion:reduce){.admal,.admal-bell{animation:none}}@media print{#adm-alerts{display:none}}</style>"""
+
+ADM_ALERT_JS = """<script>(function(){var b=document.getElementById('adm-alerts');if(!b)return;function go(){if(document.hidden)return;
+fetch('/admin/alerts/poll',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.text():null}).then(function(h){if(h!==null&&h!==b.getAttribute('data-h')){b.innerHTML=h;b.setAttribute('data-h',h)}}).catch(function(){})}
+setInterval(go,30000);document.addEventListener('visibilitychange',function(){if(!document.hidden)go()})})();</script>"""
+
+def admin_alert_add(kind, emp, details):
+    """Update265: record a new Leave / Permission request for the Admin's notification bar. Never raises - a failure here must not affect the employee's request."""
+    try:
+        ws = ws_of("Admin Alerts")
+        ws.append_row([uuid.uuid4().hex[:10], kind, str((emp or {}).get("Employee ID", "")).strip(), str((emp or {}).get("Name", "")),
+                       _short(str(details), 220), now_local().strftime("%Y-%m-%d %H:%M:%S"), "New", ""], value_input_option="RAW")
+        invalidate_cache("Admin Alerts")
+    except Exception as ex:
+        print("Admin alert not saved:", repr(ex))
+
+def _admin_alert_items(limit=25):
+    live = [r for r in rows("Admin Alerts") if str(r.get("Status", "")).strip().lower() != "cleared" and str(r.get("Alert ID", "")).strip()]
+    live.sort(key=lambda r: str(r.get("Created at", "")), reverse=True)
+    items = [dict(id=str(r["Alert ID"]), kind=str(r.get("Type", "")), eid=str(r.get("Employee ID", "")), name=str(r.get("Employee name", "")),
+                  details=str(r.get("Details", "")), at=str(r.get("Created at", ""))[:16]) for r in live[:limit]]
+    return items, max(len(live) - limit, 0)
+
+def admin_alert_html():
+    try: items, more = _admin_alert_items()
+    except Exception as ex:
+        print("Admin alerts read failed:", repr(ex)); items, more = [], 0
+    return render_fast(ADM_ALERT_T, items=items, more=more)
+
+def admin_alert_box():
+    return ADM_ALERT_CSS + '<div id="adm-alerts" data-h="">' + admin_alert_html() + '</div>' + ADM_ALERT_JS
+
+@app.route("/admin/alerts/poll")
+@need("admin")
+def admin_alerts_poll():
+    return Response(admin_alert_html(), mimetype="text/html", headers={"Cache-Control": "no-store"})
+
+@app.route("/admin/alerts/clear", methods=["POST"])
+@need("admin")
+def admin_alerts_clear():
+    aid = request.form.get("id", "").strip(); nx = request.form.get("nx", "")
+    back = nx if (nx.startswith("/admin") and "//" not in nx[:3] and "\\" not in nx) else "/admin/summary"
+    try:
+        now = now_local().strftime("%Y-%m-%d %H:%M:%S"); ups = []
+        for r in _fetch_rows("Admin Alerts"):
+            if str(r.get("Status", "")).strip().lower() == "cleared" or not str(r.get("Alert ID", "")).strip(): continue
+            if aid == "all" or str(r.get("Alert ID")) == aid: ups.append({"range": "G%d:H%d" % (r["_row"], r["_row"]), "values": [["Cleared", now]]})
+        if ups: ws_of("Admin Alerts").batch_update(ups, value_input_option="RAW")
+        invalidate_cache("Admin Alerts")
+    except Exception as ex:
+        print("Admin alert clear failed:", repr(ex)); flash("Could not clear the notification - please try again.", "error")
+    return redirect(back)
+
 @app.route("/employee/leave", methods=["GET", "POST"])
 @need("employee")
 def employee_leave():
@@ -8328,6 +8986,19 @@ def employee_leave():
                 log_change(SEC_LEAVE, "Added", f"{'Half-day leave' if request.form.get('daytype', '').lower().startswith('half') else 'Leave'} {d1 if d1 == d2 else d1 + ' to ' + d2} ({n} day(s)) \u2013 {_short(why, 80)}")
             flash(("Half-day leave submitted" if request.form.get('daytype', '').lower().startswith('half') and n else f"{n} leave day(s) submitted") + " - waiting for admin approval." +
                   (f" Holiday date(s) {', '.join(skipped)} were skipped (leave is not needed on a holiday)." if skipped else ""))
+            if n:
+                try:      # Update265: notify the Admin (top bar) - leave request received
+                    _d1, _d2 = request.form['d1'], request.form['d2']; _hf = request.form.get('daytype', '').lower().startswith('half')
+                    admin_alert_add("Leave", my_emp_row(), f"{'Half-day leave' if _hf else str(n) + ' day(s)'}: {_pretty_date(_d1) if _d1 == _d2 else _pretty_date(_d1) + ' to ' + _pretty_date(_d2)} - {request.form['reason'].strip() or 'Leave'}")
+                except Exception as ex_: print("Admin alert (leave) error:", repr(ex_))
+            if n:      # Update255: e-mail the applicant (own Office Email ID only) that the request was received
+                try:
+                    d1_, d2_ = request.form['d1'], request.form['d2']; half_ = request.form.get('daytype', '').lower().startswith('half')
+                    msg_, cat_ = notify_request(my_emp_row(), "Leave", "Pending", _pretty_date(d1_) if d1_ == d2_ else f"{_pretty_date(d1_)} to {_pretty_date(d2_)}",
+                                                "Half day (4 hrs)" if half_ and n == 1 else f"{n} day{'s' if n != 1 else ''}", n,
+                                                reason=request.form['reason'].strip() or "Leave", applied_at=now_local().strftime("%Y-%m-%d %H:%M:%S"))
+                    if cat_ == "ok": flash(msg_)
+                except Exception as ex_: print("Leave application e-mail error:", ex_)
         except ValueError as e:
             flash(str(e))
         return redirect("/employee/leave")
@@ -8366,6 +9037,15 @@ def employee_permission():
         log_change(SEC_LEAVE, "Added", f"Permission request for {pdate} ({_fmt_num(round(float(request.form.get('hours', 0)), 2))} hr) "
                                         f"\u2013 {_short(request.form.get('reason', '').strip() or 'Permission', 80)}")
         flash("Permission request submitted for today." if pdate == str(today_local()) else f"Permission request submitted for {pdate}.")
+        try:      # Update265: notify the Admin (top bar) - permission request received
+            admin_alert_add("Permission", my_emp_row(), f"{_fmt_num(round(float(request.form.get('hours', 0)), 2))} hr on {_pretty_date(pdate)} - {request.form.get('reason', '').strip() or 'Permission'}")
+        except Exception as ex_: print("Admin alert (permission) error:", repr(ex_))
+        try:      # Update255: e-mail the applicant (own Office Email ID only) that the request was received. Permission never blocks or completes the Productivity entry.
+            hrs_ = round(float(request.form.get("hours", 0)), 2)
+            msg_, cat_ = notify_request(my_emp_row(), "Permission", "Pending", _pretty_date(pdate), f"{hrs_:g} hr{'s' if hrs_ != 1 else ''}", 1,
+                                        reason=request.form.get("reason", "").strip() or "Permission", applied_at=now_local().strftime("%Y-%m-%d %H:%M:%S"))
+            if cat_ == "ok": flash(msg_)
+        except Exception as ex_: print("Permission application e-mail error:", ex_)
     except ValueError as e:
         flash(str(e))
     return redirect("/employee/leave")
@@ -9976,6 +10656,7 @@ _WORKER_ID = uuid.uuid4().hex[:8]
 def productivity_access(eid, access_rows):
     """Everyone may submit the Daily Productivity Entry unless the 'Productivity Access' sheet has a row for them with Enabled = No."""
     if is_view_only(eid): return False                  # Update105: View-Only designations get no productivity reminder / missed-entry e-mails
+    if is_separated(eid): return False                  # Update253: Resigned / NCNS - no productivity access, no reminder / summary e-mails
     for r in access_rows:
         if _key(r.get("Employee ID", "")) == _key(eid):
             return str(r.get("Enabled", "")).strip().lower() not in ("no", "n", "false", "0", "disabled")
@@ -10174,25 +10855,43 @@ def _missed_html(nm, ds, pretty, link):
                    f'{summary}{table}', link,
                    "Please log in to the Productivity Tracker and complete the required entr" + ("y" if n == 1 else "ies") + ":")
 
-def approval_message(emp, kind, date_txt, duration_txt):
-    """Update100: 'Leave' / 'Permission' APPROVED e-mail - same 3D template. Fields: employee name, request type, date, duration / hours, approval status."""
+def request_message(emp, kind, status, date_txt, duration_txt, reason="", applied_at=""):
+    """Update255: ONE 3D e-mail for a Leave / Permission request, sent to the applicant only (no CC).
+    status 'Pending' = application received (waiting for the Admin), 'Approved' / 'Rejected' = the Admin's decision.
+    Fields: employee name, request type, date, duration / hours, reason, applied on, status."""
     import html as _h
     F = "font-family:'Segoe UI',Arial,Helvetica,sans-serif;"
     name = str(emp["name"])
-    badge = ('<span style="display:inline-block;padding:4px 10px;border-radius:99px;background:#16a34a;border-bottom:3px solid #166534;'
-             f'color:#ffffff;{F}font-size:13px;font-weight:bold;letter-spacing:.5px">&#10003; Approved</span>')
+    look = {"Pending": ("#d97706", "#92400e", "&#9203; Pending approval", "submitted", "#b45309", "Your {k} request has been submitted and is waiting for the Admin's approval."),
+            "Approved": ("#16a34a", "#166534", "&#10003; Approved", "approved", "#15803d", "Your {k} request has been approved."),
+            "Rejected": ("#dc2626", "#991b1b", "&#10007; Rejected", "rejected", "#b91c1c", "Your {k} request has been rejected.")}[status]
+    bg, bd, label, word, colr, plain_line = look
+    badge = (f'<span style="display:inline-block;padding:4px 10px;border-radius:99px;background:{bg};border-bottom:3px solid {bd};'
+             f'color:#ffffff;{F}font-size:13px;font-weight:bold;letter-spacing:.5px">{label}</span>')
     fields = [("Employee Name", _h.escape(name)), ("Request Type", _h.escape(kind)), ("Date", _h.escape(date_txt)),
               ("Duration / Hours", _h.escape(duration_txt)), ("Status", badge)]
     card = _orange_row(fields, F)
+    reason = " ".join(str(reason or "").split())
+    extra = ""
+    if reason or applied_at:
+        extra = (f'<div style="max-width:532px;margin-top:10px;{F}font-size:13px;color:#431407;text-align:left">'
+                 + (f'<div><b>Reason:</b> {_h.escape(reason)}</div>' if reason else "")
+                 + (f'<div><b>Applied on:</b> {_h.escape(str(applied_at))}</div>' if applied_at else "") + '</div>')
     msg = EmailMessage()
-    msg["Subject"] = f"{kind} request approved - {date_txt}"
+    msg["Subject"] = f"{kind} request {word} - {date_txt}"
     msg["From"] = formataddr(mail_sender()); msg["To"] = emp["email"]
-    msg.set_content(f"Hello {name},\n\nYour {kind} request has been approved.\n\n"
-                    f"Employee Name: {name}\nRequest Type: {kind}\nDate: {date_txt}\nDuration / Hours: {duration_txt}\nApproval Status: Approved\n\n"
+    msg.set_content(f"Hello {name},\n\n{plain_line.format(k=kind)}\n\n"
+                    f"Employee Name: {name}\nRequest Type: {kind}\nDate: {date_txt}\nDuration / Hours: {duration_txt}\n"
+                    + (f"Reason: {reason}\n" if reason else "") + (f"Applied on: {applied_at}\n" if applied_at else "")
+                    + f"Status: {'Pending approval' if status == 'Pending' else status}\n\n"
                     "This is an automated email. Please do not reply to this email.\n\nThanks,\nProductivity Tracker (LN_Map)")
-    msg.add_alternative(_html3d(_h.escape(name), f"Your {kind} request has been approved ({date_txt}).",
-                                f'Your <b>{_h.escape(kind)}</b> request has been <b style="color:#15803d">approved</b>.', card, "", ""), subtype="html")
+    msg.add_alternative(_html3d(_h.escape(name), f"Your {kind} request has been {word} ({date_txt}).",
+                                f'Your <b>{_h.escape(kind)}</b> request has been <b style="color:{colr}">{word}</b>'
+                                + (" and is waiting for the Admin's approval." if status == "Pending" else "."), card + extra, "", ""), subtype="html")
     return msg
+
+def approval_message(emp, kind, date_txt, duration_txt):      # kept for compatibility (Update100 name)
+    return request_message(emp, kind, "Approved", date_txt, duration_txt)
 
 def missed_message(emp, dates):
     """Update99: the single missed-entry e-mail (3D template) - used by Manual AND Automatic sending."""
@@ -10249,21 +10948,33 @@ def _admin_only_mail():
 def send_missed_mails(items, mode, by):
     """items = [(emp, [dates])] -> one 3D missed-entry e-mail each (manual, Admin only). Returns {eid: status}."""
     _admin_only_mail()
+    try: sep_ = {_key(x.get("Employee ID", "")) for x in _fetch_rows("Employees") if emp_sep(x)}      # Update253: live re-check - Resigned / NCNS never receive a Missed Entries reminder
+    except Exception: sep_ = set(separated_ids())
+    items = [(e, d) for e, d in items if _key(e.get("eid", "")) not in sep_]
+    if not items: return {}
     return send_logged([(e, missed_message(e, d), ", ".join(d), len(d)) for e, d in items], mode, by)
 
 def _pretty_date(d):
     try: return dt.date.fromisoformat(str(d)).strftime("%d %b %Y (%a)")
     except ValueError: return str(d)
 
-def notify_approved(emp_row, kind, date_txt, duration_txt, count):
-    """Send the 'approved' e-mail for a Leave / Permission request. Never raises. Returns a flash-ready (text, category)."""
+def notify_request(emp_row, kind, status, date_txt, duration_txt, count, reason="", applied_at=""):
+    """Update255: e-mail the APPLICANT (their own Office Email ID only) about a Leave / Permission request: status 'Pending' (just applied),
+    'Approved' or 'Rejected' (Admin decision). Never raises. Returns a flash-ready (text, category)."""
     mail = employee_office_email(emp_row); name = str(emp_row.get("Name", ""))
-    if not EMAIL_RE.match(mail): return (f"No approval e-mail sent: {name} has no valid Office Email ID.", "error")
+    what = {"Pending": "confirmation", "Approved": "approval", "Rejected": "rejection"}[status]
+    if not EMAIL_RE.match(mail): return (f"No {what} e-mail sent: {name} has no valid Office Email ID.", "error")
     e = dict(eid=str(emp_row["Employee ID"]), name=name, email=mail)
-    try: st = send_logged([(e, approval_message(e, kind, date_txt, duration_txt), date_txt, count)], f"{kind} approval", session.get("name", "Admin"))[e["eid"]]
-    except Exception as ex_: st = "Failed: " + str(ex_)[:150]; print("Approval mail error:", ex_)
-    if st == "Sent": return (f"Approval e-mail sent to {name} ({mail}).", "ok")
-    return (f"The request was approved, but the approval e-mail to {name} could not be sent: {st}", "error")
+    mode = f"{kind} request" if status == "Pending" else f"{kind} {what}"
+    try: st = send_logged([(e, request_message(e, kind, status, date_txt, duration_txt, reason, applied_at), date_txt, count)], mode, session.get("name", "System"))[e["eid"]]
+    except Exception as ex_: st = "Failed: " + str(ex_)[:150]; print("Request mail error:", ex_)
+    if st == "Sent":
+        return ((f"A confirmation e-mail was sent to {mail}.", "ok") if status == "Pending" else (f"{what.capitalize()} e-mail sent to {name} ({mail}).", "ok"))
+    if status == "Pending": return (f"The request was submitted, but the confirmation e-mail could not be sent: {st}", "error")
+    return (f"The request was {status.lower()}, but the {what} e-mail to {name} could not be sent: {st}", "error")
+
+def notify_approved(emp_row, kind, date_txt, duration_txt, count):      # kept for compatibility (Update100 name)
+    return notify_request(emp_row, kind, "Approved", date_txt, duration_txt, count)
 
 @app.route("/admin/missed/send", methods=["POST"])
 @need("admin")
@@ -10379,7 +11090,7 @@ def admin_leads_overview(emps, q):
     return page(EMP_LIST, title="Employee Info", view="leads", emps=emps, q=request.args.get("q", ""), lrows=out,
                 month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), new_count=sum(1 for r in update_log() if r["new"]))
 
-TEAM_TABS = """<div class="tabs no-print"><a href="/employee/team-logs" class="{{'on' if tl=='prod' else ''}}">Productivity Log</a><a href="/employee/team-logs/missed" class="{{'on' if tl=='missed' else ''}}">Missed Entries Log</a></div>"""
+TEAM_TABS = """<div class="tabs no-print"><a href="/employee/team-logs" class="{{'on' if tl=='prod' else ''}}">Productivity Log</a><a href="/employee/team-logs/missed" class="{{'on' if tl=='missed' else ''}}">Missed Entries Log</a>{% if team_leave_tab() %}<a href="/employee/team-logs/leave" class="{{'on' if tl=='leave' else ''}}">Leave &amp; Permission</a>{% endif %}</div>"""
 TEAM_PROD = TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all employees</h2>
 <p class="mut">{{label}} &middot; read-only. Weekly-off / holiday entries are shown but not counted.</p>
 <form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><input name="emp" placeholder="Employee ID / name" value="{{emp}}"><button class="primary">Show</button><a href="/employee/team-logs">Reset</a></form>
@@ -10412,13 +11123,14 @@ def pd_need(f):
         return f(*a, **k)
     return w
 
-PEOPLE_LIST = """<div class="head"><div><h1>Employee Details</h1><p class="mut">Personal Details of all employees &mdash; click a name to view / edit.</p></div></div>
+PEOPLE_LIST = """<div class="head"><div><h1>Employee Details</h1><p class="mut">Personal Details of all employees &mdash; click a name to view / edit. The <b>Login Access Status</b> of every employee (and Resigned / NCNS with the relieving date) is shown read-only; only the Admin can change it. &middot; Login enabled: <b>{{n_on}}</b> &middot; disabled: <b>{{n_off}}</b></p></div></div>
 <form class="grid no-print" method="get"><input name="q" placeholder="Search ID / name" value="{{q}}"><button class="primary">Search</button><a href="/employee/people">Reset</a></form>
-<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Designation</th><th>Gender</th><th>Address Line_1</th><th>Address Line_2</th><th>City</th><th>PIN</th><th>Phone</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID</th><th>Profile Name</th><th>Last updated</th><th></th></tr>
+<div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Designation</th><th>Gender</th><th>Address Line_1</th><th>Address Line_2</th><th>City</th><th>PIN</th><th>Phone</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID</th><th>Profile Name</th><th>Login Access Status</th><th>Status (Resigned / NCNS)</th><th>Relieving Date</th><th>Last updated</th><th></th></tr>
 {% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td><a href="/employee/people/{{e['_row']}}"><b>{{e['Name']}}</b></a></td><td>{{e['Designation'] or '-'}}</td><td>{{e['Gender'] or '-'}}</td><td>{{e['Address Line_1'] or '-'}}</td><td>{{e['Address Line_2'] or '-'}}</td>
 <td>{{e['City'] or '-'}}</td><td>{{e['PIN'] or '-'}}</td><td>{{e['Phone Number'] or '-'}}</td><td>{{e['Emergency no'] or '-'}}</td><td>{{e['Personal Email ID'] or '-'}}</td><td>{{e['Email'] or '-'}}</td><td>{{e['Profile Name'] or '-'}}</td>
+<td>{% if e.login_on %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% else %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% endif %}</td><td>{% if e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td><td>{{ e.rel_txt or '-' }}</td>
 <td>{{(e['Profile updated at'] or '-')|t12}}</td><td class="act"><a href="/employee/people/{{e['_row']}}">Edit</a></td></tr>
-{% else %}<tr><td colspan="15">No employees found.</td></tr>{% endfor %}</table></div>"""
+{% else %}<tr><td colspan="18">No employees found.</td></tr>{% endfor %}</table></div>"""
 
 PEOPLE_EDIT = """<div class="card"><h2>Personal details &mdash; {{emp['Name']}}</h2>
 <form method="post" class="grid">
@@ -10437,7 +11149,8 @@ def employee_people():
     prefetch("Employees")
     q = request.args.get("q", "").strip(); ql = q.lower()
     emps = sorted((e for e in rows("Employees") if not ql or ql in str(e["Employee ID"]).lower() or ql in str(e["Name"]).lower()), key=lambda e: str(e["Name"]).lower())
-    return page(PEOPLE_LIST, title="Employee Details", emps=emps, q=q)
+    for e in emps: sep_fields(e)                                  # Update252: Login Access Status (Enabled / Disabled) + Resigned / NCNS + relieving date - read only
+    return page(PEOPLE_LIST, title="Employee Details", emps=emps, q=q, n_on=sum(1 for e in emps if e["login_on"]), n_off=sum(1 for e in emps if not e["login_on"]))
 
 @app.route("/employee/people/<int:row>", methods=["GET", "POST"])
 @need("employee")
@@ -10476,7 +11189,8 @@ TEAM_PLOG = TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all em
 {% else %}<div style="overflow-x:auto"><table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Joining Date</th><th>Tracking From</th><th>Working Days</th><th>Entries</th><th>Missed</th>{% if not hide_status %}<th>Attendance</th>{% endif %}<th>Productivity</th></tr>
 {% for p in lrows %}<tr><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}">{{p.e['Employee ID']}}</a></td><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
 <td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}}{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td><td>{{p.pstart.strftime('%d %b %Y')}}</td>
-{% if not p.active %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
+{% if p.sepst %}<td><span class="pill" style="{{ 'background:#fde8e8;color:#b42318' if p.sepst=='Resigned' else 'background:#fff1db;color:#b45309' }}">{{p.sepst}}</span></td><td colspan="{{ 3 if hide_status else 4 }}" class="mut">{% if p.e.rel_txt %}Relieving date: {{p.e.rel_txt}} &mdash; {% endif %}not counted in working days, pending entries or reminders</td>
+{% elif not p.active %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
 {% elif p.r.vo %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">View only (no productivity entry for this designation)</td>
 {% else %}<td>{{p.r.wd}}</td><td>{{p.entries}}</td><td>{{p.missed}}</td>{% if not hide_status %}<td>{{p.r.att}}%</td>{% endif %}<td><b>{{p.r.pct}}%</b></td>{% endif %}</tr>
 {% else %}<tr><td colspan="10">No employees found.</td></tr>{% endfor %}</table></div>{% endif %}</div>"""
@@ -10519,7 +11233,12 @@ def _team_plog_page():
         ea = max(m0, jd) if jd else m0
         entries = len({x["date"] for x in by_emp.get(k, []) if not x["off"] and str(ea) <= x["date"] <= str(m1)})
         missed = len(missing_dates(eid, by_emp.get(k, []), lv_by.get(k, []), m0, end_m)) if end_m >= m0 else 0
-        lrows.append(dict(e=e, jd=jd, pstart=pstart, active=(not jd or jd <= m1), r=r, entries=entries, missed=missed))
+        sepst = ""      # Update256: Resigned / NCNS (Admin-set, effective from the relieving date) shown in the Working Days column
+        if emp_sep(e):
+            rel_ = str(e.get("Relieving date", "")).strip()[:10]
+            if not rel_ or rel_ <= str(m1): sepst = emp_sep(e)
+        sep_fields(e)
+        lrows.append(dict(e=e, jd=jd, pstart=pstart, active=(not jd or jd <= m1), r=r, entries=entries, missed=missed, sepst=sepst))
     return page(TEAM_PLOG, title="Team Logs - Productivity Log", tl="prod", month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), emp=emp_q, proc="", lrows=lrows, prows=[], more=False, pemps=0)
 
 @app.route("/employee/team-logs/employee/<eid>")
@@ -10544,6 +11263,58 @@ def employee_team_prod():
     total = len(subs); subs = subs[:600]
     return page(TEAM_PROD, title="Team Logs - Productivity Log", tl="prod", month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), emp=request.args.get("emp", ""),
                 subs=subs, total=total, more=total > len(subs))
+
+app.jinja_env.globals["team_leave_tab"] = lambda: plog_user()      # Update256: the tab is offered only to Associate Manager / Team Lead / Senior Team Lead
+
+TEAM_LEAVE = TEAM_TABS + """<div class="card"><h2>Leave &amp; Permission &mdash; all employees</h2>
+<p class="mut">{{label}} &middot; read-only. Leave and Permission requests of every employee with their status (the Admin approves / rejects).</p>
+<form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><input name="emp" placeholder="Employee ID / name" value="{{emp}}">
+<select name="status"><option value="">All status</option>{% for x in ['Pending','Approved','Rejected'] %}<option {{'selected' if status==x else ''}}>{{x}}</option>{% endfor %}</select>
+<button class="primary">Show</button><a href="/employee/team-logs/leave">This month</a><a href="/employee/team-logs/leave?month=all">All time</a></form>
+<div class="kpis"><div class="kpi"><span>Leave requests</span><b>{{lv|length}}</b></div><div class="kpi"><span>Permission requests</span><b>{{pm|length}}</b></div>
+<div class="kpi"><span>Pending</span><b>{{n_pend}}</b></div><div class="kpi"><span>Approved</span><b>{{n_appr}}</b></div><div class="kpi"><span>Rejected</span><b>{{n_rej}}</b></div></div>
+<h2>Leave</h2><div style="overflow-x:auto"><table><tr><th>Date</th><th>Day</th><th>Employee ID</th><th>Name</th><th>Designation</th><th>Day type</th><th>Reason</th><th>Status</th><th>Applied at</th><th>Reviewed at</th></tr>
+{% for r in lv %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}}</td><td><b>{{r.name}}</b></td><td>{{r.desig or '-'}}</td><td>{{r.dtype}}</td><td>{{r.reason or '-'}}</td>
+<td><span class="pill {{r.status|ppill}}">{{r.status}}</span></td><td>{{(r.applied or '-')|t12}}</td><td>{{(r.reviewed or '-')|t12}}</td></tr>
+{% else %}<tr><td colspan="10">No leave requests for this selection.</td></tr>{% endfor %}</table></div>
+<h2>Permission</h2><div style="overflow-x:auto"><table><tr><th>Date</th><th>Day</th><th>Employee ID</th><th>Name</th><th>Designation</th><th>Hours</th><th>Reason</th><th>Status</th><th>Applied at</th><th>Reviewed at</th></tr>
+{% for r in pm %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}}</td><td><b>{{r.name}}</b></td><td>{{r.desig or '-'}}</td><td>{{r.hours|g}}</td><td>{{r.reason or '-'}}</td>
+<td><span class="pill {{r.status|ppill}}">{{r.status}}</span></td><td>{{(r.applied or '-')|t12}}</td><td>{{(r.reviewed or '-')|t12}}</td></tr>
+{% else %}<tr><td colspan="10">No permission requests for this selection.</td></tr>{% endfor %}</table></div></div>"""
+
+@app.route("/employee/team-logs/leave")
+@need("employee")
+@team_need
+def employee_team_leave():
+    """Update256: read-only Leave & Permission of ALL employees (from the existing Leave / Permissions sheets) for Associate Manager / Team Lead / Senior Team Lead."""
+    if not plog_user(): abort(403)
+    prefetch("Employees", "Leave", "Permissions")
+    month_arg = request.args.get("month", "").strip(); q = request.args.get("emp", "").strip().lower(); status = request.args.get("status", "").strip()
+    if month_arg == "all": month, label, m0, m1 = "", "All time", None, None
+    else:
+        m0, m1 = month_range(month_arg or today_local().strftime("%Y-%m")); month = m0.strftime("%Y-%m"); label = m0.strftime("%B %Y")
+    desig = {_key(e["Employee ID"]): e.get("Designation", "") for e in rows("Employees")}
+    def keep(eid, name, d):
+        if q and q not in str(eid).lower() and q not in str(name).lower(): return False
+        return not m0 or str(m0) <= norm_date(d) <= str(m1)
+    def dayname(d):
+        try: return dt.date.fromisoformat(norm_date(d)).strftime("%a")
+        except ValueError: return ""
+    lv, pm = [], []
+    for r in rows("Leave"):
+        st = leave_status(r)
+        if (status and st != status) or not keep(r["Employee ID"], r.get("Employee name", ""), r.get("Date", "")): continue
+        lv.append(dict(date=norm_date(r.get("Date", "")), day=dayname(r.get("Date", "")), id=r["Employee ID"], name=r.get("Employee name", ""), desig=desig.get(_key(r["Employee ID"]), ""),
+                       dtype="Half day" if leave_is_half(r) else "Full day", reason=r.get("Reason", ""), status=st, applied=r.get("Applied at", ""), reviewed=r.get("Reviewed at", "")))
+    for r in rows("Permissions"):
+        st = str(r.get("Status", "")).strip() or "Pending"
+        if (status and st != status) or not keep(r["Employee ID"], r.get("Employee name", ""), r.get("Date", "")): continue
+        pm.append(dict(date=norm_date(r.get("Date", "")), day=dayname(r.get("Date", "")), id=r["Employee ID"], name=r.get("Employee name", ""), desig=desig.get(_key(r["Employee ID"]), ""),
+                       hours=num(r.get("Hours")), reason=r.get("Reason", ""), status=st, applied=r.get("Applied at", ""), reviewed=r.get("Decided at", "")))
+    lv.sort(key=lambda x: (x["date"], x["name"]), reverse=True); pm.sort(key=lambda x: (x["date"], x["name"]), reverse=True)
+    allr = lv + pm
+    return page(TEAM_LEAVE, title="Team Logs - Leave & Permission", tl="leave", month=month, label=label, emp=request.args.get("emp", ""), status=status, lv=lv, pm=pm,
+                n_pend=sum(1 for x in allr if x["status"] == "Pending"), n_appr=sum(1 for x in allr if x["status"] == "Approved"), n_rej=sum(1 for x in allr if x["status"] == "Rejected"))
 
 @app.route("/employee/team-logs/missed")
 @need("employee")
@@ -10707,7 +11478,7 @@ def run_auto_missed_mail(force=False):
         per_emp, noaddr = [], []
         for e in _fetch_rows("Employees"):
             eid = str(e.get("Employee ID", "")).strip(); k = _key(eid)
-            if not eid or not productivity_access(eid, access): continue
+            if not eid or emp_sep(e) or not productivity_access(eid, access): continue      # Update253: Resigned / NCNS never get a reminder
             mail = employee_office_email(e)
             ds = missing_dates(eid, [x for x in subs if _key(x["emp_id"]) == k], [l for l in leaves if _key(l["Employee ID"]) == k], start, end, fmt="%Y-%m-%d")
             pending = sorted(d for d in ds if force or (k, d) not in sent_today)      # ONLY dates still pending (read live: a date submitted since yesterday is simply gone)
@@ -10783,7 +11554,7 @@ def manager_summary_rows(today=None):
     out = []
     for e in _fetch_rows("Employees"):
         eid = str(e.get("Employee ID", "")).strip(); k = _key(eid)
-        if not eid or not productivity_access(eid, access): continue
+        if not eid or emp_sep(e) or not productivity_access(eid, access): continue      # Update253: Resigned / NCNS are left out of the Missed Entries summary
         ds = missing_dates(eid, [x for x in subs if _key(x["emp_id"]) == k], [l for l in leaves if _key(l["Employee ID"]) == k], start, end, fmt="%Y-%m-%d")
         ds = sorted({d for d in ds if d not in covered.get(k, set()) and d not in hol and not is_off(d)}, reverse=True)
         if ds: out.append((eid, str(e.get("Name", "")).strip(), ds))
@@ -11014,6 +11785,7 @@ def admin_email_controls_send():
     eid = (request.form.get("eid") or "").strip()
     e = next((x for x in rows("Employees") if _key(x["Employee ID"]) == _key(eid)), None)
     if not e: flash("Choose an employee.", "error"); return redirect(back)
+    if emp_sep(e): flash(f"{e['Name']} is marked Resigned / NCNS - no Missed Entries reminder is sent.", "error"); return redirect(back)      # Update253
     mail = employee_office_email(e)
     if not EMAIL_RE.match(mail): flash(f"{e['Name']} has no valid Office Email ID.", "error"); return redirect(back)
     asked = {d for d in request.form.getlist("dates") if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d)}
@@ -12627,6 +13399,945 @@ document.getElementById('gmA-q').addEventListener('input',function(){var q=this.
 </script>{% endraw %}"""
 
 
+# ================================================================ Admin Notes / Messages - Update248
+# Admin writes short notes or longer messages (Admin > Notes & Messages) and chooses WHO may view each one (all employees, or only the
+# employees ticked). Employees see them as 3D animated pop-up notifications on every page and in Employee > Messages (read / unread).
+# Sheets (created automatically): "Admin Notes" (one row per note) and "Admin Note Reads" (who has read what).
+NT_SHEET, NT_READS = "Admin Notes", "Admin Note Reads"
+NT_PRI = ("Normal", "Important", "Urgent")
+
+def _nt_clean(s, n):
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(s or "").replace("\r\n", "\n").replace("\r", "\n")).strip()[:n]
+
+def _nt_recips(n):
+    return {_key(x) for x in str(n.get("Recipients", "")).split(",") if str(x).strip()}
+
+def _nt_dt(v):
+    s_ = str(v or "").strip().replace("T", " ")[:16]
+    try: return dt.datetime.strptime(s_, "%Y-%m-%d %H:%M")
+    except ValueError: return None
+
+def _nt_window(n):
+    """(display-from, stop-at) as datetimes (None = no limit). Old rows that only have the date-only 'Expires on' stop at the end of that day."""
+    st, sp = _nt_dt(n.get("Display from")), _nt_dt(n.get("Stop at"))
+    if sp is None:
+        ex = str(n.get("Expires on", "")).strip()
+        try: sp = (dt.datetime.strptime(ex, "%Y-%m-%d") + dt.timedelta(days=1)) if ex else None
+        except ValueError: sp = None
+    return st, sp
+
+def _nt_state(n, now=None):
+    """Hidden (switched off by Admin) / Scheduled (display time not reached) / Ended (stop time passed) / Live."""
+    now = now or now_local()
+    if str(n.get("Status", "")).strip() == "Archived": return "Hidden"
+    st, sp = _nt_window(n)
+    if st and now < st: return "Scheduled"
+    if sp and now >= sp: return "Ended"
+    return "Live"
+
+def _nt_visible(n, eid):
+    """Live right now (inside the Display - Stop window) and (sent to everyone OR this employee is one of the chosen recipients)."""
+    if str(n.get("Status", "")).strip() != "Active": return False
+    if _nt_state(n) != "Live": return False
+    if str(n.get("Audience", "All")).strip().lower() == "selected": return _key(eid) in _nt_recips(n)
+    return True
+
+def nt_for(eid):
+    """Notes this employee may view, pinned first then newest; each with a 'read' flag."""
+    try: notes = [n for n in rows(NT_SHEET) if str(n.get("Note ID", "")).strip() and _nt_visible(n, eid)]
+    except Exception as ex:
+        print("Admin Notes read failed:", repr(ex)); return []
+    try: rd = {str(r.get("Note ID", "")).strip() for r in rows(NT_READS) if _key(r.get("Employee ID", "")) == _key(eid)}
+    except Exception: rd = set()
+    out = []
+    for n in notes:
+        nid = str(n["Note ID"]).strip()
+        out.append(dict(id=nid, title=str(n.get("Title", "")).strip(), message=str(n.get("Message", "")), kind=("Message" if str(n.get("Kind", "")).strip() == "Message" else "Note"),
+                        pri=(str(n.get("Priority", "")).strip() if str(n.get("Priority", "")).strip() in NT_PRI else "Normal"),
+                        pinned=str(n.get("Pinned", "")).strip() == "Yes", at=(str(n.get("Display from", "")).strip().replace("T", " ") or str(n.get("Created at", "")).strip()), upd=str(n.get("Updated at", "")).strip(),
+                        until=(_nt_window(n)[1].strftime("%Y-%m-%d %H:%M") if _nt_window(n)[1] else ""), read=(nid in rd)))
+    out.sort(key=lambda x: x["at"], reverse=True); out.sort(key=lambda x: not x["pinned"])
+    return out
+
+def nt_unread_count(eid):
+    try: return sum(1 for x in nt_for(eid) if not x["read"])
+    except Exception: return 0
+
+def _nt_emps():
+    out = []
+    for e in rows("Employees"):
+        eid = str(e.get("Employee ID", "")).strip()
+        if not eid: continue
+        out.append(dict(id=eid, key=_key(eid), name=str(e.get("Name", "")).strip(), desig=str(e.get("Designation", "")).strip(),
+                        locked=str(e.get("Account locked", "")).strip().lower() in ("yes", "y", "true")))
+    out.sort(key=lambda x: x["name"].lower())
+    return out
+
+def _nt_tabs(active):
+    """Update260 / Update266: the Notes & Messages | Celebrations tab bar is gone - Celebrations live under Admin > Log > Celebrations Log."""
+    return ""
+    base = "display:inline-block;padding:8px 16px;border-radius:99px;font-weight:700;font-size:13px;text-decoration:none;margin:0 8px 14px 0;"
+    on, off = "background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;", "background:#eef0fb;color:#4f46e5;"
+    return ('<div class="nt-tabs"><a href="/admin/notes" style="%s%s">Notes &amp; Messages</a><a href="/admin/celebrations-log" style="%s%s">&#127881; Celebrations</a></div>'
+            % (base, on if active == "n" else off, base, on if active == "c" else off))
+
+NOTES_ADM = _nt_tabs("n") + r"""<style>
+.nt-f label{display:block;font-weight:600;font-size:13px;margin:12px 0 4px}
+.nt-f input[type=text],.nt-f input[type=date],.nt-f select,.nt-f textarea{width:100%;box-sizing:border-box}
+.nt-f textarea{min-height:130px;resize:vertical;line-height:1.5}
+.nt-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;align-items:end}
+.nt-cnt{font-size:12px;color:#6b7280;margin-top:4px}
+.nt-chk{display:flex!important;align-items:center;gap:8px;font-weight:600}
+.nt-chk input{width:auto}
+.nt-aud{border:1px solid #dfe4f5;border-radius:12px;padding:12px 14px;margin-top:14px;background:#f8f9ff}
+.nt-aud legend{font-weight:700;font-size:13px;padding:0 6px}
+.nt-aud .ra{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:6px}.nt-aud .ra label{display:flex;align-items:center;gap:6px;margin:4px 0;font-weight:600}
+.nt-aud .ra input{width:auto}
+.nt-pick{margin-top:8px}.nt-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}.nt-tools input{flex:1;min-width:160px}
+.nt-tools button{padding:6px 12px;font-size:12px}
+.nt-list{max-height:260px;overflow:auto;border:1px solid #e3e7f7;border-radius:10px;background:#fff;padding:6px 10px}
+.nt-pk{display:flex!important;align-items:center;gap:8px;font-weight:500!important;margin:0!important;padding:5px 2px;border-bottom:1px dashed #eef0fb;font-size:13px}
+.nt-pk input{width:auto}.nt-pk small{color:#6b7280;margin-left:auto}
+.nt-dtw{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.nt-dtw input{flex:1;min-width:190px}.nt-dtw button{padding:6px 10px;font-size:12px}
+.nt-sch{margin-top:12px}
+.nt-st-Live{color:#047857;font-weight:700}.nt-st-Scheduled{color:#1d4ed8;font-weight:700}.nt-st-Ended{color:#6b7280;font-weight:700}.nt-st-Hidden{color:#b45309;font-weight:700}
+.nt-sel{font-size:12px;color:#4f46e5;font-weight:700;margin-top:6px}
+.nt-pv{margin-top:16px;perspective:900px}
+.nt-pvc{border-radius:14px;padding:14px 16px;color:#fff;background:linear-gradient(135deg,var(--a),var(--b));box-shadow:0 18px 30px -14px #0008,0 0 18px var(--g);transform:rotateX(4deg) rotateY(-6deg);transition:transform .25s;max-width:420px}
+.nt-pvc:hover{transform:rotateX(0) rotateY(0)}.nt-pvc b{display:block;font-size:14px}.nt-pvc span{display:block;font-size:13px;opacity:.95;margin-top:4px;white-space:pre-wrap;word-break:break-word;max-height:4.4em;overflow:hidden}
+.nt-pv small{display:block;color:#6b7280;margin-bottom:6px}
+.p-Normal{--a:#4f46e5;--b:#7c3aed;--g:#7c3aed55}.p-Important{--a:#f59e0b;--b:#f97316;--g:#f59e0b66}.p-Urgent{--a:#ef4444;--b:#be123c;--g:#ef444477}
+.nt-tag{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700;color:#fff;background:linear-gradient(135deg,var(--a),var(--b))}
+.nt-st-Active{color:#047857;font-weight:700}.nt-st-Archived{color:#b45309;font-weight:700}
+.nt-act form{display:inline}.nt-act button,.nt-act a{font-size:12px;padding:4px 10px;margin:2px;cursor:pointer}
+.nt-det summary{cursor:pointer;color:#4f46e5;font-size:12px;font-weight:600}.nt-det div{font-size:12px;margin-top:4px;max-width:340px}
+.nt-det .rd{color:#047857}.nt-det .un{color:#b91c1c}
+</style>
+<div class="card nt-f"><h2>{{ 'Edit note / message' if f.id else 'Send a note / message to employees' }}</h2>
+<p class="mut">Notes and messages scroll as a marquee (left to right) at the top of the employees' Daily Entry page, only between the Display and Stop times. You decide exactly who can view each one.</p>
+<form method="post" action="/admin/notes/save" id="nt-form">
+<input type="hidden" name="id" value="{{f.id}}">
+<label>Title <span class="mut">(optional)</span><input type="text" name="title" maxlength="120" value="{{f.title}}" placeholder="e.g. Holiday notice / Target update"></label>
+<label>Message<textarea name="message" id="nt-msg" maxlength="5000" required placeholder="Type a short note or a longer message...">{{f.message}}</textarea></label>
+<div class="nt-cnt"><span id="nt-c">0</span> / 5000 characters &middot; shows as a <b id="nt-k">short note</b></div>
+<div class="nt-row">
+<label>Type<select name="kind" id="nt-kind"><option value="auto" {{'selected' if f.kind=='auto'}}>Auto (by length)</option><option value="short" {{'selected' if f.kind=='short'}}>Short note</option><option value="long" {{'selected' if f.kind=='long'}}>Long message</option></select></label>
+<label>Priority<select name="priority" id="nt-pri">{% for p in pris %}<option value="{{p}}" {{'selected' if f.pri==p}}>{{p}}</option>{% endfor %}</select></label>
+<label class="nt-chk"><input type="checkbox" name="pinned" value="1" {{'checked' if f.pinned}}> Pin to top</label>
+</div>
+<fieldset class="nt-aud nt-sch"><legend>Schedule</legend>
+<div class="nt-row">
+<label>Display date &amp; time <span class="mut">(blank = show immediately)</span><span class="nt-dtw"><input type="datetime-local" name="start" id="nt-start" value="{{f.start}}"><button type="button" class="back sm" data-now="nt-start">Now</button><button type="button" class="back sm" data-clr="nt-start">Clear</button></span></label>
+<label>Stop date &amp; time <span class="mut">(blank = stays until you stop it)</span><span class="nt-dtw"><input type="datetime-local" name="stop" id="nt-stop" value="{{f.stop}}"><button type="button" class="back sm" data-clr="nt-stop">Clear</button></span></label>
+</div><div class="nt-cnt" id="nt-sch"></div></fieldset>
+<fieldset class="nt-aud"><legend>Who can view this?</legend>
+<div class="ra"><label><input type="radio" name="audience" value="all" {{'checked' if f.aud=='all'}}> All employees</label><label><input type="radio" name="audience" value="selected" {{'checked' if f.aud=='selected'}}> Only selected employees</label></div>
+<div class="nt-pick" id="nt-pick" style="display:{{'block' if f.aud=='selected' else 'none'}}">
+<div class="nt-tools"><input type="text" id="nt-q" placeholder="Search by ID, name or designation"><button type="button" class="back sm" id="nt-all">Select shown</button><button type="button" class="back sm" id="nt-none">Clear all</button></div>
+<div class="nt-list">{% for e in emps %}<label class="nt-pk" data-s="{{(e.id ~ ' ' ~ e.name ~ ' ' ~ e.desig)|lower}}"><input type="checkbox" name="to" value="{{e.id}}" {{'checked' if e.ck}}><b>{{e.id}}</b> &middot; {{e.name}}{% if e.locked %} <em class="mut">(locked)</em>{% endif %}<small>{{e.desig}}</small></label>{% endfor %}</div>
+<div class="nt-sel"><span id="nt-n">0</span> employee(s) selected</div></div></fieldset>
+<div class="nt-pv"><small>Preview</small><div class="nt-pvc p-Normal" id="nt-pvc"><b id="nt-pvt">Message from Admin</b><span id="nt-pvm">Your text appears here...</span></div></div>
+<p style="margin-top:14px"><button class="primary">{{ 'Save changes' if f.id else 'Send' }}</button> {% if f.id %}<a class="back sm" href="/admin/notes">Cancel</a>{% endif %}</p>
+</form></div>
+<div class="card"><h2>Sent notes &amp; messages</h2>
+{% if not notes %}<p class="mut">Nothing sent yet.</p>{% else %}
+<table><tr><th>Sent</th><th>Note</th><th>Schedule</th><th>Type</th><th>Priority</th><th>Viewers</th><th>Seen</th><th>Status</th><th></th></tr>
+{% for n in notes %}<tr class="p-{{n.pri}}"><td>{{n.at|t12}}{% if n.upd %}<br><small class="mut">edited {{n.upd|t12}}</small>{% endif %}</td>
+<td style="max-width:300px"><b>{% if n.pinned %}&#128204; {% endif %}{{n.title or '(no title)'}}</b><br><span class="mut">{{n.message[:140]}}{{'...' if n.message|length>140}}</span></td>
+<td style="white-space:nowrap"><small class="mut">Display</small> {{ (n.start|t12) if n.start else 'Immediately' }}<br><small class="mut">Stop</small> {{ (n.stop|t12) if n.stop else 'Not set' }}</td>
+<td>{{n.kind}}</td><td><span class="nt-tag">{{n.pri}}</span></td>
+<td>{% if n.sel %}Selected ({{n.total}}){% else %}All employees ({{n.total}}){% endif %}</td>
+<td><b>{{n.read_n}}</b> / {{n.total}}<details class="nt-det"><summary>Who</summary><div><span class="rd">Seen:</span> {% for w in n.who_read %}{{w[0]}} <small>({{w[1]|t12}})</small>{{ ', ' if not loop.last }}{% else %}-{% endfor %}</div><div><span class="un">Not seen yet:</span> {{ n.who_not|join(', ') or '-' }}</div></details></td>
+<td class="nt-st-{{n.state}}">{{n.state}}</td>
+<td class="nt-act"><a class="back sm" href="/admin/notes?edit={{n.id}}#nt-form">Edit</a>
+{% if n.state=='Scheduled' %}<form method="post" action="/admin/notes/{{n.id}}/status"><input type="hidden" name="to" value="startnow"><button class="back sm">Start now</button></form>{% elif n.state=='Live' %}<form method="post" action="/admin/notes/{{n.id}}/status"><input type="hidden" name="to" value="stopnow"><button class="back sm">Stop now</button></form>{% endif %}
+<form method="post" action="/admin/notes/{{n.id}}/status"><input type="hidden" name="to" value="{{ 'restore' if n.status=='Archived' else 'archive' }}"><button class="back sm">{{ 'Switch on again' if n.status=='Archived' else 'Switch off' }}</button></form>
+<form method="post" action="/admin/notes/{{n.id}}/status" onsubmit="return confirm('Delete this note / message permanently from the employees\' panels?')"><input type="hidden" name="to" value="delete"><button class="back sm">Delete</button></form></td></tr>{% endfor %}</table>{% endif %}</div>
+<script>
+(function(){
+  var f=document.getElementById('nt-form'); if(!f) return;
+  var msg=document.getElementById('nt-msg'),cnt=document.getElementById('nt-c'),kd=document.getElementById('nt-k'),kind=document.getElementById('nt-kind'),pri=document.getElementById('nt-pri');
+  var pick=document.getElementById('nt-pick'),q=document.getElementById('nt-q'),nn=document.getElementById('nt-n'),pv=document.getElementById('nt-pvc'),pvt=document.getElementById('nt-pvt'),pvm=document.getElementById('nt-pvm'),ti=f.querySelector('[name=title]');
+  function isLong(){ var v=msg.value; if(kind.value==='long') return true; if(kind.value==='short') return false; return v.length>200||(v.match(/\n/g)||[]).length>=2; }
+  function upd(){ cnt.textContent=msg.value.length; kd.textContent=isLong()?'long message':'short note'; pvt.textContent=ti.value.trim()||'Message from Admin'; pvm.textContent=msg.value.trim()||'Your text appears here...'; pv.className='nt-pvc p-'+pri.value; }
+  [msg,kind,pri,ti].forEach(function(e){ e.addEventListener('input',upd); e.addEventListener('change',upd); }); upd();
+  function boxes(){ return f.querySelectorAll('input[name=to]'); }
+  function count(){ var c=0; boxes().forEach(function(b){ if(b.checked) c++; }); nn.textContent=c; }
+  f.querySelectorAll('input[name=audience]').forEach(function(r){ r.addEventListener('change',function(){ pick.style.display=(f.querySelector('input[name=audience]:checked').value==='selected')?'block':'none'; }); });
+  f.addEventListener('change',function(e){ if(e.target.name==='to') count(); }); count();
+  q.addEventListener('input',function(){ var s=q.value.trim().toLowerCase(); f.querySelectorAll('.nt-pk').forEach(function(l){ l.style.display=(!s||l.getAttribute('data-s').indexOf(s)>=0)?'':'none'; }); });
+  document.getElementById('nt-all').addEventListener('click',function(){ f.querySelectorAll('.nt-pk').forEach(function(l){ if(l.style.display!=='none') l.querySelector('input').checked=true; }); count(); });
+  document.getElementById('nt-none').addEventListener('click',function(){ boxes().forEach(function(b){ b.checked=false; }); count(); });
+  var NOW='{{now_str}}', st=document.getElementById('nt-start'), sp=document.getElementById('nt-stop'), sch=document.getElementById('nt-sch');
+  function fmt(v){ if(!v) return ''; var d=new Date(v); return isNaN(d)?v:d.toLocaleString([], {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
+  function schedTxt(){ var a=st.value,b=sp.value; sch.textContent=(a?'Appears on '+fmt(a):'Appears immediately')+(b?' \u2192 disappears on '+fmt(b):' \u2192 stays until you stop or hide it'); }
+  [st,sp].forEach(function(i){ i.addEventListener('input',schedTxt); i.addEventListener('change',schedTxt); }); schedTxt();
+  f.querySelectorAll('[data-now]').forEach(function(b){ b.addEventListener('click',function(){ document.getElementById(b.getAttribute('data-now')).value=NOW; schedTxt(); }); });
+  f.querySelectorAll('[data-clr]').forEach(function(b){ b.addEventListener('click',function(){ document.getElementById(b.getAttribute('data-clr')).value=''; schedTxt(); }); });
+  f.addEventListener('submit',function(e){ if(st.value&&sp.value&&sp.value<=st.value){ e.preventDefault(); alert('The Stop date & time must be after the Display date & time.'); return; } });
+  f.addEventListener('submit',function(e){ var sel=f.querySelector('input[name=audience]:checked'); if(sel&&sel.value==='selected'&&!f.querySelector('input[name=to]:checked')){ e.preventDefault(); alert('Tick at least one employee, or choose All employees.'); } });
+})();
+</script>"""
+
+# Update250: the Admin's live notes / messages scroll as a marquee at the top of the Employee Daily Entry page (left -> right, smooth and continuous).
+NT_MARQUEE = r"""<style id="ntm-css">
+.ntm{position:relative;display:flex;align-items:stretch;margin:0 0 14px;border-radius:14px;overflow:hidden;background:linear-gradient(135deg,#312e81,#4f46e5 55%,#7c3aed);color:#fff;
+  box-shadow:0 14px 26px -14px #4f46e5cc,0 0 0 1px #ffffff2a inset;perspective:700px}
+.ntm-lb{flex:none;display:flex;align-items:center;gap:8px;padding:0 16px 0 14px;font-weight:800;font-size:12.5px;letter-spacing:.08em;background:linear-gradient(135deg,#1e1b4b,#3730a3);position:relative;z-index:2;box-shadow:6px 0 14px -6px #0008}
+.ntm-ic{width:22px;height:16px;border-radius:3px;background:linear-gradient(145deg,#fff,#dbe2ff);position:relative;box-shadow:0 4px 7px #0006;animation:ntmSpin 4.5s ease-in-out infinite}
+.ntm-ic::before{content:"";position:absolute;inset:0;border-radius:3px;background:linear-gradient(135deg,transparent 49%,#9fb0f0 50%,transparent 52%),linear-gradient(225deg,transparent 49%,#9fb0f0 50%,transparent 52%)}
+@keyframes ntmSpin{0%,100%{transform:rotateY(-24deg) rotateX(8deg)}50%{transform:rotateY(24deg) rotateX(-6deg)}}
+.ntm-vp{position:relative;flex:1;min-width:0;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent,#000 40px,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(90deg,transparent,#000 40px,#000 calc(100% - 40px),transparent)}
+.ntm-track{display:flex;width:max-content;will-change:transform;animation:ntmMove var(--d,40s) linear infinite;backface-visibility:hidden;transform:translate3d(-50%,0,0)}
+.ntm:hover .ntm-track{animation-play-state:paused}
+@keyframes ntmMove{from{transform:translate3d(-50%,0,0)}to{transform:translate3d(0,0,0)}}
+.ntm-g{display:flex;flex:none;align-items:center;white-space:nowrap}
+.ntm-i{display:inline-flex;align-items:center;gap:8px;padding:12px 0;font-size:14.5px;line-height:1.2}
+.ntm-t{font-weight:800;text-shadow:0 1px 6px #0006}
+.ntm-pr{font-size:10.5px;font-weight:800;letter-spacing:.06em;padding:2px 8px;border-radius:99px;color:#fff}
+.ntm-pr.Important{background:linear-gradient(135deg,#f59e0b,#f97316)}.ntm-pr.Urgent{background:linear-gradient(135deg,#ef4444,#be123c);animation:ntmBl 1.2s ease-in-out infinite}
+@keyframes ntmBl{50%{opacity:.6}}
+.ntm-sep{display:inline-block;padding:0 26px;color:#c7d2fe;opacity:.9;font-size:13px}
+@media(prefers-reduced-motion:reduce){.ntm-track{animation:none;transform:none;flex-wrap:wrap}.ntm-g{flex-wrap:wrap;white-space:normal}.ntm-g+.ntm-g{display:none}.ntm-vp{-webkit-mask-image:none;mask-image:none}.ntm-ic{animation:none}}
+@media print{.ntm{display:none}}
+@media(max-width:600px){.ntm-lb span{display:none}.ntm-lb{padding:0 12px}.ntm-i{font-size:13.5px}}
+</style>
+<div class="ntm" id="ntm" role="marquee" aria-label="Notes and messages from Admin" style="display:none"><div class="ntm-lb"><i class="ntm-ic"></i><span>NOTICE</span></div><div class="ntm-vp"><div class="ntm-track" id="ntm-track"></div></div></div>
+<script>
+(function(){
+  var bar=document.getElementById('ntm'); if(!bar) return;
+  var track=document.getElementById('ntm-track'), DATA=__DATA__, last='', SPEED=70, SK='ntmSeen';
+  function esc(s){ var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+  function seg(n){ return '<span class="ntm-i">'+(n.pri!=='Normal'?'<span class="ntm-pr '+n.pri+'">'+n.pri.toUpperCase()+'</span>':'')+(n.title?'<b class="ntm-t">'+esc(n.title)+':</b>':'')+'<span>'+esc(n.text)+'</span></span><span class="ntm-sep">\u2726</span>'; }
+  function build(items){
+    var key=JSON.stringify(items); if(key===last) return; last=key;
+    if(!items.length){ bar.style.display='none'; track.innerHTML=''; return; }
+    bar.style.display='';
+    var one=items.map(seg).join(''), bw=Math.max(bar.clientWidth,320), grp=one, probe=document.createElement('div');
+    probe.className='ntm-g'; probe.style.cssText='position:absolute;visibility:hidden;left:0;top:0'; track.appendChild(probe);
+    probe.innerHTML=grp; var w=probe.offsetWidth, tries=0; while(w<bw&&tries<12){ grp+=one; probe.innerHTML=grp; w=probe.offsetWidth; tries++; }
+    track.removeChild(probe);
+    track.innerHTML='<div class="ntm-g">'+grp+'</div><div class="ntm-g" aria-hidden="true">'+grp+'</div>';
+    track.style.setProperty('--d',Math.max(12,w/SPEED).toFixed(1)+'s');
+  }
+  function seen(items){ var s={}; try{ (JSON.parse(sessionStorage.getItem(SK)||'[]')||[]).forEach(function(i){ s[i]=1; }); }catch(e){}
+    var ids=items.map(function(n){ return n.id; }).filter(function(i){ return !s[i]; }); if(!ids.length) return;
+    try{ fetch('/employee/messages/read',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:ids})}); ids.forEach(function(i){ s[i]=1; }); sessionStorage.setItem(SK,JSON.stringify(Object.keys(s))); }catch(e){} }
+  build(DATA); seen(DATA);
+  var rt=0; window.addEventListener('resize',function(){ clearTimeout(rt); rt=setTimeout(function(){ last=''; build(JSON.parse(JSON.stringify(cur))); },250); });
+  var cur=DATA;
+  setInterval(function(){ if(document.hidden) return;
+    fetch('/employee/messages/ticker',{credentials:'same-origin',cache:'no-store'}).then(function(r){ return r.ok?r.json():null; }).then(function(d){ if(d&&d.items){ cur=d.items; build(cur); seen(cur); } }).catch(function(){});
+  },60000);
+})();
+</script>"""
+
+def _nt_ticker_items(eid):
+    out = []
+    for x in nt_for(eid):
+        txt = re.sub(r"\s+", " ", x["message"]).strip()
+        out.append(dict(id=x["id"], title=x["title"], text=(txt[:1500] + (" ..." if len(txt) > 1500 else "")), pri=x["pri"]))
+    return out
+
+def nt_marquee_html():
+    """The marquee shown at the top of the Employee Daily Entry page (live notes / messages only; hidden when there are none)."""
+    data = json.dumps(_nt_ticker_items(session.get("emp_id", "")))
+    return NT_MARQUEE.replace("__DATA__", data.replace("</", "<\\/"))
+
+@app.route("/employee/messages")
+@need("employee")
+def employee_messages(): return redirect("/employee")      # Update250: the Messages page is removed - notes scroll on the Daily Entry page
+
+@app.route("/employee/messages/read", methods=["POST"])
+@need("employee")
+def employee_messages_read():
+    eid = session["emp_id"]; d = request.get_json(silent=True) or {}
+    ids = [str(i).strip() for i in (d.get("ids") or []) if str(i).strip()][:200]
+    mine = {x["id"]: x for x in nt_for(eid)}
+    have = {str(r.get("Note ID", "")).strip() for r in rows(NT_READS) if _key(r.get("Employee ID", "")) == _key(eid)}
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S"); out = [[i, str(eid), str(session.get("name", "")), now] for i in ids if i in mine and i not in have]
+    if out:
+        try: ws_of(NT_READS).append_rows(out, value_input_option="RAW"); invalidate_cache(NT_READS)
+        except Exception as ex:
+            print("Admin Note Reads save failed:", repr(ex)); return jsonify(ok=False), 500
+    return jsonify(ok=True, added=len(out))
+
+@app.route("/employee/messages/ticker")
+@need("employee")
+def employee_messages_ticker():
+    r = jsonify(items=_nt_ticker_items(session["emp_id"])); r.headers["Cache-Control"] = "no-store"; return r
+
+@app.route("/admin/notes")
+@need("admin")
+def admin_notes():
+    emps = _nt_emps(); reads = {}
+    for r in rows(NT_READS): reads.setdefault(str(r.get("Note ID", "")).strip(), {})[_key(r.get("Employee ID", ""))] = str(r.get("Read at", "")).strip()
+    notes = []
+    for n in rows(NT_SHEET):
+        nid = str(n.get("Note ID", "")).strip(); st = str(n.get("Status", "")).strip() or "Active"
+        if not nid or st == "Deleted": continue
+        rec = _nt_recips(n); sel = str(n.get("Audience", "")).strip().lower() == "selected"
+        aud = [e for e in emps if (e["key"] in rec if sel else not e["locked"])]; rd = reads.get(nid, {})
+        pri = str(n.get("Priority", "")).strip(); pri = pri if pri in NT_PRI else "Normal"
+        notes.append(dict(id=nid, at=str(n.get("Created at", "")).strip(), upd=str(n.get("Updated at", "")).strip(), title=str(n.get("Title", "")).strip(), message=str(n.get("Message", "")),
+                          kind=("Message" if str(n.get("Kind", "")).strip() == "Message" else "Note"), pri=pri, sel=sel, status=st, pinned=str(n.get("Pinned", "")).strip() == "Yes",
+                          start=(_nt_window(n)[0].strftime("%Y-%m-%d %H:%M") if _nt_window(n)[0] else ""), stop=(_nt_window(n)[1].strftime("%Y-%m-%d %H:%M") if _nt_window(n)[1] else ""), state=_nt_state(n), total=len(aud), read_n=sum(1 for e in aud if e["key"] in rd),
+                          who_read=[(e["name"], rd[e["key"]]) for e in aud if e["key"] in rd], who_not=[e["name"] for e in aud if e["key"] not in rd]))
+    notes.sort(key=lambda x: x["at"], reverse=True)
+    f = dict(id="", title="", message="", kind="auto", pri="Normal", aud="all", to=set(), pinned=False, start="", stop="")
+    eid = request.args.get("edit", "").strip()
+    if eid:
+        for n in rows(NT_SHEET):
+            if str(n.get("Note ID", "")).strip() == eid and str(n.get("Status", "")).strip() != "Deleted":
+                pri = str(n.get("Priority", "")).strip()
+                f = dict(id=eid, title=str(n.get("Title", "")), message=str(n.get("Message", "")), kind=("long" if str(n.get("Kind", "")).strip() == "Message" else "short"), pri=(pri if pri in NT_PRI else "Normal"),
+                         aud=("selected" if str(n.get("Audience", "")).strip().lower() == "selected" else "all"), to=_nt_recips(n), pinned=str(n.get("Pinned", "")).strip() == "Yes",
+                         start=(_nt_window(n)[0].strftime("%Y-%m-%dT%H:%M") if _nt_window(n)[0] else ""), stop=(_nt_window(n)[1].strftime("%Y-%m-%dT%H:%M") if _nt_window(n)[1] else ""))
+                break
+    for e in emps: e["ck"] = e["key"] in f["to"]
+    return page(NOTES_ADM, title="Notes & Messages", emps=emps, notes=notes, f=f, pris=NT_PRI, now_str=now_local().strftime("%Y-%m-%dT%H:%M"))
+
+@app.route("/admin/notes/save", methods=["POST"])
+@need("admin")
+def admin_notes_save():
+    fm = request.form; nid = fm.get("id", "").strip()
+    title = _nt_clean(fm.get("title"), 120); msg = _nt_clean(fm.get("message"), 5000)
+    back = "/admin/notes" + (("?edit=" + nid) if nid else "")
+    if not msg:
+        flash("Please type the note / message.", "error"); return redirect(back)
+    k = fm.get("kind", "auto"); kind = "Message" if k == "long" else ("Note" if k == "short" else ("Note" if len(msg) <= 200 and msg.count("\n") < 2 else "Message"))
+    pri = fm.get("priority", "Normal"); pri = pri if pri in NT_PRI else "Normal"
+    sel = fm.get("audience") == "selected"; valid = {e["key"]: e["id"] for e in _nt_emps()}
+    to = []
+    for x in fm.getlist("to"):
+        kx = _key(x)
+        if kx in valid and valid[kx] not in to: to.append(valid[kx])
+    if sel and not to:
+        flash("Tick at least one employee, or choose All employees.", "error"); return redirect(back)
+    st_raw, sp_raw = fm.get("start", "").strip(), fm.get("stop", "").strip()
+    st_d, sp_d = _nt_dt(st_raw), _nt_dt(sp_raw)
+    if (st_raw and st_d is None) or (sp_raw and sp_d is None):
+        flash("Please enter a valid Display / Stop date & time.", "error"); return redirect(back)
+    if st_d and sp_d and sp_d <= st_d:
+        flash("The Stop date & time must be after the Display date & time.", "error"); return redirect(back)
+    start_s, stop_s = (st_d.strftime("%Y-%m-%d %H:%M") if st_d else ""), (sp_d.strftime("%Y-%m-%d %H:%M") if sp_d else "")
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S"); pinned = "Yes" if fm.get("pinned") else ""
+    ws = ws_of(NT_SHEET); H = HEADERS[NT_SHEET]
+    if nid:
+        cur = next((n for n in rows(NT_SHEET) if str(n.get("Note ID", "")).strip() == nid and str(n.get("Status", "")).strip() != "Deleted"), None)
+        if cur is None:
+            flash("That note no longer exists.", "error"); return redirect("/admin/notes")
+        vals = [nid, str(cur.get("Created at", "")), title, msg, kind, pri, "Selected" if sel else "All", ",".join(to) if sel else "", pinned, str(cur.get("Status", "")).strip() or "Active", str(cur.get("Created by", "") or "Admin"), "", now, start_s, stop_s]
+        ws.update(range_name="A%d:%s%d" % (cur["_row"], chr(64 + len(H)), cur["_row"]), values=[vals], value_input_option="RAW")
+        flash("Saved. The updated schedule and text apply to employees right away.")
+    else:
+        import uuid as _uu
+        nid = "N" + now_local().strftime("%y%m%d%H%M%S") + _uu.uuid4().hex[:3]
+        ws.append_row([nid, now, title, msg, kind, pri, "Selected" if sel else "All", ",".join(to) if sel else "", pinned, "Active", "Admin", "", "", start_s, stop_s], value_input_option="RAW")
+        who = ("%d selected employee(s)" % len(to)) if sel else "all employees"
+        flash(("Scheduled for %s - it appears on %s." % (who, start_s)) if (st_d and st_d > now_local()) else ("Sent to %s." % who))
+    invalidate_cache(NT_SHEET)
+    return redirect("/admin/notes")
+
+@app.route("/admin/notes/<nid>/status", methods=["POST"])
+@need("admin")
+def admin_notes_status(nid):
+    act = request.form.get("to", ""); val = {"archive": "Archived", "restore": "Active", "delete": "Deleted"}.get(act)
+    cur = next((n for n in rows(NT_SHEET) if str(n.get("Note ID", "")).strip() == nid), None)
+    if cur is None or (not val and act not in ("startnow", "stopnow")):
+        flash("Nothing changed.", "error"); return redirect("/admin/notes")
+    now_s = now_local().strftime("%Y-%m-%d %H:%M"); ws = ws_of(NT_SHEET)
+    if act == "startnow":      # Scheduled -> show now (a stop time that is already earlier than now is cleared)
+        ws.update(range_name="N%d" % cur["_row"], values=[[now_s]], value_input_option="RAW")
+        sp = _nt_window(cur)[1]
+        if sp and sp <= now_local(): ws.update(range_name="O%d" % cur["_row"], values=[[""]], value_input_option="RAW"); ws.update(range_name="L%d" % cur["_row"], values=[[""]], value_input_option="RAW")
+        flash("Started - employees can see it now.")
+    elif act == "stopnow":     # Live -> stop now (ends exactly now)
+        ws.update(range_name="O%d" % cur["_row"], values=[[now_s]], value_input_option="RAW"); ws.update(range_name="L%d" % cur["_row"], values=[[""]], value_input_option="RAW")
+        flash("Stopped - it no longer shows in the Employee Panel.")
+    else:
+        ws.update(range_name="J%d" % cur["_row"], values=[[val]], value_input_option="RAW")
+        flash({"Archived": "Hidden from employees.", "Active": "Switched on again (it follows its Display / Stop times).", "Deleted": "Deleted."}[val])
+    invalidate_cache(NT_SHEET)
+    return redirect("/admin/notes")
+
+
+# ================================================================ Celebrations - Update260
+# Admin > Notes & Messages > Celebrations: the Admin creates celebration animations (fireworks, crackers, confetti, balloons ...) for occasions such as birthdays, Pongal,
+# Diwali or New Year, chooses WHO sees them (all employees or only the ones ticked), WHEN (Display / Stop date & time, or "Start now") and HOW OFTEN.
+# The Employee page (the page right after login) plays them as a full-screen animation with a greeting card. Sheets (created automatically): "Celebrations", "Celebration Seen".
+CL_SHEET, CL_SEEN = "Celebrations", "Celebration Seen"
+CL_FX = (("fireworks", "Fireworks"), ("crackers", "Crackers (ladi strings + flower pots)"), ("grand", "Fireworks + Crackers"), ("party", "Fireworks + Confetti"), ("confetti", "Confetti"), ("balloons", "Balloons"))
+CL_LVL = (("low", "Gentle"), ("mid", "Normal"), ("high", "Grand"))
+CL_FREQ = (("continuous", "Continuous - until the Admin clicks Stop"), ("once", "Once per employee"), ("day", "Once a day (first visit of the day)"), ("login", "Every login (once per browser session)"))
+CL_OCC = (("birthday", "Birthday", "Happy Birthday, {name}!", "Wishing you a wonderful year ahead filled with joy and success. From all of us!", "grand"),
+          ("pongal", "Pongal", "Happy Pongal!", "Pongalo Pongal! May this harvest festival bring happiness, prosperity and sweetness to you and your family.", "crackers"),
+          ("diwali", "Diwali", "Happy Diwali!", "May the festival of lights brighten your life with joy and prosperity.", "grand"),
+          ("newyear", "New Year", "Happy New Year!", "Wishing you a year full of success, health and happiness.", "fireworks"),
+          ("anniversary", "Work anniversary", "Congratulations, {name}!", "Thank you for being a valued part of the team. Here's to many more years together!", "balloons"),
+          ("festival", "Other festival", "Season's Greetings!", "Warm wishes to you and your family.", "confetti"),
+          ("custom", "Custom", "", "", "fireworks"))
+CL_OCC_KEYS = {o[0] for o in CL_OCC}; CL_FX_KEYS = {o[0] for o in CL_FX}; CL_LVL_KEYS = {o[0] for o in CL_LVL}; CL_FREQ_KEYS = {o[0] for o in CL_FREQ}
+CL_PRESETS = {o[0]: dict(label=o[1], title=o[2], message=o[3], fx=o[4]) for o in CL_OCC}
+# ---- Update266: themes = decoration style + colours + emoji + default wish. Built-in ones are fixed; the Admin adds his own (sheet 'Celebration Themes').
+CL_THEME_SHEET = "Celebration Themes"
+CL_DECOR_OF = {"birthday": "birthday", "pongal": "pongal", "diwali": "diwali", "newyear": "stars", "anniversary": "stars", "festival": "lights", "custom": "lights"}
+CL_DECOR_OPTS = (("pongal", "Pongal - toran, sun, kolam, sugarcane, petals"), ("diwali", "Diwali - string lights, lanterns, diyas"), ("birthday", "Birthday - bunting, balloons, cake"),
+                 ("lights", "Festive string lights"), ("floral", "Flowers & falling petals"), ("stars", "Sparkling stars"), ("none", "No decoration (animation only)"))
+CL_DECOR_KEYS = {o[0] for o in CL_DECOR_OPTS}
+def _cl_hex(v, d):
+    v = str(v or "").strip(); return v.lower() if re.fullmatch(r"#[0-9a-fA-F]{6}", v) else d
+def _cl_themes():
+    out = {}
+    try:
+        for r in rows(CL_THEME_SHEET):
+            tid = str(r.get("Theme ID", "")).strip().lower()
+            if not tid or str(r.get("Status", "")).strip() == "Deleted": continue
+            out[tid] = dict(id=tid, name=str(r.get("Name", "")).strip() or "Theme", title=str(r.get("Title", "")), message=str(r.get("Message", "")),
+                            fx=_cl_pick(r.get("Effect"), CL_FX_KEYS, "fireworks"), decor=_cl_pick(r.get("Decor"), CL_DECOR_KEYS, "lights"),
+                            c1=_cl_hex(r.get("Color 1"), "#4f46e5"), c2=_cl_hex(r.get("Color 2"), "#7c3aed"), em=str(r.get("Emoji", "")).strip()[:8], at=str(r.get("Created at", "")))
+    except Exception as ex: print("Celebration Themes read failed:", repr(ex))
+    return out
+def _cl_occ(v):
+    v = str(v or "").strip().lower()
+    return v if (v in CL_OCC_KEYS or v in _cl_themes()) else "custom"
+def _cl_look(occ):
+    t = _cl_themes().get(occ)
+    if t: return dict(th=[t["c1"], t["c2"]], em=t["em"], decor=t["decor"])
+    return dict(decor=CL_DECOR_OF.get(occ, "lights"))
+def _cl_label(occ):
+    t = _cl_themes().get(occ)
+    return t["name"] if t else next((o[1] for o in CL_OCC if o[0] == occ), occ)
+def _cl_occ_options(): return [(o[0], o[1]) for o in CL_OCC] + [(t["id"], "\u2605 " + t["name"]) for t in sorted(_cl_themes().values(), key=lambda x: x["name"].lower())]
+def _cl_presets():
+    p = {k: dict(v, decor=CL_DECOR_OF.get(k, "lights")) for k, v in CL_PRESETS.items()}
+    for t in _cl_themes().values(): p[t["id"]] = dict(label=t["name"], title=t["title"], message=t["message"], fx=t["fx"], decor=t["decor"], th=[t["c1"], t["c2"]], em=t["em"])
+    return p
+
+def _cl_int(v, lo, hi, d):
+    try: return max(lo, min(hi, int(float(str(v).strip()))))
+    except (ValueError, TypeError): return d
+def _cl_pick(v, allowed, d):
+    v = str(v or "").strip().lower(); return v if v in allowed else d
+def _cl_freq(c): return _cl_pick(c.get("Frequency"), CL_FREQ_KEYS, "once")
+
+def cl_for(eid, name=""):
+    """Celebrations this employee should see right now (Live, sent to them, and - for 'once' - not shown to them before). Oldest first, at most 3."""
+    try: cs = [c for c in rows(CL_SHEET) if str(c.get("Celebration ID", "")).strip() and _nt_visible(c, eid)]
+    except Exception as ex:
+        print("Celebrations read failed:", repr(ex)); return []
+    if not cs: return []
+    seen = set()
+    if any(_cl_freq(c) == "once" for c in cs):
+        try: seen = {str(r.get("Celebration ID", "")).strip() for r in rows(CL_SEEN) if _key(r.get("Employee ID", "")) == _key(eid)}
+        except Exception: pass
+    first = (str(name or "").strip().split() or [""])[0] or "there"
+    out = []
+    for c in cs:
+        cid = str(c["Celebration ID"]).strip(); fr = _cl_freq(c)
+        if fr == "once" and cid in seen: continue
+        out.append(dict(_cl_look(_cl_occ(c.get("Occasion"))), id=cid, title=str(c.get("Title", "")).replace("{name}", first).strip(), text=str(c.get("Message", "")).replace("{name}", first).strip(),
+                        occ=_cl_occ(c.get("Occasion")), fx=_cl_pick(c.get("Effect"), CL_FX_KEYS, "fireworks"), lvl=_cl_pick(c.get("Intensity"), CL_LVL_KEYS, "mid"),
+                        dur=_cl_int(c.get("Duration sec"), 5, 120, 12), freq=fr, cont=(fr == "continuous"), at=(str(c.get("Display from", "")).strip() or str(c.get("Created at", "")).strip())))
+    out.sort(key=lambda x: x["at"]); co = [x for x in out if x["cont"]]; ot = [x for x in out if not x["cont"]]
+    return ot[-3:] + co[-2:]      # Update261: a Continuous celebration is never trimmed away
+
+CL_ENGINE_JS = r'''(function(){
+if(window.__clPlay) return;
+var EMO={birthday:0x1F382,pongal:0x1F33E,diwali:0x1FA94,newyear:0x1F389,anniversary:0x1F3C6,festival:0x2728,custom:0x2728};
+var THEME={birthday:['#ec4899','#7c3aed'],pongal:['#f59e0b','#15803d'],diwali:['#f97316','#9f1239'],newyear:['#4f46e5','#0ea5e9'],anniversary:['#0ea5e9','#0d9488'],festival:['#8b5cf6','#ec4899'],custom:['#4f46e5','#7c3aed']};
+var DECOR={birthday:'birthday',pongal:'pongal',diwali:'diwali',newyear:'stars',anniversary:'stars',festival:'lights',custom:'lights'};
+var KOL='<svg viewBox="0 0 100 100"><g fill="none" stroke="#e11d48" stroke-width="2.2"><path d="M50 6 L94 50 L50 94 L6 50Z"/><path d="M50 22 L78 50 L50 78 L22 50Z" stroke="#f59e0b"/><circle cx="50" cy="50" r="9" stroke="#15803d"/></g><g fill="#e11d48"><circle cx="50" cy="2" r="2.6"/><circle cx="98" cy="50" r="2.6"/><circle cx="50" cy="98" r="2.6"/><circle cx="2" cy="50" r="2.6"/></g></svg>';
+var FXMAP={fireworks:['fw'],crackers:['cr'],grand:['fw','cr'],party:['fw','cf'],confetti:['cf'],balloons:['bl']};
+var PAL=['#ff595e','#ffca3a','#8ac926','#1982c4','#a855f7','#ff924c','#f72585','#4cc9f0','#ffffff'];
+var GOLD=['#ffd166','#ff9f1c','#ffbf69','#fff3b0','#ff6b35'];
+function rnd(a,b){return a+Math.random()*(b-a)}
+function pick(a){return a[(Math.random()*a.length)|0]}
+function esc(t){return String(t).replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]})}
+function mkDecor(dk,th,em){
+  var d=document.createElement('div'); d.className='clx-dc';
+  var n=Math.max(8,Math.min(22,Math.round((window.innerWidth||1000)/70)));
+  function rp(a,k){var o=[];for(var i=0;i<k;i++)o.push(a[i%a.length]);return o}
+  function row(cls,arr){return '<div class="'+cls+'">'+arr.map(function(e,i){return '<i style="--i:'+i+'">'+e+'</i>'}).join('')+'</div>'}
+  function drift(cls,arr,k,t0,t1){var o='';for(var i=0;i<k;i++){o+='<span class="'+cls+'" style="left:'+(rnd(2,96)|0)+'%;--dx:'+(rnd(-40,40)|0)+'px;animation-duration:'+rnd(t0,t1).toFixed(1)+'s;animation-delay:-'+rnd(0,t1).toFixed(1)+'s;font-size:'+(rnd(18,34)|0)+'px">'+arr[i%arr.length]+'</span>'}return o}
+  function scatter(arr,k){var o='';for(var i=0;i<k;i++){o+='<span class="tws" style="left:'+(rnd(2,96)|0)+'%;top:'+(rnd(4,92)|0)+'%;animation-delay:-'+rnd(0,2).toFixed(1)+'s;font-size:'+(rnd(14,28)|0)+'px">'+arr[i%arr.length]+'</span>'}return o}
+  var wash={pongal:'linear-gradient(180deg,rgba(253,224,71,.22),rgba(253,224,71,0) 38%,rgba(34,197,94,.10))',diwali:'radial-gradient(ellipse at 50% 0,rgba(251,146,60,.24),rgba(0,0,0,0) 58%),linear-gradient(0deg,rgba(190,24,93,.10),rgba(0,0,0,0) 30%)',birthday:'linear-gradient(180deg,rgba(236,72,153,.14),rgba(124,58,237,0) 40%,rgba(14,165,233,.09))'}[dk]||('linear-gradient(180deg,'+th[0]+'26,rgba(0,0,0,0) 42%)');
+  var h='<div class="ws" style="background:'+wash+'"></div>';
+  if(dk==='pongal'){ h+=row('tp',rp(['\ud83c\udf43','\ud83c\udf3c','\ud83c\udf43','\ud83c\udf38'],n))+'<div class="sun">\ud83c\udf1e</div>'+row('bt',rp(['\ud83c\udf3e','\ud83e\udd6d','\ud83c\udf4c','\ud83c\udf3e','\ud83c\udf72','\ud83c\udf3e'],n))+'<div class="kol">'+KOL+'</div>'+drift('fd',['\ud83c\udf3c','\ud83c\udf3e'],7,9,15) }
+  else if(dk==='diwali'){ h+='<div class="wire"></div>'+row('tp tw',rp(['\ud83d\udd34','\ud83d\udfe1','\ud83d\udfe2','\ud83d\udd35','\ud83d\udfe0','\ud83d\udfe3'],n*2))+'<div class="lan l1">\ud83c\udfee</div><div class="lan l2">\ud83c\udfee</div>'+row('bt gl',rp(['\ud83e\ude94'],n))+drift('fl',['\u2728'],8,8,14) }
+  else if(dk==='birthday'){ var cl=['#ef4444','#f59e0b','#22c55e','#3b82f6','#a855f7','#ec4899'],m=24,tri=''; for(var i=0;i<m;i++){tri+='<polygon points="'+(i*1000/m)+',4 '+((i+1)*1000/m)+',4 '+((i+.5)*1000/m)+',46" fill="'+cl[i%6]+'"/>'}
+    h+='<svg class="bun" viewBox="0 0 1000 50" preserveAspectRatio="none"><path d="M0 4 L1000 4" stroke="#7c3aed" stroke-width="2"/>'+tri+'</svg>'+drift('fl',['\ud83c\udf88'],9,9,16)+row('bt',rp(['\ud83c\udf81','\ud83c\udf82','\ud83c\udf89','\ud83c\udf8a','\ud83c\udf81','\ud83c\udf82'],Math.max(6,n>>1))) }
+  else if(dk==='floral'){ h+=row('tp',rp(['\ud83c\udf38','\ud83c\udf3a','\ud83c\udf3c'],n))+drift('fd',['\ud83c\udf38','\ud83c\udf3a'],9,9,15) }
+  else if(dk==='stars'){ h+=scatter(['\u2728','\u2b50','\u2728'],16) }
+  else { h+='<div class="wire"></div>'+row('tp tw',rp(['\ud83d\udd34','\ud83d\udfe1','\ud83d\udfe2','\ud83d\udd35','\ud83d\udfe0','\ud83d\udfe3'],n*2)) }
+  if(em) h+=drift('fd',[esc(em)],6,9,15);
+  d.innerHTML=h; return d;
+}
+function css(){
+  if(document.getElementById('clx-css')) return;
+  var s=document.createElement('style'); s.id='clx-css';
+  s.textContent='.clx{position:fixed;inset:0;z-index:2147483000;pointer-events:none;opacity:0;transition:opacity .4s}.clx.on{opacity:1}'
+  +'.clx-cv{position:absolute;inset:0;width:100%;height:100%}'
+  +'.clx-card{position:absolute;left:50%;top:11%;transform:translate(-50%,-30px) scale(.9);pointer-events:auto;box-sizing:border-box;width:max-content;max-width:min(92vw,520px);padding:18px 48px 18px 22px;border-radius:18px;color:#fff;text-align:center;background:linear-gradient(135deg,var(--a),var(--b));box-shadow:0 24px 50px -16px #000a,0 0 44px var(--a);opacity:0;transition:transform .55s cubic-bezier(.2,1.4,.4,1),opacity .4s}'
+  +'.clx.on .clx-card{transform:translate(-50%,0) scale(1);opacity:1}'
+  +'.clx-ic{display:block;font-size:42px;line-height:1.1;margin-bottom:6px;animation:clxB 1.1s ease-in-out infinite}'
+  +'.clx-t{display:block;font-size:22px;font-weight:800;text-shadow:0 2px 10px #0006;word-break:break-word}'
+  +'.clx-m{display:block;margin-top:6px;font-size:14.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word;opacity:.97}'
+  +'.clx-x{position:absolute;top:8px;right:10px;width:30px;height:30px;border:0;border-radius:50%;background:#ffffff33;color:#fff;font-size:18px;line-height:1;cursor:pointer}.clx-x:hover{background:#ffffff55}'
+  +'@keyframes clxB{50%{transform:translateY(-6px) scale(1.08)}}'
+  +'.clx-bn{box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:4px 8px;flex-wrap:wrap;margin:0 0 10px;padding:6px 14px;border-radius:10px;color:#fff;text-align:center;background:linear-gradient(135deg,var(--a),var(--b));box-shadow:0 4px 14px -6px var(--a);font-size:12px;line-height:1.4;animation:clxP 2.4s ease-in-out infinite}'
+  +'.clx-bn b{font-size:12.5px;font-weight:700}.clx-bn span{font-size:11.5px;opacity:.96}.clx-bn i{font-style:normal;font-size:14px}'
+  +'.clx-bn.fix{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:2147483001;max-width:92vw;margin:0}'
+  +'@keyframes clxP{50%{box-shadow:0 4px 22px -2px var(--a)}}'
+  +'.clx-dc{position:absolute;inset:0;overflow:hidden;pointer-events:none}.clx-dc .ws{position:absolute;inset:0}.clx-dc i{font-style:normal;display:inline-block}'
+  +'.clx-dc .tp,.clx-dc .bt{position:absolute;left:0;right:0;display:flex;justify-content:space-around}.clx-dc .tp{top:0;font-size:clamp(18px,3vw,30px)}.clx-dc .bt{bottom:0;font-size:clamp(22px,3.6vw,38px)}'
+  +'.clx-dc .tp i{transform-origin:50% 0;animation:clxSw 3s ease-in-out infinite;animation-delay:calc(var(--i)*.15s)}.clx-dc .tp.tw{top:8px;font-size:clamp(10px,1.6vw,16px)}.clx-dc .tp.tw i{animation:clxTw 1.3s ease-in-out infinite;animation-delay:calc(var(--i)*.11s)}'
+  +'.clx-dc .bt.gl i{animation:clxFl .8s ease-in-out infinite alternate;animation-delay:calc(var(--i)*.13s)}'
+  +'.clx-dc .wire{position:absolute;top:12px;left:0;right:0;height:2px;background:#7c4a1e;opacity:.7}.clx-dc .sun{position:absolute;top:34px;right:3%;font-size:clamp(40px,7vw,84px);animation:clxSpin 24s linear infinite}'
+  +'.clx-dc .kol{position:absolute;left:10px;bottom:46px;width:clamp(70px,10vw,120px);animation:clxSpin 40s linear infinite;opacity:.85}.clx-dc .lan{position:absolute;top:30px;font-size:clamp(30px,5vw,54px);transform-origin:50% 0;animation:clxSw 3.2s ease-in-out infinite}.clx-dc .l1{left:2%}.clx-dc .l2{right:2%;animation-delay:-1.4s}'
+  +'.clx-dc .bun{position:absolute;top:0;left:0;width:100%;height:46px;transform-origin:50% 0;animation:clxSw2 6s ease-in-out infinite}'
+  +'.clx-dc .fl{position:absolute;bottom:-48px;animation:clxUp linear infinite;opacity:.9}.clx-dc .fd{position:absolute;top:-48px;animation:clxDn linear infinite;opacity:.85}.clx-dc .tws{position:absolute;animation:clxTw 1.6s ease-in-out infinite}'
+  +'@keyframes clxUp{to{transform:translate(var(--dx,0),-120vh)}}@keyframes clxDn{to{transform:translate(var(--dx,0),120vh) rotate(360deg)}}@keyframes clxSw{0%,100%{transform:rotate(-7deg)}50%{transform:rotate(7deg)}}@keyframes clxSw2{0%,100%{transform:skewX(-1.2deg)}50%{transform:skewX(1.2deg)}}@keyframes clxSpin{to{transform:rotate(360deg)}}@keyframes clxTw{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1.15)}}@keyframes clxFl{from{filter:drop-shadow(0 0 3px #ffb703)}to{filter:drop-shadow(0 0 12px #ff7b00)}}'
+  +'@media(prefers-reduced-motion:reduce){.clx-dc *{animation:none!important}}'
+  +'@media(prefers-reduced-motion:reduce){.clx-ic,.clx-bn{animation:none}.clx-card{transition:none}}@media print{.clx,.clx-bn{display:none}}';
+  document.head.appendChild(s);
+}
+window.__clStop=function(){ var r=document.getElementById('clx-root'); if(r&&r.__fin) r.__fin() };
+window.__clPlay=function(c,done){
+  css();
+  var old=document.getElementById('clx-root'); if(old&&old.__fin) old.__fin(true);
+  var root=document.createElement('div'); root.id='clx-root'; root.className='clx'; root.setAttribute('role','status'); root.setAttribute('aria-live','polite');
+  var th=c.th||THEME[c.occ]||THEME.custom; root.style.setProperty('--a',th[0]); root.style.setProperty('--b',th[1]);
+  var reduce=false; try{reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}
+  var cont=!!c.cont, inf=cont&&!c.prev, bn=null;
+  if(cont){
+    bn=document.createElement('div'); bn.className='clx-bn'; bn.setAttribute('role','status'); bn.style.setProperty('--a',th[0]); bn.style.setProperty('--b',th[1]);
+    var bi=document.createElement('i'); bi.setAttribute('aria-hidden','true'); bi.textContent=c.em||String.fromCodePoint(EMO[c.occ]||0x2728); bn.appendChild(bi);
+    if(c.title){var bt=document.createElement('b'); bt.textContent=c.title; bn.appendChild(bt)}
+    if(c.text){var bm=document.createElement('span'); bm.textContent=c.text; bn.appendChild(bm)}
+    var an=window.__clAnchor;
+    if(!c.prev&&an&&an.parentNode) an.parentNode.insertBefore(bn,an); else { bn.className+=' fix'; document.body.appendChild(bn) }
+  }
+  var dk=c.decor||DECOR[c.occ]||'lights'; if(dk!=='none') root.appendChild(mkDecor(dk,th,c.em||''));
+  var cv=null,ctx=null; if(!reduce){cv=document.createElement('canvas'); cv.className='clx-cv'; root.appendChild(cv); ctx=cv.getContext('2d')}
+  var card=document.createElement('div'); card.className='clx-card';
+  var ic=document.createElement('span'); ic.className='clx-ic'; ic.setAttribute('aria-hidden','true'); ic.textContent=c.em||String.fromCodePoint(EMO[c.occ]||0x2728); card.appendChild(ic);
+  if(c.title){var t=document.createElement('span'); t.className='clx-t'; t.textContent=c.title; card.appendChild(t)}
+  if(c.text){var m=document.createElement('span'); m.className='clx-m'; m.textContent=c.text; card.appendChild(m)}
+  var x=document.createElement('button'); x.type='button'; x.className='clx-x'; x.setAttribute('aria-label','Close'); x.textContent='\u00d7'; card.appendChild(x);
+  if(!cont) root.appendChild(card); document.body.appendChild(root);
+  setTimeout(function(){root.className='clx on'},30);
+  var dur=Math.max(5,Math.min(120,+c.dur||12)), fin=false, raf=0, hard=0, W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2);
+  function finish(quick){
+    if(fin) return; fin=true; cancelAnimationFrame(raf); clearTimeout(hard);
+    window.removeEventListener('resize',size); document.removeEventListener('keydown',key);
+    root.className='clx'; var wait=quick?0:450; if(bn&&bn.parentNode) bn.parentNode.removeChild(bn);
+    setTimeout(function(){ if(root.parentNode) root.parentNode.removeChild(root); if(done) done() },wait);
+  }
+  root.__fin=finish; x.addEventListener('click',function(){finish()});
+  function key(e){if(e.key==='Escape'&&!inf) finish()} document.addEventListener('keydown',key);
+  if(reduce){ if(!inf) hard=setTimeout(function(){finish()},Math.min(dur,8)*1000); return }
+  function size(){W=window.innerWidth;H=window.innerHeight;cv.width=Math.round(W*DPR);cv.height=Math.round(H*DPR);ctx.setTransform(DPR,0,0,DPR,0,0)}
+  size(); window.addEventListener('resize',size);
+  var L=({low:.55,mid:1,high:1.7})[c.lvl]||1, fx={}; (FXMAP[c.fx]||FXMAP.fireworks).forEach(function(k){fx[k]=1});
+  var sp=[],rk=[],cf=[],bl=[],fo=[],ld=[];
+  var t0=performance.now(), last=t0, end=inf?Infinity:t0+dur*1000, quiet=inf?Infinity:end-2200;
+  var nRk=t0+300, nCr=t0+200, nCf=t0, nBl=t0;
+  function burst(x0,y0,col,n,sp0,sp1,g,life,ring){
+    for(var i=0;i<n;i++){ var a=ring?(i/n)*Math.PI*2:rnd(0,Math.PI*2), v=ring?sp1:rnd(sp0,sp1);
+      sp.push({x:x0,y:y0,px:x0,py:y0,vx:Math.cos(a)*v,vy:Math.sin(a)*v,g:g,l:rnd(life*.7,life),m:life,c:Array.isArray(col)?pick(col):col,w:rnd(1.4,2.6)}) }
+  }
+  function explode(x0,y0){
+    var c1=pick(PAL), c2=pick(PAL), n=Math.round(rnd(46,72)*Math.min(L,1.4)), ring=Math.random()<.3;
+    burst(x0,y0,[c1,c1,c2],n,1.2,ring?4.2:5.2,.055,rnd(.9,1.5),ring);
+    if(Math.random()<.4) burst(x0,y0,'#ffffff',Math.round(14*Math.min(L,1.4)),.6,2.2,.04,.8,false);
+  }
+  function pop(x0,y0){
+    fo.push({x:x0,y:y0,r:4,l:.16});
+    burst(x0,y0,GOLD,Math.round(14*Math.min(L,1.5)),1,4.6,.16,rnd(.35,.6),false);
+  }
+  function step(now){
+    var dt=Math.min((now-last)/1000,.05); last=now; var k=dt*60, live=now<quiet;
+    if(fx.fw&&live&&now>=nRk&&rk.length<6){ rk.push({x:rnd(.12,.88)*W,y:H+4,vx:rnd(-.6,.6),vy:-rnd(9.5,12.5)*Math.max(.7,H/800),c:pick(PAL)}); nRk=now+rnd(380,900)/L }
+    if(fx.cr&&live&&now>=nCr){
+      if(Math.random()<.5){ fo.push({fount:1,x:rnd(.1,.9)*W,y:H,until:now+rnd(2200,3400),next:0}) }
+      else { var dir=Math.random()<.5?1:-1, x1=dir>0?rnd(0,.3)*W:rnd(.7,1)*W; ld.push({x:x1,d:dir,left:Math.round(rnd(14,26)),next:now}) }
+      nCr=now+rnd(900,1700)/L }
+    if(fx.cf&&live&&now>=nCf){ for(var i=0;i<Math.round(5*L);i++) cf.push({x:rnd(0,W),y:-12,vx:rnd(-1.2,1.2),vy:rnd(1.6,3.6),r:rnd(0,6.3),vr:rnd(-.2,.2),w:rnd(6,11),h:rnd(3,6),c:pick(PAL),ph:rnd(0,6.3)}); nCf=now+90 }
+    if(fx.cf&&now-t0<400&&!cf.__b){ cf.__b=1; [0,1].forEach(function(s){ for(var i=0;i<Math.round(40*L);i++){ var a=(s?Math.PI*1.25:Math.PI*1.75)+rnd(-.35,.35), v=rnd(9,17); cf.push({x:s?W:0,y:H,vx:Math.cos(a)*v,vy:Math.sin(a)*v,r:rnd(0,6.3),vr:rnd(-.3,.3),w:rnd(6,11),h:rnd(3,6),c:pick(PAL),ph:rnd(0,6.3),cn:1}) } }) }
+    if(fx.bl&&live&&now>=nBl&&bl.length<28){ bl.push({x:rnd(.04,.96)*W,y:H+60,vy:rnd(1,2.2),r:rnd(20,32),c:pick(PAL),ph:rnd(0,6.3),a:rnd(10,26)}); nBl=now+rnd(160,320)/L }
+    var i;
+    for(i=rk.length-1;i>=0;i--){ var r=rk[i]; r.px=r.x;r.py=r.y; r.x+=r.vx*k; r.y+=r.vy*k; r.vy+=.18*k; if(r.vy>-1.2){ explode(r.x,r.y); rk.splice(i,1) } }
+    for(i=fo.length-1;i>=0;i--){ var f=fo[i];
+      if(f.fount){ if(now>=f.until){fo.splice(i,1);continue} if(now>=f.next){ for(var j=0;j<Math.round(5*L);j++){ var a=-Math.PI/2+rnd(-.4,.4), v=rnd(6,11); sp.push({x:f.x,y:f.y,px:f.x,py:f.y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,g:.2,l:rnd(.8,1.3),m:1.3,c:pick(GOLD),w:rnd(1.4,2.4)}) } f.next=now+30 } }
+      else { f.l-=dt; f.r+=40*k*.3; if(f.l<=0) fo.splice(i,1) } }
+    for(i=ld.length-1;i>=0;i--){ var q=ld[i]; if(now>=q.next){ pop(q.x,H-rnd(2,16)); q.x+=q.d*rnd(14,24); q.left--; q.next=now+rnd(60,110); if(q.left<=0||q.x<-10||q.x>W+10) ld.splice(i,1) } }
+    if(sp.length>900) sp.splice(0,sp.length-900);
+    for(i=sp.length-1;i>=0;i--){ var s=sp[i]; s.px=s.x;s.py=s.y; s.x+=s.vx*k; s.y+=s.vy*k; s.vy+=s.g*k; s.vx*=Math.pow(.985,k); s.l-=dt; if(s.l<=0) sp.splice(i,1) }
+    for(i=cf.length-1;i>=0;i--){ var p=cf[i]; p.ph+=.08*k; p.x+=(p.vx+Math.sin(p.ph)*.8)*k; p.y+=p.vy*k; p.r+=p.vr*k; if(p.cn){p.vx*=Math.pow(.95,k); p.vy=p.vy*Math.pow(.95,k)+.18*k; if(p.vy>2.2) p.cn=0} if(p.y>H+20) cf.splice(i,1) }
+    for(i=bl.length-1;i>=0;i--){ var b=bl[i]; b.y-=b.vy*k; b.ph+=.03*k; b.x+=Math.sin(b.ph)*.5*k; if(b.y<-120) bl.splice(i,1) }
+    draw(now);
+    if(now>=end&&!sp.length&&!rk.length&&!cf.length&&!bl.length&&!fo.length&&!ld.length) finish(); else raf=requestAnimationFrame(step);
+  }
+  function draw(now){
+    ctx.clearRect(0,0,W,H); var i;
+    ctx.lineCap='round';
+    for(i=0;i<bl.length;i++){ var b=bl[i], bx=b.x, by=b.y;
+      ctx.strokeStyle='rgba(120,120,120,.55)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(bx,by+b.r*1.25); ctx.quadraticCurveTo(bx+Math.sin(b.ph*2)*b.a,by+b.r*2.2,bx,by+b.r*3.4); ctx.stroke();
+      ctx.fillStyle=b.c; ctx.beginPath(); ctx.ellipse(bx,by,b.r,b.r*1.22,0,0,6.2832); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(bx,by+b.r*1.22); ctx.lineTo(bx-4,by+b.r*1.22+7); ctx.lineTo(bx+4,by+b.r*1.22+7); ctx.closePath(); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.4)'; ctx.beginPath(); ctx.ellipse(bx-b.r*.35,by-b.r*.4,b.r*.2,b.r*.34,-.5,0,6.2832); ctx.fill() }
+    for(i=0;i<cf.length;i++){ var p=cf[i]; ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.r); ctx.scale(1,Math.abs(Math.cos(p.ph))*.9+.1); ctx.fillStyle=p.c; ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h); ctx.restore() }
+    for(i=0;i<rk.length;i++){ var r=rk[i]; ctx.strokeStyle='#ffe9a8'; ctx.lineWidth=2.4; ctx.beginPath(); ctx.moveTo(r.px,r.py); ctx.lineTo(r.x,r.y); ctx.stroke() }
+    ctx.globalCompositeOperation='lighter';
+    for(i=0;i<fo.length;i++){ var f=fo[i]; if(f.fount) continue; var al=Math.max(f.l/.16,0); var g=ctx.createRadialGradient(f.x,f.y,0,f.x,f.y,f.r*3); g.addColorStop(0,'rgba(255,240,190,'+al+')'); g.addColorStop(1,'rgba(255,140,0,0)'); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(f.x,f.y,f.r*3,0,6.2832); ctx.fill() }
+    for(i=0;i<sp.length;i++){ var s=sp[i]; ctx.globalAlpha=Math.max(Math.min(s.l/(s.m*.6),1),0); ctx.strokeStyle=s.c; ctx.lineWidth=s.w; ctx.beginPath(); ctx.moveTo(s.px,s.py); ctx.lineTo(s.x,s.y); ctx.stroke() }
+    ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over';
+  }
+  if(!inf) hard=setTimeout(function(){finish()},(dur+8)*1000);
+  raf=requestAnimationFrame(step);
+};
+})();
+'''
+CL_RUNNER_JS = r'''(function(){
+window.__clAnchor=document.currentScript;
+var CFG=__DATA__, q=[], busy=false, played={}, ACT='';
+function ls(){try{return window.localStorage}catch(e){return null}}
+function ss(){try{return window.sessionStorage}catch(e){return null}}
+function kk(c){return 'cl:'+c.id+':'+CFG.eid}
+function due(c){
+  if(c.cont) return ACT!==c.id;
+  if(played[c.id]) return false;
+  try{
+    if(c.freq==='day'){var a=ls(); if(a&&a.getItem(kk(c))===CFG.today) return false}
+    if(c.freq==='login'){var b=ss(); if(b&&b.getItem(kk(c))) return false}
+  }catch(e){}
+  return true;
+}
+function mark(c){
+  if(c.cont) return;
+  played[c.id]=1;
+  try{ if(c.freq==='day'){var a=ls(); if(a) a.setItem(kk(c),CFG.today)} else if(c.freq==='login'){var b=ss(); if(b) b.setItem(kk(c),'1')} }catch(e){}
+  if(c.freq==='once'){ try{ fetch('/employee/celebration/seen',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:c.id})}) }catch(e){} }
+}
+function next(){
+  if(busy) return; var c=null;
+  while(q.length){ c=q.shift(); if(due(c)) break; c=null }
+  if(!c) return; busy=true; mark(c); ACT=c.id;
+  window.__clPlay(c,function(){ busy=false; if(ACT===c.id) ACT=''; setTimeout(next,600) });
+}
+function add(list){
+  (list||[]).slice().sort(function(a,b){return (a.cont?1:0)-(b.cont?1:0)}).forEach(function(c){ if(due(c)&&!q.some(function(x){return x.id===c.id})) q.push(c) });
+  next();
+}
+function chk(){
+  if(document.hidden) return;
+  fetch('/employee/celebration/poll',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(d){
+    if(!d||!d.items) return;
+    var lv=d.live||d.items.map(function(x){return x.id}); if(ACT&&lv.indexOf(ACT)<0){ if(window.__clStop) window.__clStop() }      /* Admin clicked Stop (or it ended / was switched off): remove the message and every animation */
+    add(d.items);
+  }).catch(function(){});
+}
+setTimeout(function(){ add(CFG.items) },900);
+setInterval(chk,30000);
+document.addEventListener('visibilitychange',function(){ if(!document.hidden) chk() });
+})();
+'''
+CL_EMP_JS = "<script>" + CL_ENGINE_JS + CL_RUNNER_JS + "</script>"
+
+def cl_html():
+    """The celebration player for the Employee page: the data of what is live for this employee now, the animation engine and a light 45-second check for celebrations the Admin starts while the page is open."""
+    eid = session.get("emp_id", "")
+    data = json.dumps(dict(eid=str(eid), today=str(today_local()), items=cl_for(eid, session.get("name", ""))), separators=(",", ":"))
+    return CL_EMP_JS.replace("__DATA__", data.replace("</", "<\\/"))
+
+def cl_live_ids(eid):
+    """Update266: IDs of every celebration that is Live for this employee right now (even ones already shown) - lets an open page drop a celebration the Admin stopped."""
+    try: return [str(c["Celebration ID"]).strip() for c in rows(CL_SHEET) if str(c.get("Celebration ID", "")).strip() and _nt_visible(c, eid)]
+    except Exception: return None
+
+@app.route("/employee/celebration/poll")
+@need("employee")
+def employee_celebration_poll():
+    _lv = cl_live_ids(session["emp_id"])
+    r = jsonify(items=cl_for(session["emp_id"], session.get("name", "")), **({"live": _lv} if _lv is not None else {})); r.headers["Cache-Control"] = "no-store"; return r
+
+@app.route("/employee/celebration/seen", methods=["POST"])
+@need("employee")
+def employee_celebration_seen():
+    eid = session["emp_id"]; d = request.get_json(silent=True) or {}; cid = str(d.get("id", "")).strip()
+    c = next((c for c in rows(CL_SHEET) if str(c.get("Celebration ID", "")).strip() == cid and _nt_visible(c, eid)), None)
+    if c is None or _cl_freq(c) != "once": return jsonify(ok=True, added=0)
+    have = any(str(r.get("Celebration ID", "")).strip() == cid and _key(r.get("Employee ID", "")) == _key(eid) for r in rows(CL_SEEN))
+    if not have:
+        try: ws_of(CL_SEEN).append_row([cid, str(eid), str(session.get("name", "")), now_local().strftime("%Y-%m-%d %H:%M:%S")], value_input_option="RAW"); invalidate_cache(CL_SEEN)
+        except Exception as ex:
+            print("Celebration Seen save failed:", repr(ex)); return jsonify(ok=False), 500
+    return jsonify(ok=True, added=0 if have else 1)
+
+CELEB_ADM = r'''<style>
+.cl-f label{display:block;font-weight:600;font-size:13px;margin:12px 0 4px}
+.cl-f input[type=text],.cl-f input[type=number],.cl-f select,.cl-f textarea{width:100%;box-sizing:border-box}
+.cl-f textarea{min-height:90px;resize:vertical;line-height:1.5}
+.cl-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;align-items:end}
+.cl-cnt{font-size:12px;color:#6b7280;margin-top:4px}
+.cl-aud{border:1px solid #dfe4f5;border-radius:12px;padding:12px 14px;margin-top:14px;background:#f8f9ff}.cl-aud legend{font-weight:700;font-size:13px;padding:0 6px}
+.cl-aud .ra{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:6px}.cl-aud .ra label{display:flex;align-items:center;gap:6px;margin:4px 0;font-weight:600}.cl-aud .ra input{width:auto}
+.cl-pick{margin-top:8px}.cl-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}.cl-tools input{flex:1;min-width:160px}.cl-tools button{padding:6px 12px;font-size:12px}
+.cl-list{max-height:260px;overflow:auto;border:1px solid #e3e7f7;border-radius:10px;background:#fff;padding:6px 10px}
+.cl-pk{display:flex!important;align-items:center;gap:8px;font-weight:500!important;margin:0!important;padding:5px 2px;border-bottom:1px dashed #eef0fb;font-size:13px}.cl-pk input{width:auto}.cl-pk small{color:#6b7280;margin-left:auto}
+.cl-dtw{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.cl-dtw input{flex:1;min-width:190px}.cl-dtw button{padding:6px 10px;font-size:12px}
+.cl-sel{font-size:12px;color:#4f46e5;font-weight:700;margin-top:6px}
+.cl-st-Live{color:#047857;font-weight:700}.cl-st-Scheduled{color:#1d4ed8;font-weight:700}.cl-st-Ended{color:#6b7280;font-weight:700}.cl-st-Hidden{color:#b45309;font-weight:700}
+.cl-act form{display:inline}.cl-act button,.cl-act a{font-size:12px;padding:4px 10px;margin:2px;cursor:pointer}
+.cl-tiles{display:flex;flex-wrap:wrap;gap:8px}.cl-tile{border:0;cursor:pointer;border-radius:99px;padding:8px 16px;font-weight:700;font-size:13px;background:#eef0fb;color:#4f46e5}.cl-tile:hover{background:#4f46e5;color:#fff}
+.cl-tag{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700;color:#fff;background:linear-gradient(135deg,#4f46e5,#7c3aed)}
+</style>
+<div class="card" id="themes"><h2>Celebration themes</h2>
+<p class="mut">Choose a theme and start it below. The Employee page then shows that theme's background decorations and animation until you stop it. Click a theme to select it in the form, or add your own theme for any other celebration.</p>
+<div class="cl-tiles">{% for k,l in occs %}<button type="button" class="cl-tile" data-occ="{{k}}">{{l}}</button>{% endfor %}</div>
+<h3 style="margin:16px 0 6px">Your own themes</h3>
+{% if themes %}<table><tr><th>Theme</th><th>Decoration</th><th>Animation</th><th>Colours</th><th>Emoji</th><th></th></tr>
+{% for t in themes %}<tr><td><b>{{t.name}}</b><br><small class="mut">{{t.title}}</small></td><td>{{ (decors|selectattr(0,'equalto',t.decor)|first)[1] }}</td><td>{{ (fxs|selectattr(0,'equalto',t.fx)|first)[1] }}</td>
+<td><span style="display:inline-block;width:22px;height:22px;border-radius:6px;background:{{t.c1}};vertical-align:middle"></span> <span style="display:inline-block;width:22px;height:22px;border-radius:6px;background:{{t.c2}};vertical-align:middle"></span></td><td style="font-size:22px">{{t.em}}</td>
+<td class="cl-act"><a class="back sm" href="/admin/celebrations-log?theme={{t.id}}#themes">Edit</a><form method="post" action="/admin/celebrations-log/theme/{{t.id}}/delete" onsubmit="return confirm('Delete this theme?')"><button class="back sm">Delete</button></form></td></tr>{% endfor %}</table>
+{% else %}<p class="mut">No themes of your own yet.</p>{% endif %}
+<form method="post" action="/admin/celebrations-log/theme/save" class="cl-f" style="margin-top:12px"><input type="hidden" name="id" value="{{tf.id}}">
+<h3 style="margin:0 0 6px">{{ 'Edit theme' if tf.id else 'Add a theme' }}</h3>
+<div class="cl-row"><label>Theme name<input type="text" name="name" maxlength="40" value="{{tf.name}}" placeholder="e.g. Christmas, Holi, Independence Day" required></label>
+<label>Decoration style<select name="decor">{% for k,l in decors %}<option value="{{k}}" {{'selected' if tf.decor==k}}>{{l}}</option>{% endfor %}</select></label>
+<label>Animation<select name="fx">{% for k,l in fxs %}<option value="{{k}}" {{'selected' if tf.fx==k}}>{{l}}</option>{% endfor %}</select></label>
+<label>Colour 1<input type="color" name="c1" value="{{tf.c1}}"></label><label>Colour 2<input type="color" name="c2" value="{{tf.c2}}"></label>
+<label>Emoji (falls like petals)<input type="text" name="em" maxlength="8" value="{{tf.em}}" placeholder="e.g. &#127876;"></label></div>
+<label>Default title<input type="text" name="title" maxlength="120" value="{{tf.title}}" placeholder="e.g. Merry Christmas!"></label>
+<label>Default message<textarea name="message" maxlength="500" placeholder="The wish shown with this theme (you can still change it for each celebration)">{{tf.message}}</textarea></label>
+<p><button class="primary">{{ 'Save theme' if tf.id else 'Add theme' }}</button> {% if tf.id %}<a class="back sm" href="/admin/celebrations-log#themes">Cancel</a>{% endif %}</p></form></div>
+<div class="card cl-f"><h2>{{ 'Edit celebration' if f.id else 'Create a celebration' }}</h2>
+<p class="mut">A celebration shows the chosen theme on the Employee page (the page employees land on after login): background decorations, animation and a greeting card. It only plays between the Display and Stop times, for the employees you choose. Type <b>{name}</b> in the title or message to greet each employee by first name.</p>
+<form method="post" action="/admin/celebrations-log/save" id="cl-form">
+<input type="hidden" name="id" value="{{f.id}}">
+<div class="cl-row">
+<label>Occasion<select name="occ" id="cl-occ">{% for k,l in occs %}<option value="{{k}}" {{'selected' if f.occ==k}}>{{l}}</option>{% endfor %}</select></label>
+<label>Animation<select name="fx" id="cl-fx">{% for k,l in fxs %}<option value="{{k}}" {{'selected' if f.fx==k}}>{{l}}</option>{% endfor %}</select></label>
+<label>Intensity<select name="lvl" id="cl-lvl">{% for k,l in lvls %}<option value="{{k}}" {{'selected' if f.lvl==k}}>{{l}}</option>{% endfor %}</select></label>
+<label>Plays for (seconds, 5-120; not used for Continuous)<input type="number" name="dur" id="cl-dur" min="5" max="120" value="{{f.dur}}"></label>
+<label>How often<select name="freq">{% for k,l in freqs %}<option value="{{k}}" {{'selected' if f.freq==k}}>{{l}}</option>{% endfor %}</select></label>
+</div>
+<label>Title <span class="mut">(shown on the greeting card)</span><input type="text" name="title" id="cl-title" maxlength="120" value="{{f.title}}" placeholder="e.g. Happy Pongal!"></label>
+<label>Message <span class="mut">(optional)</span><textarea name="message" id="cl-msg" maxlength="500" placeholder="A short wish for the employees...">{{f.message}}</textarea></label>
+<fieldset class="cl-aud"><legend>Schedule</legend>
+<div class="cl-row">
+<label>Display date &amp; time <span class="mut">(blank = starts immediately)</span><span class="cl-dtw"><input type="datetime-local" name="start" id="cl-start" value="{{f.start}}"><button type="button" class="back sm" data-now="cl-start">Now</button><button type="button" class="back sm" data-clr="cl-start">Clear</button></span></label>
+<label>Stop date &amp; time <span class="mut">(blank = until you stop it)</span><span class="cl-dtw"><input type="datetime-local" name="stop" id="cl-stop" value="{{f.stop}}"><button type="button" class="back sm" data-clr="cl-stop">Clear</button></span></label>
+</div><div class="cl-cnt" id="cl-sch"></div></fieldset>
+<fieldset class="cl-aud"><legend>Who sees this?</legend>
+<div class="ra"><label><input type="radio" name="audience" value="all" {{'checked' if f.aud=='all'}}> All employees</label><label><input type="radio" name="audience" value="selected" {{'checked' if f.aud=='selected'}}> Only selected employees (e.g. the birthday person)</label></div>
+<div class="cl-pick" id="cl-pick" style="display:{{'block' if f.aud=='selected' else 'none'}}">
+<div class="cl-tools"><input type="text" id="cl-q" placeholder="Search by ID, name or designation"><button type="button" class="back sm" id="cl-all">Select shown</button><button type="button" class="back sm" id="cl-none">Clear all</button></div>
+<div class="cl-list">{% for e in emps %}<label class="cl-pk" data-s="{{(e.id ~ ' ' ~ e.name ~ ' ' ~ e.desig)|lower}}"><input type="checkbox" name="to" value="{{e.id}}" {{'checked' if e.ck}}><b>{{e.id}}</b> &middot; {{e.name}}{% if e.locked %} <em class="mut">(locked)</em>{% endif %}<small>{{e.desig}}</small></label>{% endfor %}</div>
+<div class="cl-sel"><span id="cl-n">0</span> employee(s) selected</div></div></fieldset>
+<p style="margin-top:14px"><button class="primary">{{ 'Save changes' if f.id else 'Save celebration' }}</button> <button type="button" class="back sm" id="cl-pv" style="padding:9px 16px">&#9654; Preview animation</button> {% if f.id %}<a class="back sm" href="/admin/celebrations-log">Cancel</a>{% endif %}</p>
+</form></div>
+<div class="card"><h2>Celebrations</h2>
+{% if not items %}<p class="mut">No celebrations yet. Pick an occasion above - Pongal, Birthday, Diwali and New Year come with ready-made wishes and animations.</p>{% else %}
+<table><tr><th>Created</th><th>Celebration</th><th>Animation</th><th>Schedule</th><th>Viewers</th><th>Shown to</th><th>How often</th><th>Status</th><th></th></tr>
+{% for n in items %}<tr><td>{{n.at|t12}}{% if n.upd %}<br><small class="mut">edited {{n.upd|t12}}</small>{% endif %}</td>
+<td style="max-width:280px"><b>{{n.title or '(no title)'}}</b><br><span class="cl-tag">{{n.occ}}</span><br><span class="mut">{{n.message[:110]}}{{'...' if n.message|length>110}}</span></td>
+<td>{{n.fx}}<br><small class="mut">{{n.lvl}}{% if n.freq[:10]!='Continuous' %} &middot; {{n.dur}} s{% endif %}</small></td>
+<td style="white-space:nowrap"><small class="mut">Display</small> {{ (n.start|t12) if n.start else 'Immediately' }}<br><small class="mut">Stop</small> {{ (n.stop|t12) if n.stop else 'Not set' }}</td>
+<td>{% if n.sel %}Selected ({{n.total}}){% else %}All employees ({{n.total}}){% endif %}</td>
+<td>{% if n.seen_n is not none %}<b>{{n.seen_n}}</b> / {{n.total}}{% else %}<span class="mut">-</span>{% endif %}</td>
+<td>{{n.freq}}</td><td class="cl-st-{{n.state}}">{{n.state}}</td>
+<td class="cl-act"><button type="button" class="back sm" data-pv='{{ n.pv|tojson }}'>&#9654; Preview</button> <a class="back sm" href="/admin/celebrations-log?edit={{n.id}}#cl-form">Edit</a>
+{% if n.state=='Scheduled' %}<form method="post" action="/admin/celebrations-log/{{n.id}}/status"><input type="hidden" name="to" value="startnow"><button class="back sm">Start now</button></form>{% elif n.state=='Live' %}<form method="post" action="/admin/celebrations-log/{{n.id}}/status"><input type="hidden" name="to" value="stopnow"><button class="back sm" style="background:#dc2626;color:#fff;border-color:#dc2626">&#9632; Stop</button></form>{% endif %}
+<form method="post" action="/admin/celebrations-log/{{n.id}}/status"><input type="hidden" name="to" value="{{ 'restore' if n.status=='Archived' else 'archive' }}"><button class="back sm">{{ 'Switch on again' if n.status=='Archived' else 'Switch off' }}</button></form>
+<form method="post" action="/admin/celebrations-log/{{n.id}}/status" onsubmit="return confirm('Delete this celebration permanently?')"><input type="hidden" name="to" value="delete"><button class="back sm">Delete</button></form></td></tr>{% endfor %}</table>{% endif %}</div>
+<script>window.CL_PRESETS={{ presets|tojson }};window.CL_NOW='{{now_str}}';</script>
+{% raw %}<script>''' + CL_ENGINE_JS + r'''</script>
+<script>
+(function(){
+  var f=document.getElementById('cl-form'); if(!f) return;
+  var P=window.CL_PRESETS||{}, occ=document.getElementById('cl-occ'), fx=document.getElementById('cl-fx'), lvl=document.getElementById('cl-lvl'), dur=document.getElementById('cl-dur'), ti=document.getElementById('cl-title'), ms=document.getElementById('cl-msg');
+  function same(v,k){ v=v.trim(); if(!v) return true; return Object.keys(P).some(function(o){ return P[o][k]===v; }); }
+  occ.addEventListener('change',function(){ var p=P[occ.value]; if(!p) return; if(same(ti.value,'title')) ti.value=p.title; if(same(ms.value,'message')) ms.value=p.message; fx.value=p.fx; });
+  function play(c){ if(!window.__clPlay) return; c.prev=true; c.title=(c.title||'').replace(/\{name\}/g,'Employee'); c.text=(c.text||'').replace(/\{name\}/g,'Employee'); window.__clPlay(c); }
+  document.getElementById('cl-pv').addEventListener('click',function(){ play({id:'pv',title:ti.value.trim()||'Preview',text:ms.value.trim(),occ:occ.value,decor:(P[occ.value]||{}).decor,th:(P[occ.value]||{}).th,em:(P[occ.value]||{}).em,fx:fx.value,lvl:lvl.value,dur:Math.max(5,Math.min(120,+dur.value||12)),cont:(f.querySelector('[name=freq]').value==='continuous')}); });
+  document.querySelectorAll('[data-pv]').forEach(function(b){ b.addEventListener('click',function(){ try{ play(JSON.parse(b.getAttribute('data-pv'))); }catch(e){} }); });
+  document.querySelectorAll('.cl-tile').forEach(function(b){ b.addEventListener('click',function(){ occ.value=b.getAttribute('data-occ'); occ.dispatchEvent(new Event('change')); var t=document.getElementById('cl-form'); if(t) t.scrollIntoView({behavior:'smooth',block:'start'}); }); });
+  var pick=document.getElementById('cl-pick'), q=document.getElementById('cl-q'), nn=document.getElementById('cl-n');
+  function boxes(){ return f.querySelectorAll('input[name=to]'); }
+  function count(){ var c=0; boxes().forEach(function(b){ if(b.checked) c++; }); nn.textContent=c; }
+  f.querySelectorAll('input[name=audience]').forEach(function(r){ r.addEventListener('change',function(){ pick.style.display=(f.querySelector('input[name=audience]:checked').value==='selected')?'block':'none'; }); });
+  f.addEventListener('change',function(e){ if(e.target.name==='to') count(); }); count();
+  q.addEventListener('input',function(){ var s=q.value.trim().toLowerCase(); f.querySelectorAll('.cl-pk').forEach(function(l){ l.style.display=(!s||l.getAttribute('data-s').indexOf(s)>=0)?'':'none'; }); });
+  document.getElementById('cl-all').addEventListener('click',function(){ f.querySelectorAll('.cl-pk').forEach(function(l){ if(l.style.display!=='none') l.querySelector('input').checked=true; }); count(); });
+  document.getElementById('cl-none').addEventListener('click',function(){ boxes().forEach(function(b){ b.checked=false; }); count(); });
+  var st=document.getElementById('cl-start'), sp=document.getElementById('cl-stop'), sch=document.getElementById('cl-sch');
+  function fmt(v){ if(!v) return ''; var d=new Date(v); return isNaN(d)?v:d.toLocaleString([], {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
+  function schedTxt(){ var a=st.value,b=sp.value; sch.textContent=(a?'Starts '+fmt(a):'Starts immediately')+(b?' \u2192 stops '+fmt(b):' \u2192 plays until you stop or switch it off'); }
+  [st,sp].forEach(function(i){ i.addEventListener('input',schedTxt); i.addEventListener('change',schedTxt); }); schedTxt();
+  f.querySelectorAll('[data-now]').forEach(function(b){ b.addEventListener('click',function(){ document.getElementById(b.getAttribute('data-now')).value=window.CL_NOW; schedTxt(); }); });
+  f.querySelectorAll('[data-clr]').forEach(function(b){ b.addEventListener('click',function(){ document.getElementById(b.getAttribute('data-clr')).value=''; schedTxt(); }); });
+  f.addEventListener('submit',function(e){
+    if(st.value&&sp.value&&sp.value<=st.value){ e.preventDefault(); alert('The Stop date & time must be after the Display date & time.'); return; }
+    var sel=f.querySelector('input[name=audience]:checked'); if(sel&&sel.value==='selected'&&!f.querySelector('input[name=to]:checked')){ e.preventDefault(); alert('Tick at least one employee, or choose All employees.'); return; }
+    if(!ti.value.trim()&&!ms.value.trim()){ e.preventDefault(); alert('Please enter a title or a message for the greeting card.'); }
+  });
+})();
+</script>{% endraw %}'''
+
+@app.route("/admin/celebrations-log")
+@need("admin")
+def admin_celebrations():
+    emps = _nt_emps(); seen = {}
+    for r in rows(CL_SEEN): seen.setdefault(str(r.get("Celebration ID", "")).strip(), {})[_key(r.get("Employee ID", ""))] = str(r.get("Seen at", "")).strip()
+    lab = lambda opts, k: next((l for o in opts for kk, l in [(o[0], o[1])] if kk == k), k)
+    items = []
+    for c in rows(CL_SHEET):
+        cid = str(c.get("Celebration ID", "")).strip(); st = str(c.get("Status", "")).strip() or "Active"
+        if not cid or st == "Deleted": continue
+        rec = _nt_recips(c); sel = str(c.get("Audience", "")).strip().lower() == "selected"
+        aud = [e for e in emps if (e["key"] in rec if sel else not e["locked"])]; sd = seen.get(cid, {}); fr = _cl_freq(c); w = _nt_window(c)
+        occ = _cl_occ(c.get("Occasion")); fxk = _cl_pick(c.get("Effect"), CL_FX_KEYS, "fireworks"); lv = _cl_pick(c.get("Intensity"), CL_LVL_KEYS, "mid"); du = _cl_int(c.get("Duration sec"), 5, 120, 12)
+        items.append(dict(id=cid, at=str(c.get("Created at", "")).strip(), upd=str(c.get("Updated at", "")).strip(), title=str(c.get("Title", "")).strip(), message=str(c.get("Message", "")),
+                          occ=_cl_label(occ), fx=lab(CL_FX, fxk), lvl=lab(CL_LVL, lv), dur=du, freq=lab(CL_FREQ, fr), sel=sel, status=st,
+                          start=(w[0].strftime("%Y-%m-%d %H:%M") if w[0] else ""), stop=(w[1].strftime("%Y-%m-%d %H:%M") if w[1] else ""), state=_nt_state(c), total=len(aud),
+                          seen_n=(sum(1 for e in aud if e["key"] in sd) if fr == "once" else None),
+                          pv=dict(id="pv", title=str(c.get("Title", "")).strip(), text=str(c.get("Message", "")).strip(), occ=occ, fx=fxk, lvl=lv, dur=du, cont=(fr == "continuous"), **_cl_look(occ))))
+    items.sort(key=lambda x: x["at"], reverse=True)
+    f = dict(id="", occ="birthday", fx=CL_OCC[0][4], lvl="mid", dur=12, freq="continuous", title=CL_OCC[0][2], message=CL_OCC[0][3], aud="all", to=set(), start="", stop="")
+    eid = request.args.get("edit", "").strip()
+    if eid:
+        for c in rows(CL_SHEET):
+            if str(c.get("Celebration ID", "")).strip() == eid and str(c.get("Status", "")).strip() != "Deleted":
+                w = _nt_window(c)
+                f = dict(id=eid, occ=_cl_occ(c.get("Occasion")), fx=_cl_pick(c.get("Effect"), CL_FX_KEYS, "fireworks"), lvl=_cl_pick(c.get("Intensity"), CL_LVL_KEYS, "mid"),
+                         dur=_cl_int(c.get("Duration sec"), 5, 120, 12), freq=_cl_freq(c), title=str(c.get("Title", "")), message=str(c.get("Message", "")),
+                         aud=("selected" if str(c.get("Audience", "")).strip().lower() == "selected" else "all"), to=_nt_recips(c),
+                         start=(w[0].strftime("%Y-%m-%dT%H:%M") if w[0] else ""), stop=(w[1].strftime("%Y-%m-%dT%H:%M") if w[1] else ""))
+                break
+    for e in emps: e["ck"] = e["key"] in f["to"]
+    th_all = sorted(_cl_themes().values(), key=lambda x: x["name"].lower())
+    tf = dict(id="", name="", title="", message="", fx="fireworks", decor="lights", c1="#4f46e5", c2="#7c3aed", em="")
+    _te = request.args.get("theme", "").strip().lower()
+    if _te in _cl_themes(): tf = dict(_cl_themes()[_te])
+    return page(CELEB_ADM, title="Celebrations Log", emps=emps, items=items, f=f, occs=_cl_occ_options(), fxs=CL_FX, lvls=CL_LVL, freqs=CL_FREQ, presets=_cl_presets(), themes=th_all, tf=tf, decors=CL_DECOR_OPTS, now_str=now_local().strftime("%Y-%m-%dT%H:%M"))
+
+@app.route("/admin/notes/celebrations")
+@need("admin")
+def admin_celebrations_old():
+    return redirect("/admin/celebrations-log" + (("?" + request.query_string.decode("utf-8", "ignore")) if request.query_string else ""))
+
+@app.route("/admin/celebrations-log/theme/save", methods=["POST"])
+@need("admin")
+def admin_cl_theme_save():
+    """Update266: Admin adds / edits one of his own celebration themes."""
+    fm = request.form; tid = fm.get("id", "").strip().lower(); back = "/admin/celebrations-log#themes"
+    name = _nt_clean(fm.get("name"), 40)
+    if not name:
+        flash("Please give the theme a name.", "error"); return redirect("/admin/celebrations-log" + (("?theme=" + tid) if tid else "") + "#themes")
+    vals = [name, _nt_clean(fm.get("title"), 120), _nt_clean(fm.get("message"), 500), _cl_pick(fm.get("fx"), CL_FX_KEYS, "fireworks"), _cl_pick(fm.get("decor"), CL_DECOR_KEYS, "lights"),
+            _cl_hex(fm.get("c1"), "#4f46e5"), _cl_hex(fm.get("c2"), "#7c3aed"), (fm.get("em") or "").strip()[:8]]
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S"); ws = ws_of(CL_THEME_SHEET); H = HEADERS[CL_THEME_SHEET]
+    try:
+        cur = next((r for r in rows(CL_THEME_SHEET) if str(r.get("Theme ID", "")).strip().lower() == tid and str(r.get("Status", "")).strip() != "Deleted"), None) if tid else None
+        if cur:
+            ws.update(range_name="A%d:%s%d" % (cur["_row"], chr(64 + len(H)), cur["_row"]), values=[[tid] + vals + ["Active", str(cur.get("Created at", "")), now]], value_input_option="RAW")
+            flash("Theme saved. Celebrations using it show the new look right away.")
+        else:
+            tid = "t_" + uuid.uuid4().hex[:8]
+            ws.append_row([tid] + vals + ["Active", now, ""], value_input_option="RAW")
+            flash("Theme added - choose it under Occasion when you create a celebration.")
+        invalidate_cache(CL_THEME_SHEET)
+    except Exception as ex:
+        print("Theme save failed:", repr(ex)); flash("Could not save the theme - please try again.", "error")
+    return redirect(back)
+
+@app.route("/admin/celebrations-log/theme/<tid>/delete", methods=["POST"])
+@need("admin")
+def admin_cl_theme_delete(tid):
+    tid = tid.strip().lower()
+    cur = next((r for r in rows(CL_THEME_SHEET) if str(r.get("Theme ID", "")).strip().lower() == tid and str(r.get("Status", "")).strip() != "Deleted"), None)
+    if cur is None: flash("That theme no longer exists.", "error"); return redirect("/admin/celebrations-log#themes")
+    try:
+        ws_of(CL_THEME_SHEET).update_cell(cur["_row"], HEADERS[CL_THEME_SHEET].index("Status") + 1, "Deleted"); invalidate_cache(CL_THEME_SHEET)
+        flash("Theme deleted. Celebrations that used it keep playing with the default look.")
+    except Exception as ex:
+        print("Theme delete failed:", repr(ex)); flash("Could not delete the theme - please try again.", "error")
+    return redirect("/admin/celebrations-log#themes")
+
+@app.route("/admin/celebrations-log/save", methods=["POST"])
+@need("admin")
+def admin_celebrations_save():
+    fm = request.form; cid = fm.get("id", "").strip()
+    back = "/admin/celebrations-log" + (("?edit=" + cid) if cid else "")
+    title = _nt_clean(fm.get("title"), 120); msg = _nt_clean(fm.get("message"), 500)
+    if not title and not msg:
+        flash("Please enter a title or a message for the greeting card.", "error"); return redirect(back)
+    occ = _cl_occ(fm.get("occ")); fxk = _cl_pick(fm.get("fx"), CL_FX_KEYS, "fireworks"); lv = _cl_pick(fm.get("lvl"), CL_LVL_KEYS, "mid")
+    du = _cl_int(fm.get("dur"), 5, 120, 12); fr = _cl_pick(fm.get("freq"), CL_FREQ_KEYS, "once")
+    sel = fm.get("audience") == "selected"; valid = {e["key"]: e["id"] for e in _nt_emps()}; to = []
+    for x in fm.getlist("to"):
+        kx = _key(x)
+        if kx in valid and valid[kx] not in to: to.append(valid[kx])
+    if sel and not to:
+        flash("Tick at least one employee, or choose All employees.", "error"); return redirect(back)
+    st_raw, sp_raw = fm.get("start", "").strip(), fm.get("stop", "").strip(); st_d, sp_d = _nt_dt(st_raw), _nt_dt(sp_raw)
+    if (st_raw and st_d is None) or (sp_raw and sp_d is None):
+        flash("Please enter a valid Display / Stop date & time.", "error"); return redirect(back)
+    if st_d and sp_d and sp_d <= st_d:
+        flash("The Stop date & time must be after the Display date & time.", "error"); return redirect(back)
+    start_s, stop_s = (st_d.strftime("%Y-%m-%d %H:%M") if st_d else ""), (sp_d.strftime("%Y-%m-%d %H:%M") if sp_d else "")
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S"); ws = ws_of(CL_SHEET); H = HEADERS[CL_SHEET]
+    if cid:
+        cur = next((c for c in rows(CL_SHEET) if str(c.get("Celebration ID", "")).strip() == cid and str(c.get("Status", "")).strip() != "Deleted"), None)
+        if cur is None:
+            flash("That celebration no longer exists.", "error"); return redirect("/admin/celebrations-log")
+        vals = [cid, str(cur.get("Created at", "")), occ, title, msg, fxk, lv, du, fr, "Selected" if sel else "All", ",".join(to) if sel else "", start_s, stop_s,
+                str(cur.get("Status", "")).strip() or "Active", str(cur.get("Created by", "") or "Admin"), now]
+        ws.update(range_name="A%d:%s%d" % (cur["_row"], chr(64 + len(H)), cur["_row"]), values=[vals], value_input_option="RAW")
+        flash("Saved. The updated animation and schedule apply to employees right away.")
+    else:
+        import uuid as _uu
+        cid = "C" + now_local().strftime("%y%m%d%H%M%S") + _uu.uuid4().hex[:3]
+        ws.append_row([cid, now, occ, title, msg, fxk, lv, du, fr, "Selected" if sel else "All", ",".join(to) if sel else "", start_s, stop_s, "Active", "Admin", ""], value_input_option="RAW")
+        who = ("%d selected employee(s)" % len(to)) if sel else "all employees"
+        flash(("Scheduled for %s - it plays from %s." % (who, start_s)) if (st_d and st_d > now_local()) else ("Live now for %s - it plays on their Employee page within a minute." % who))
+    invalidate_cache(CL_SHEET)
+    return redirect("/admin/celebrations-log")
+
+@app.route("/admin/celebrations-log/<cid>/status", methods=["POST"])
+@need("admin")
+def admin_celebrations_status(cid):
+    act = request.form.get("to", ""); val = {"archive": "Archived", "restore": "Active", "delete": "Deleted"}.get(act)
+    cur = next((c for c in rows(CL_SHEET) if str(c.get("Celebration ID", "")).strip() == cid), None)
+    if cur is None or (not val and act not in ("startnow", "stopnow")):
+        flash("Nothing changed.", "error"); return redirect("/admin/celebrations-log")
+    now_s = now_local().strftime("%Y-%m-%d %H:%M"); ws = ws_of(CL_SHEET); r = cur["_row"]; col = {n: chr(65 + HEADERS[CL_SHEET].index(n)) for n in ("Display from", "Stop at", "Status", "Updated at")}
+    if act == "startnow":      # Scheduled -> plays now (a stop time that is already earlier than now is cleared)
+        ws.update(range_name="%s%d" % (col["Display from"], r), values=[[now_s]], value_input_option="RAW")
+        sp = _nt_window(cur)[1]
+        if sp and sp <= now_local(): ws.update(range_name="%s%d" % (col["Stop at"], r), values=[[""]], value_input_option="RAW")
+        ws.update(range_name="%s%d" % (col["Status"], r), values=[["Active"]], value_input_option="RAW")
+        flash("Started - it plays on the employees' pages within a minute.")
+    elif act == "stopnow":
+        ws.update(range_name="%s%d" % (col["Stop at"], r), values=[[now_s]], value_input_option="RAW")
+        flash("Stopped - the birthday / greeting message and all animations disappear from the Employee page within about half a minute.")
+    else:
+        ws.update(range_name="%s%d" % (col["Status"], r), values=[[val]], value_input_option="RAW")
+        flash({"Archived": "Switched off - employees will not see it.", "Active": "Switched on again (it follows its Display / Stop times).", "Deleted": "Deleted."}[val])
+    ws.update(range_name="%s%d" % (col["Updated at"], r), values=[[now_local().strftime("%Y-%m-%d %H:%M:%S")]], value_input_option="RAW")
+    invalidate_cache(CL_SHEET)
+    return redirect("/admin/celebrations-log")
+
+
+def _boot_warm():
+    """Update259: open the spreadsheet and read the Employees sheet as soon as this server process starts (background), so the first login after a deploy / Render wake-up is not the request that pays for it."""
+    try:
+        time.sleep(0.5); book(); _fetch_rows("Employees")
+    except Exception as ex: print("boot warm-up skipped:", repr(ex))
+threading.Thread(target=_boot_warm, daemon=True).start()
+
 if __name__ == "__main__":
     # NOTE: Flask's built-in dev server (even with threaded=True) is still not
     # meant for real concurrent traffic, and debug=True is a security risk in
@@ -12634,7 +14345,8 @@ if __name__ == "__main__":
     # For local testing with a few users this is fine; for the real deployment
     # run with a production WSGI server instead, e.g.:
     #   pip install gunicorn
-    #   gunicorn -w 4 --threads 4 -b 0.0.0.0:5000 app:app
+    #   gunicorn -k gthread -w 2 --threads 8 --timeout 120 --graceful-timeout 30 --keep-alive 5 -b 0.0.0.0:$PORT <this file name without .py>:app
+    #   (Update259: do NOT add --preload - the background loops are started at import and would not survive the fork)
     # (4 worker processes x 4 threads comfortably covers 20 concurrent users;
     # gspread calls are I/O-bound so threads work well here.)
     debug = os.getenv("FLASK_DEBUG", "0") == "1"

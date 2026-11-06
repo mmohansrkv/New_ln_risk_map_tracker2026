@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update272: Admin > Notes & Messages - every note / message now has an "E-mail with picture" button. It opens Admin > Mail Notes with the note's title (subject), message and recipients already filled in (all employees, or the same selected employees) and "Send immediately" ticked; the Admin adds one or more PICTURES (PNG, JPG, GIF, WEBP, up to 2 MB each, 5 files, 2.5 MB together) under Attachments, checks the e-mail and clicks Send. Sending, scheduling, the Sent / Failed log and the attachments are the existing Mail Notes features, Admin only. Nothing is e-mailed until the Admin clicks Send; the note itself is unchanged.
   * Update271: Employee login - a username whose account is Locked or Resigned / NCNS (Admin > Employee Login Access) now shows "Your account is locked. Please contact your Manager, Team Lead, or Admin." whatever password is typed, the username stays in the field, the male / female / lead picture still appears for it, and these accounts can never sign in. An unknown username still shows "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." (Update270).
   * Update270: Employee login messages - an unknown / invalid username OR a locked account (any password) now shows exactly: "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." The typed username stays in the field. A valid, unlocked username with a wrong password shows "Wrong username or password. Please try again." The male / female / lead picture still appears while typing and, for a locked account, still appears whenever the username matches an employee record (the picture lookup ignores the lock). Admin login unchanged.
   * Update269: Employee login - the username stays in the field after a failed sign-in (also for a locked account) and the cursor moves to the password box. Locked or invalid usernames now show: "Wrong username or password, or the account is locked / not valid. Please contact your Manager, Team Lead, or Admin." A locked account with the correct password shows "Your account is locked. Please contact your Manager, Team Lead, or Admin to unlock it." The message is the same for a locked, unknown or wrong-password attempt, so it never reveals which usernames exist. Admin login also keeps the typed username.
@@ -12417,7 +12418,7 @@ def _mn_att_view(rec):
     return [dict(id=a["id"], name=a["name"], size=f"{max(1, int(a.get('size', 0) or 0) // 1024)} KB", mid=mid,
                  view=a["name"].rsplit(".", 1)[-1].lower() in _MN_ATT_VIEW) for a in _mn_att_list(rec)]
 
-def _mn_render(form=None, edit=None):
+def _mn_render(form=None, edit=None, from_note=""):
     prefetch(MN_SHEET, MN_LOG, "Employees")
     emps = []
     for e in sorted(rows("Employees"), key=lambda e: str(e.get("Name", "")).lower()):
@@ -12432,6 +12433,14 @@ def _mn_render(form=None, edit=None):
                 form.update(mid=r["ID"], subject=r["Subject"], message=r["Message"], sdate=sa[:10], stime=sa[11:16] or "09:00",
                             rmode="selected" if r.get("Recipient mode") == "selected" else "all", eids=_mn_ids(r), cc=", ".join(_mn_cc_list(r)), atts=_mn_att_view(r))
             else: flash("Only a Scheduled e-mail can be edited.", "error")
+        elif from_note:      # Update272: prefilled from a Notes & Messages note (Admin adds the picture, then sends)
+            n_ = next((x for x in rows(NT_SHEET) if str(x.get("Note ID", "")).strip() == from_note and str(x.get("Status", "")).strip() != "Deleted"), None)
+            if n_ is None: flash("That note no longer exists.", "error")
+            else:
+                sel_ = str(n_.get("Audience", "")).strip().lower() == "selected"; rec_ = _nt_recips(n_); msg_ = str(n_.get("Message", ""))
+                form.update(subject=(re.sub(r"[\r\n]+", " ", str(n_.get("Title", ""))).strip() or re.sub(r"\s+", " ", msg_).strip()[:80] or "Message from Admin")[:150], message=msg_, mode="now",
+                            rmode=("selected" if sel_ else "all"), eids=([e["id"] for e in emps if _key(e["id"]) in rec_] if sel_ else []))
+                flash("E-mail filled in from the note. Add the picture(s) under Attachments, check everything, then click Send.")
     form = dict(form); form["message_html"] = _mn_editor_html(form.get("message", ""))
     notices = []
     for r in sorted(rows(MN_SHEET), key=lambda r: str(r.get("Created at", "")), reverse=True)[:30]:
@@ -12454,7 +12463,7 @@ def _mn_render(form=None, edit=None):
 @need("admin")
 def admin_mail_notes():
     _admin_only_mail()
-    return _mn_render(edit=(request.args.get("edit") or "").strip())
+    return _mn_render(edit=(request.args.get("edit") or "").strip(), from_note=(request.args.get("from_note") or "").strip())
 
 @app.route("/admin/maintenance-email")
 @need("admin")
@@ -13550,6 +13559,7 @@ NOTES_ADM = _nt_tabs("n") + r"""<style>
 <td><b>{{n.read_n}}</b> / {{n.total}}<details class="nt-det"><summary>Who</summary><div><span class="rd">Seen:</span> {% for w in n.who_read %}{{w[0]}} <small>({{w[1]|t12}})</small>{{ ', ' if not loop.last }}{% else %}-{% endfor %}</div><div><span class="un">Not seen yet:</span> {{ n.who_not|join(', ') or '-' }}</div></details></td>
 <td class="nt-st-{{n.state}}">{{n.state}}</td>
 <td class="nt-act"><a class="back sm" href="/admin/notes?edit={{n.id}}#nt-form">Edit</a>
+<a class="back sm" href="/admin/mail-notes?from_note={{n.id}}" title="Open Mail Notes with this note filled in - add a picture and send">&#9993; E-mail with picture</a>
 {% if n.state=='Scheduled' %}<form method="post" action="/admin/notes/{{n.id}}/status"><input type="hidden" name="to" value="startnow"><button class="back sm">Start now</button></form>{% elif n.state=='Live' %}<form method="post" action="/admin/notes/{{n.id}}/status"><input type="hidden" name="to" value="stopnow"><button class="back sm">Stop now</button></form>{% endif %}
 <form method="post" action="/admin/notes/{{n.id}}/status"><input type="hidden" name="to" value="{{ 'restore' if n.status=='Archived' else 'archive' }}"><button class="back sm">{{ 'Switch on again' if n.status=='Archived' else 'Switch off' }}</button></form>
 <form method="post" action="/admin/notes/{{n.id}}/status" onsubmit="return confirm('Delete this note / message permanently from the employees\' panels?')"><input type="hidden" name="to" value="delete"><button class="back sm">Delete</button></form></td></tr>{% endfor %}</table>{% endif %}</div>

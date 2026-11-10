@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update284: the daily quote is a separate full-screen layer over the Productivity Entry (Daily entry) page - the page stays visible (blurred) behind it; Close & Continue reveals it. Pending quote is now kept in the login session itself, so every login (also repeated ones) always shows it. Quotes added by Admin reach all employees at their next login.
   * Update283: Admin Quotes page (add / edit / delete Tamil, English, Thanglish quotes) at /admin/quotes - not in the Admin menu. Every employee sees a quote at EVERY login; quotes are assigned per employee and rotate daily (employee position + day number), so employees get different quotes the same day. Admin menu: Theme & Layout link hidden (/admin/theme still works).
   * Update282: Daily quote overlay hardened - it is hidden until its script confirms it can run (so no stray "Quotes" text / label can ever show on the Employee page), is shielded from page-wide CSS, stays centred with the 3D animation, and can now be closed with the Close & Continue button, the X button or Esc. Employee page layout / functionality unchanged.
   * Update281: Employee login - after EVERY login (also repeated logins the same day) a full-screen 3D animated "Daily Inspiration" overlay appears on the first Employee page: "Welcome Back, <name>! Login #N", today's motivational quote (language Tamil / English / Thanglish picked at random per day, same quote for everyone that day; English quotes are fetched online with a built-in fallback, Tamil / Thanglish are built-in) and a "Close & Continue" button - the overlay cannot be dismissed any other way (no timeout / Esc / outside click) and stays on every Employee page until Close is pressed. Display only: nothing is written to the Productivity log, so the quote is never counted as productive hours. Login # = number of this employee's sessions in the Attendance sheet (incl. the current one). New Settings key daily_quote. Routes /employee/quote-data, /employee/quote/close. Existing Employee page design unchanged after closing.
@@ -4596,6 +4597,7 @@ QUOTES = {
 QUOTE_LABEL = {"en": "English", "ta": "தமிழ்", "tg": "Thanglish"}
 _QUOTE_WORDS = ("work", "success", "team", "effort", "goal", "grow", "learn", "believe", "courage", "persever", "disciplin", "action", "habit", "focus", "progress", "improve", "dream", "strength", "patience", "begin", "start", "mistake", "try", "hard", "great")
 _QUOTE_CACHE, _QUOTE_LOCK = {}, threading.Lock()          # {date: quote dict} - this process
+_QUOTE_DONE = set()                                      # Update284: dq_id values already closed (guards against a close whose cookie update was lost)
 _QUOTE_PENDING = {}                                      # {attendance session id: {"n": login number, "t": time}} - quotes waiting for the Close click (server-side, so a stale cookie can never bring one back)
 _LOGIN_N, _LOGIN_N_LOCK = {}, threading.Lock()           # {employee id: logins so far} - seeded once from the Attendance sheet
 
@@ -4659,7 +4661,7 @@ QUOTE_CSS = r"""<style id="dq-css">
 .dq,.dq *{box-sizing:border-box}
 .dq:not(.dq-on){display:none!important}
 .dq{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:18px;overflow:hidden;font-family:"Noto Sans Tamil","Nirmala UI","Latha","Tamil Sangam MN",system-ui,-apple-system,"Segoe UI",sans-serif;color:#fff;perspective:1100px;
- background:radial-gradient(900px 520px at 15% 10%,#7c3aedcc,transparent 60%),radial-gradient(800px 500px at 88% 90%,#ec4899b3,transparent 60%),radial-gradient(700px 420px at 80% 8%,#06b6d4aa,transparent 60%),linear-gradient(135deg,#1e1b4b,#312e81 45%,#4c1d95);background-size:140% 140%;animation:dqIn .5s ease both,dqBg 16s ease-in-out infinite alternate}
+ background:radial-gradient(900px 520px at 15% 10%,#7c3aed44,transparent 60%),radial-gradient(800px 500px at 88% 90%,#ec489933,transparent 60%),radial-gradient(700px 420px at 80% 8%,#06b6d444,transparent 60%),linear-gradient(135deg,#1e1b4b73,#312e8159 45%,#4c1d9573);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);background-size:140% 140%;animation:dqIn .5s ease both,dqBg 16s ease-in-out infinite alternate}
 .dq.out{animation:dqOut .35s ease forwards}
 @keyframes dqIn{from{opacity:0}to{opacity:1}}@keyframes dqOut{to{opacity:0;visibility:hidden}}@keyframes dqBg{from{background-position:0 0}to{background-position:100% 100%}}
 .dq-o{position:absolute;pointer-events:none;border-radius:50%;background:radial-gradient(circle at 30% 28%,#fff 0,var(--c) 38%,#0000 72%);opacity:.75;filter:blur(.3px);animation:dqFloat var(--d) ease-in-out infinite;animation-delay:var(--dl);left:var(--x);top:var(--y);width:var(--s);height:var(--s)}
@@ -4736,7 +4738,9 @@ setTimeout(function(){try{btn.focus({preventScroll:true})}catch(e){}},900)})();<
 
 def quote_overlay_html():
     """Update281: the blocking quote overlay for this login (empty once Close was pressed, on bare pages and for the Admin)."""
-    st = _QUOTE_PENDING.get(session.get("att_id")) if session.get("role") == "employee" else None
+    st = None
+    if session.get("role") == "employee" and session.get("dq_id") and session["dq_id"] not in _QUOTE_DONE:      # Update284
+        st = dict(n=int(session.get("dq_n") or 1))
     if not st: return ""
     import html as _hq
     nm = str(session.get("name") or "").strip()[:40]
@@ -4760,7 +4764,11 @@ def employee_quote_data():
 @app.route("/employee/quote/close", methods=["POST"])
 @need("employee")
 def employee_quote_close():
-    _QUOTE_PENDING.pop(session.get("att_id"), None)      # display only: nothing is saved to the Productivity log or the working-time hours
+    _QUOTE_PENDING.pop(session.get("att_id"), None)
+    d_ = session.pop("dq_id", None); session.pop("dq_n", None)
+    if d_:
+        if len(_QUOTE_DONE) > 5000: _QUOTE_DONE.clear()
+        _QUOTE_DONE.add(d_)      # display only: nothing is saved to the Productivity log or the working-time hours
     return jsonify(ok=True)
 
 # ---------------------------------------------------------------- Update283: Quotes library (Admin) + per-employee daily rotation
@@ -7059,6 +7067,7 @@ def employee_login():
                 try: _lno = _login_number(session["emp_id"])      # Update281: login # (counted before this login is written to Attendance)
                 except Exception as ex_: print("login count error:", repr(ex_)); _lno = 1
                 track_login(session["emp_id"], session["name"], session["band"])
+                session["dq_id"] = uuid.uuid4().hex; session["dq_n"] = int(_lno)      # Update284: quote pending for THIS login (kept in the signed session, so no login can miss it)
                 try: quote_begin(session.get("att_id"), _lno)      # Update281: daily quote overlay until Close is pressed
                 except Exception as ex_: print("daily quote start error:", repr(ex_))
                 _bg(warm_employee_cache)                  # dashboard data loads while the welcome animation plays

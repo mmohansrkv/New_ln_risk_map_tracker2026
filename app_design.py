@@ -1,4 +1,11 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update265: Admin - a bold notification bar at the TOP of every Admin page whenever an employee submits a Leave or Permission request (who, what, dates / hours, reason, time). It stays on every Admin page, and keeps appearing after logout / login, until the Admin clicks Clear (one request) or Clear all; cleared notifications disappear for good. New ones appear within about 30 seconds without reloading the page. 'Review requests' opens Admin > Leave & Permission Log. Stored in the new sheet 'Admin Alerts' (created automatically). An alert never blocks or delays the employee's submission.
+  * Update264: Productivity entry is never held up by a Leave / Permission that is still waiting for Admin approval. When an entry is saved or edited, the required working hours now already allow for a PENDING permission (e.g. 2 hrs) or PENDING half-day leave (4 hrs) - before, only APPROVED ones were allowed for, so an employee with a pending 2-hr permission who logged 6 hrs got "Entry incomplete: 6 of the required 8 hours" until the Admin approved it. Same rule in the entry page's "Required ... hrs" hint and the 100% bloom. A pending full-day leave never blocked entry and still does not. A Rejected request counts for nothing (full day required again). Reports, Productivity %, Missed entries, attendance and calendars are unchanged and still follow APPROVED requests only.
+  * Update263: Employee menu for Associate Manager / Team Lead / Senior Team Lead (matched live by Designation, active login) is now EXACTLY, in this order: 1. Team Logs  2. Employee Details  3. Personal Details  4. Leave & Permission. Nothing else is listed (no Daily entry / Productivity Info / Audit Log / Mahizhchi / Game links). Their first page after login is Team Logs (it also carries the Admin notes ticker and celebration, as the first page did before). /employee and /employee/productivity send them to Team Logs. All other employees and the Admin menu are unchanged. The menu label "Personal details" is now "Personal Details" for these three designations only.
+  * Update262: Admin > Overview - NEW card "Senior Team Leads, Team Leads & Associate Managers with Productivity entry access". By default these three designations are View Only (Update105). The Admin can now GRANT (or take back) Productivity entry access for an individual lead with the Grant / Revoke buttons under 'Manage entry access' in that card (new sheet 'Lead Productivity Access', created automatically). The card lists ONLY the leads who have been granted access, with their Overview details (present / leave / absent, attendance, productive / non-productive hours, productivity %); leads without the grant are not shown (they stay View Only). A granted lead gets the Daily entry / Productivity Info pages, missed-entry tracking and reminders like any other employee and is counted in the Overview averages; Revoke restores View Only. Resigned / NCNS leads cannot be granted. Every other employee and page unchanged.
+  * Update261: Celebrations - NEW 'Continuous' mode (How often = "Continuous - until the Admin clicks Stop"). The greeting (e.g. "Happy Birthday, <name>! Wishing you a wonderful year ahead filled with joy and success. From all of us!") shows as a SMALL-font banner at the very TOP of the Employee page with fireworks / crackers (and the other effects) repeating non-stop - no time limit and no close button for the employee. It disappears, together with every animation, within about half a minute after the Admin clicks 'Stop' (Admin > Notes & Messages > Celebrations; also ends at an optional Stop date & time, 'Switch off' or Delete). The employee's page is never blocked (animation layer is click-through). Birthday now defaults to Fireworks + Crackers and Continuous. Existing celebrations and all other pages unchanged.
+  * Update260: NEW Admin > Notes & Messages > Celebrations. The Admin creates celebration animations for the Employee page - Fireworks, Crackers (ladi strings + flower pots), Fireworks + Crackers, Fireworks + Confetti, Confetti or Balloons - for occasions such as Birthday, Pongal, Diwali, New Year or a work anniversary (ready-made wishes included; type {name} to greet each employee by first name). Per celebration: greeting title / message, intensity (Gentle / Normal / Grand), play time (5-30 s), who sees it (all employees or only the ones ticked - e.g. the birthday person), Display / Stop date & time or 'Start now' / 'Stop now', 'Switch off', Delete, Preview, and how often it plays (once per employee / once a day / every login). It plays full-screen with a greeting card on the page employees land on after login (the Daily Entry page; the Leave page for Associate Manager / Team Lead / Senior Team Lead); work underneath stays clickable, the card has a close button (Esc also closes), and it is skipped as animation (card only) for people whose device asks for reduced motion. A celebration the Admin starts while an employee is already on the page appears within about a minute (a light check that does NOT reset the idle auto-logout timer). New sheets 'Celebrations' and 'Celebration Seen' are created automatically. Nothing else was changed.
+  * Update259: SPEED ONLY - no screen, text, permission or feature was changed. (1) Start-up: the spreadsheet is opened with 3 Google calls instead of ~63 (one call lists the sheets, one call reads every header row, the Productivity log column migration runs only when its header is still the old one), and it is opened in the background as soon as the server process starts - the first Admin / Employee login after a deploy or a Render wake-up no longer waits for it (before, 30 sheets x 2 calls in a row could run past Gunicorn's 30 s timeout and hit the Sheets read quota). (2) Save: the 'already submitted for this date?' check reads only the 3 columns it needs (Submission ID, Date, Employee ID) live instead of the whole Productivity log; Edit / Delete row lookup and the 'did the rows land?' check read only column A. (3) Login: the Attendance 'close sessions left open' clean-up runs once per employee per day (it re-read the whole Attendance sheet on EVERY login) and reads only columns A:G. (4) Admin pages that read their sheets live (@live_data) and the Employee Info pages now read the sheets they need AT THE SAME TIME instead of one after another, and share an in-flight read instead of asking Google twice.
   * Update252b: Admin > Productivity Log - the Employee column shows the employee's NAME (read from the Employees sheet by Employee ID; falls back to the name saved on the log row, then the ID) instead of the Employee ID; it still links to the employee's complete Productivity Log. Columns, order, calculations and data are unchanged (new read-only key master_name, used only for this display).
   * Update258: (1) Smooth natural eye blinking on the sidebar profile characters - employee male / female and the supplied pictures of Associate Manager / Team Lead / Senior Team Lead (feathered skin-coloured eyelids, transform only, each character on its own rhythm); the Admin character's blink uses the same softer curve; pictures / 3D layers unchanged. (2) Admin > Employee Info > Employee Login Access > Action (Admin only): one dropdown Active / Resigned / NCNS (No Call, No Show) + relieving date (needed for Resigned / NCNS) + Save action; 'Active' clears the status (the login stays disabled until the Admin clicks Enable Login). (3) The Status column now shows Active / Resigned / NCNS for Associate Manager / Team Lead / Senior Team Lead (Login Access and Managers & Leads tables, and the Employee Details page they see); all read the same Employees sheet column, so they stay in sync. Admin only; login access rules unchanged.
   * Update257: Admin sidebar dropdowns (Log, Employee Info): only ONE open at a time (opening one closes the other), choosing a submenu item closes its dropdown and opens the page (the page loads with the dropdown closed; the group holding the current page gets a light border), a click anywhere outside - or Esc - closes an open dropdown. Menu items, links and every other function unchanged.
@@ -555,12 +562,17 @@ HEADERS = {
     # Update248: Admin Notes / Messages (Admin > Notes & Messages; Employee > Messages)
     "Admin Notes": ["Note ID", "Created at", "Title", "Message", "Kind", "Priority", "Audience", "Recipients", "Pinned", "Status", "Created by", "Expires on", "Updated at", "Display from", "Stop at"],
     "Admin Note Reads": ["Note ID", "Employee ID", "Employee name", "Read at"],
+    # Update260: Admin > Notes & Messages > Celebrations (animations on the Employee page)
+    "Celebrations": ["Celebration ID", "Created at", "Occasion", "Title", "Message", "Effect", "Intensity", "Duration sec", "Frequency", "Audience", "Recipients", "Display from", "Stop at", "Status", "Created by", "Updated at"],
+    "Celebration Seen": ["Celebration ID", "Employee ID", "Employee name", "Seen at"],
     "Mahizhchi Answers": ["Employee ID", "Employee name", "Question ID", "Question", "Answer", "Submitted at"],
     # Update84: one row per employee PER SET: when they pressed Start (timer runs from this SERVER time), when the Set closed, and its result
     "Mahizhchi Attempts": ["Employee ID", "Employee name", "Started at", "Closed at", "Set", "Answered", "Correct", "Result", "Extra seconds"],
     # Update85: Connection Game (bonus round after all 5 Sets are won). 4 rows per Game = 4 groups of 4 words.
     "Mahizhchi Connections": ["Game", "Group name", "Word 1", "Word 2", "Word 3", "Word 4"],
     # Update90: optional list to SWITCH OFF the Daily Productivity Entry for an employee (Enabled = No). No row / Enabled = Yes -> has access.
+    "Admin Alerts": ["Alert ID", "Type", "Employee ID", "Employee name", "Details", "Created at", "Status", "Cleared at"],      # Update265
+    "Lead Productivity Access": ["Employee ID", "Employee name", "Granted", "Updated at", "Updated by"],      # Update262
     "Productivity Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
     # Update90: one row per reminder e-mail (and one \"__RUN__\" row per day = the worker that sends that day's batch, so workers never double-send)
     "Email Log": ["Date", "Employee ID", "Employee name", "Email", "Sent at", "Status"],
@@ -750,7 +762,7 @@ def _idle_auto_logout():
             session.clear()
             flash(f"You were logged out automatically after {SESSION_IDLE_MINUTES} minutes of inactivity.")
             return redirect("/admin/login" if was_admin else "/employee/login")
-        if request.endpoint in ("employee_ping", "gc_state", "gm_state"):          # heartbeat: shows "online" but must NOT reset the idle timer
+        if request.endpoint in ("employee_ping", "gc_state", "gm_state", "employee_celebration_poll"):          # heartbeat: shows "online" but must NOT reset the idle timer
             online_set(session.get("att_id"), session.get("att_eid"), session.get("att_name"), active=last)
             return
         session["last_seen"] = now_ts
@@ -845,17 +857,35 @@ def book():
                     try: client.http_client.timeout = 60
                     except Exception: pass
                 b = _with_retry(client.open_by_key, SHEET_ID)
-                have = {w.title for w in _with_retry(b.worksheets)}
+                wss = {w.title: w for w in _with_retry(b.worksheets)}      # Update259: ONE call lists every worksheet (was one extra call per sheet)
+                heads = _first_rows(b, [n for n in HEADERS if n in wss])      # Update259: ONE call reads row 1 of every sheet (was one call per sheet)
                 for name, h in HEADERS.items():
-                    if name not in have:
-                        _with_retry(b.add_worksheet, title=name, rows=1000, cols=max(12, len(h)))
-                    ws = _with_retry(b.worksheet, name)
+                    ws = wss.get(name)
+                    if ws is None:
+                        ws = _with_retry(b.add_worksheet, title=name, rows=1000, cols=max(12, len(h))); wss[name] = ws; cur = []
+                    else:
+                        cur = heads.get(name)
+                        if cur is None: cur = _with_retry(ws.row_values, 1)      # batch read not available -> the old one-sheet-at-a-time read
                     if ws.col_count < len(h): _with_retry(ws.add_cols, len(h) - ws.col_count)
-                    if name == "Productivity log": _migrate_log_columns(ws)      # Update169: move rows still in the Update160 column order BEFORE the header is renamed
-                    if _with_retry(ws.row_values, 1) != h:
+                    if cur != h:
+                        if name == "Productivity log": _migrate_log_columns(ws)      # Update169: move rows still in the Update160 column order BEFORE the header is renamed (Update259: only while the header is still the old one)
                         _with_retry(ws.update, range_name="A1", values=[h])
+                _ws_cache.update(wss)      # Update259: every worksheet object is kept, so ws_of() never needs its own lookup call
                 _book = b
     return _book
+
+def _first_rows(b, names):
+    """Update259: {sheet name: row 1 as a list} for many sheets in ONE Google call. Returns {} when the batch read is not possible (the caller then reads each sheet itself)."""
+    if not names: return {}
+    try:
+        res = _with_retry(b.values_batch_get, ["'%s'!1:1" % n.replace("'", "''") for n in names])
+        out = {}
+        for n, v in zip(names, res.get("valueRanges", [])):
+            vals = v.get("values") or [[]]
+            out[n] = [str(x) for x in vals[0]]
+        return out if len(out) == len(names) else {}
+    except Exception as ex:
+        print("batch header read skipped:", repr(ex)); return {}
 
 _LOG_TS = re.compile(r"^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}")
 def _log_row_is_old(r):
@@ -986,16 +1016,52 @@ class live_sheets:
         if "Holidays" in self.n: _holidays_cache = None
     def __exit__(self, *a): _tl.live = self.old
 
+def _live_parallel(names):
+    """Update259: a page wrapped in @live_data read its sheets live ONE AFTER ANOTHER (7 sheets = 7 round trips in a row). The sheets that are due are now read at the SAME time;
+    a sheet that another thread is already reading is waited for instead of being asked from Google a second time. The result is stored in the request's live-read memo,
+    so rows() behaves exactly as before (one live read per sheet per request, own writes always visible)."""
+    if not has_request_context(): return
+    try:
+        from flask import g as _g
+        memo = getattr(_g, "_rows_live", None)
+        if memo is None: memo = _g._rows_live = {}
+        now_t, now_w = time.monotonic(), time.time()
+        sf = session.get("fresh") or {}; all_fresh = session.get("fresh_all", 0) > now_w
+        forced, due = {}, []
+        for n in names:
+            if n in memo: continue
+            f_ = bool(all_fresh or sf.get(n, 0) > now_w)
+            c = _rows_cache.get(n)
+            if f_ or not c or now_t - c[0] >= LIVE_TTL: due.append(n); forced[n] = f_
+        if len(due) < 2: return
+        res = {}
+        def run(n):
+            try:
+                if forced[n]: res[n] = _fetch_rows(n)                 # the user just wrote this sheet: must be a brand-new read
+                else:
+                    _safe_fetch(n)                                    # single flight: joins a read that is already running
+                    c2 = _rows_cache.get(n)
+                    if c2 and time.monotonic() - c2[0] < LIVE_TTL + 20: res[n] = c2[1]
+            except Exception as ex: print("live prefetch error:", n, repr(ex))
+        ths = [threading.Thread(target=run, args=(n,), daemon=True) for n in due]
+        for t in ths: t.start()
+        for t in ths: t.join(timeout=40)
+        for n, v in res.items(): memo.setdefault(n, v)
+    except Exception as ex: print("live prefetch skipped:", repr(ex))
+
 def live_data(*names):
     def deco(f):
         @wraps(f)
         def w(*a, **k):
-            with live_sheets(*names): return f(*a, **k)
+            with live_sheets(*names):
+                _live_parallel(names)      # Update259
+                return f(*a, **k)
         return w
     return deco
 LIVE_REPORT_SHEETS = ("Productivity log", "Leave", "Permissions", "Employees", "Settings", "Holidays", "Processes")
 
-EMP_PAGE_SHEETS = ("Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays", "Mahizhchi Access")
+ADMIN_EMP_SHEETS = ("Employees", "Notifications", "Productivity log", "Leave", "Permissions", "Processes", "Settings", "Holidays")      # Update259: what the Admin Employee Info pages read
+EMP_PAGE_SHEETS = ("Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays", "Mahizhchi Access", "Celebrations")
 
 def _prewarm_employees():
     """Update114: while the Employee login page is open, refresh the Employees list in the background (only if it is not fresh already),
@@ -1168,13 +1234,24 @@ VIEW_ONLY_DESIGNATIONS = ("Senior Team Lead", "Team Lead", "Associate Manager")
 def _norm_desig(d): return re.sub(r"[^a-z]+", " ", str(d or "").lower()).strip()      # case / spacing / punctuation insensitive
 _VIEW_ONLY_SET = {_norm_desig(x) for x in VIEW_ONLY_DESIGNATIONS}
 def desig_view_only(d): return _norm_desig(d) in _VIEW_ONLY_SET
-_vo_cache = [0.0, frozenset()]
+_vo_cache = [0.0, frozenset(), frozenset()]
+LEAD_ACCESS_SHEET = "Lead Productivity Access"      # Update262: Admin grants Productivity entry access to an individual Senior Team Lead / Team Lead / Associate Manager
+def _lead_granted_now():
+    try: return frozenset(_key(r.get("Employee ID", "")) for r in rows(LEAD_ACCESS_SHEET) if str(r.get("Granted", "")).strip().lower() in ("yes", "y", "true", "1", "granted"))
+    except Exception as ex:
+        print("Lead Productivity Access read failed:", repr(ex)); return frozenset()
 def view_only_ids():
-    """Employee IDs (normalised) whose Designation is view-only. Re-read every few seconds, so a Designation change applies automatically."""
+    """Employee IDs (normalised) whose Designation is view-only AND who have not been granted entry access by the Admin (Update262). Re-read every few seconds."""
     if time.monotonic() - _vo_cache[0] > 8:
-        ids = frozenset(_key(e.get("Employee ID", "")) for e in rows("Employees") if desig_view_only(e.get("Designation", "")))
-        _vo_cache[0], _vo_cache[1] = time.monotonic(), ids
+        gr = _lead_granted_now()
+        ids = frozenset(_key(e.get("Employee ID", "")) for e in rows("Employees") if desig_view_only(e.get("Designation", "")) and _key(e.get("Employee ID", "")) not in gr)
+        _vo_cache[0], _vo_cache[1], _vo_cache[2] = time.monotonic(), ids, gr
     return _vo_cache[1]
+def lead_granted_ids():
+    view_only_ids(); return _vo_cache[2]
+def desig_vo_eff(e):
+    """Update262: the Employees row is a View-Only designation and has NOT been granted entry access."""
+    return desig_view_only(e.get("Designation", "")) and _key(e.get("Employee ID", "")) not in lead_granted_ids()
 def is_view_only(eid): return _key(eid) in view_only_ids()
 VIEW_ONLY_MSG = "Your designation has View Only access to Productivity - entries cannot be added or edited."
 # ---- Update253: Resigned / NCNS employees have NO Productivity access and are excluded from every pending-productivity calculation and every Missed Entries reminder e-mail ----
@@ -1309,32 +1386,33 @@ def leave_is_half(l):
     return str(l.get("Day type", "")).strip().lower().startswith("half")
 app.jinja_env.filters["lhalf"] = leave_is_half
 
-def deduction_map(emp_id=None):
+def deduction_map(emp_id=None, pending=False):
     """{(EMPLOYEE ID key, 'YYYY-MM-DD'): hours taken OFF that working day} = APPROVED permission hours + 4 hrs for an APPROVED
     Half-Day Leave. One pass over the (cached) Permissions + Leave sheets; pass emp_id to look at one employee only."""
     want = _key(emp_id) if emp_id is not None else None
     out = {}
+    ok_ = ("Approved", "Pending") if pending else ("Approved",)      # Update264: pending=True (entry validation only) also allows for requests still waiting for Admin approval
     for r in rows("Permissions"):
-        if str(r.get("Status", "")).strip() != "Approved": continue
+        if str(r.get("Status", "")).strip() not in ok_: continue
         k = _key(r.get("Employee ID", ""))
         if want is not None and k != want: continue
         key = (k, norm_date(r.get("Date", "")))
         out[key] = out.get(key, 0.0) + num(r.get("Hours"))
     for l in rows("Leave"):
-        if leave_status(l) != "Approved" or not leave_is_half(l): continue
+        if leave_status(l) not in ok_ or not leave_is_half(l): continue
         k = _key(l.get("Employee ID", ""))
         if want is not None and k != want: continue
         key = (k, norm_date(l.get("Date", "")))
         out[key] = out.get(key, 0.0) + HALF_DAY_HOURS
     return {k: min(v, float(DAY_HOURS)) for k, v in out.items()}
 
-def day_deduction(emp_id, date):
-    return deduction_map(emp_id).get((_key(emp_id), str(date)), 0.0)
+def day_deduction(emp_id, date, pending=False):
+    return deduction_map(emp_id, pending=pending).get((_key(emp_id), str(date)), 0.0)
 
-def required_hours(emp_id, date):
+def required_hours(emp_id, date, pending=False):
     """Hours that must be logged for a day to be complete: the 8-hour working day minus approved permission / half-day leave
     (2-hr permission = 6 hrs, half-day leave = 4 hrs)."""
-    return max(float(DAY_HOURS) - day_deduction(emp_id, date), 0.0)
+    return max(float(DAY_HOURS) - day_deduction(emp_id, date, pending=pending), 0.0)
 
 def parse_form(emp_id):
     f = request.form; g = f.getlist
@@ -1364,17 +1442,20 @@ def parse_form(emp_id):
     elif tot > day_limit():
         err = f"Total {tot:g} hrs is more than {day_limit():g} hrs."
     else:
-        need_h = required_hours(emp_id, date)
+        need_h = required_hours(emp_id, date, pending=True)      # Update264: a pending permission / half-day leave does not hold up the entry
         if tot + 1e-9 < need_h:
             cut = float(DAY_HOURS) - need_h
-            why = f" ({DAY_HOURS:g}-hour day less {cut:g} hr approved permission / half-day leave)" if cut > 0 else ""
+            why = f" ({DAY_HOURS:g}-hour day less {cut:g} hr permission / half-day leave)" if cut > 0 else ""
             err = (f"Entry incomplete: {tot:g} of the required {need_h:g} working hours logged{why} "
                    f"({need_h - tot:g} hrs remaining). Complete all {need_h:g} hours before saving.")
     return date, procs, notes, err
 
 def live_rows_of(sid):
     """Update103: current sheet row numbers of one submission, read live (cached row numbers can be stale after another Add/Delete)."""
-    return [r["_row"] for r in _fetch_rows("Productivity log") if str(r["Submission ID"]) == str(sid)]
+    try: return _sid_rows_live(sid)      # Update259: reads column A only
+    except Exception as ex:
+        print("narrow row lookup failed, reading the full sheet:", repr(ex))
+        return [r["_row"] for r in _fetch_rows("Productivity log") if str(r["Submission ID"]) == str(sid)]
 
 def norm_date(v):
     """Update171: ONE canonical YYYY-MM-DD for any date text found in the sheet. Slash dates follow the sheet's locale (10/01/2026 = 1 Oct on a US sheet),
@@ -1387,11 +1468,39 @@ def norm_date(v):
         except ValueError: pass
     return _iso_date(re.sub(r"[ T]\d{1,2}:\d{2}.*$", "", t))
 
+def _sid_rows_live(sid):
+    """Update259: sheet row numbers of one submission, from a live read of column A only (the whole log used to be downloaded for this)."""
+    col = _with_retry(ws_of("Productivity log").col_values, 1)
+    t = str(sid)
+    return [i for i, v in enumerate(col, start=1) if i > 1 and str(v) == t]
+
+def _sid_landed(sid):
+    """Update259: did the rows of this submission reach the sheet? (live, column A only)"""
+    try: return bool(_sid_rows_live(sid))
+    except Exception: return any(str(r["Submission ID"]) == str(sid) for r in _fetch_rows("Productivity log"))
+
+def _log_keys_live():
+    """Update259: [(Submission ID, Date, Employee ID)] of every Productivity log row, read live - only the 3 columns the duplicate check needs."""
+    heads = HEADERS["Productivity log"]
+    ix = [heads.index("Submission ID"), heads.index("Date"), heads.index("Employee ID")]
+    last = max(ix) + 1
+    from gspread.utils import rowcol_to_a1
+    end = re.sub(r"\d+", "", rowcol_to_a1(1, last))
+    out = []
+    for r in _with_retry(ws_of("Productivity log").get_values, "A2:%s" % end):
+        r = list(r) + [""] * (last - len(r))
+        out.append((r[ix[0]], r[ix[1]], r[ix[2]]))
+    return out
+
 def duplicate_entry(emp_id, date, skip_sid=None, fresh=False):
-    """Update96: reads just the Productivity log (live from the sheet when fresh=True) instead of building every employee's submissions."""
+    """Update96: reads just the Productivity log (live from the sheet when fresh=True) instead of building every employee's submissions.
+    Update259: the live check downloads only 3 columns (was the whole sheet)."""
+    k, nd = _key(emp_id), norm_date(date)
+    if fresh:
+        try: return any(_key(e) == k and norm_date(d) == nd and str(s_) != str(skip_sid) for s_, d, e in _log_keys_live())
+        except Exception as ex: print("narrow duplicate check failed, reading the full sheet:", repr(ex))
     recs = _fetch_rows("Productivity log") if fresh else rows("Productivity log")
-    k = _key(emp_id)
-    return any(_key(r["Employee ID"]) == k and norm_date(r["Date"]) == norm_date(date) and str(r["Submission ID"]) != str(skip_sid) for r in recs)
+    return any(_key(r["Employee ID"]) == k and norm_date(r["Date"]) == nd and str(r["Submission ID"]) != str(skip_sid) for r in recs)
 
 def write_sub(sid, date, emp, procs, notes):
     if is_view_only(emp[1]): raise PermissionError("View Only designation: productivity entry is not allowed")      # Update105
@@ -1407,7 +1516,7 @@ def write_sub(sid, date, emp, procs, notes):
         try:
             if attempt:
                 time.sleep(2.0 * attempt)
-                if any(str(r["Submission ID"]) == str(sid) for r in _fetch_rows("Productivity log")):
+                if _sid_landed(sid):
                     invalidate_cache("Productivity log"); return
             ws_of("Productivity log").append_rows(out, value_input_option="RAW"); invalidate_cache("Productivity log"); return
         except Exception as ex:
@@ -1575,13 +1684,16 @@ def _act_q_put_raw(vals):
             _act_q = queue_mod.Queue(); threading.Thread(target=_act_worker, daemon=True).start()
         _act_q.put(dict(vals=vals))
 
+_stale_done = set()      # Update259
 def _close_stale(emp_id, now):
     """Sessions from earlier days that never logged out (browser/computer closed, etc.)
     are marked so - the system closed these itself, so they're tagged as an automatic logout."""
+    key = (str(emp_id), str(now.date()))
+    if key in _stale_done: return      # Update259: sessions of EARLIER days are closed once per employee per day (this used to re-read the whole Attendance sheet on every login)
     with _att_lock:
         ws = ws_of("Attendance")
         fixes = []
-        for i, r in enumerate(ws.get_all_values()[1:], start=2):
+        for i, r in enumerate(_with_retry(ws.get_values, "A:G")[1:], start=2):      # Update259: only columns A:G are used
             r = r + [""] * 9
             if r[2] == emp_id and r[1] < str(now.date()) and not r[6].strip():
                 fixes.append({"range": f"G{i}:I{i}", "values": [["Not recorded", "", "Auto (Session left open)"]]})
@@ -1590,6 +1702,8 @@ def _close_stale(emp_id, now):
                     _act_q_put_raw([r[1], "Not recorded", r[2], r[3], "Logoff", "App", "Automatic logoff (session left open - time not recorded)", int(d_.timestamp())])
                 except Exception as ex: print("stale logoff row error:", ex)
         if fixes: ws.batch_update(fixes, value_input_option="RAW")
+    if len(_stale_done) > 5000: _stale_done.clear()
+    _stale_done.add(key)
 
 def _log_login(sid, emp_id, name, band, now):
     with _att_lock:
@@ -4095,7 +4209,12 @@ def page(body, title="Productivity Tracker", **ctx):
     p = request.path
     items = list(NAVS.get(session.get("role"), []))
     if hide_entry_pages(): items = [it for it in items if it[0] not in ("/employee", "/employee/productivity")]      # Update236
-    if session.get("role") == "employee":
+    lead_menu = False
+    try: lead_menu = session.get("role") == "employee" and team_log_access()      # Update263
+    except Exception: lead_menu = False
+    if lead_menu:      # Update263: Associate Manager / Team Lead / Senior Team Lead - exactly these four menu items, in this order
+        items = [("/employee/team-logs", "Team Logs"), ("/employee/people", "Employee Details"), ("/employee/profile", "Personal Details"), ("/employee/leave", "Leave & Permission")]
+    elif session.get("role") == "employee":
         try:      # Admin-controlled: the menu item exists only while Audit Log access is enabled for this employee
             if audit_active(audit_access(session.get("emp_id", ""))): items.append(("/employee/audit", "Audit Log"))
         except Exception:
@@ -4187,9 +4306,14 @@ def page(body, title="Productivity Tracker", **ctx):
                 prm_json = _json.dumps(employee_perm_map(session.get("emp_id", "")), separators=(",", ":"))
         except Exception as ex: print("attendance calendar error:", repr(ex))
     _ntm = ""
-    if session.get("role") == "employee" and not ctx.get("bare") and (p == "/employee" or (ctx["hide_status"] and p == "/employee/leave")):      # Update250: Admin notes scroll at the top of the Daily Entry page (Associate Manager / Team Lead / Senior Team Lead have no Daily Entry - their first page shows it)
+    if session.get("role") == "employee" and not ctx.get("bare") and (p == "/employee" or p == "/employee/team-logs" or (ctx["hide_status"] and p == "/employee/leave")):      # Update250: Admin notes scroll at the top of the Daily Entry page (Associate Manager / Team Lead / Senior Team Lead have no Daily Entry - their first page shows it)
         try: _ntm = nt_marquee_html()
         except Exception as ex_: print("Messages marquee failed:", repr(ex_))
+        try: _ntm += cl_html()      # Update260: celebration animations (Admin > Notes & Messages > Celebrations)
+        except Exception as ex_: print("Celebration overlay failed:", repr(ex_))
+    if session.get("role") == "admin" and not ctx.get("bare"):      # Update265: Leave / Permission notifications at the top of every Admin page
+        try: _ntm = admin_alert_box() + _ntm
+        except Exception as ex_: print("Admin alert bar failed:", repr(ex_))
     _html = render_fast(BASE, body=_ntm + render_fast(body, **ctx), title=title, nav=nav,
                                   side_avatar=side_avatar, side_name=side_name, side_name_html=side_name_html, welcome_html=welcome_html, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, hol_only=bool(ctx["hide_status"]), srv_today=str(today_local()), theme_css=_theme_css())
     return _html
@@ -5341,7 +5465,7 @@ def admin_log():
     rep_month, _on = report_scope()
     subs = [s for s in load_subs() if (not d or s["date"] == d) and (not rep_month or str(s["date"]).startswith(rep_month)) and
             (not e or e in (str(s["emp_id"]).lower(), str(s["emp_name"]).lower())) and not is_view_only(s["emp_id"])]      # Update256: no names / records of Associate Manager / Team Lead / Senior Team Lead here
-    emp_list = sorted((x for x in rows("Employees") if not desig_view_only(x.get("Designation", ""))), key=lambda x: str(x.get("Name", "")).lower())
+    emp_list = sorted((x for x in rows("Employees") if not desig_vo_eff(x)), key=lambda x: str(x.get("Name", "")).lower())
     return page(LOG_MANAGE + LOG_TOP + LIST + LOG_MISSED, title="Productivity log", subs=subs, emp=request.args.get("emp", "").strip(), **log_missed_section(),
                 emp_list=emp_list, sel_emp=request.args.get("emp", "").strip(), today_str=str(today_local()),
                 nxt=request.full_path.rstrip("?"),
@@ -5821,6 +5945,7 @@ T_NOTIF = """<p class="mut">Everything this employee added, updated or deleted, 
 @app.route("/admin/employee-info")
 @need("admin")
 def admin_employee_info():
+    prefetch(*ADMIN_EMP_SHEETS)      # Update259: cold cache -> all sheets are read together, not one by one
     if request.args.get("view") == "notifications":
         log = update_log()
         return page(EMP_LIST, title="Employee Info", view="notifications", log=log,
@@ -5961,6 +6086,7 @@ def admin_set_joining(eid):
 @app.route("/admin/employee-info/<eid>")
 @need("admin")
 def admin_employee_detail(eid):
+    prefetch(*ADMIN_EMP_SHEETS)      # Update259
     emp = emp_or_404(eid); eid = str(emp["Employee ID"])
     if "tab" not in request.args and desig_view_only(emp.get("Designation", "")):      # Update235: Associate Manager / Team Lead / Senior Team Lead -> name click opens ONLY the detailed Productivity Log
         return redirect("/admin/employee-info/%s/productivity-log" % urllib.parse.quote(eid, safe=""))
@@ -6090,6 +6216,7 @@ def admin_employee_plog(eid):
 
 def plog_ctx(eid, month):
     """Update237: everything the detailed date-wise Productivity Log page shows for ONE employee (read from the existing Productivity log via load_subs)."""
+    prefetch(*ADMIN_EMP_SHEETS)      # Update259
     emp = emp_or_404(eid); eid = str(emp["Employee ID"])
     subs = load_subs(eid)
     label = "All time"
@@ -6244,7 +6371,7 @@ def form_page(sub, action, heading):
     if not any(is_poc(n) for n in names): names.insert(max(len(names) - 1, 0), POC_SAMPLE_PROCESS)       # Update94: "POC_Sample" is always available (Hour, Count, Description required)
     if not any(is_training(n) for n in names): names.insert(max(len(names) - 1, 0), TRAINING_PROCESS)       # Update93: "Training" is always available (just before "Other")
     tph = process_rates()
-    perm = {d: h for (_k, d), h in deduction_map(sub.get("emp_id")).items()}      # approved permission + half-day leave hours, by date
+    perm = {d: h for (_k, d), h in deduction_map(sub.get("emp_id"), pending=True).items()}      # approved + pending (Update264) permission + half-day leave hours, by date
     maxdate = ""          # no upper limit on the entry date - employees may pick any date they need
     jd_ = join_date(sub.get("emp_id")) if session.get("role") == "employee" else None
     mindate = str(jd_) if jd_ else ""      # Update97: no entry before the joining date
@@ -7571,11 +7698,11 @@ def employee_welcome():
 @app.route("/employee")
 @need("employee")
 def employee_home():
-    if hide_entry_pages(): return redirect("/employee/leave")      # Update236: no Daily entry page for Associate Manager / Team Lead / Senior Team Lead
+    if hide_entry_pages(): return redirect("/employee/team-logs")      # Update263 (was /employee/leave): first page is Team Logs. Update236: no Daily entry page for Associate Manager / Team Lead / Senior Team Lead
     prefetch(*EMP_PAGE_SHEETS)          # cold cache: fetch all sheets together instead of one by one
     today = str(today_local())
     session["designation"] = find_designation(session["emp_id"], session["name"], session["band"])
-    if desig_view_only(session["designation"]) or is_view_only(session["emp_id"]):      # Update105: View Only - no entry form, no Productivity %
+    if is_view_only(session["emp_id"]):      # Update105 / Update262 (a lead granted entry access gets the normal entry form): View Only - no entry form, no Productivity %
         first_ = today_local().replace(day=1)
         today_perm_ = next((r for r in rows("Permissions") if str(r["Employee ID"]) == session["emp_id"] and r["Date"] == today), None)
         return page(EMP_TOP + VIEW_ONLY_CARD, title="Daily productivity", today=today, month_label=first_.strftime("%B %Y"),
@@ -7618,7 +7745,7 @@ def prod_months():
 def employee_productivity():
     """Productivity Info: this employee's submissions for the chosen month (current month by default; the previous month is also
     available from the month picker, with View / Edit / Delete on every entry). Only the employee's OWN entries are ever listed."""
-    if hide_entry_pages(): return redirect("/employee/leave")      # Update236: no Productivity Info page for Associate Manager / Team Lead / Senior Team Lead
+    if hide_entry_pages(): return redirect("/employee/team-logs")      # Update263 / Update236: no Productivity Info page for Associate Manager / Team Lead / Senior Team Lead
     prefetch("Productivity log", "Processes", "Employees", "Settings", "Permissions", "Holidays")
     today = today_local()
     months = prod_months()
@@ -7706,7 +7833,7 @@ def _employee_save_impl():
     except Exception as ex:
         import traceback; traceback.print_exc()
         landed = False
-        try: landed = any(str(r["Submission ID"]) == str(sid_new) for r in _fetch_rows("Productivity log"))      # Update157: the rows may have been written even though the reply failed
+        try: landed = _sid_landed(sid_new)      # Update157: the rows may have been written even though the reply failed
         except Exception: pass
         if landed:
             invalidate_cache("Productivity log"); session["saved_anim"] = True; flash("Saved.")
@@ -7722,7 +7849,7 @@ def _employee_save_impl():
         miss = [] if is_off(date) else miss_lines(date, [(n, h, c) for n, h, c, _d in procs])
         if miss: flash(target_alert_text(miss), "error")           # employee is told straight away that the target was missed
         # Update94: 100% = not a weekly off, every Admin target met, and all required working hours logged -> flower animation (3 s)
-        if not is_off(date) and not miss and sum(p_[1] for p_ in procs) + sum(n_[1] for n_ in notes) + 1e-9 >= required_hours(session["emp_id"], date):
+        if not is_off(date) and not miss and sum(p_[1] for p_ in procs) + sum(n_[1] for n_ in notes) + 1e-9 >= required_hours(session["emp_id"], date, pending=True):
             session["bloom"] = True
     except Exception as ex:
         print("post-save checks failed:", ex)
@@ -7838,7 +7965,7 @@ def report(employees, subs, leaves, start, end):
                         pct=min(round(earned_ / base * 100), 100) if base else (100 if prod_hrs > 0 else 0),
                         prod=round(prod_hrs, 2), non=round(non_hrs, 2), perm=perm_hrs))
     for r_, e_ in zip(out, employees):      # Update105: Senior Team Lead / Team Lead / Associate Manager -> View Only, no Productivity %
-        if desig_view_only(e_.get("Designation", "")) or is_view_only(r_["id"]):
+        if desig_vo_eff(e_) or is_view_only(r_["id"]):
             r_.update(vo=True, pct=None, att=None, present="-", absent="-", prod=0, non=0)
         else:
             r_["vo"] = False
@@ -8007,7 +8134,7 @@ def admin_productivity_overview(emps, q):
     end_m = min(m1, today - dt.timedelta(days=1)); prow = []
     for e in emps:
         eid = str(e["Employee ID"]).strip(); k = _key(eid)
-        if desig_view_only(e.get("Designation", "")): continue      # Update256: Associate Manager / Team Lead / Senior Team Lead are not listed in the Admin Productivity Log
+        if desig_vo_eff(e): continue      # Update256: Associate Manager / Team Lead / Senior Team Lead are not listed in the Admin Productivity Log
         pstart, jd, basis = prod_start_info(eid); r = reps.get(k, {})
         ea = max(m0, jd) if jd else m0
         entries = len({s["date"] for s in by_emp.get(k, []) if not s["off"] and str(ea) <= s["date"] <= str(m1)})
@@ -8200,11 +8327,22 @@ setInterval(poll,5000);document.addEventListener('visibilitychange',function(){i
 <td>{{r.prod|g}}</td><td>{{r.non|g}}</td>
 <td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td>{% endif %}<td class="no-print"><a href="/admin/summary/check?emp={{r.id|urlencode}}&month={{month}}">Check</a></td></tr>
 {% else %}<tr><td colspan="11">No employees yet.</td></tr>{% endfor %}</table>
+<div class="card" id="ovl"><h2 style="margin:0 0 6px">Senior Team Leads, Team Leads &amp; Associate Managers with Productivity entry access <span class="pill in">{{lead_granted|length}}</span></h2>
+<p class="mut" style="margin:0 0 8px">Only leads the Admin has granted Productivity entry access are listed. Leads without the grant stay View Only and are not shown here.</p>
+<table><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance</th><th>Productive Hours</th><th>Non-productive Hours</th><th>Productivity (%)</th></tr>
+{% for r in lead_granted %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td>
+<td>{{r.att}}%<i class="bar {{r.att|tone}}"><u style="width:{{r.att}}%"></u></i></td><td>{{r.prod|g}}</td><td>{{r.non|g}}</td><td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td></tr>
+{% else %}<tr><td colspan="10">No Senior Team Lead / Team Lead / Associate Manager has been granted Productivity entry access.</td></tr>{% endfor %}</table>
+<details class="no-print" style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Manage entry access ({{lead_all|length}})</summary>
+<table style="margin-top:8px"><tr><th>Employee</th><th>Designation</th><th>Entry access</th><th></th></tr>
+{% for l in lead_all %}<tr><td>{{l.id}} &middot; {{l.name}}</td><td>{{l.desig}}</td><td><span class="pill {{'in' if l.granted else 'act'}}">{{'Granted' if l.granted else 'View Only'}}</span></td>
+<td><form method="post" action="/admin/summary/lead-access" style="margin:0"><input type="hidden" name="emp" value="{{l.id}}"><input type="hidden" name="month" value="{{month}}"><input type="hidden" name="to" value="{{'revoke' if l.granted else 'grant'}}"><button class="back sm">{{'Revoke access' if l.granted else 'Grant access'}}</button></form></td></tr>
+{% else %}<tr><td colspan="4">No Senior Team Lead / Team Lead / Associate Manager found.</td></tr>{% endfor %}</table></details></div>
 <script>(function(){var t=document.getElementById('ovt');if(!t)return;var sig=t.getAttribute('data-sig'),busy=false,q=location.search||'';
 function stamp(x){var e=document.getElementById('ov_at');if(e)e.textContent=x}
 function redraw(){fetch(location.pathname+q,{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.text()}).then(function(h){
  var d=new DOMParser().parseFromString(h,'text/html'),nt=d.getElementById('ovt'),ok=d.querySelector('.kpis'),ck=document.querySelector('.kpis');
- if(!nt)return;t.innerHTML=nt.innerHTML;sig=nt.getAttribute('data-sig');t.setAttribute('data-sig',sig);if(ok&&ck)ck.innerHTML=ok.innerHTML}).catch(function(){})}
+ if(!nt)return;var ol=d.getElementById('ovl'),cl=document.getElementById('ovl');if(ol&&cl)cl.innerHTML=ol.innerHTML;t.innerHTML=nt.innerHTML;sig=nt.getAttribute('data-sig');t.setAttribute('data-sig',sig);if(ok&&ck)ck.innerHTML=ok.innerHTML}).catch(function(){})}
 function poll(){if(busy||document.hidden)return;busy=true;
  fetch('/admin/summary/poll'+q,{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(j){stamp(j.at);if(j.sig!==sig)redraw()}).catch(function(){}).then(function(){busy=false})}
 setInterval(poll,30000);document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()})})();
@@ -8319,8 +8457,13 @@ def _overview_ctx(month):
     n = len(std) or 1
     a1, a2 = round(sum(r["att"] for r in std) / n), round(sum(r["pct"] for r in std) / n)
     extra = [("Employees", len(rep)), ("Total leave days", sum(r["leave"] for r in rep))]
-    sig = _ih.md5(json.dumps([rep, a1, a2, label], sort_keys=True, default=str).encode()).hexdigest()
-    return dict(rep=rep, month=month, label=label, wd=workdays(start, end), lab1="Average attendance", lab2="Average productivity",
+    gr = lead_granted_ids()      # Update262: leads the Admin granted Productivity entry access -> shown in their own Overview card; all leads listed for Grant / Revoke
+    lead_all = [dict(id=str(e.get("Employee ID", "")).strip(), name=str(e.get("Name", "")), desig=str(e.get("Designation", "")).strip(), granted=_key(e.get("Employee ID", "")) in gr)
+                for e in emps if desig_view_only(e.get("Designation", "")) and not emp_sep(e)]
+    lead_all.sort(key=lambda x: x["name"].lower())
+    lead_granted = [r for r in rep if _key(r["id"]) in gr and any(_key(x["id"]) == _key(r["id"]) for x in lead_all)]
+    sig = _ih.md5(json.dumps([rep, a1, a2, label, lead_all], sort_keys=True, default=str).encode()).hexdigest()
+    return dict(lead_all=lead_all, lead_granted=lead_granted, rep=rep, month=month, label=label, wd=workdays(start, end), lab1="Average attendance", lab2="Average productivity",
                 a1=a1, a2=a2, extra=extra, target=target_hours(), sig=sig)
 
 @app.route("/admin/summary")
@@ -8330,6 +8473,28 @@ def admin_summary():
     month = request.args.get("month") or today_local().strftime("%Y-%m")
     ctx = _overview_ctx(month)
     return page(SUMMARY, title="Overview", online=online_list(), **ctx)
+
+@app.route("/admin/summary/lead-access", methods=["POST"])
+@need("admin")
+def admin_lead_access():
+    """Update262: Admin grants / revokes Productivity entry access for ONE Senior Team Lead / Team Lead / Associate Manager."""
+    eid = request.form.get("emp", "").strip(); act = request.form.get("to", ""); mo = request.form.get("month", "").strip()
+    back = "/admin/summary" + (("?month=" + mo) if (mo == "all" or re.fullmatch(r"\d{4}-\d{2}", mo)) else "")
+    e = next((x for x in rows("Employees") if _key(x.get("Employee ID", "")) == _key(eid)), None)
+    if e is None or act not in ("grant", "revoke") or not desig_view_only(e.get("Designation", "")):
+        flash("Nothing changed - choose a Senior Team Lead, Team Lead or Associate Manager.", "error"); return redirect(back)
+    if act == "grant" and emp_sep(e):
+        flash("A Resigned / NCNS employee cannot be granted Productivity entry access.", "error"); return redirect(back)
+    val = "Yes" if act == "grant" else "No"; now = now_local().strftime("%Y-%m-%d %H:%M:%S"); ws = ws_of(LEAD_ACCESS_SHEET)
+    cur = next((r for r in _fetch_rows(LEAD_ACCESS_SHEET) if _key(r.get("Employee ID", "")) == _key(eid)), None)
+    try:
+        if cur: ws.update(range_name="C%d:E%d" % (cur["_row"], cur["_row"]), values=[[val, now, "Admin"]], value_input_option="RAW")
+        else: ws.append_row([str(e.get("Employee ID", "")).strip(), str(e.get("Name", "")), val, now, "Admin"], value_input_option="RAW")
+    except Exception as ex:
+        print("Lead access save failed:", repr(ex)); flash("Could not save - please try again.", "error"); return redirect(back)
+    invalidate_cache(LEAD_ACCESS_SHEET); _vo_cache[0] = 0.0
+    flash("%s - Productivity entry access %s." % (e.get("Name", eid), "granted (they now get the Daily entry page)" if act == "grant" else "taken back (View Only again)"))
+    return redirect(back)
 
 @app.route("/admin/summary/poll")
 @need("admin")
@@ -8547,6 +8712,76 @@ def employee_password():
         flash("Could not change the password - please reload the page and try again.")
     return redirect("/employee/profile")
 
+# ---------------------------------------------------------------- Update265: Admin notifications for new Leave / Permission requests
+ADM_ALERT_T = """{% if items %}<div class="admal" role="alert" aria-live="assertive">
+<div class="admal-h"><span class="admal-bell" aria-hidden="true">&#128276;</span><b>{{items|length + more}} new Leave &amp; Permission request{{'' if items|length + more == 1 else 's'}} to review</b>
+<a class="admal-go" href="/admin/leave-permission">Review requests</a>
+<form method="post" action="/admin/alerts/clear" onsubmit="this.nx.value=location.pathname+location.search"><input type="hidden" name="nx"><input type="hidden" name="id" value="all"><button type="submit" class="admal-b">Clear all</button></form></div>
+<ul>{% for a in items %}<li><span class="admal-t {{a.kind|lower}}">{{a.kind}}</span><span class="admal-m"><b>{{a.name}}</b> ({{a.eid}}) &middot; {{a.details}}</span><small>{{a.at}}</small>
+<form method="post" action="/admin/alerts/clear" onsubmit="this.nx.value=location.pathname+location.search"><input type="hidden" name="nx"><input type="hidden" name="id" value="{{a.id}}"><button type="submit" class="admal-b">Clear</button></form></li>{% endfor %}</ul>
+{% if more %}<p class="admal-more">+ {{more}} older notification{{'' if more == 1 else 's'}} - use Clear all or Clear to see them.</p>{% endif %}</div>{% endif %}"""
+
+ADM_ALERT_CSS = """<style>.admal{margin:0 0 14px;border-radius:12px;overflow:hidden;color:#fff;background:linear-gradient(135deg,#dc2626,#f97316);box-shadow:0 8px 26px -10px rgba(220,38,38,.7);animation:admalP 2.2s ease-in-out infinite}
+@keyframes admalP{50%{box-shadow:0 8px 34px -4px rgba(249,115,22,.95)}}
+.admal-h{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px;font-size:15px}.admal-h b{flex:1 1 auto}.admal-bell{font-size:20px;display:inline-block;animation:admalR 1.6s ease-in-out infinite;transform-origin:50% 0}
+@keyframes admalR{0%,60%,100%{transform:rotate(0)}10%,30%{transform:rotate(14deg)}20%,40%{transform:rotate(-14deg)}}
+.admal form{margin:0}.admal-go{color:#fff;background:rgba(255,255,255,.22);border-radius:8px;padding:5px 12px;text-decoration:none;font-weight:600;font-size:13px}
+.admal-b{cursor:pointer;border:0;border-radius:8px;padding:5px 12px;font-weight:600;font-size:13px;background:#fff;color:#b91c1c}
+.admal ul{list-style:none;margin:0;padding:0;background:rgba(0,0,0,.16);max-height:260px;overflow:auto}.admal li{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 14px;border-top:1px solid rgba(255,255,255,.18);font-size:13.5px}
+.admal-m{flex:1 1 260px}.admal li small{opacity:.85}.admal-t{border-radius:999px;padding:2px 10px;font-weight:700;font-size:12px;background:#fff;color:#b45309}.admal-t.permission{color:#6d28d9}
+.admal-more{margin:0;padding:6px 14px;font-size:12.5px;background:rgba(0,0,0,.16)}@media(prefers-reduced-motion:reduce){.admal,.admal-bell{animation:none}}@media print{#adm-alerts{display:none}}</style>"""
+
+ADM_ALERT_JS = """<script>(function(){var b=document.getElementById('adm-alerts');if(!b)return;function go(){if(document.hidden)return;
+fetch('/admin/alerts/poll',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.text():null}).then(function(h){if(h!==null&&h!==b.getAttribute('data-h')){b.innerHTML=h;b.setAttribute('data-h',h)}}).catch(function(){})}
+setInterval(go,30000);document.addEventListener('visibilitychange',function(){if(!document.hidden)go()})})();</script>"""
+
+def admin_alert_add(kind, emp, details):
+    """Update265: record a new Leave / Permission request for the Admin's notification bar. Never raises - a failure here must not affect the employee's request."""
+    try:
+        ws = ws_of("Admin Alerts")
+        ws.append_row([uuid.uuid4().hex[:10], kind, str((emp or {}).get("Employee ID", "")).strip(), str((emp or {}).get("Name", "")),
+                       _short(str(details), 220), now_local().strftime("%Y-%m-%d %H:%M:%S"), "New", ""], value_input_option="RAW")
+        invalidate_cache("Admin Alerts")
+    except Exception as ex:
+        print("Admin alert not saved:", repr(ex))
+
+def _admin_alert_items(limit=25):
+    live = [r for r in rows("Admin Alerts") if str(r.get("Status", "")).strip().lower() != "cleared" and str(r.get("Alert ID", "")).strip()]
+    live.sort(key=lambda r: str(r.get("Created at", "")), reverse=True)
+    items = [dict(id=str(r["Alert ID"]), kind=str(r.get("Type", "")), eid=str(r.get("Employee ID", "")), name=str(r.get("Employee name", "")),
+                  details=str(r.get("Details", "")), at=str(r.get("Created at", ""))[:16]) for r in live[:limit]]
+    return items, max(len(live) - limit, 0)
+
+def admin_alert_html():
+    try: items, more = _admin_alert_items()
+    except Exception as ex:
+        print("Admin alerts read failed:", repr(ex)); items, more = [], 0
+    return render_fast(ADM_ALERT_T, items=items, more=more)
+
+def admin_alert_box():
+    return ADM_ALERT_CSS + '<div id="adm-alerts" data-h="">' + admin_alert_html() + '</div>' + ADM_ALERT_JS
+
+@app.route("/admin/alerts/poll")
+@need("admin")
+def admin_alerts_poll():
+    return Response(admin_alert_html(), mimetype="text/html", headers={"Cache-Control": "no-store"})
+
+@app.route("/admin/alerts/clear", methods=["POST"])
+@need("admin")
+def admin_alerts_clear():
+    aid = request.form.get("id", "").strip(); nx = request.form.get("nx", "")
+    back = nx if (nx.startswith("/admin") and "//" not in nx[:3] and "\\" not in nx) else "/admin/summary"
+    try:
+        now = now_local().strftime("%Y-%m-%d %H:%M:%S"); ups = []
+        for r in _fetch_rows("Admin Alerts"):
+            if str(r.get("Status", "")).strip().lower() == "cleared" or not str(r.get("Alert ID", "")).strip(): continue
+            if aid == "all" or str(r.get("Alert ID")) == aid: ups.append({"range": "G%d:H%d" % (r["_row"], r["_row"]), "values": [["Cleared", now]]})
+        if ups: ws_of("Admin Alerts").batch_update(ups, value_input_option="RAW")
+        invalidate_cache("Admin Alerts")
+    except Exception as ex:
+        print("Admin alert clear failed:", repr(ex)); flash("Could not clear the notification - please try again.", "error")
+    return redirect(back)
+
 @app.route("/employee/leave", methods=["GET", "POST"])
 @need("employee")
 def employee_leave():
@@ -8559,6 +8794,11 @@ def employee_leave():
                 log_change(SEC_LEAVE, "Added", f"{'Half-day leave' if request.form.get('daytype', '').lower().startswith('half') else 'Leave'} {d1 if d1 == d2 else d1 + ' to ' + d2} ({n} day(s)) \u2013 {_short(why, 80)}")
             flash(("Half-day leave submitted" if request.form.get('daytype', '').lower().startswith('half') and n else f"{n} leave day(s) submitted") + " - waiting for admin approval." +
                   (f" Holiday date(s) {', '.join(skipped)} were skipped (leave is not needed on a holiday)." if skipped else ""))
+            if n:
+                try:      # Update265: notify the Admin (top bar) - leave request received
+                    _d1, _d2 = request.form['d1'], request.form['d2']; _hf = request.form.get('daytype', '').lower().startswith('half')
+                    admin_alert_add("Leave", my_emp_row(), f"{'Half-day leave' if _hf else str(n) + ' day(s)'}: {_pretty_date(_d1) if _d1 == _d2 else _pretty_date(_d1) + ' to ' + _pretty_date(_d2)} - {request.form['reason'].strip() or 'Leave'}")
+                except Exception as ex_: print("Admin alert (leave) error:", repr(ex_))
             if n:      # Update255: e-mail the applicant (own Office Email ID only) that the request was received
                 try:
                     d1_, d2_ = request.form['d1'], request.form['d2']; half_ = request.form.get('daytype', '').lower().startswith('half')
@@ -8605,6 +8845,9 @@ def employee_permission():
         log_change(SEC_LEAVE, "Added", f"Permission request for {pdate} ({_fmt_num(round(float(request.form.get('hours', 0)), 2))} hr) "
                                         f"\u2013 {_short(request.form.get('reason', '').strip() or 'Permission', 80)}")
         flash("Permission request submitted for today." if pdate == str(today_local()) else f"Permission request submitted for {pdate}.")
+        try:      # Update265: notify the Admin (top bar) - permission request received
+            admin_alert_add("Permission", my_emp_row(), f"{_fmt_num(round(float(request.form.get('hours', 0)), 2))} hr on {_pretty_date(pdate)} - {request.form.get('reason', '').strip() or 'Permission'}")
+        except Exception as ex_: print("Admin alert (permission) error:", repr(ex_))
         try:      # Update255: e-mail the applicant (own Office Email ID only) that the request was received. Permission never blocks or completes the Productivity entry.
             hrs_ = round(float(request.form.get("hours", 0)), 2)
             msg_, cat_ = notify_request(my_emp_row(), "Permission", "Pending", _pretty_date(pdate), f"{hrs_:g} hr{'s' if hrs_ != 1 else ''}", 1,
@@ -13038,7 +13281,14 @@ def _nt_emps():
     out.sort(key=lambda x: x["name"].lower())
     return out
 
-NOTES_ADM = r"""<style>
+def _nt_tabs(active):
+    """Update260: Notes & Messages | Celebrations tab bar (Admin)."""
+    base = "display:inline-block;padding:8px 16px;border-radius:99px;font-weight:700;font-size:13px;text-decoration:none;margin:0 8px 14px 0;"
+    on, off = "background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;", "background:#eef0fb;color:#4f46e5;"
+    return ('<div class="nt-tabs"><a href="/admin/notes" style="%s%s">Notes &amp; Messages</a><a href="/admin/notes/celebrations" style="%s%s">&#127881; Celebrations</a></div>'
+            % (base, on if active == "n" else off, base, on if active == "c" else off))
+
+NOTES_ADM = _nt_tabs("n") + r"""<style>
 .nt-f label{display:block;font-weight:600;font-size:13px;margin:12px 0 4px}
 .nt-f input[type=text],.nt-f input[type=date],.nt-f select,.nt-f textarea{width:100%;box-sizing:border-box}
 .nt-f textarea{min-height:130px;resize:vertical;line-height:1.5}
@@ -13319,6 +13569,441 @@ def admin_notes_status(nid):
     return redirect("/admin/notes")
 
 
+# ================================================================ Celebrations - Update260
+# Admin > Notes & Messages > Celebrations: the Admin creates celebration animations (fireworks, crackers, confetti, balloons ...) for occasions such as birthdays, Pongal,
+# Diwali or New Year, chooses WHO sees them (all employees or only the ones ticked), WHEN (Display / Stop date & time, or "Start now") and HOW OFTEN.
+# The Employee page (the page right after login) plays them as a full-screen animation with a greeting card. Sheets (created automatically): "Celebrations", "Celebration Seen".
+CL_SHEET, CL_SEEN = "Celebrations", "Celebration Seen"
+CL_FX = (("fireworks", "Fireworks"), ("crackers", "Crackers (ladi strings + flower pots)"), ("grand", "Fireworks + Crackers"), ("party", "Fireworks + Confetti"), ("confetti", "Confetti"), ("balloons", "Balloons"))
+CL_LVL = (("low", "Gentle"), ("mid", "Normal"), ("high", "Grand"))
+CL_FREQ = (("continuous", "Continuous - until the Admin clicks Stop"), ("once", "Once per employee"), ("day", "Once a day (first visit of the day)"), ("login", "Every login (once per browser session)"))
+CL_OCC = (("birthday", "Birthday", "Happy Birthday, {name}!", "Wishing you a wonderful year ahead filled with joy and success. From all of us!", "grand"),
+          ("pongal", "Pongal", "Happy Pongal!", "Pongalo Pongal! May this harvest festival bring happiness, prosperity and sweetness to you and your family.", "crackers"),
+          ("diwali", "Diwali", "Happy Diwali!", "May the festival of lights brighten your life with joy and prosperity.", "grand"),
+          ("newyear", "New Year", "Happy New Year!", "Wishing you a year full of success, health and happiness.", "fireworks"),
+          ("anniversary", "Work anniversary", "Congratulations, {name}!", "Thank you for being a valued part of the team. Here's to many more years together!", "balloons"),
+          ("festival", "Other festival", "Season's Greetings!", "Warm wishes to you and your family.", "confetti"),
+          ("custom", "Custom", "", "", "fireworks"))
+CL_OCC_KEYS = {o[0] for o in CL_OCC}; CL_FX_KEYS = {o[0] for o in CL_FX}; CL_LVL_KEYS = {o[0] for o in CL_LVL}; CL_FREQ_KEYS = {o[0] for o in CL_FREQ}
+CL_PRESETS = {o[0]: dict(label=o[1], title=o[2], message=o[3], fx=o[4]) for o in CL_OCC}
+
+def _cl_int(v, lo, hi, d):
+    try: return max(lo, min(hi, int(float(str(v).strip()))))
+    except (ValueError, TypeError): return d
+def _cl_pick(v, allowed, d):
+    v = str(v or "").strip().lower(); return v if v in allowed else d
+def _cl_freq(c): return _cl_pick(c.get("Frequency"), CL_FREQ_KEYS, "once")
+
+def cl_for(eid, name=""):
+    """Celebrations this employee should see right now (Live, sent to them, and - for 'once' - not shown to them before). Oldest first, at most 3."""
+    try: cs = [c for c in rows(CL_SHEET) if str(c.get("Celebration ID", "")).strip() and _nt_visible(c, eid)]
+    except Exception as ex:
+        print("Celebrations read failed:", repr(ex)); return []
+    if not cs: return []
+    seen = set()
+    if any(_cl_freq(c) == "once" for c in cs):
+        try: seen = {str(r.get("Celebration ID", "")).strip() for r in rows(CL_SEEN) if _key(r.get("Employee ID", "")) == _key(eid)}
+        except Exception: pass
+    first = (str(name or "").strip().split() or [""])[0] or "there"
+    out = []
+    for c in cs:
+        cid = str(c["Celebration ID"]).strip(); fr = _cl_freq(c)
+        if fr == "once" and cid in seen: continue
+        out.append(dict(id=cid, title=str(c.get("Title", "")).replace("{name}", first).strip(), text=str(c.get("Message", "")).replace("{name}", first).strip(),
+                        occ=_cl_pick(c.get("Occasion"), CL_OCC_KEYS, "custom"), fx=_cl_pick(c.get("Effect"), CL_FX_KEYS, "fireworks"), lvl=_cl_pick(c.get("Intensity"), CL_LVL_KEYS, "mid"),
+                        dur=_cl_int(c.get("Duration sec"), 5, 30, 12), freq=fr, cont=(fr == "continuous"), at=(str(c.get("Display from", "")).strip() or str(c.get("Created at", "")).strip())))
+    out.sort(key=lambda x: x["at"]); co = [x for x in out if x["cont"]]; ot = [x for x in out if not x["cont"]]
+    return ot[-3:] + co[-2:]      # Update261: a Continuous celebration is never trimmed away
+
+CL_ENGINE_JS = r'''(function(){
+if(window.__clPlay) return;
+var EMO={birthday:0x1F382,pongal:0x1F33E,diwali:0x1FA94,newyear:0x1F389,anniversary:0x1F3C6,festival:0x2728,custom:0x2728};
+var THEME={birthday:['#ec4899','#7c3aed'],pongal:['#f59e0b','#15803d'],diwali:['#f97316','#9f1239'],newyear:['#4f46e5','#0ea5e9'],anniversary:['#0ea5e9','#0d9488'],festival:['#8b5cf6','#ec4899'],custom:['#4f46e5','#7c3aed']};
+var FXMAP={fireworks:['fw'],crackers:['cr'],grand:['fw','cr'],party:['fw','cf'],confetti:['cf'],balloons:['bl']};
+var PAL=['#ff595e','#ffca3a','#8ac926','#1982c4','#a855f7','#ff924c','#f72585','#4cc9f0','#ffffff'];
+var GOLD=['#ffd166','#ff9f1c','#ffbf69','#fff3b0','#ff6b35'];
+function rnd(a,b){return a+Math.random()*(b-a)}
+function pick(a){return a[(Math.random()*a.length)|0]}
+function css(){
+  if(document.getElementById('clx-css')) return;
+  var s=document.createElement('style'); s.id='clx-css';
+  s.textContent='.clx{position:fixed;inset:0;z-index:2147483000;pointer-events:none;opacity:0;transition:opacity .4s}.clx.on{opacity:1}'
+  +'.clx-cv{position:absolute;inset:0;width:100%;height:100%}'
+  +'.clx-card{position:absolute;left:50%;top:11%;transform:translate(-50%,-30px) scale(.9);pointer-events:auto;box-sizing:border-box;width:max-content;max-width:min(92vw,520px);padding:18px 48px 18px 22px;border-radius:18px;color:#fff;text-align:center;background:linear-gradient(135deg,var(--a),var(--b));box-shadow:0 24px 50px -16px #000a,0 0 44px var(--a);opacity:0;transition:transform .55s cubic-bezier(.2,1.4,.4,1),opacity .4s}'
+  +'.clx.on .clx-card{transform:translate(-50%,0) scale(1);opacity:1}'
+  +'.clx-ic{display:block;font-size:42px;line-height:1.1;margin-bottom:6px;animation:clxB 1.1s ease-in-out infinite}'
+  +'.clx-t{display:block;font-size:22px;font-weight:800;text-shadow:0 2px 10px #0006;word-break:break-word}'
+  +'.clx-m{display:block;margin-top:6px;font-size:14.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word;opacity:.97}'
+  +'.clx-x{position:absolute;top:8px;right:10px;width:30px;height:30px;border:0;border-radius:50%;background:#ffffff33;color:#fff;font-size:18px;line-height:1;cursor:pointer}.clx-x:hover{background:#ffffff55}'
+  +'@keyframes clxB{50%{transform:translateY(-6px) scale(1.08)}}'
+  +'.clx-bn{box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:4px 8px;flex-wrap:wrap;margin:0 0 10px;padding:6px 14px;border-radius:10px;color:#fff;text-align:center;background:linear-gradient(135deg,var(--a),var(--b));box-shadow:0 4px 14px -6px var(--a);font-size:12px;line-height:1.4;animation:clxP 2.4s ease-in-out infinite}'
+  +'.clx-bn b{font-size:12.5px;font-weight:700}.clx-bn span{font-size:11.5px;opacity:.96}.clx-bn i{font-style:normal;font-size:14px}'
+  +'.clx-bn.fix{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:2147483001;max-width:92vw;margin:0}'
+  +'@keyframes clxP{50%{box-shadow:0 4px 22px -2px var(--a)}}'
+  +'@media(prefers-reduced-motion:reduce){.clx-ic,.clx-bn{animation:none}.clx-card{transition:none}}@media print{.clx,.clx-bn{display:none}}';
+  document.head.appendChild(s);
+}
+window.__clStop=function(){ var r=document.getElementById('clx-root'); if(r&&r.__fin) r.__fin() };
+window.__clPlay=function(c,done){
+  css();
+  var old=document.getElementById('clx-root'); if(old&&old.__fin) old.__fin(true);
+  var root=document.createElement('div'); root.id='clx-root'; root.className='clx'; root.setAttribute('role','status'); root.setAttribute('aria-live','polite');
+  var th=THEME[c.occ]||THEME.custom; root.style.setProperty('--a',th[0]); root.style.setProperty('--b',th[1]);
+  var reduce=false; try{reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}
+  var cont=!!c.cont, inf=cont&&!c.prev, bn=null;
+  if(cont){
+    bn=document.createElement('div'); bn.className='clx-bn'; bn.setAttribute('role','status'); bn.style.setProperty('--a',th[0]); bn.style.setProperty('--b',th[1]);
+    var bi=document.createElement('i'); bi.setAttribute('aria-hidden','true'); bi.textContent=String.fromCodePoint(EMO[c.occ]||0x2728); bn.appendChild(bi);
+    if(c.title){var bt=document.createElement('b'); bt.textContent=c.title; bn.appendChild(bt)}
+    if(c.text){var bm=document.createElement('span'); bm.textContent=c.text; bn.appendChild(bm)}
+    var an=window.__clAnchor;
+    if(!c.prev&&an&&an.parentNode) an.parentNode.insertBefore(bn,an); else { bn.className+=' fix'; document.body.appendChild(bn) }
+  }
+  var cv=null,ctx=null; if(!reduce){cv=document.createElement('canvas'); cv.className='clx-cv'; root.appendChild(cv); ctx=cv.getContext('2d')}
+  var card=document.createElement('div'); card.className='clx-card';
+  var ic=document.createElement('span'); ic.className='clx-ic'; ic.setAttribute('aria-hidden','true'); ic.textContent=String.fromCodePoint(EMO[c.occ]||0x2728); card.appendChild(ic);
+  if(c.title){var t=document.createElement('span'); t.className='clx-t'; t.textContent=c.title; card.appendChild(t)}
+  if(c.text){var m=document.createElement('span'); m.className='clx-m'; m.textContent=c.text; card.appendChild(m)}
+  var x=document.createElement('button'); x.type='button'; x.className='clx-x'; x.setAttribute('aria-label','Close'); x.textContent='\u00d7'; card.appendChild(x);
+  if(!cont) root.appendChild(card); document.body.appendChild(root);
+  setTimeout(function(){root.className='clx on'},30);
+  var dur=Math.max(5,Math.min(30,+c.dur||12)), fin=false, raf=0, hard=0, W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2);
+  function finish(quick){
+    if(fin) return; fin=true; cancelAnimationFrame(raf); clearTimeout(hard);
+    window.removeEventListener('resize',size); document.removeEventListener('keydown',key);
+    root.className='clx'; var wait=quick?0:450; if(bn&&bn.parentNode) bn.parentNode.removeChild(bn);
+    setTimeout(function(){ if(root.parentNode) root.parentNode.removeChild(root); if(done) done() },wait);
+  }
+  root.__fin=finish; x.addEventListener('click',function(){finish()});
+  function key(e){if(e.key==='Escape'&&!inf) finish()} document.addEventListener('keydown',key);
+  if(reduce){ if(!inf) hard=setTimeout(function(){finish()},Math.min(dur,8)*1000); return }
+  function size(){W=window.innerWidth;H=window.innerHeight;cv.width=Math.round(W*DPR);cv.height=Math.round(H*DPR);ctx.setTransform(DPR,0,0,DPR,0,0)}
+  size(); window.addEventListener('resize',size);
+  var L=({low:.55,mid:1,high:1.7})[c.lvl]||1, fx={}; (FXMAP[c.fx]||FXMAP.fireworks).forEach(function(k){fx[k]=1});
+  var sp=[],rk=[],cf=[],bl=[],fo=[],ld=[];
+  var t0=performance.now(), last=t0, end=inf?Infinity:t0+dur*1000, quiet=inf?Infinity:end-2200;
+  var nRk=t0+300, nCr=t0+200, nCf=t0, nBl=t0;
+  function burst(x0,y0,col,n,sp0,sp1,g,life,ring){
+    for(var i=0;i<n;i++){ var a=ring?(i/n)*Math.PI*2:rnd(0,Math.PI*2), v=ring?sp1:rnd(sp0,sp1);
+      sp.push({x:x0,y:y0,px:x0,py:y0,vx:Math.cos(a)*v,vy:Math.sin(a)*v,g:g,l:rnd(life*.7,life),m:life,c:Array.isArray(col)?pick(col):col,w:rnd(1.4,2.6)}) }
+  }
+  function explode(x0,y0){
+    var c1=pick(PAL), c2=pick(PAL), n=Math.round(rnd(46,72)*Math.min(L,1.4)), ring=Math.random()<.3;
+    burst(x0,y0,[c1,c1,c2],n,1.2,ring?4.2:5.2,.055,rnd(.9,1.5),ring);
+    if(Math.random()<.4) burst(x0,y0,'#ffffff',Math.round(14*Math.min(L,1.4)),.6,2.2,.04,.8,false);
+  }
+  function pop(x0,y0){
+    fo.push({x:x0,y:y0,r:4,l:.16});
+    burst(x0,y0,GOLD,Math.round(14*Math.min(L,1.5)),1,4.6,.16,rnd(.35,.6),false);
+  }
+  function step(now){
+    var dt=Math.min((now-last)/1000,.05); last=now; var k=dt*60, live=now<quiet;
+    if(fx.fw&&live&&now>=nRk&&rk.length<6){ rk.push({x:rnd(.12,.88)*W,y:H+4,vx:rnd(-.6,.6),vy:-rnd(9.5,12.5)*Math.max(.7,H/800),c:pick(PAL)}); nRk=now+rnd(380,900)/L }
+    if(fx.cr&&live&&now>=nCr){
+      if(Math.random()<.5){ fo.push({fount:1,x:rnd(.1,.9)*W,y:H,until:now+rnd(2200,3400),next:0}) }
+      else { var dir=Math.random()<.5?1:-1, x1=dir>0?rnd(0,.3)*W:rnd(.7,1)*W; ld.push({x:x1,d:dir,left:Math.round(rnd(14,26)),next:now}) }
+      nCr=now+rnd(900,1700)/L }
+    if(fx.cf&&live&&now>=nCf){ for(var i=0;i<Math.round(5*L);i++) cf.push({x:rnd(0,W),y:-12,vx:rnd(-1.2,1.2),vy:rnd(1.6,3.6),r:rnd(0,6.3),vr:rnd(-.2,.2),w:rnd(6,11),h:rnd(3,6),c:pick(PAL),ph:rnd(0,6.3)}); nCf=now+90 }
+    if(fx.cf&&now-t0<400&&!cf.__b){ cf.__b=1; [0,1].forEach(function(s){ for(var i=0;i<Math.round(40*L);i++){ var a=(s?Math.PI*1.25:Math.PI*1.75)+rnd(-.35,.35), v=rnd(9,17); cf.push({x:s?W:0,y:H,vx:Math.cos(a)*v,vy:Math.sin(a)*v,r:rnd(0,6.3),vr:rnd(-.3,.3),w:rnd(6,11),h:rnd(3,6),c:pick(PAL),ph:rnd(0,6.3),cn:1}) } }) }
+    if(fx.bl&&live&&now>=nBl&&bl.length<28){ bl.push({x:rnd(.04,.96)*W,y:H+60,vy:rnd(1,2.2),r:rnd(20,32),c:pick(PAL),ph:rnd(0,6.3),a:rnd(10,26)}); nBl=now+rnd(160,320)/L }
+    var i;
+    for(i=rk.length-1;i>=0;i--){ var r=rk[i]; r.px=r.x;r.py=r.y; r.x+=r.vx*k; r.y+=r.vy*k; r.vy+=.18*k; if(r.vy>-1.2){ explode(r.x,r.y); rk.splice(i,1) } }
+    for(i=fo.length-1;i>=0;i--){ var f=fo[i];
+      if(f.fount){ if(now>=f.until){fo.splice(i,1);continue} if(now>=f.next){ for(var j=0;j<Math.round(5*L);j++){ var a=-Math.PI/2+rnd(-.4,.4), v=rnd(6,11); sp.push({x:f.x,y:f.y,px:f.x,py:f.y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,g:.2,l:rnd(.8,1.3),m:1.3,c:pick(GOLD),w:rnd(1.4,2.4)}) } f.next=now+30 } }
+      else { f.l-=dt; f.r+=40*k*.3; if(f.l<=0) fo.splice(i,1) } }
+    for(i=ld.length-1;i>=0;i--){ var q=ld[i]; if(now>=q.next){ pop(q.x,H-rnd(2,16)); q.x+=q.d*rnd(14,24); q.left--; q.next=now+rnd(60,110); if(q.left<=0||q.x<-10||q.x>W+10) ld.splice(i,1) } }
+    if(sp.length>900) sp.splice(0,sp.length-900);
+    for(i=sp.length-1;i>=0;i--){ var s=sp[i]; s.px=s.x;s.py=s.y; s.x+=s.vx*k; s.y+=s.vy*k; s.vy+=s.g*k; s.vx*=Math.pow(.985,k); s.l-=dt; if(s.l<=0) sp.splice(i,1) }
+    for(i=cf.length-1;i>=0;i--){ var p=cf[i]; p.ph+=.08*k; p.x+=(p.vx+Math.sin(p.ph)*.8)*k; p.y+=p.vy*k; p.r+=p.vr*k; if(p.cn){p.vx*=Math.pow(.95,k); p.vy=p.vy*Math.pow(.95,k)+.18*k; if(p.vy>2.2) p.cn=0} if(p.y>H+20) cf.splice(i,1) }
+    for(i=bl.length-1;i>=0;i--){ var b=bl[i]; b.y-=b.vy*k; b.ph+=.03*k; b.x+=Math.sin(b.ph)*.5*k; if(b.y<-120) bl.splice(i,1) }
+    draw(now);
+    if(now>=end&&!sp.length&&!rk.length&&!cf.length&&!bl.length&&!fo.length&&!ld.length) finish(); else raf=requestAnimationFrame(step);
+  }
+  function draw(now){
+    ctx.clearRect(0,0,W,H); var i;
+    ctx.lineCap='round';
+    for(i=0;i<bl.length;i++){ var b=bl[i], bx=b.x, by=b.y;
+      ctx.strokeStyle='rgba(120,120,120,.55)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(bx,by+b.r*1.25); ctx.quadraticCurveTo(bx+Math.sin(b.ph*2)*b.a,by+b.r*2.2,bx,by+b.r*3.4); ctx.stroke();
+      ctx.fillStyle=b.c; ctx.beginPath(); ctx.ellipse(bx,by,b.r,b.r*1.22,0,0,6.2832); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(bx,by+b.r*1.22); ctx.lineTo(bx-4,by+b.r*1.22+7); ctx.lineTo(bx+4,by+b.r*1.22+7); ctx.closePath(); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.4)'; ctx.beginPath(); ctx.ellipse(bx-b.r*.35,by-b.r*.4,b.r*.2,b.r*.34,-.5,0,6.2832); ctx.fill() }
+    for(i=0;i<cf.length;i++){ var p=cf[i]; ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.r); ctx.scale(1,Math.abs(Math.cos(p.ph))*.9+.1); ctx.fillStyle=p.c; ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h); ctx.restore() }
+    for(i=0;i<rk.length;i++){ var r=rk[i]; ctx.strokeStyle='#ffe9a8'; ctx.lineWidth=2.4; ctx.beginPath(); ctx.moveTo(r.px,r.py); ctx.lineTo(r.x,r.y); ctx.stroke() }
+    ctx.globalCompositeOperation='lighter';
+    for(i=0;i<fo.length;i++){ var f=fo[i]; if(f.fount) continue; var al=Math.max(f.l/.16,0); var g=ctx.createRadialGradient(f.x,f.y,0,f.x,f.y,f.r*3); g.addColorStop(0,'rgba(255,240,190,'+al+')'); g.addColorStop(1,'rgba(255,140,0,0)'); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(f.x,f.y,f.r*3,0,6.2832); ctx.fill() }
+    for(i=0;i<sp.length;i++){ var s=sp[i]; ctx.globalAlpha=Math.max(Math.min(s.l/(s.m*.6),1),0); ctx.strokeStyle=s.c; ctx.lineWidth=s.w; ctx.beginPath(); ctx.moveTo(s.px,s.py); ctx.lineTo(s.x,s.y); ctx.stroke() }
+    ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over';
+  }
+  if(!inf) hard=setTimeout(function(){finish()},(dur+8)*1000);
+  raf=requestAnimationFrame(step);
+};
+})();
+'''
+CL_RUNNER_JS = r'''(function(){
+window.__clAnchor=document.currentScript;
+var CFG=__DATA__, q=[], busy=false, played={}, ACT='';
+function ls(){try{return window.localStorage}catch(e){return null}}
+function ss(){try{return window.sessionStorage}catch(e){return null}}
+function kk(c){return 'cl:'+c.id+':'+CFG.eid}
+function due(c){
+  if(c.cont) return ACT!==c.id;
+  if(played[c.id]) return false;
+  try{
+    if(c.freq==='day'){var a=ls(); if(a&&a.getItem(kk(c))===CFG.today) return false}
+    if(c.freq==='login'){var b=ss(); if(b&&b.getItem(kk(c))) return false}
+  }catch(e){}
+  return true;
+}
+function mark(c){
+  if(c.cont) return;
+  played[c.id]=1;
+  try{ if(c.freq==='day'){var a=ls(); if(a) a.setItem(kk(c),CFG.today)} else if(c.freq==='login'){var b=ss(); if(b) b.setItem(kk(c),'1')} }catch(e){}
+  if(c.freq==='once'){ try{ fetch('/employee/celebration/seen',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:c.id})}) }catch(e){} }
+}
+function next(){
+  if(busy) return; var c=null;
+  while(q.length){ c=q.shift(); if(due(c)) break; c=null }
+  if(!c) return; busy=true; mark(c); if(c.cont) ACT=c.id;
+  window.__clPlay(c,function(){ busy=false; if(c.cont&&ACT===c.id) ACT=''; setTimeout(next,600) });
+}
+function add(list){
+  (list||[]).slice().sort(function(a,b){return (a.cont?1:0)-(b.cont?1:0)}).forEach(function(c){ if(due(c)&&!q.some(function(x){return x.id===c.id})) q.push(c) });
+  next();
+}
+function chk(){
+  if(document.hidden) return;
+  fetch('/employee/celebration/poll',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(d){
+    if(!d||!d.items) return;
+    if(ACT&&!d.items.some(function(x){return x.id===ACT})){ if(window.__clStop) window.__clStop() }      /* Admin clicked Stop (or it ended / was switched off): remove the message and every animation */
+    add(d.items);
+  }).catch(function(){});
+}
+setTimeout(function(){ add(CFG.items) },900);
+setInterval(chk,20000);
+document.addEventListener('visibilitychange',function(){ if(!document.hidden) chk() });
+})();
+'''
+CL_EMP_JS = "<script>" + CL_ENGINE_JS + CL_RUNNER_JS + "</script>"
+
+def cl_html():
+    """The celebration player for the Employee page: the data of what is live for this employee now, the animation engine and a light 45-second check for celebrations the Admin starts while the page is open."""
+    eid = session.get("emp_id", "")
+    data = json.dumps(dict(eid=str(eid), today=str(today_local()), items=cl_for(eid, session.get("name", ""))), separators=(",", ":"))
+    return CL_EMP_JS.replace("__DATA__", data.replace("</", "<\\/"))
+
+@app.route("/employee/celebration/poll")
+@need("employee")
+def employee_celebration_poll():
+    r = jsonify(items=cl_for(session["emp_id"], session.get("name", ""))); r.headers["Cache-Control"] = "no-store"; return r
+
+@app.route("/employee/celebration/seen", methods=["POST"])
+@need("employee")
+def employee_celebration_seen():
+    eid = session["emp_id"]; d = request.get_json(silent=True) or {}; cid = str(d.get("id", "")).strip()
+    c = next((c for c in rows(CL_SHEET) if str(c.get("Celebration ID", "")).strip() == cid and _nt_visible(c, eid)), None)
+    if c is None or _cl_freq(c) != "once": return jsonify(ok=True, added=0)
+    have = any(str(r.get("Celebration ID", "")).strip() == cid and _key(r.get("Employee ID", "")) == _key(eid) for r in rows(CL_SEEN))
+    if not have:
+        try: ws_of(CL_SEEN).append_row([cid, str(eid), str(session.get("name", "")), now_local().strftime("%Y-%m-%d %H:%M:%S")], value_input_option="RAW"); invalidate_cache(CL_SEEN)
+        except Exception as ex:
+            print("Celebration Seen save failed:", repr(ex)); return jsonify(ok=False), 500
+    return jsonify(ok=True, added=0 if have else 1)
+
+CELEB_ADM = _nt_tabs("c") + r'''<style>
+.cl-f label{display:block;font-weight:600;font-size:13px;margin:12px 0 4px}
+.cl-f input[type=text],.cl-f input[type=number],.cl-f select,.cl-f textarea{width:100%;box-sizing:border-box}
+.cl-f textarea{min-height:90px;resize:vertical;line-height:1.5}
+.cl-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;align-items:end}
+.cl-cnt{font-size:12px;color:#6b7280;margin-top:4px}
+.cl-aud{border:1px solid #dfe4f5;border-radius:12px;padding:12px 14px;margin-top:14px;background:#f8f9ff}.cl-aud legend{font-weight:700;font-size:13px;padding:0 6px}
+.cl-aud .ra{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:6px}.cl-aud .ra label{display:flex;align-items:center;gap:6px;margin:4px 0;font-weight:600}.cl-aud .ra input{width:auto}
+.cl-pick{margin-top:8px}.cl-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}.cl-tools input{flex:1;min-width:160px}.cl-tools button{padding:6px 12px;font-size:12px}
+.cl-list{max-height:260px;overflow:auto;border:1px solid #e3e7f7;border-radius:10px;background:#fff;padding:6px 10px}
+.cl-pk{display:flex!important;align-items:center;gap:8px;font-weight:500!important;margin:0!important;padding:5px 2px;border-bottom:1px dashed #eef0fb;font-size:13px}.cl-pk input{width:auto}.cl-pk small{color:#6b7280;margin-left:auto}
+.cl-dtw{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.cl-dtw input{flex:1;min-width:190px}.cl-dtw button{padding:6px 10px;font-size:12px}
+.cl-sel{font-size:12px;color:#4f46e5;font-weight:700;margin-top:6px}
+.cl-st-Live{color:#047857;font-weight:700}.cl-st-Scheduled{color:#1d4ed8;font-weight:700}.cl-st-Ended{color:#6b7280;font-weight:700}.cl-st-Hidden{color:#b45309;font-weight:700}
+.cl-act form{display:inline}.cl-act button,.cl-act a{font-size:12px;padding:4px 10px;margin:2px;cursor:pointer}
+.cl-tag{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700;color:#fff;background:linear-gradient(135deg,#4f46e5,#7c3aed)}
+</style>
+<div class="card cl-f"><h2>{{ 'Edit celebration' if f.id else 'Create a celebration' }}</h2>
+<p class="mut">A celebration plays on the Employee page (the page employees land on after login) as a full-screen animation with a greeting card. It only plays between the Display and Stop times, for the employees you choose. Type <b>{name}</b> in the title or message to greet each employee by first name.</p>
+<form method="post" action="/admin/notes/celebrations/save" id="cl-form">
+<input type="hidden" name="id" value="{{f.id}}">
+<div class="cl-row">
+<label>Occasion<select name="occ" id="cl-occ">{% for k,l in occs %}<option value="{{k}}" {{'selected' if f.occ==k}}>{{l}}</option>{% endfor %}</select></label>
+<label>Animation<select name="fx" id="cl-fx">{% for k,l in fxs %}<option value="{{k}}" {{'selected' if f.fx==k}}>{{l}}</option>{% endfor %}</select></label>
+<label>Intensity<select name="lvl" id="cl-lvl">{% for k,l in lvls %}<option value="{{k}}" {{'selected' if f.lvl==k}}>{{l}}</option>{% endfor %}</select></label>
+<label>Plays for (seconds, 5-30; not used for Continuous)<input type="number" name="dur" id="cl-dur" min="5" max="30" value="{{f.dur}}"></label>
+<label>How often<select name="freq">{% for k,l in freqs %}<option value="{{k}}" {{'selected' if f.freq==k}}>{{l}}</option>{% endfor %}</select></label>
+</div>
+<label>Title <span class="mut">(shown on the greeting card)</span><input type="text" name="title" id="cl-title" maxlength="120" value="{{f.title}}" placeholder="e.g. Happy Pongal!"></label>
+<label>Message <span class="mut">(optional)</span><textarea name="message" id="cl-msg" maxlength="500" placeholder="A short wish for the employees...">{{f.message}}</textarea></label>
+<fieldset class="cl-aud"><legend>Schedule</legend>
+<div class="cl-row">
+<label>Display date &amp; time <span class="mut">(blank = starts immediately)</span><span class="cl-dtw"><input type="datetime-local" name="start" id="cl-start" value="{{f.start}}"><button type="button" class="back sm" data-now="cl-start">Now</button><button type="button" class="back sm" data-clr="cl-start">Clear</button></span></label>
+<label>Stop date &amp; time <span class="mut">(blank = until you stop it)</span><span class="cl-dtw"><input type="datetime-local" name="stop" id="cl-stop" value="{{f.stop}}"><button type="button" class="back sm" data-clr="cl-stop">Clear</button></span></label>
+</div><div class="cl-cnt" id="cl-sch"></div></fieldset>
+<fieldset class="cl-aud"><legend>Who sees this?</legend>
+<div class="ra"><label><input type="radio" name="audience" value="all" {{'checked' if f.aud=='all'}}> All employees</label><label><input type="radio" name="audience" value="selected" {{'checked' if f.aud=='selected'}}> Only selected employees (e.g. the birthday person)</label></div>
+<div class="cl-pick" id="cl-pick" style="display:{{'block' if f.aud=='selected' else 'none'}}">
+<div class="cl-tools"><input type="text" id="cl-q" placeholder="Search by ID, name or designation"><button type="button" class="back sm" id="cl-all">Select shown</button><button type="button" class="back sm" id="cl-none">Clear all</button></div>
+<div class="cl-list">{% for e in emps %}<label class="cl-pk" data-s="{{(e.id ~ ' ' ~ e.name ~ ' ' ~ e.desig)|lower}}"><input type="checkbox" name="to" value="{{e.id}}" {{'checked' if e.ck}}><b>{{e.id}}</b> &middot; {{e.name}}{% if e.locked %} <em class="mut">(locked)</em>{% endif %}<small>{{e.desig}}</small></label>{% endfor %}</div>
+<div class="cl-sel"><span id="cl-n">0</span> employee(s) selected</div></div></fieldset>
+<p style="margin-top:14px"><button class="primary">{{ 'Save changes' if f.id else 'Save celebration' }}</button> <button type="button" class="back sm" id="cl-pv" style="padding:9px 16px">&#9654; Preview animation</button> {% if f.id %}<a class="back sm" href="/admin/notes/celebrations">Cancel</a>{% endif %}</p>
+</form></div>
+<div class="card"><h2>Celebrations</h2>
+{% if not items %}<p class="mut">No celebrations yet. Pick an occasion above - Pongal, Birthday, Diwali and New Year come with ready-made wishes and animations.</p>{% else %}
+<table><tr><th>Created</th><th>Celebration</th><th>Animation</th><th>Schedule</th><th>Viewers</th><th>Shown to</th><th>How often</th><th>Status</th><th></th></tr>
+{% for n in items %}<tr><td>{{n.at|t12}}{% if n.upd %}<br><small class="mut">edited {{n.upd|t12}}</small>{% endif %}</td>
+<td style="max-width:280px"><b>{{n.title or '(no title)'}}</b><br><span class="cl-tag">{{n.occ}}</span><br><span class="mut">{{n.message[:110]}}{{'...' if n.message|length>110}}</span></td>
+<td>{{n.fx}}<br><small class="mut">{{n.lvl}}{% if n.freq[:10]!='Continuous' %} &middot; {{n.dur}} s{% endif %}</small></td>
+<td style="white-space:nowrap"><small class="mut">Display</small> {{ (n.start|t12) if n.start else 'Immediately' }}<br><small class="mut">Stop</small> {{ (n.stop|t12) if n.stop else 'Not set' }}</td>
+<td>{% if n.sel %}Selected ({{n.total}}){% else %}All employees ({{n.total}}){% endif %}</td>
+<td>{% if n.seen_n is not none %}<b>{{n.seen_n}}</b> / {{n.total}}{% else %}<span class="mut">-</span>{% endif %}</td>
+<td>{{n.freq}}</td><td class="cl-st-{{n.state}}">{{n.state}}</td>
+<td class="cl-act"><button type="button" class="back sm" data-pv='{{ n.pv|tojson }}'>&#9654; Preview</button> <a class="back sm" href="/admin/notes/celebrations?edit={{n.id}}#cl-form">Edit</a>
+{% if n.state=='Scheduled' %}<form method="post" action="/admin/notes/celebrations/{{n.id}}/status"><input type="hidden" name="to" value="startnow"><button class="back sm">Start now</button></form>{% elif n.state=='Live' %}<form method="post" action="/admin/notes/celebrations/{{n.id}}/status"><input type="hidden" name="to" value="stopnow"><button class="back sm" style="background:#dc2626;color:#fff;border-color:#dc2626">&#9632; Stop</button></form>{% endif %}
+<form method="post" action="/admin/notes/celebrations/{{n.id}}/status"><input type="hidden" name="to" value="{{ 'restore' if n.status=='Archived' else 'archive' }}"><button class="back sm">{{ 'Switch on again' if n.status=='Archived' else 'Switch off' }}</button></form>
+<form method="post" action="/admin/notes/celebrations/{{n.id}}/status" onsubmit="return confirm('Delete this celebration permanently?')"><input type="hidden" name="to" value="delete"><button class="back sm">Delete</button></form></td></tr>{% endfor %}</table>{% endif %}</div>
+<script>window.CL_PRESETS={{ presets|tojson }};window.CL_NOW='{{now_str}}';</script>
+{% raw %}<script>''' + CL_ENGINE_JS + r'''</script>
+<script>
+(function(){
+  var f=document.getElementById('cl-form'); if(!f) return;
+  var P=window.CL_PRESETS||{}, occ=document.getElementById('cl-occ'), fx=document.getElementById('cl-fx'), lvl=document.getElementById('cl-lvl'), dur=document.getElementById('cl-dur'), ti=document.getElementById('cl-title'), ms=document.getElementById('cl-msg');
+  function same(v,k){ v=v.trim(); if(!v) return true; return Object.keys(P).some(function(o){ return P[o][k]===v; }); }
+  occ.addEventListener('change',function(){ var p=P[occ.value]; if(!p) return; if(same(ti.value,'title')) ti.value=p.title; if(same(ms.value,'message')) ms.value=p.message; fx.value=p.fx; });
+  function play(c){ if(!window.__clPlay) return; c.prev=true; c.title=(c.title||'').replace(/\{name\}/g,'Employee'); c.text=(c.text||'').replace(/\{name\}/g,'Employee'); window.__clPlay(c); }
+  document.getElementById('cl-pv').addEventListener('click',function(){ play({id:'pv',title:ti.value.trim()||'Preview',text:ms.value.trim(),occ:occ.value,fx:fx.value,lvl:lvl.value,dur:Math.max(5,Math.min(30,+dur.value||12)),cont:(f.querySelector('[name=freq]').value==='continuous')}); });
+  document.querySelectorAll('[data-pv]').forEach(function(b){ b.addEventListener('click',function(){ try{ play(JSON.parse(b.getAttribute('data-pv'))); }catch(e){} }); });
+  var pick=document.getElementById('cl-pick'), q=document.getElementById('cl-q'), nn=document.getElementById('cl-n');
+  function boxes(){ return f.querySelectorAll('input[name=to]'); }
+  function count(){ var c=0; boxes().forEach(function(b){ if(b.checked) c++; }); nn.textContent=c; }
+  f.querySelectorAll('input[name=audience]').forEach(function(r){ r.addEventListener('change',function(){ pick.style.display=(f.querySelector('input[name=audience]:checked').value==='selected')?'block':'none'; }); });
+  f.addEventListener('change',function(e){ if(e.target.name==='to') count(); }); count();
+  q.addEventListener('input',function(){ var s=q.value.trim().toLowerCase(); f.querySelectorAll('.cl-pk').forEach(function(l){ l.style.display=(!s||l.getAttribute('data-s').indexOf(s)>=0)?'':'none'; }); });
+  document.getElementById('cl-all').addEventListener('click',function(){ f.querySelectorAll('.cl-pk').forEach(function(l){ if(l.style.display!=='none') l.querySelector('input').checked=true; }); count(); });
+  document.getElementById('cl-none').addEventListener('click',function(){ boxes().forEach(function(b){ b.checked=false; }); count(); });
+  var st=document.getElementById('cl-start'), sp=document.getElementById('cl-stop'), sch=document.getElementById('cl-sch');
+  function fmt(v){ if(!v) return ''; var d=new Date(v); return isNaN(d)?v:d.toLocaleString([], {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
+  function schedTxt(){ var a=st.value,b=sp.value; sch.textContent=(a?'Starts '+fmt(a):'Starts immediately')+(b?' \u2192 stops '+fmt(b):' \u2192 plays until you stop or switch it off'); }
+  [st,sp].forEach(function(i){ i.addEventListener('input',schedTxt); i.addEventListener('change',schedTxt); }); schedTxt();
+  f.querySelectorAll('[data-now]').forEach(function(b){ b.addEventListener('click',function(){ document.getElementById(b.getAttribute('data-now')).value=window.CL_NOW; schedTxt(); }); });
+  f.querySelectorAll('[data-clr]').forEach(function(b){ b.addEventListener('click',function(){ document.getElementById(b.getAttribute('data-clr')).value=''; schedTxt(); }); });
+  f.addEventListener('submit',function(e){
+    if(st.value&&sp.value&&sp.value<=st.value){ e.preventDefault(); alert('The Stop date & time must be after the Display date & time.'); return; }
+    var sel=f.querySelector('input[name=audience]:checked'); if(sel&&sel.value==='selected'&&!f.querySelector('input[name=to]:checked')){ e.preventDefault(); alert('Tick at least one employee, or choose All employees.'); return; }
+    if(!ti.value.trim()&&!ms.value.trim()){ e.preventDefault(); alert('Please enter a title or a message for the greeting card.'); }
+  });
+})();
+</script>{% endraw %}'''
+
+@app.route("/admin/notes/celebrations")
+@need("admin")
+def admin_celebrations():
+    emps = _nt_emps(); seen = {}
+    for r in rows(CL_SEEN): seen.setdefault(str(r.get("Celebration ID", "")).strip(), {})[_key(r.get("Employee ID", ""))] = str(r.get("Seen at", "")).strip()
+    lab = lambda opts, k: next((l for o in opts for kk, l in [(o[0], o[1])] if kk == k), k)
+    items = []
+    for c in rows(CL_SHEET):
+        cid = str(c.get("Celebration ID", "")).strip(); st = str(c.get("Status", "")).strip() or "Active"
+        if not cid or st == "Deleted": continue
+        rec = _nt_recips(c); sel = str(c.get("Audience", "")).strip().lower() == "selected"
+        aud = [e for e in emps if (e["key"] in rec if sel else not e["locked"])]; sd = seen.get(cid, {}); fr = _cl_freq(c); w = _nt_window(c)
+        occ = _cl_pick(c.get("Occasion"), CL_OCC_KEYS, "custom"); fxk = _cl_pick(c.get("Effect"), CL_FX_KEYS, "fireworks"); lv = _cl_pick(c.get("Intensity"), CL_LVL_KEYS, "mid"); du = _cl_int(c.get("Duration sec"), 5, 30, 12)
+        items.append(dict(id=cid, at=str(c.get("Created at", "")).strip(), upd=str(c.get("Updated at", "")).strip(), title=str(c.get("Title", "")).strip(), message=str(c.get("Message", "")),
+                          occ=lab(CL_OCC, occ), fx=lab(CL_FX, fxk), lvl=lab(CL_LVL, lv), dur=du, freq=lab(CL_FREQ, fr), sel=sel, status=st,
+                          start=(w[0].strftime("%Y-%m-%d %H:%M") if w[0] else ""), stop=(w[1].strftime("%Y-%m-%d %H:%M") if w[1] else ""), state=_nt_state(c), total=len(aud),
+                          seen_n=(sum(1 for e in aud if e["key"] in sd) if fr == "once" else None),
+                          pv=dict(id="pv", title=str(c.get("Title", "")).strip(), text=str(c.get("Message", "")).strip(), occ=occ, fx=fxk, lvl=lv, dur=du, cont=(fr == "continuous"))))
+    items.sort(key=lambda x: x["at"], reverse=True)
+    f = dict(id="", occ="birthday", fx=CL_OCC[0][4], lvl="mid", dur=12, freq="continuous", title=CL_OCC[0][2], message=CL_OCC[0][3], aud="all", to=set(), start="", stop="")
+    eid = request.args.get("edit", "").strip()
+    if eid:
+        for c in rows(CL_SHEET):
+            if str(c.get("Celebration ID", "")).strip() == eid and str(c.get("Status", "")).strip() != "Deleted":
+                w = _nt_window(c)
+                f = dict(id=eid, occ=_cl_pick(c.get("Occasion"), CL_OCC_KEYS, "custom"), fx=_cl_pick(c.get("Effect"), CL_FX_KEYS, "fireworks"), lvl=_cl_pick(c.get("Intensity"), CL_LVL_KEYS, "mid"),
+                         dur=_cl_int(c.get("Duration sec"), 5, 30, 12), freq=_cl_freq(c), title=str(c.get("Title", "")), message=str(c.get("Message", "")),
+                         aud=("selected" if str(c.get("Audience", "")).strip().lower() == "selected" else "all"), to=_nt_recips(c),
+                         start=(w[0].strftime("%Y-%m-%dT%H:%M") if w[0] else ""), stop=(w[1].strftime("%Y-%m-%dT%H:%M") if w[1] else ""))
+                break
+    for e in emps: e["ck"] = e["key"] in f["to"]
+    return page(CELEB_ADM, title="Celebrations", emps=emps, items=items, f=f, occs=[(o[0], o[1]) for o in CL_OCC], fxs=CL_FX, lvls=CL_LVL, freqs=CL_FREQ, presets=CL_PRESETS, now_str=now_local().strftime("%Y-%m-%dT%H:%M"))
+
+@app.route("/admin/notes/celebrations/save", methods=["POST"])
+@need("admin")
+def admin_celebrations_save():
+    fm = request.form; cid = fm.get("id", "").strip()
+    back = "/admin/notes/celebrations" + (("?edit=" + cid) if cid else "")
+    title = _nt_clean(fm.get("title"), 120); msg = _nt_clean(fm.get("message"), 500)
+    if not title and not msg:
+        flash("Please enter a title or a message for the greeting card.", "error"); return redirect(back)
+    occ = _cl_pick(fm.get("occ"), CL_OCC_KEYS, "custom"); fxk = _cl_pick(fm.get("fx"), CL_FX_KEYS, "fireworks"); lv = _cl_pick(fm.get("lvl"), CL_LVL_KEYS, "mid")
+    du = _cl_int(fm.get("dur"), 5, 30, 12); fr = _cl_pick(fm.get("freq"), CL_FREQ_KEYS, "once")
+    sel = fm.get("audience") == "selected"; valid = {e["key"]: e["id"] for e in _nt_emps()}; to = []
+    for x in fm.getlist("to"):
+        kx = _key(x)
+        if kx in valid and valid[kx] not in to: to.append(valid[kx])
+    if sel and not to:
+        flash("Tick at least one employee, or choose All employees.", "error"); return redirect(back)
+    st_raw, sp_raw = fm.get("start", "").strip(), fm.get("stop", "").strip(); st_d, sp_d = _nt_dt(st_raw), _nt_dt(sp_raw)
+    if (st_raw and st_d is None) or (sp_raw and sp_d is None):
+        flash("Please enter a valid Display / Stop date & time.", "error"); return redirect(back)
+    if st_d and sp_d and sp_d <= st_d:
+        flash("The Stop date & time must be after the Display date & time.", "error"); return redirect(back)
+    start_s, stop_s = (st_d.strftime("%Y-%m-%d %H:%M") if st_d else ""), (sp_d.strftime("%Y-%m-%d %H:%M") if sp_d else "")
+    now = now_local().strftime("%Y-%m-%d %H:%M:%S"); ws = ws_of(CL_SHEET); H = HEADERS[CL_SHEET]
+    if cid:
+        cur = next((c for c in rows(CL_SHEET) if str(c.get("Celebration ID", "")).strip() == cid and str(c.get("Status", "")).strip() != "Deleted"), None)
+        if cur is None:
+            flash("That celebration no longer exists.", "error"); return redirect("/admin/notes/celebrations")
+        vals = [cid, str(cur.get("Created at", "")), occ, title, msg, fxk, lv, du, fr, "Selected" if sel else "All", ",".join(to) if sel else "", start_s, stop_s,
+                str(cur.get("Status", "")).strip() or "Active", str(cur.get("Created by", "") or "Admin"), now]
+        ws.update(range_name="A%d:%s%d" % (cur["_row"], chr(64 + len(H)), cur["_row"]), values=[vals], value_input_option="RAW")
+        flash("Saved. The updated animation and schedule apply to employees right away.")
+    else:
+        import uuid as _uu
+        cid = "C" + now_local().strftime("%y%m%d%H%M%S") + _uu.uuid4().hex[:3]
+        ws.append_row([cid, now, occ, title, msg, fxk, lv, du, fr, "Selected" if sel else "All", ",".join(to) if sel else "", start_s, stop_s, "Active", "Admin", ""], value_input_option="RAW")
+        who = ("%d selected employee(s)" % len(to)) if sel else "all employees"
+        flash(("Scheduled for %s - it plays from %s." % (who, start_s)) if (st_d and st_d > now_local()) else ("Live now for %s - it plays on their Employee page within a minute." % who))
+    invalidate_cache(CL_SHEET)
+    return redirect("/admin/notes/celebrations")
+
+@app.route("/admin/notes/celebrations/<cid>/status", methods=["POST"])
+@need("admin")
+def admin_celebrations_status(cid):
+    act = request.form.get("to", ""); val = {"archive": "Archived", "restore": "Active", "delete": "Deleted"}.get(act)
+    cur = next((c for c in rows(CL_SHEET) if str(c.get("Celebration ID", "")).strip() == cid), None)
+    if cur is None or (not val and act not in ("startnow", "stopnow")):
+        flash("Nothing changed.", "error"); return redirect("/admin/notes/celebrations")
+    now_s = now_local().strftime("%Y-%m-%d %H:%M"); ws = ws_of(CL_SHEET); r = cur["_row"]; col = {n: chr(65 + HEADERS[CL_SHEET].index(n)) for n in ("Display from", "Stop at", "Status", "Updated at")}
+    if act == "startnow":      # Scheduled -> plays now (a stop time that is already earlier than now is cleared)
+        ws.update(range_name="%s%d" % (col["Display from"], r), values=[[now_s]], value_input_option="RAW")
+        sp = _nt_window(cur)[1]
+        if sp and sp <= now_local(): ws.update(range_name="%s%d" % (col["Stop at"], r), values=[[""]], value_input_option="RAW")
+        ws.update(range_name="%s%d" % (col["Status"], r), values=[["Active"]], value_input_option="RAW")
+        flash("Started - it plays on the employees' pages within a minute.")
+    elif act == "stopnow":
+        ws.update(range_name="%s%d" % (col["Stop at"], r), values=[[now_s]], value_input_option="RAW")
+        flash("Stopped - the birthday / greeting message and all animations disappear from the Employee page within about half a minute.")
+    else:
+        ws.update(range_name="%s%d" % (col["Status"], r), values=[[val]], value_input_option="RAW")
+        flash({"Archived": "Switched off - employees will not see it.", "Active": "Switched on again (it follows its Display / Stop times).", "Deleted": "Deleted."}[val])
+    ws.update(range_name="%s%d" % (col["Updated at"], r), values=[[now_local().strftime("%Y-%m-%d %H:%M:%S")]], value_input_option="RAW")
+    invalidate_cache(CL_SHEET)
+    return redirect("/admin/notes/celebrations")
+
+
+def _boot_warm():
+    """Update259: open the spreadsheet and read the Employees sheet as soon as this server process starts (background), so the first login after a deploy / Render wake-up is not the request that pays for it."""
+    try:
+        time.sleep(0.5); book(); _fetch_rows("Employees")
+    except Exception as ex: print("boot warm-up skipped:", repr(ex))
+threading.Thread(target=_boot_warm, daemon=True).start()
+
 if __name__ == "__main__":
     # NOTE: Flask's built-in dev server (even with threaded=True) is still not
     # meant for real concurrent traffic, and debug=True is a security risk in
@@ -13326,7 +14011,8 @@ if __name__ == "__main__":
     # For local testing with a few users this is fine; for the real deployment
     # run with a production WSGI server instead, e.g.:
     #   pip install gunicorn
-    #   gunicorn -w 4 --threads 4 -b 0.0.0.0:5000 app:app
+    #   gunicorn -k gthread -w 2 --threads 8 --timeout 120 --graceful-timeout 30 --keep-alive 5 -b 0.0.0.0:$PORT <this file name without .py>:app
+    #   (Update259: do NOT add --preload - the background loops are started at import and would not survive the fork)
     # (4 worker processes x 4 threads comfortably covers 20 concurrent users;
     # gspread calls are I/O-bound so threads work well here.)
     debug = os.getenv("FLASK_DEBUG", "0") == "1"

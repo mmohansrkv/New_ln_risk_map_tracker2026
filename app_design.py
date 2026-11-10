@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update278: Admin AND Employee pages - the left sidebar is REMOVED; every menu item (incl. the Log / Employee Info dropdowns, Calendar, profile avatar + name and Logout) now sits in a compact TOP navigation bar. On phones the bar collapses behind a menu button. Navigation layout only - pages, themes, colours, animations, routes and data are unchanged. The Theme & Layout "Panel layout" choice is now fixed to Top bar.
   * Update271: Employee login - a username whose account is Locked or Resigned / NCNS (Admin > Employee Login Access) now shows "Your account is locked. Please contact your Manager, Team Lead, or Admin." whatever password is typed, the username stays in the field, the male / female / lead picture still appears for it, and these accounts can never sign in. An unknown username still shows "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." (Update270).
   * Update270: Employee login messages - an unknown / invalid username OR a locked account (any password) now shows exactly: "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." The typed username stays in the field. A valid, unlocked username with a wrong password shows "Wrong username or password. Please try again." The male / female / lead picture still appears while typing and, for a locked account, still appears whenever the username matches an employee record (the picture lookup ignores the lock). Admin login unchanged.
   * Update269: Employee login - the username stays in the field after a failed sign-in (also for a locked account) and the cursor moves to the password box. Locked or invalid usernames now show: "Wrong username or password, or the account is locked / not valid. Please contact your Manager, Team Lead, or Admin." A locked account with the correct password shows "Your account is locked. Please contact your Manager, Team Lead, or Admin to unlock it." The message is the same for a locked, unknown or wrong-password attempt, so it never reveals which usernames exist. Admin login also keeps the typed username.
@@ -3514,16 +3515,17 @@ html body .app.emp3d table tbody tr:hover td{background:#f4f3ff}
 </style>{% endif %}</head><body>
 {% if bare %}{{body|safe}}
 {% elif session.role %}<div class="app{{' emp3d' if session.role=='employee' else ''}}">{% if session.role=='employee' %}<script>document.documentElement.classList.add('fit188')</script><div id="fly3d" aria-hidden="true"><div class="fo" style="--s:64px;--x0:-12vw;--y0:78vh;--x1:112vw;--y1:-14vh;--z0:-380px;--z1:160px;--d:46s;--dl:0s;--c1:#6366f1;--c2:#a78bfa;--t:24s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:44px;--x0:110vw;--y0:64vh;--x1:-14vw;--y1:20vh;--z0:-120px;--z1:220px;--d:38s;--dl:-9s;--c1:#ec4899;--c2:#f9a8d4;--t:21s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:86px;--x0:-10vw;--y0:22vh;--x1:112vw;--y1:88vh;--z0:-420px;--z1:-60px;--d:58s;--dl:-21s;--c1:#06b6d4;--c2:#67e8f9;--t:28s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:52px;--x0:30vw;--y0:112vh;--x1:70vw;--y1:-16vh;--z0:-200px;--z1:240px;--d:34s;--dl:-14s;--c1:#f59e0b;--c2:#fcd34d;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:72px;--x0:112vw;--y0:92vh;--x1:-12vw;--y1:40vh;--z0:-340px;--z1:120px;--d:52s;--dl:-30s;--c1:#8b5cf6;--c2:#c4b5fd;--t:26s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:38px;--x0:-10vw;--y0:48vh;--x1:110vw;--y1:6vh;--z0:-60px;--z1:260px;--d:30s;--dl:-4s;--c1:#10b981;--c2:#6ee7b7;--t:20s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:58px;--x0:60vw;--y0:-14vh;--x1:16vw;--y1:114vh;--z0:-260px;--z1:180px;--d:44s;--dl:-26s;--c1:#3b82f6;--c2:#93c5fd;--t:23s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:48px;--x0:88vw;--y0:112vh;--x1:40vw;--y1:-14vh;--z0:-160px;--z1:200px;--d:36s;--dl:-17s;--c1:#f43f5e;--c2:#fda4af;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:90px;--x0:-14vw;--y0:60vh;--x1:112vw;--y1:20vh;--z0:-300px;--z1:140px;--d:50s;--dl:-6s;--c1:#6366f1;--c2:#6366f1;--t:29s"><div class="fr"></div></div><div class="fo" style="--s:64px;--x0:112vw;--y0:18vh;--x1:-14vw;--y1:80vh;--z0:-180px;--z1:200px;--d:42s;--dl:-19s;--c1:#ec4899;--c2:#ec4899;--t:24s"><div class="fr"></div></div><div class="fo" style="--s:110px;--x0:20vw;--y0:114vh;--x1:84vw;--y1:-18vh;--z0:-400px;--z1:60px;--d:60s;--dl:-33s;--c1:#06b6d4;--c2:#06b6d4;--t:32s"><div class="fr"></div></div><div class="fo" style="--s:56px;--x0:80vw;--y0:-14vh;--x1:6vw;--y1:100vh;--z0:-100px;--z1:240px;--d:40s;--dl:-12s;--c1:#f59e0b;--c2:#f59e0b;--t:23s"><div class="fr"></div></div><div class="fo" style="--s:54px;--x0:-12vw;--y0:34vh;--x1:112vw;--y1:70vh;--z0:-240px;--z1:180px;--d:48s;--dl:-2s;--c1:#6366f1;--c2:#22d3ee;--t:23s"><div class="ft"></div></div><div class="fo" style="--s:40px;--x0:112vw;--y0:50vh;--x1:-12vw;--y1:8vh;--z0:-80px;--z1:240px;--d:34s;--dl:-23s;--c1:#ec4899;--c2:#f59e0b;--t:20s"><div class="ft"></div></div><div class="fo" style="--s:70px;--x0:46vw;--y0:-14vh;--x1:92vw;--y1:114vh;--z0:-320px;--z1:100px;--d:54s;--dl:-36s;--c1:#8b5cf6;--c2:#06b6d4;--t:25s"><div class="ft"></div></div><div class="fo" style="--s:46px;--x0:-12vw;--y0:104vh;--x1:114vw;--y1:30vh;--z0:-140px;--z1:220px;--d:40s;--dl:-28s;--c1:#10b981;--c2:#3b82f6;--t:21s"><div class="ft"></div></div></div>{% endif %}<aside class="emp{{' tlside' if hol_only else ''}}">
+<button type="button" class="tb-toggle" aria-label="Menu" aria-expanded="false" onclick="var a=this.closest('aside');var o=a.classList.toggle('tb-open');this.setAttribute('aria-expanded',o?'true':'false')">&#9776;</button>
 <div class="panel-ttl">{{ 'Admin Panel' if session.role=='admin' else 'Employee Panel' }}</div>
 {% for h,l,on,kids in nav %}{% if kids %}<div class="ng{{' open' if (on and session.role!='admin') else ''}}{{' ng-act' if on else ''}}"><a class="ng-h" href="{{h}}" role="button" aria-expanded="{{'true' if (on and session.role!='admin') else 'false'}}" onclick="var g=this.parentNode;var w=!g.classList.contains('open');document.querySelectorAll('.ng.open').forEach(function(x){x.classList.remove('open');x.firstElementChild.setAttribute('aria-expanded','false')});if(w){g.classList.add('open');this.setAttribute('aria-expanded','true')}return false">{{l}}<span class="chev">&#9650;</span></a>
 <div class="kids">{% for kh,kl,kon in kids %}<a href="{{kh}}" class="{{'on' if kon else ''}}" onclick="var g=this.closest('.ng');g.classList.remove('open');g.firstElementChild.setAttribute('aria-expanded','false')">{{kl}}</a>{% endfor %}</div></div>
 {% elif h == '/employee/mahizhchi' %}<a href="{{h}}" class="mzn{{' on' if on else ''}}" aria-label="{{l}}"><span class="mzn-em e1" aria-hidden="true">✨</span><span class="mzn-em e2" aria-hidden="true">🎉</span><span class="mzn-em e3" aria-hidden="true">🌟</span>{% for ch in l %}<span class="mzn-c" aria-hidden="true" style="--i:{{loop.index0}}">{{ch}}</span>{% endfor %}</a>
 {% else %}<a href="{{h}}" class="{{'on' if on else ''}}">{{l}}</a>{% endif %}{% endfor %}
-<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-up" id="cal_up" hidden></div><button type="button" class="cal-today" id="cal_td">Today</button></details>
+<details class="cal" id="cal"><summary>Calendar</summary><div class="cal-pop"><div class="cal-ct" id="cal_ct" hidden></div><div class="cal-h"><button type="button" id="cal_p" aria-label="Previous month">&lsaquo;</button><b id="cal_t"></b><button type="button" id="cal_n" aria-label="Next month">&rsaquo;</button></div><div class="cal-g" id="cal_g"></div><div class="cal-up" id="cal_up" hidden></div><button type="button" class="cal-today" id="cal_td">Today</button></div></details>
 <div class="prof{{' prof-emp' if session.role=='employee' else ''}}"><div class="prof-row">{{side_avatar|safe}}<div class="prof-info"><div class="prof-name" title="{{side_name or session.name}}">{% if side_name_html %}{{side_name_html|safe}}{% else %}{{session.name}}{% endif %}</div></div></div>
 <a class="prof-out" href="/logout">Logout</a></div>
 </aside>
-<script>document.addEventListener('click',function(e){if(e.target.closest&&e.target.closest('.ng'))return;document.querySelectorAll('.ng.open').forEach(function(x){x.classList.remove('open');x.firstElementChild.setAttribute('aria-expanded','false')})});document.addEventListener('keydown',function(e){if(e.key==='Escape')document.querySelectorAll('.ng.open').forEach(function(x){x.classList.remove('open');x.firstElementChild.setAttribute('aria-expanded','false')})});</script>
+<script>document.addEventListener('click',function(e){var cc=e.target.closest&&e.target.closest('details.cal');document.querySelectorAll('details.cal[open]').forEach(function(x){if(x!==cc)x.open=false});if(e.target.closest&&e.target.closest('.ng'))return;document.querySelectorAll('.ng.open').forEach(function(x){x.classList.remove('open');x.firstElementChild.setAttribute('aria-expanded','false')})});document.addEventListener('keydown',function(e){if(e.key==='Escape')document.querySelectorAll('details.cal[open]').forEach(function(x){x.open=false});if(e.key==='Escape')document.querySelectorAll('.ng.open').forEach(function(x){x.classList.remove('open');x.firstElementChild.setAttribute('aria-expanded','false')})});</script>
 <main>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}">{{m}}</p>{% endfor %}<div class="mbody">{{body|safe}}</div><div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></main></div>
 {% else %}<div class="lg"><div class="blob b1" aria-hidden="true"></div><div class="blob b2" aria-hidden="true"></div><div class="blob b3" aria-hidden="true"></div>{% for c,m in get_flashed_messages(with_categories=true) %}<p class="flash {{'err' if c=='error' else ''}}" style="{{'' if c=='error' else 'background:#fff'}}">{{m}}</p>{% endfor %}{{body|safe}}<div class="site-foot" role="contentinfo">@2026_Mobius365 | LN_Map_AI</div></div>{% endif %}
 {% if att_json %}<script>window.ATT={{att_json|safe}};window.HOL={{hol_json|safe}};window.PRM={{prm_json|safe}};window.SRVTODAY="{{srv_today}}";{% if hol_only %}window.HOLONLY=true;{% endif %}</script>{% endif %}
@@ -3532,7 +3534,7 @@ html body .app.emp3d table tbody tr:hover td{background:#f4f3ff}
 var M=['January','February','March','April','May','June','July','August','September','October','November','December'],W=['S','M','T','W','T','F','S'];
 var now=new Date();if(window.SRVTODAY){var sp=window.SRVTODAY.split('-');now=new Date(+sp[0],+sp[1]-1,+sp[2])}var y=now.getFullYear(),m=now.getMonth(),NH='';
 var HL=window.HOL||{},PRM=window.PRM||{},A=window.ATT||null,FM=['January','February','March','April','May','June','July','August','September','October','November','December'];
-if((window.matchMedia&&window.matchMedia('(min-width:801px)').matches)||A)d.open=true;
+
 function z(n){return(n<10?'0':'')+n}
 function iso(d){return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())}
 function nextHol(){var tk=iso(now),ks=Object.keys(HL).filter(function(k){return k>=tk}).sort();return ks.length?ks[0]:''}
@@ -3604,8 +3606,7 @@ var aside=root.querySelector('aside.emp'),main=root.querySelector('main'),mb=roo
 if(!aside||!main||!mb)return;
 var mq=window.matchMedia('(min-width:801px)'),FS=0.9,FM=0.95,MS=1,MM=1,STEP=0.025,sbin=null,fin=null,tm=null,profEl=aside.querySelector('.prof');
 function wrap(){
- if(!sbin){sbin=document.createElement('div');sbin.className='sbin';while(aside.firstChild)sbin.appendChild(aside.firstChild);aside.appendChild(sbin)}
- if(profEl&&profEl.parentNode!==aside)aside.appendChild(profEl);
+
  if(!fin){fin=document.createElement('div');fin.className='fitin';while(mb.firstChild)fin.appendChild(mb.firstChild);mb.appendChild(fin)}
 }
 function reset(){
@@ -3645,7 +3646,7 @@ function fitMain(){
 }
 function fit(){
  if(!mq.matches){reset();return}
- wrap();fitSide();fitMain()
+ wrap();fitMain()
 }
 function sched(){clearTimeout(tm);tm=setTimeout(fit,60)}
 mb.addEventListener('scroll',function(){if(!mb.classList.contains('fit-scroll')&&(mb.scrollTop||mb.scrollLeft)){mb.scrollTop=0;mb.scrollLeft=0}});
@@ -3656,7 +3657,7 @@ if(mq.addEventListener)mq.addEventListener('change',sched);
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(sched);
 if(window.MutationObserver){
  var mo=new MutationObserver(sched),o={childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['class','hidden','open']};
- wrap();mo.observe(sbin,o);mo.observe(fin,o)
+ wrap();mo.observe(aside,o);mo.observe(fin,o)
 }
 fit();setTimeout(fit,400);setTimeout(fit,1500)
 })();
@@ -4074,7 +4075,7 @@ THEMES = [
     dict(id="porcelain", name="Porcelain",    note="Clean and bright", pri="#3b82f6", pri2="#1d4ed8", s1="#0c1f4a", s2="#14337a", s3="#1d4ed8", t1="#d7e6ff", t2="#e4efff", base="#f3f7fd", l1="#0c1f4a", l2="#1d4ed8", l3="#60a5fa"),
     dict(id="rose",      name="Rose Quartz",  note="Soft and friendly", pri="#db2777", pri2="#be185d", s1="#2e0e25", s2="#5b1a45", s3="#8a2a62", t1="#fbd5e5", t2="#ffe4ee", base="#fff6f9", l1="#2e0e25", l2="#7d1442", l3="#f0468d"),
 ]
-PANEL_LAYOUTS = [("0", "Sidebar", "Menu on the left (current)"), ("1", "Top bar", "Menu across the top, more room for tables")]
+PANEL_LAYOUTS = [("1", "Top bar", "Menu across the top, more room for tables (Update278: the sidebar was removed)")]
 LOGIN_LAYOUTS = [("0", "Window with scene", "Animated 3D scene beside the form (current)"), ("1", "Centered card", "Clean, single card in the middle")]
 
 from functools import lru_cache
@@ -4119,11 +4120,83 @@ def theme_choice():
         tid = _setting("ui_theme") or "indigo"; pl = _setting("ui_panel_layout") or "0"; ll = _setting("ui_login_layout") or "0"
     except Exception as ex:
         print("theme settings read error:", repr(ex)); return "indigo", "0", "0"
-    return (tid if any(x["id"] == tid for x in THEMES) else "indigo"), ("1" if pl == "1" else "0"), ("1" if ll == "1" else "0")
+    return (tid if any(x["id"] == tid for x in THEMES) else "indigo"), "1", ("1" if ll == "1" else "0")      # Update278: panel layout is always the Top bar
+
+
+TOPBAR_CSS = r"""
+/* Update278: TOP navigation bar - replaces the left sidebar on Admin + Employee pages (layout only; colours / animations come from the theme + design) */
+html body .app{flex-direction:column!important}
+html body .app aside.emp{--tbg:linear-gradient(185deg,@S1@,@S2@);width:auto!important;height:auto!important;max-height:none!important;position:sticky!important;top:0!important;margin:0!important;z-index:60!important;flex:none!important;flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;align-content:center!important;gap:4px 6px!important;padding:6px 16px!important;overflow:visible!important;border-right:0!important;border-radius:0 0 16px 16px!important;box-shadow:0 10px 26px -14px #0f172a99}
+html body .app.emp3d aside.emp{--tbg:linear-gradient(185deg,var(--e-side1,@S1@),var(--e-side2,@S2@))}
+html body .app aside.emp .sbin{display:contents!important;zoom:1!important}
+html body .app aside.emp .tb-toggle{display:none}
+html body .app aside.emp .panel-ttl{display:block!important;order:0;margin:0 8px 0 0!important;padding:2px 14px 2px 4px!important;border:0!important;border-right:1px solid #ffffff2e!important;font-size:12.5px!important;white-space:nowrap;color:#fff}
+html body .app aside.emp>a,html body .app aside.emp .ng>a.ng-h{order:1;display:inline-flex;align-items:center;gap:6px;width:auto!important;margin:0!important;padding:6px 11px!important;font-size:12.5px!important;line-height:1.2;white-space:nowrap;border-radius:10px!important}
+html body .app aside.emp a:hover{transform:translateY(-1px)!important}
+html body .app aside.emp .ng.open>a.ng-h{transform:none!important}
+html body .app aside.emp a.mzn{align-self:center!important;margin:0 0 0 2px!important;padding:4px 14px!important;font-size:13.5px!important}
+html body .app aside.emp .ng{order:1;position:relative}
+html body .app aside.emp .ng .kids{position:absolute;top:calc(100% + 6px);left:0;min-width:220px;padding:6px!important;border:1px solid #ffffff1f;border-radius:14px;background:var(--tbg);box-shadow:0 20px 40px -12px #000a;z-index:70}
+html body .app aside.emp details.cal{order:1;position:relative;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:none!important;color:#c9d0ee}
+html body .app aside.emp details.cal>summary{display:flex;align-items:center;gap:6px;padding:6px 11px;border:1px solid transparent;border-radius:10px;font-size:12.5px;font-weight:500;letter-spacing:0;text-transform:none;line-height:1.2;white-space:nowrap;color:#cfd5f7;cursor:pointer;user-select:none;transition:background .15s}
+html body .app aside.emp details.cal>summary::after{content:"\25BE";font-size:11px;opacity:.85;transition:transform .2s}
+html body .app aside.emp details.cal>summary:hover{background:#ffffff17;color:#fff}
+html body .app aside.emp details.cal[open]>summary{border-color:#fff;color:#fff}
+html body .app aside.emp details.cal[open]>summary::after{transform:rotate(180deg)}
+html body .app aside.emp details.cal .cal-pop{position:absolute;top:calc(100% + 6px);left:0;width:272px;max-width:calc(100vw - 20px);max-height:calc(100vh - 90px);overflow:auto;padding:10px;border:1px solid #ffffff1f;border-radius:14px;background:var(--tbg);box-shadow:0 24px 50px -12px #000a;z-index:70}
+html body .app aside.emp .prof{order:99;display:flex!important;flex-direction:row!important;align-items:center!important;justify-content:flex-end!important;gap:10px!important;width:auto!important;flex:none!important;margin:0 0 0 auto!important;padding:0!important;border:0!important;position:relative;z-index:6}
+html body .app aside.emp .prof .prof-row{display:flex!important;flex-direction:row!important;align-items:center!important;gap:8px!important;width:auto!important;flex:none!important;text-align:left}
+html body .app aside.emp .prof .prof-info{width:auto!important;max-width:170px;text-align:left!important}
+html body .app aside.emp .prof .prof-name{display:block!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap!important;font-size:12.5px!important;line-height:1.2!important;text-align:left!important}
+html body .app aside.emp .prof .av3d,html body .app aside.emp .prof .av-adm,html body .app aside.emp .prof .av-flat,html body .app aside.emp .prof .prof-pic{width:40px!important;height:40px!important;margin:0!important;flex:none}
+html body .app aside.emp .prof .prof-out{grid-column:auto!important;grid-row:auto!important;width:auto!important;min-width:0!important;margin:0!important;padding:5px 14px!important;font-size:12px!important}
+html.fit188 .app.emp3d{flex-direction:column!important}
+html.fit188 .app.emp3d aside.emp{height:auto!important;overflow:visible!important}
+html.fit188 .app.emp3d main{height:auto!important;flex:1 1 0!important;min-height:0!important}
+@media(min-width:801px) and (max-width:1180px){
+html body .app aside.emp{padding:5px 10px!important;gap:3px 4px!important}
+html body .app aside.emp>a,html body .app aside.emp .ng>a.ng-h,html body .app aside.emp details.cal>summary{padding:5px 8px!important;font-size:12px!important}
+html body .app aside.emp .panel-ttl{padding-right:10px!important}
+html body .app aside.emp .prof .prof-info{display:none!important}
+}
+@media(max-width:800px){
+html body .app aside.emp{padding:6px 10px!important;gap:4px 6px!important;max-height:100vh!important;overflow-y:auto!important;border-radius:0 0 14px 14px!important}
+html body .app aside.emp .tb-toggle{display:inline-flex;order:0;align-items:center;justify-content:center;width:34px;height:32px;margin:0;padding:0;border:1px solid #ffffff40;border-radius:9px;background:#ffffff14;color:#fff;font-size:17px;line-height:1;cursor:pointer;box-shadow:none}
+html body .app aside.emp .panel-ttl{order:1;margin:0!important;padding:2px 6px!important;border-right:0!important}
+html body .app aside.emp .prof{order:2}
+html body .app aside.emp .prof .prof-info{display:none!important}
+html body .app aside.emp>a,html body .app aside.emp .ng,html body .app aside.emp details.cal{display:none!important;order:4}
+html body .app aside.emp.tb-open::before{content:"";order:3;flex:0 0 100%;height:0}
+html body .app aside.emp.tb-open>a{display:inline-flex!important}
+html body .app aside.emp.tb-open .ng,html body .app aside.emp.tb-open details.cal{display:block!important}
+html body .app aside.emp .ng .kids{position:static;min-width:0;padding:2px 0 2px 12px!important;border:0;background:none;box-shadow:none}
+html body .app aside.emp details.cal .cal-pop{position:static;width:min(280px,100%);max-height:none;margin-top:6px;background:#ffffff0d;box-shadow:none}
+}
+@media print{html body .app aside.emp{display:none!important}}
+"""
+from functools import lru_cache as _lru_tb
+
+@_lru_tb(maxsize=32)
+def _topbar_css_for(s1, s2):
+    return re.sub(r"\s*\n\s*", "", TOPBAR_CSS.replace("@S1@", s1).replace("@S2@", s2))
+
+def _topbar_css_now():
+    """Update278: the top navigation bar stylesheet, coloured from the active theme / design (dropdown + calendar panels)."""
+    try:
+        tid = theme_choice()[0]; t = next((x for x in THEMES if x["id"] == tid), THEMES[0]); s1, s2 = t["s1"], t["s2"]
+        role = session.get("role")
+        if role in ("admin", "employee"):
+            did = (session.get("dz_try") or "") if role == "admin" else ""
+            if not did: did = design_choice(role)
+            d = _design_of(role, did)
+            if d and d["k"] != "classic": s1, s2 = d["s1"], d["s2"]
+        return _topbar_css_for(s1, s2)
+    except Exception as ex:
+        print("top bar css error:", repr(ex)); return ""
 
 def _theme_css():
     try:
-        tid, pl, ll = theme_choice(); return _theme_css_for(tid, pl == "1", ll == "1") + _design_css_now()      # Update274: per-panel design (Admin / Employee) on top of the theme
+        tid, pl, ll = theme_choice(); return _theme_css_for(tid, False, ll == "1") + _design_css_now() + _topbar_css_now()      # Update274: per-panel design (Admin / Employee) on top of the theme
     except Exception as ex:
         print("theme css error:", repr(ex)); return ""
 
@@ -4169,8 +4242,8 @@ f.addEventListener('change',up);up()})();
 @need("admin")
 def admin_theme():
     if request.method == "POST":
-        tid = request.form.get("theme", "indigo"); pl = request.form.get("panel", "0"); ll = request.form.get("login", "0")
-        if not any(x["id"] == tid for x in THEMES) or pl not in ("0", "1") or ll not in ("0", "1"):
+        tid = request.form.get("theme", "indigo"); pl = "1"; ll = request.form.get("login", "0")      # Update278: Top bar only
+        if not any(x["id"] == tid for x in THEMES) or ll not in ("0", "1"):
             flash("Please pick a theme and a layout.", "error"); return redirect("/admin/theme")
         try:
             _set_setting("ui_theme", tid); _set_setting("ui_panel_layout", pl); _set_setting("ui_login_layout", ll)
@@ -4224,7 +4297,7 @@ body @S@ .card:hover,body @S@ .kpi:hover{transform:perspective(900px) translateY
 """,
  "titan": """
 @S@::before{background:radial-gradient(520px 300px at 0% 0%,@A1@2e,transparent 65%),linear-gradient(@S3@14 1px,transparent 1px) 0 0/34px 34px,linear-gradient(90deg,@S3@14 1px,transparent 1px) 0 0/34px 34px}
-@S@ aside{border-right:3px solid @A1@;border-radius:0;box-shadow:8px 0 26px -12px #0b1220aa}
+@S@ aside{border-bottom:3px solid @A1@;border-radius:0;box-shadow:0 8px 26px -12px #0b1220aa}
 @S@ aside a{border-radius:6px}@S@ aside a.on{border-radius:6px;box-shadow:inset 3px 0 0 #fff,0 8px 18px -8px @A1@aa}
 body @S@ .card,body @S@ .kpi{background:#fffffff2;border:1px solid #cbd5e1;border-top:3px solid @A1@;border-radius:8px;box-shadow:0 1px 0 #fff inset,0 8px 20px -14px #0b1220aa}
 body @S@ .card:hover,body @S@ .kpi:hover{transform:translateY(-1px);box-shadow:0 14px 26px -14px @A2@88}
@@ -4236,7 +4309,7 @@ body @S@ .card:hover,body @S@ .kpi:hover{transform:translateY(-1px);box-shadow:0
 """,
  "sunrise": """
 @S@::before{background:radial-gradient(circle at 90% 4%,#fde68a 0,@A1@66 14%,transparent 36%),radial-gradient(300px 300px at 10% 84%,@A2@38,transparent 70%),radial-gradient(360px 360px at 54% 30%,@A1@22,transparent 70%);animation:dzDrift 34s ease-in-out infinite alternate}
-@S@ aside{border-radius:0 28px 28px 0;box-shadow:10px 0 34px -14px @S2@99}
+@S@ aside{border-radius:0 0 28px 28px;box-shadow:0 10px 34px -14px @S2@99}
 @S@ aside a{border-radius:14px}
 body @S@ .card,body @S@ .kpi{background:#fffffff0;border:1px solid @BG1@;border-radius:26px;box-shadow:0 5px 0 @BG1@,0 20px 32px -16px @A2@66}
 body @S@ .card:hover,body @S@ .kpi:hover{transform:translateY(-3px);box-shadow:0 8px 0 @BG1@,0 26px 38px -16px @A2@88}
@@ -4247,7 +4320,7 @@ body @S@ .card:hover,body @S@ .kpi:hover{transform:translateY(-3px);box-shadow:0
 """,
  "orbit": """
 @S@::before{background:repeating-radial-gradient(circle at 92% 6%,transparent 0 46px,@A1@22 47px 48px),repeating-radial-gradient(circle at 4% 98%,transparent 0 60px,@A2@22 61px 62px),radial-gradient(520px 320px at 50% 0%,@BG1@aa,transparent 70%);animation:dzDrift 40s ease-in-out infinite alternate}
-@S@ aside{border-right:1px solid @A1@55;box-shadow:6px 0 28px -14px @S2@aa}
+@S@ aside{border-bottom:1px solid @A1@55;box-shadow:0 6px 28px -14px @S2@aa}
 body @S@ .card,body @S@ .kpi{background:#fffffff2;border:1px solid @BG1@;border-left:5px solid @A1@;border-radius:14px;box-shadow:0 12px 26px -16px @S3@88}
 body @S@ .card:hover,body @S@ .kpi:hover{transform:translateX(3px);box-shadow:0 16px 30px -14px @A2@88;border-left-color:@A2@}
 @S@ .kpi b{color:@S2@}

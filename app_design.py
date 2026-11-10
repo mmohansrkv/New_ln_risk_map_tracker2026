@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update289: FIX - quotes never appeared on the Employee page because the variable _QUOTE_DONE was used but never defined (NameError inside quote_overlay_html(), silently swallowed, so no quote screen was ever built). Now defined. Also: the Quotes sheet columns are detected more reliably (an \"English\" / \"English Quote\" column is preferred, Tamil / Thanglish columns are never taken as the English quote), the sheet read reports why rows were skipped, errors in the quote screen are printed with a full traceback, and a new admin check page /admin/quotes/check shows the Google Sheet connection, the worksheets found, the detected columns and the quote an employee will get (add ?emp=<Employee ID>). Existing tracker functionality unchanged.
   * Update288: quote screen = the English quote (Quotes sheet, column Quote) big in the centre + its Thanglish translation (column Thanglish, added to the sheet automatically if missing) smaller right below, over the blurred Productivity Entry page, with the 3D animation and Close button. Shown at every login.
   * Update287: the "Quotes" worksheet is checked automatically - used as it is if it exists (no duplicate), created with the headers Quote / Language / Author / Status if it is missing; no error is shown. Admin add / edit / delete and the employee quote screen work on that sheet right away.
   * Update286: the quote screen shows only the quote from the Quotes sheet (+ author if the sheet has one), the 3D animation, the X and the Close & Continue button - greeting, Login #, language label and the "Take a moment..." line removed.
@@ -4582,6 +4583,7 @@ WELCOME_CSS = """<style id="wlc-css">
 # The employee must press "Close & Continue"; nothing is written to the Productivity log, so the quote is never counted as productive time.
 # Update285: every quote now comes from the "Quotes" worksheet of the Google Sheet (see ql_sheet) - nothing is hardcoded or generated.
 QUOTE_LABEL = {"en": "English", "ta": "தமிழ்", "tg": "Thanglish"}
+_QUOTE_DONE = set()                                       # Update289: ids of quote screens already closed (was used but never defined -> NameError -> no quote ever shown)
 _QUOTE_PENDING = {}                                      # {attendance session id: {"n": login number, "t": time}} - quotes waiting for the Close click (server-side, so a stale cookie can never bring one back)
 _LOGIN_N, _LOGIN_N_LOCK = {}, threading.Lock()           # {employee id: logins so far} - seeded once from the Attendance sheet
 
@@ -4693,7 +4695,8 @@ def quote_overlay_html():
     if not nm: hello = "Welcome Back!" if st["n"] > 1 else "Welcome!"
     q = None
     try: q = quote_for_employee(session.get("emp_id"))      # Update283: this employee's own quote for today
-    except Exception as ex_: print("employee quote pick error:", repr(ex_))
+    except Exception as ex_:
+        import traceback; traceback.print_exc(); print("employee quote pick error:", repr(ex_))
     if not q: return ""      # Update285: no quote in the Google Sheet = no quote screen (nothing is invented)
     out = QUOTE_CSS + QUOTE_HTML
     if True:
@@ -4756,14 +4759,18 @@ def _ql_find_ws(create=True):
     return w
 
 def _ql_cols(head):
+    """Update289: finds the columns by header. English quote = a header containing \"english\" (else \"quote\" / Text / Message ...); Thanglish = translation column; Tamil / Thanglish columns are never taken as the English quote."""
     h = [str(x).strip().lower() for x in head]
     def first(pred):
         return next((i for i, x in enumerate(h) if pred(x)), None)
-    t = first(lambda x: any(k in x for k in ("thanglish", "tanglish", "translation", "transliteration")))
-    q = first(lambda x: "english" in x and first(lambda y: y == x) != t) if False else None
-    q = first(lambda x: "quote" in x and not any(k in x for k in ("thanglish", "tanglish", "translation", "transliteration")))
+    TH = ("thanglish", "tanglish", "tamilish", "translation", "transliteration")
+    isth = lambda x: any(k in x for k in TH)
+    istamil = lambda x: ("tamil" in x or "\u0ba4\u0bae\u0bbf\u0bb4\u0bcd" in x) and not isth(x)
+    t = first(isth)
+    q = first(lambda x: "english" in x and not isth(x))
+    if q is None: q = first(lambda x: "quote" in x and not isth(x) and not istamil(x))
     if q is None: q = first(lambda x: x in ("text", "message", "thought", "motivation", "motivational", "content", "description"))
-    if q is None: q = first(lambda x: x not in ("", "s.no", "sno", "no", "no.", "id", "#", "sl.no", "sl no", "s no", "date", "language", "lang", "author", "status", "active") and first(lambda y: y == x) != t and not any(k in x for k in ("thanglish", "tanglish", "translation", "transliteration")))
+    if q is None: q = first(lambda x: x not in ("", "s.no", "sno", "no", "no.", "id", "#", "sl.no", "sl no", "s no", "date", "day", "language", "lang", "author", "status", "active") and not isth(x) and not istamil(x))
     return dict(q=q if q is not None else 0, t=t, l=first(lambda x: x in ("language", "lang", "quote language") or x.startswith("lang")),
                 a=first(lambda x: x in ("author", "by", "source", "said by", "quote by")), s=first(lambda x: x in ("status", "active", "enabled", "show", "display")))
 
@@ -4785,15 +4792,17 @@ def ql_sheet(fresh=False):
                 _with_retry(ws.update, range_name=gspread.utils.rowcol_to_a1(1, nc), values=[["Thanglish"]], value_input_option="RAW")
                 vals[0] = list(vals[0]) + ["Thanglish"]; cols["t"] = nc - 1
             except Exception as ex_: print("Thanglish column add skipped:", repr(ex_))
-        items = []
+        items, skip = [], dict(blank=0, hidden=0, tamil_or_thanglish_only=0)      # Update289: why rows were not used
         for i, r in enumerate(vals[1:], start=2):
             g = lambda c: (str(r[c]).strip() if c is not None and c < len(r) else "")
             text = re.sub(r"\s+", " ", g(cols["q"])).strip()
-            if not text or g(cols["s"]).lower() in _QL_OFF: continue
+            if not text: skip["blank"] += 1; continue
+            if g(cols["s"]).lower() in _QL_OFF: skip["hidden"] += 1; continue
             lg = _ql_lang(g(cols["l"]))
-            if lg in ("ta", "tg") or re.search(r"[\u0B80-\u0BFF]", text): continue      # Update288: the quote screen is English + Thanglish translation, so Tamil / Thanglish-only rows are not used
+            if lg in ("ta", "tg") or re.search(r"[\u0B80-\u0BFF]", text): skip["tamil_or_thanglish_only"] += 1; continue      # Update288: the quote screen is English + Thanglish translation, so Tamil / Thanglish-only rows are not used
             items.append(dict(row=i, text=text, thanglish=re.sub(r"\s+", " ", g(cols["t"])).strip(), lang=lg, label="", author=g(cols["a"])))
-        meta = dict(ok=True, err="", title=ws.title, cols=cols, ncols=max(len(vals[0]) if vals else 0, 1))
+        meta = dict(ok=True, err="", title=ws.title, cols=cols, ncols=max(len(vals[0]) if vals else 0, 1), head=list(vals[0]) if vals else [], rows=max(len(vals) - 1, 0), skip=skip)
+        print("Quotes sheet read: worksheet=%r rows=%d usable_english_quotes=%d skipped=%s" % (ws.title, max(len(vals) - 1, 0), len(items), skip))
         with _QL_LOCK: _QL.update(t=time.time(), items=items, meta=meta)
         return items, meta
     except Exception as ex:
@@ -4834,6 +4843,27 @@ def _ql_put(ws, meta, row, text, thanglish, author, new):
     else:
         for key_, v in (("q", vals[c["q"]]), ("t", vals[c["t"]] if c["t"] is not None else ""), ("a", vals[c["a"]] if c["a"] is not None else "")):
             if c[key_] is not None: ws.update(range_name=gspread.utils.rowcol_to_a1(row, c[key_] + 1), values=[[v]], value_input_option="RAW")
+
+@app.route("/admin/quotes/check")
+@need("admin")
+def admin_quotes_check():
+    """Update289: Google Sheet connection + Quotes worksheet check (JSON). Add ?emp=<Employee ID> to see the quote that employee gets today."""
+    out = dict(ok=False)
+    try:
+        b = book(); out["spreadsheet"] = b.title
+        out["worksheets"] = [w.title for w in _with_retry(b.worksheets)]
+        items, meta = ql_sheet(True)
+        head = meta.get("head") or []
+        out.update(ok=bool(meta.get("ok")), quotes_worksheet=meta.get("title"), error=meta.get("err", ""), header=head,
+                   detected_columns={k: (head[v] if v is not None and v < len(head) else None) for k, v in (meta.get("cols") or {}).items()},
+                   sheet_rows=meta.get("rows", 0), usable_english_quotes=len(items), skipped_rows=meta.get("skip", {}))
+        eid = (request.args.get("emp", "") or "").strip()
+        q = quote_for_employee(eid) if eid else (items[0] if items else None)
+        out["sample_quote" + (" for " + eid if eid else "")] = dict(english=q["text"], thanglish=q.get("thanglish", "")) if q else None
+        if not items: out["hint"] = "No usable English quote rows: add rows with the English text under the Quote (or English) column and the Thanglish translation under the Thanglish column; check Status is not No / Inactive."
+    except Exception as ex:
+        out["error"] = repr(ex)
+    return Response(json.dumps(out, ensure_ascii=False, indent=2), mimetype="application/json")
 
 @app.route("/admin/quotes")
 @need("admin")
@@ -5023,7 +5053,8 @@ def page(body, title="Productivity Tracker", **ctx):
         except Exception as ex: print("welcome overlay error:", repr(ex))
     if session.get("role") == "employee" and not ctx.get("bare"):      # Update281: daily quote overlay (until Close is pressed)
         try: welcome_html = quote_overlay_html() + welcome_html
-        except Exception as ex_: print("quote overlay error:", repr(ex_))
+        except Exception as ex_:
+            import traceback; traceback.print_exc(); print("quote overlay error:", repr(ex_))
     att_json, hol_json, prm_json = "", "{}", "{}"              # Update158: attendance for the sidebar calendar (employees only)
     if session.get("role") == "employee" and not ctx.get("bare"):
         try:
@@ -7100,7 +7131,7 @@ def employee_login():
                 except Exception as ex_: print("login count error:", repr(ex_)); _lno = 1
                 track_login(session["emp_id"], session["name"], session["band"])
                 session["dq_id"] = uuid.uuid4().hex; session["dq_n"] = int(_lno)      # Update284: quote pending for THIS login (kept in the signed session, so no login can miss it)
-                try: ql_sheet(True)      # Update285: read the Quotes sheet live at every login so the newest quotes are used
+                try: print("login quotes ready:", len(ql_sheet(True)[0]))      # Update285 / Update289: read the Quotes sheet live at every login so the newest quotes are used
                 except Exception as ex_: print("quotes refresh error:", repr(ex_))
                 try: quote_begin(session.get("att_id"), _lno)      # Update281: daily quote overlay until Close is pressed
                 except Exception as ex_: print("daily quote start error:", repr(ex_))

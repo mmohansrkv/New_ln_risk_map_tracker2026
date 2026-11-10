@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update280: Employee page (Daily entry) - the small "Monthly Productivity Summary" strip now also shows "Permission: N Hrs" = the total hours of this employee's APPROVED permissions in the current month (Pending / Rejected not counted). Read live from the Permissions sheet on every page load, so it follows new / approved / changed records. Display only; same one-line strip, nothing else changed.
   * Update279: Admin > Theme & Layout (menu item "Theme & Layout") now manages the Employee Panel and the Admin Panel SEPARATELY - each has its own Layout (Top bar / Sidebar) and Theme (Employee: or "Same as Admin"), a live preview before applying, and an Apply button; an applied Employee layout / theme is used by every Employee page from its next load. Reset Employee panel returns to Top bar + Admin theme. Only CSS / menu position changes (new Settings keys ui_admin_layout, ui_emp_layout, ui_emp_theme); employee data, routes and features are untouched. The Sidebar layout of Update277 can be chosen again.
   * Update278: Admin AND Employee pages - the left sidebar is REMOVED; every menu item (incl. the Log / Employee Info dropdowns, Calendar, profile avatar + name and Logout) now sits in a compact TOP navigation bar. On phones the bar collapses behind a menu button. Navigation layout only - pages, themes, colours, animations, routes and data are unchanged. The Theme & Layout "Panel layout" choice is now fixed to Top bar.
   * Update271: Employee login - a username whose account is Locked or Resigned / NCNS (Admin > Employee Login Access) now shows "Your account is locked. Please contact your Manager, Team Lead, or Admin." whatever password is typed, the username stays in the field, the male / female / lead picture still appears for it, and these accounts can never sign in. An unknown username still shows "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." (Update270).
@@ -8222,6 +8223,7 @@ def employee_home():
     today_perm = next((r for r in rows("Permissions")
                        if str(r["Employee ID"]) == session["emp_id"] and r["Date"] == today), None)
     perm_used = permission_hours_used(session["emp_id"], today[:7])
+    perm_taken = permission_hours_taken(session["emp_id"], today[:7])      # Update280
     cut = str(t0 - dt.timedelta(days=6))
     tgt_miss = [m for s_ in all_mine if s_["date"] >= cut for m in sub_misses(s_)][:12]     # newest entries first
     return page(EMP_MARQUEE + EMP_TOP + EMP_MSUM + EMP_ALERT + EMP_TARGET + body + '<h2>Submitted today</h2>' + LIST + BLOOM + SAVED_ANIM,
@@ -8230,7 +8232,7 @@ def employee_home():
                 today=today, month_label=first.strftime("%B %Y"), lab1="Attendance", lab2="Productivity",
                 a1=k["att"], a2=k["pct"], extra=extra, msum_hrs=round(k["prod"] + k["non"], 2), msum_prod=k["prod"], msum_non=k["non"], profile_incomplete=profile_incomplete, missing_fields=missing_fields,
                 today_perm=today_perm, perm_limit=PERMISSION_MONTHLY_LIMIT, perm_used=perm_used,
-                perm_remaining=round(PERMISSION_MONTHLY_LIMIT - perm_used, 2), **ctx)
+                perm_remaining=round(PERMISSION_MONTHLY_LIMIT - perm_used, 2), perm_taken=perm_taken, **ctx)
 
 def prod_months():
     """Update91: months an employee can open on Productivity Info - the current month and the previous month."""
@@ -8571,6 +8573,13 @@ def leave_range_check(d1, d2):
         raise ValueError(f"{', '.join(hol)} {'is a holiday' if total == 1 else 'are holidays'} - leave cannot be applied for a holiday.")
     return hol
 
+def permission_hours_taken(eid, month):
+    """Update280: APPROVED permission hours of this employee in the given month ('YYYY-MM') - shown on the Employee page strip."""
+    k = _key(eid)
+    return round(sum(num(r.get("Hours")) for r in rows("Permissions")
+                     if _key(r.get("Employee ID", "")) == k and str(norm_date(r.get("Date", "")) or "").startswith(month)
+                     and str(r.get("Status", "")).strip() == "Approved"), 2)
+
 def permission_hours_used(eid, month):
     """Hours already applied for (Pending + Approved; Rejected doesn't count) by this employee
     in the given month ('YYYY-MM')."""
@@ -8834,7 +8843,7 @@ EMP_TOP = EMP_GREET_CSS + """<div class="head hero"><div class="welcome wflex g3
 EMP_MSUM = """<style>.msum{display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px 14px;margin:0 0 8px;padding:4px 12px;border-radius:999px;background:#eef2ff;border:1px solid #c7d2fe;font-size:12px;line-height:1.3;color:#1e1b4b}
 .msum b{font-size:13px}.msum .mt{font-weight:700;color:#4338ca}.msum .ms{width:1px;height:14px;background:#c7d2fe}.msum .mp{padding:1px 8px;border-radius:999px;color:#fff;font-weight:700;font-size:12px;background:#22a06b}.msum .mp.mid{background:#f59e0b}.msum .mp.low{background:#dc2626}
 @media(prefers-color-scheme:dark){.msum{background:#1e1b4b;border-color:#3730a3;color:#e0e7ff}.msum .mt{color:#a5b4fc}.msum .ms{background:#3730a3}}</style>
-<div class="msum" title="Productive {{msum_prod}} hrs + non-productive {{msum_non}} hrs logged this month"><span class="mt">&#128202; {{month_label}}</span><span class="ms"></span><span>&#9201; Hours completed: <b>{{msum_hrs}} hrs</b></span><span class="ms"></span><span>Productivity: <span class="mp {{'' if a2 >= 80 else ('mid' if a2 >= 50 else 'low')}}">{{a2}}%</span></span></div>"""
+<div class="msum" title="Productive {{msum_prod}} hrs + non-productive {{msum_non}} hrs logged this month"><span class="mt">&#128202; {{month_label}}</span><span class="ms"></span><span>&#9201; Hours completed: <b>{{msum_hrs}} hrs</b></span><span class="ms"></span><span>Productivity: <span class="mp {{'' if a2 >= 80 else ('mid' if a2 >= 50 else 'low')}}">{{a2}}%</span></span><span class="ms"></span><span title="Approved permission hours this month">Permission: <b>{{perm_taken|g}} Hrs</b></span></div>"""
 
 VIEW_ONLY_CARD = """<div class="card"><h2 style="margin-top:0">Productivity &mdash; View Only</h2>
 <p class="mut">Your designation ({{session.designation}}) has <b>View Only</b> access to Productivity. Daily productivity entry is not required,

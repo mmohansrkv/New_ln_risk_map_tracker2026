@@ -1,4 +1,6 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update286: the quote screen shows only the quote from the Quotes sheet (+ author if the sheet has one), the 3D animation, the X and the Close & Continue button - greeting, Login #, language label and the "Take a moment..." line removed.
+  * Update285: ALL employee quotes now come from the "Quotes" worksheet of the Google Sheet (single source; nothing hardcoded or generated). Added / edited / deleted rows reach all employees automatically; per-employee daily rotation; hidden Admin page /admin/quotes edits that same sheet.
   * Update284: the daily quote is a separate full-screen layer over the Productivity Entry (Daily entry) page - the page stays visible (blurred) behind it; Close & Continue reveals it. Pending quote is now kept in the login session itself, so every login (also repeated ones) always shows it. Quotes added by Admin reach all employees at their next login.
   * Update283: Admin Quotes page (add / edit / delete Tamil, English, Thanglish quotes) at /admin/quotes - not in the Admin menu. Every employee sees a quote at EVERY login; quotes are assigned per employee and rotate daily (employee position + day number), so employees get different quotes the same day. Admin menu: Theme & Layout link hidden (/admin/theme still works).
   * Update282: Daily quote overlay hardened - it is hidden until its script confirms it can run (so no stray "Quotes" text / label can ever show on the Employee page), is shielded from page-wide CSS, stays centred with the 3D animation, and can now be closed with the Close & Continue button, the X button or Esc. Employee page layout / functionality unchanged.
@@ -4576,69 +4578,10 @@ WELCOME_CSS = """<style id="wlc-css">
 # ---------------------------------------------------------------- Update281: Daily Inspirational Quote after every Employee login
 # One quote per day (language ta / en / tg picked at random for the day), shown in a full-screen 3D overlay after EVERY employee login (also repeated logins the same day).
 # The employee must press "Close & Continue"; nothing is written to the Productivity log, so the quote is never counted as productive time.
-# English quotes are fetched online (ZenQuotes / DummyJSON, work-related ones preferred) with a built-in fallback; Tamil / Thanglish come from the built-in lists (no reliable free online source).
-QUOTES = {
- "en": ["Small steps taken every day add up to big results.", "Focus on progress, not perfection.", "Great teams are built on trust, respect, and shared goals.",
-        "Success is the sum of small efforts repeated day after day.", "Learn something new today and you are already ahead of yesterday.", "Do the work with full focus, and the results will follow.",
-        "Alone we go fast, together we go far.", "Your attitude today shapes your results tomorrow.", "Plan your day, then give it your best effort.",
-        "Every challenge is a chance to grow stronger.", "Consistency beats intensity when it comes to success.", "Help a teammate today - success tastes better when it is shared.",
-        "Quality work starts with a calm mind and a clear goal.", "Don't wait for motivation. Start, and motivation will join you."],
- "ta": ["ஒவ்வொரு நாளும் செய்யும் சிறிய முயற்சி, பெரிய வெற்றிக்கு அடித்தளம்.", "இன்றைய உழைப்பே நாளைய வெற்றி.", "குழுவாக இணைந்தால் எந்த இலக்கும் எளிதாகும்.",
-        "தொடங்குவதே பாதி வெற்றி; தொடர்வதே முழு வெற்றி.", "கற்றுக்கொள்ளும் மனம் எப்போதும் வளர்ந்துகொண்டே இருக்கும்.", "கவனத்துடன் செய்யும் வேலை எப்போதும் சிறப்பாக அமையும்.",
-        "தோல்வி என்பது முடிவல்ல; அது அடுத்த முயற்சிக்கான பாடம்.", "நேரத்தை மதித்தால் நேரம் உங்களை உயர்த்தும்.", "ஒற்றுமையே வலிமை; ஒன்றாகச் செய்தால் வெற்றி நிச்சயம்.",
-        "இன்று நீங்கள் செய்யும் நல்ல வேலை, நாளை உங்கள் அடையாளமாகும்.", "நம்பிக்கையோடு முயற்சி செய்; வழி தானாகத் திறக்கும்.", "சிறிய முன்னேற்றமும் முன்னேற்றமே; அதைக் கொண்டாடுங்கள்.",
-        "திட்டமிட்டுச் செயல்படுங்கள்; நாள் முழுவதும் நிறைவாக இருக்கும்.", "உங்களால் முடியும் என்று நம்புங்கள்; பாதி வேலை முடிந்துவிடும்."],
- "tg": ["Daily chinna effort edutha, periya vetri kidaikkum.", "Innaiku seiyura velai thaan naalaiya vetri.", "Team-aa serndhu velai senjaa, edhuvum easy-aa mudiyum.",
-        "Aarambikkradhu paadhi vetri; thodarvadhu muzhu vetri.", "Dhinamum puthusa edhaavadhu kathukonga, neenga valarndhutte irupeenga.", "Focus-oda seiyura velai eppavum best-aa irukkum.",
-        "Thotrangal mudivu illa; adhu adutha muyarchikku paadam.", "Neram-a madhicha, neram ungala uyarthum.", "Otrumai thaan balam; serndhu senjaa vetri nichayam.",
-        "Nambikkaiyoda muyarchi pannunga, vazhi thaanaa thirakkum.", "Chinna munnetram kooda munnetram dhaan; adha kondaadunga.", "Plan pannitu velai seiyunga, naal muzhukka nimmadhiya irukkum.",
-        "Ungalala mudiyum nu nambunga; paadhi velai mudinjidum.", "Unga positive attitude dhaan unga result-a decide pannum."],
-}
+# Update285: every quote now comes from the "Quotes" worksheet of the Google Sheet (see ql_sheet) - nothing is hardcoded or generated.
 QUOTE_LABEL = {"en": "English", "ta": "தமிழ்", "tg": "Thanglish"}
-_QUOTE_WORDS = ("work", "success", "team", "effort", "goal", "grow", "learn", "believe", "courage", "persever", "disciplin", "action", "habit", "focus", "progress", "improve", "dream", "strength", "patience", "begin", "start", "mistake", "try", "hard", "great")
-_QUOTE_CACHE, _QUOTE_LOCK = {}, threading.Lock()          # {date: quote dict} - this process
-_QUOTE_DONE = set()                                      # Update284: dq_id values already closed (guards against a close whose cookie update was lost)
 _QUOTE_PENDING = {}                                      # {attendance session id: {"n": login number, "t": time}} - quotes waiting for the Close click (server-side, so a stale cookie can never bring one back)
 _LOGIN_N, _LOGIN_N_LOCK = {}, threading.Lock()           # {employee id: logins so far} - seeded once from the Attendance sheet
-
-def _quote_online():
-    """-> (text, author, source) of a work-related English quote from the web, or None. Short time budget; never raises."""
-    t0 = time.time(); cands = []
-    for url, pick in (("https://zenquotes.io/api/today", lambda d: (d[0]["q"], d[0]["a"], "zenquotes.io")),) + (("https://dummyjson.com/quotes/random", lambda d: (d["quote"], d["author"], "dummyjson.com")),) * 4:
-        if time.time() - t0 > 7: break
-        try:
-            d = requests.get(url, timeout=2.5, headers={"User-Agent": "ProductivityTracker/1.0"}).json()
-            q, a, src = pick(d); q = str(q).strip(); a = str(a).strip()
-            if not (12 <= len(q) <= 200) or a.lower() == "zenquotes.io": continue          # ZenQuotes answers with an 'author' of zenquotes.io when it is rate-limiting
-            if any(w in q.lower() for w in _QUOTE_WORDS): return q, a, src
-            cands.append((q, a, src))
-        except Exception as ex:
-            print("quote fetch failed:", url, repr(ex))
-    return None      # nothing work-related found online: use the built-in English list
-
-def get_daily_quote():
-    """Update281: today's quote {date, lang, text, author, src} - same for everyone, saved once a day in Settings (key daily_quote) so restarts / workers agree."""
-    day = str(today_local())
-    with _QUOTE_LOCK:
-        q = _QUOTE_CACHE.get(day)
-        if q: return q
-        try:
-            sv = json.loads(_setting("daily_quote") or "{}")
-            if sv.get("date") == day and sv.get("text"):
-                _QUOTE_CACHE.clear(); _QUOTE_CACHE[day] = sv; return sv
-        except Exception: pass
-        lang = random.Random("quote-" + day).choice(("ta", "en", "tg"))
-        text, author, src = "", "", "built-in"
-        if lang == "en":
-            got = _quote_online()
-            if got: text, author, src = got
-        if not text:
-            lst = QUOTES[lang]; text = lst[dt.date.fromisoformat(day).toordinal() % len(lst)]
-        q = dict(date=day, lang=lang, label=QUOTE_LABEL[lang], text=text, author=author, src=src)
-        _QUOTE_CACHE.clear(); _QUOTE_CACHE[day] = q
-    try: _set_setting("daily_quote", json.dumps(q, ensure_ascii=False))
-    except Exception as ex: print("daily quote save error:", repr(ex))
-    return q
 
 def _login_number(eid):
     """This employee's login count including the login happening now (counted from the Attendance sheet once, then kept in memory)."""
@@ -4683,6 +4626,7 @@ QUOTE_CSS = r"""<style id="dq-css">
 @keyframes dqBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
 .dq-meta{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin:10px 0 4px}
 .dq-pill{display:inline-block;padding:4px 14px;border-radius:999px;font-size:13px;font-weight:700;background:linear-gradient(120deg,#f59e0b,#ec4899);box-shadow:0 4px 0 #9d174d,0 10px 18px -6px #ec4899aa;position:relative;overflow:hidden}
+.dq-pill.l:empty{display:none}
 .dq-pill.l{background:#ffffff26;box-shadow:inset 0 0 0 1px #ffffff55;font-weight:600}
 .dq-pill::after{content:"";position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(100deg,transparent,#ffffffaa,transparent);transform:skewX(-20deg);animation:dqShine 3.2s ease-in-out infinite}
 @keyframes dqShine{0%{left:-60%}55%,100%{left:140%}}
@@ -4706,25 +4650,21 @@ QUOTE_CSS = r"""<style id="dq-css">
 @media print{.dq{display:none!important}}
 </style>"""
 
-QUOTE_HTML = r"""<div class="dq" id="dq" role="dialog" aria-modal="true" aria-labelledby="dq-hi" aria-describedby="dq-q">
+QUOTE_HTML = r"""<div class="dq" id="dq" role="dialog" aria-modal="true" aria-label="Daily quote" aria-describedby="dq-q">
 <span class="dq-o" style="--c:#22d3ee;--s:150px;--x:6%;--y:14%;--d:9s;--dl:0s;--mx:30px"></span><span class="dq-o" style="--c:#f472b6;--s:110px;--x:84%;--y:62%;--d:11s;--dl:-3s;--mx:-26px"></span>
 <span class="dq-o" style="--c:#fbbf24;--s:80px;--x:76%;--y:10%;--d:8s;--dl:-5s;--mx:18px"></span><span class="dq-o" style="--c:#a78bfa;--s:130px;--x:12%;--y:70%;--d:12s;--dl:-2s;--mx:-20px"></span>
 <span class="dq-cube" style="--s:46px;--x:16%;--y:30%;--d:18s"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="dq-cube" style="--s:34px;--x:88%;--y:34%;--d:14s"><i></i><i></i><i></i><i></i><i></i><i></i></span>
 <span class="dq-cube" style="--s:28px;--x:70%;--y:84%;--d:16s"><i></i><i></i><i></i><i></i><i></i><i></i></span>
 <span class="dq-sp" style="--s:22px;--x:30%;--y:8%;--dl:0s">&#10022;</span><span class="dq-sp" style="--s:16px;--x:62%;--y:90%;--dl:-1.2s">&#10022;</span><span class="dq-sp" style="--s:26px;--x:92%;--y:18%;--dl:-2s">&#10022;</span><span class="dq-sp" style="--s:18px;--x:4%;--y:46%;--dl:-.6s">&#10022;</span>
 <div class="dq-card" id="dq-card"><button type="button" class="dq-x" id="dq-x" aria-label="Close" title="Close">&times;</button>
-<h2 class="dq-hi" id="dq-hi">@@HELLO@@</h2>
-<div class="dq-meta"><span class="dq-pill">Login #@@N@@</span><span class="dq-pill l" id="dq-lang"></span></div>
 <div class="dq-mark" aria-hidden="true">&ldquo;</div>
 <p class="dq-q" id="dq-q"></p><p class="dq-by" id="dq-by"></p>
-<p class="dq-note">Take a moment to read today&rsquo;s thought, then continue to your work.</p>
 <button type="button" class="dq-btn" id="dq-close">Close &amp; Continue</button>
 </div></div>"""
 
-QUOTE_JS = r"""<script>(function(){var el=document.getElementById('dq');if(!el)return;el.classList.add('dq-on');var q=document.getElementById('dq-q'),by=document.getElementById('dq-by'),lg=document.getElementById('dq-lang'),btn=document.getElementById('dq-close'),xb=document.getElementById('dq-x'),card=document.getElementById('dq-card'),done=false;
+QUOTE_JS = r"""<script>(function(){var el=document.getElementById('dq');if(!el)return;el.classList.add('dq-on');var q=document.getElementById('dq-q'),by=document.getElementById('dq-by'),btn=document.getElementById('dq-close'),xb=document.getElementById('dq-x'),card=document.getElementById('dq-card'),done=false;
 var prevOv=document.documentElement.style.overflow;document.documentElement.style.overflow='hidden';
-var FALL={text:'Every day is a new chance to grow.',author:'',label:'English'};
-function show(d){if(!d||!d.text)d=FALL;lg.textContent=d.label||'';q.textContent='';var ws=String(d.text).split(/\s+/);for(var i=0;i<ws.length;i++){var s=document.createElement('span');s.className='w';s.style.setProperty('--i',i);s.textContent=ws[i];q.appendChild(s)}
+function show(d){if(!d||!d.text){close();return}q.textContent='';var ws=String(d.text).split(/\s+/);for(var i=0;i<ws.length;i++){var s=document.createElement('span');s.className='w';s.style.setProperty('--i',i);s.textContent=ws[i];q.appendChild(s)}
 q.setAttribute('aria-label',d.text);by.textContent=d.author?('\u2014 '+d.author+(d.src&&d.src!=='built-in'?'  \u00b7 via '+d.src:'')):''}
 var emb=document.getElementById('dq-data');if(emb){try{show(JSON.parse(emb.textContent))}catch(e){show(null)}}
 else{fetch('/employee/quote-data',{credentials:'same-origin'}).then(function(r){return r.json()}).then(show).catch(function(){show(null)})}
@@ -4746,11 +4686,12 @@ def quote_overlay_html():
     nm = str(session.get("name") or "").strip()[:40]
     hello = ("Welcome Back, %s!" % nm) if st["n"] > 1 else ("Welcome, %s!" % nm)
     if not nm: hello = "Welcome Back!" if st["n"] > 1 else "Welcome!"
-    out = QUOTE_CSS + QUOTE_HTML.replace("@@HELLO@@", _hq.escape(hello)).replace("@@N@@", str(int(st["n"])))
     q = None
     try: q = quote_for_employee(session.get("emp_id"))      # Update283: this employee's own quote for today
     except Exception as ex_: print("employee quote pick error:", repr(ex_))
-    if q:
+    if not q: return ""      # Update285: no quote in the Google Sheet = no quote screen (nothing is invented)
+    out = QUOTE_CSS + QUOTE_HTML
+    if True:
         data = json.dumps(dict(text=q["text"], author=q.get("author", ""), src=q.get("src", ""), label=q.get("label", "")), ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
         out += '<script type="application/json" id="dq-data">' + data + '</script>'
     return out + QUOTE_JS
@@ -4758,8 +4699,9 @@ def quote_overlay_html():
 @app.route("/employee/quote-data")
 @need("employee")
 def employee_quote_data():
-    q = quote_for_employee(session.get("emp_id")) or dict(text="Every day is a new chance to grow.", author="", src="built-in", label="English")
-    return jsonify(text=q["text"], author=q.get("author", ""), src=q.get("src", ""), label=q.get("label", ""))
+    q = quote_for_employee(session.get("emp_id"))
+    if not q: return jsonify(text="", author="", src="", label="")
+    return jsonify(text=q["text"], author=q.get("author", ""), src="", label=q.get("label", ""))
 
 @app.route("/employee/quote/close", methods=["POST"])
 @need("employee")
@@ -4771,89 +4713,144 @@ def employee_quote_close():
         _QUOTE_DONE.add(d_)      # display only: nothing is saved to the Productivity log or the working-time hours
     return jsonify(ok=True)
 
-# ---------------------------------------------------------------- Update283: Quotes library (Admin) + per-employee daily rotation
-# Admin-added quotes live in Settings key quotes_lib (JSON list). With no Admin quotes the built-in QUOTES lists are used.
-# Each employee gets a different quote every day: index = (today's day number + the employee's fixed position) % number of quotes.
-# Same employee + same day = same quote on every login; next day everybody moves on by one, so all quotes rotate through all employees.
-# The Quotes page is NOT in the Admin menu - it is opened directly at /admin/quotes.
-QL_KEY, QL_MAX, QL_LEN = "quotes_lib", 120, 250
+# ---------------------------------------------------------------- Update285: the "Quotes" worksheet of the Google Sheet is the ONLY source of employee quotes
+# Columns are found by their header (any order): a header containing "quote" (else Text / Message / Thought, else the first column) = the quote; "Language"; "Author"; "Status" / "Active" (No / Inactive / Deleted / Hidden hides a row).
+# Rows are read live (never older than QL_TTL seconds, and freshly at every employee login), so adding / editing / deleting a row in the sheet reaches every employee at once.
+# Each employee gets a different row every day: row number = (today's day number + the employee's fixed position) % number of quotes. No quotes in the sheet = no quote screen (nothing is invented).
+QL_TTL, QL_MAX, QL_LEN = 15.0, 2000, 250
+_QL, _QL_LOCK = dict(t=0.0, items=[], meta=dict(ok=False, err="not read yet", title="Quotes", cols={}, ncols=0)), threading.Lock()
+_QL_OFF = ("no", "n", "inactive", "disabled", "deleted", "hidden", "archived", "off", "false", "0", "stopped")
 
-def ql_load(fresh=False):
-    try: lst = json.loads(_setting(QL_KEY, fresh) or "[]")
-    except Exception: lst = []
-    return [x for x in lst if isinstance(x, dict) and x.get("id") and str(x.get("text", "")).strip() and x.get("lang") in QUOTE_LABEL]
+def _ql_lang(v):
+    t = str(v or "").strip(); k = t.lower()
+    if not t: return ""
+    if k in ("ta", "tamil") or t == "தமிழ்": return "ta"
+    if k in ("tg", "tanglish", "thanglish", "tamilish", "tamil english"): return "tg"
+    if k in ("en", "english"): return "en"
+    return t[:20]
 
-def ql_save(lst):
-    _set_setting(QL_KEY, json.dumps(lst, ensure_ascii=False, separators=(",", ":")))
+def _ql_find_ws():
+    for w in _with_retry(book().worksheets):
+        if w.title.strip().lower() in ("quotes", "quote", "daily quotes", "motivational quotes"): return w
+    return None
 
-def ql_pool():
-    """-> [{id, lang, label, text, author, src}] - Admin quotes if there are any, else the built-in ones (stable order)."""
-    mine = ql_load()
-    if mine:
-        return [dict(id=x["id"], lang=x["lang"], label=QUOTE_LABEL[x["lang"]], text=str(x["text"]).strip(), author=str(x.get("author", "")).strip(), src="") for x in sorted(mine, key=lambda x: x["id"])]
-    return [dict(id="b-%s-%d" % (l, i), lang=l, label=QUOTE_LABEL[l], text=t, author="", src="built-in") for i in range(max(len(v) for v in QUOTES.values())) for l, v in QUOTES.items() if i < len(v) for t in [v[i]]]
+def _ql_cols(head):
+    h = [str(x).strip().lower() for x in head]
+    def first(pred):
+        return next((i for i, x in enumerate(h) if pred(x)), None)
+    q = first(lambda x: "quote" in x) 
+    if q is None: q = first(lambda x: x in ("text", "message", "thought", "motivation", "motivational", "content", "description"))
+    if q is None: q = first(lambda x: x not in ("", "s.no", "sno", "no", "no.", "id", "#", "sl.no", "sl no", "s no", "date", "language", "lang", "author", "status", "active"))
+    return dict(q=q if q is not None else 0, l=first(lambda x: x in ("language", "lang", "quote language") or x.startswith("lang")),
+                a=first(lambda x: x in ("author", "by", "source", "said by", "quote by")), s=first(lambda x: x in ("status", "active", "enabled", "show", "display")))
+
+def ql_sheet(fresh=False):
+    """-> (items, meta). items = [{row, text, lang, label, author}] in sheet order. A failed read keeps the last good copy of the SHEET (never invented text)."""
+    with _QL_LOCK:
+        if not fresh and _QL["meta"].get("ok") and time.time() - _QL["t"] < QL_TTL: return _QL["items"], _QL["meta"]
+    try:
+        ws = _ql_find_ws()
+        if ws is None: raise RuntimeError('no worksheet named "Quotes" in the Google Sheet')
+        vals = _with_retry(ws.get_all_values)
+        cols = _ql_cols(vals[0] if vals else []); items = []
+        for i, r in enumerate(vals[1:], start=2):
+            g = lambda c: (str(r[c]).strip() if c is not None and c < len(r) else "")
+            text = re.sub(r"\s+", " ", g(cols["q"])).strip()
+            if not text or g(cols["s"]).lower() in _QL_OFF: continue
+            lg = _ql_lang(g(cols["l"]))
+            label = QUOTE_LABEL.get(lg, lg) if lg else ("தமிழ்" if re.search(r"[\u0B80-\u0BFF]", text) else "")
+            items.append(dict(row=i, text=text, lang=lg, label=label, author=g(cols["a"])))
+        meta = dict(ok=True, err="", title=ws.title, cols=cols, ncols=max(len(vals[0]) if vals else 0, 1))
+        with _QL_LOCK: _QL.update(t=time.time(), items=items, meta=meta)
+        return items, meta
+    except Exception as ex:
+        print("quotes sheet read error:", repr(ex))
+        with _QL_LOCK:
+            m = dict(_QL["meta"]); m["err"] = str(ex)[:200]
+            if not _QL["items"]: m["ok"] = False
+            _QL["t"] = time.time() - QL_TTL + 3      # retry in a few seconds
+            _QL["meta"] = m
+            return _QL["items"], m
 
 def ql_employee_keys():
     try: return sorted({_key(e["id"]) for e in _nt_emps() if not e["locked"]})
     except Exception as ex: print("quote employee list error:", repr(ex)); return []
 
 def quote_for_employee(eid, day=None, pool=None, keys=None):
-    pool = pool if pool is not None else ql_pool()
+    pool = pool if pool is not None else ql_sheet()[0]
     if not pool: return None
     keys = keys if keys is not None else ql_employee_keys()
     k = _key(eid); n = (day or today_local()).toordinal()
-    rank = keys.index(k) if k in keys else (sum(ord(c) for c in k) % max(len(pool), 1))
-    return pool[(n + rank) % len(pool)]
+    rank = keys.index(k) if k in keys else (sum(ord(c) for c in k) % len(pool))
+    q = dict(pool[(n + rank) % len(pool)]); q["src"] = ""
+    return q
 
-def _ql_clean(v, n): return re.sub(r"\s+", " ", str(v or "")).strip()[:n]
+def _ql_cell(v):
+    v = re.sub(r"\s+", " ", str(v or "")).strip()
+    return ("'" + v) if v[:1] in "=+-@" else v
+
+def _ql_put(ws, meta, row, text, lang, author, new):
+    c = meta["cols"]; n = max(meta["ncols"], max([x for x in c.values() if x is not None] + [0]) + 1)
+    vals = [""] * n; vals[c["q"]] = _ql_cell(text)
+    if c["l"] is not None: vals[c["l"]] = lang
+    if c["a"] is not None: vals[c["a"]] = _ql_cell(author)
+    if c["s"] is not None: vals[c["s"]] = "Active"
+    if new:
+        ws.append_row(vals, value_input_option="RAW")
+    else:
+        for key_, v in (("q", vals[c["q"]]), ("l", lang), ("a", vals[c["a"]] if c["a"] is not None else "")):
+            if c[key_] is not None: ws.update(range_name=gspread.utils.rowcol_to_a1(row, c[key_] + 1), values=[[v]], value_input_option="RAW")
 
 @app.route("/admin/quotes")
 @need("admin")
 def admin_quotes():
-    prefetch("Settings", "Employees")
-    mine = ql_load(); pool = ql_pool(); keys = ql_employee_keys(); today = today_local()
+    items, meta = ql_sheet(True); keys = ql_employee_keys(); today = today_local()
     em = {_key(e["id"]): e for e in _nt_emps()}
     plan = []
     for k in keys:
-        q = quote_for_employee(k, today, pool, keys); tq = quote_for_employee(k, today + dt.timedelta(days=1), pool, keys)
+        q = quote_for_employee(k, today, items, keys); tq = quote_for_employee(k, today + dt.timedelta(days=1), items, keys)
         plan.append(dict(id=em[k]["id"], name=em[k]["name"], today=q["text"] if q else "", tomorrow=tq["text"] if tq else ""))
     plan.sort(key=lambda x: x["name"].lower())
-    f = dict(id="", lang="en", text="", author="")
-    eid = request.args.get("edit", "").strip()
-    if eid:
-        x = next((x for x in mine if x["id"] == eid), None)
-        if x: f = dict(id=x["id"], lang=x["lang"], text=x["text"], author=x.get("author", ""))
-    return page(QUOTES_ADM, title="Daily Quotes", f=f, quotes=sorted(mine, key=lambda x: x["id"], reverse=True), labels=QUOTE_LABEL, plan=plan, builtin=(not mine), npool=len(pool), maxq=QL_MAX, qlen=QL_LEN)
+    f = dict(row="", lang="en", text="", author="")
+    er = request.args.get("edit", "").strip()
+    if er.isdigit():
+        x = next((x for x in items if x["row"] == int(er)), None)
+        if x: f = dict(row=x["row"], lang=x["lang"] or "en", text=x["text"], author=x["author"])
+    return page(QUOTES_ADM, title="Daily Quotes", f=f, quotes=items, labels=QUOTE_LABEL, plan=plan, meta=meta, qlen=QL_LEN)
 
 @app.route("/admin/quotes/save", methods=["POST"])
 @need("admin")
 def admin_quotes_save():
-    fm = request.form; qid = fm.get("id", "").strip(); text = _ql_clean(fm.get("text"), QL_LEN); author = _ql_clean(fm.get("author"), 60); lang = fm.get("lang", "")
-    back = "/admin/quotes" + (("?edit=" + urllib.parse.quote(qid, safe="")) if qid else "")
+    fm = request.form; row = fm.get("row", "").strip(); text = re.sub(r"\s+", " ", fm.get("text", "")).strip()[:QL_LEN]; author = re.sub(r"\s+", " ", fm.get("author", "")).strip()[:60]
+    lang = fm.get("lang", "") if fm.get("lang", "") in QUOTE_LABEL else "en"; lang_cell = QUOTE_LABEL[lang]
+    back = "/admin/quotes" + (("?edit=" + row) if row.isdigit() else "")
     if not text: flash("Please type the quote.", "error"); return redirect(back)
-    if lang not in QUOTE_LABEL: flash("Please choose Tamil, English or Thanglish.", "error"); return redirect(back)
     try:
-        lst = ql_load(True)
-        if qid:
-            x = next((x for x in lst if x["id"] == qid), None)
-            if x is None: flash("That quote no longer exists.", "error"); return redirect("/admin/quotes")
-            x.update(lang=lang, text=text, author=author); flash("Quote updated. Employees see the change from their next login.")
+        ws = _ql_find_ws()
+        if ws is None: flash('The Google Sheet has no worksheet named "Quotes".', "error"); return redirect("/admin/quotes")
+        items, meta = ql_sheet(True)
+        if row.isdigit():
+            if not any(x["row"] == int(row) for x in items): flash("That quote no longer exists in the sheet.", "error"); return redirect("/admin/quotes")
+            _ql_put(ws, meta, int(row), text, lang_cell, author, False); flash("Quote updated in the sheet. Employees see the change from their next login.")
         else:
-            if len(lst) >= QL_MAX: flash("You can keep up to %d quotes. Please delete an old one first." % QL_MAX, "error"); return redirect(back)
-            import uuid as _uq
-            lst.append(dict(id="Q" + now_local().strftime("%y%m%d%H%M%S") + _uq.uuid4().hex[:3], lang=lang, text=text, author=author)); flash("Quote added.")
-        ql_save(lst)
+            if len(items) >= QL_MAX: flash("The Quotes sheet is full.", "error"); return redirect(back)
+            _ql_put(ws, meta, 0, text, lang_cell, author, True); flash("Quote added to the sheet. Employees see it from their next login.")
+        ql_sheet(True)
     except Exception as ex:
         print("quote save error:", repr(ex)); flash("Could not save the quote. Please try again.", "error"); return redirect(back)
     return redirect("/admin/quotes")
 
-@app.route("/admin/quotes/<qid>/delete", methods=["POST"])
+@app.route("/admin/quotes/<int:row>/delete", methods=["POST"])
 @need("admin")
-def admin_quotes_delete(qid):
+def admin_quotes_delete(row):
     try:
-        lst = ql_load(True); new = [x for x in lst if x["id"] != qid]
-        if len(new) != len(lst): ql_save(new); flash("Quote deleted.")
-        else: flash("Nothing changed.", "error")
+        ws = _ql_find_ws(); items, meta = ql_sheet(True)
+        x = next((x for x in items if x["row"] == row), None)
+        cur = re.sub(r"\s+", " ", str(ws.cell(row, meta["cols"]["q"] + 1).value or "")).strip() if (ws is not None and x is not None) else None
+        if cur is None or cur != x["text"]:
+            flash("That row changed in the sheet - nothing was deleted. Please check the list and try again.", "error")
+        else:
+            ws.delete_rows(row); ql_sheet(True); flash("Quote deleted from the sheet.")
     except Exception as ex:
         print("quote delete error:", repr(ex)); flash("Could not delete the quote. Please try again.", "error")
     return redirect("/admin/quotes")
@@ -4865,22 +4862,23 @@ QUOTES_ADM = r"""<style>
 .qa-t{width:100%;border-collapse:collapse}.qa-t th,.qa-t td{padding:8px 10px;border-bottom:1px solid #e3e7f7;text-align:left;vertical-align:top;font-size:13px}
 .qa-wrap{overflow-x:auto}.qa-acts{display:flex;gap:6px;white-space:nowrap}.qa-acts form{margin:0}
 </style>
-<div class="card qa"><h2>{{ 'Edit quote' if f.id else 'Add a motivational quote' }}</h2>
-<p class="mut">Every employee sees one quote at each login (Close &amp; Continue). Quotes are shared out so employees get <b>different</b> quotes on the same day, and everyone moves to the next quote each day. {% if builtin %}You have not added any quotes yet, so the {{npool}} built-in quotes are in use. Once you add your own, only your quotes are used.{% else %}Currently rotating through your {{npool}} quote(s).{% endif %}</p>
-<form method="post" action="/admin/quotes/save"><input type="hidden" name="id" value="{{f.id}}">
-<div class="qa-row"><label>Language<select name="lang">{% for k,v in labels.items() %}<option value="{{k}}" {{'selected' if f.lang==k}}>{{v}}</option>{% endfor %}</select></label>
-<label>Author / source <span class="mut">(optional)</span><input type="text" name="author" maxlength="60" value="{{f.author}}"></label></div>
+<div class="card qa"><h2>Daily quotes - Google Sheet "{{meta.title}}"</h2>
+<p class="mut">The <b>{{meta.title}}</b> worksheet of the Google Sheet is the only source of employee quotes. Add, edit or delete rows here or directly in the sheet - every employee gets the change at their next login. Each employee sees a different quote every day, and everyone moves to the next one daily.</p>
+{% if not meta.ok %}<p class="flash err">The quotes sheet could not be read: {{meta.err}}. Employees will not see a quote until it can be read.</p>{% elif not quotes %}<p class="flash err">The sheet has no quotes yet, so employees see no quote screen. Add one below.</p>{% elif meta.err %}<p class="mut">Last sheet read had a problem ({{meta.err}}); showing the last copy read from the sheet.</p>{% endif %}
+{% if meta.ok %}<h3>{{ 'Edit quote (row ' ~ f.row ~ ')' if f.row else 'Add a quote' }}</h3>
+<form method="post" action="/admin/quotes/save"><input type="hidden" name="row" value="{{f.row}}">
+<div class="qa-row">{% if meta.cols.l is not none %}<label>Language<select name="lang">{% for k,v in labels.items() %}<option value="{{k}}" {{'selected' if f.lang==k}}>{{v}}</option>{% endfor %}</select></label>{% else %}<span></span>{% endif %}
+{% if meta.cols.a is not none %}<label>Author / source <span class="mut">(optional)</span><input type="text" name="author" maxlength="60" value="{{f.author}}"></label>{% else %}<span></span>{% endif %}</div>
 <label>Quote<textarea name="text" maxlength="{{qlen}}" required placeholder="Type the quote in Tamil, English or Thanglish...">{{f.text}}</textarea></label>
-<p class="mut">Up to {{qlen}} characters &middot; up to {{maxq}} quotes.</p>
-<button>{{ 'Save changes' if f.id else 'Add quote' }}</button>{% if f.id %} <a class="back" href="/admin/quotes">Cancel</a>{% endif %}</form></div>
-<div class="card qa"><h2>Your quotes ({{quotes|length}})</h2>
-{% if quotes %}<div class="qa-wrap"><table class="qa-t"><tr><th>Language</th><th>Quote</th><th>Author</th><th></th></tr>
-{% for q in quotes %}<tr><td><span class="qa-lang">{{labels[q.lang]}}</span></td><td>{{q.text}}</td><td>{{q.author}}</td>
-<td><div class="qa-acts"><a class="back sm" href="/admin/quotes?edit={{q.id}}">Edit</a><form method="post" action="/admin/quotes/{{q.id}}/delete" onsubmit="return confirm('Delete this quote?')"><button class="sm">Delete</button></form></div></td></tr>{% endfor %}</table></div>
-{% else %}<p class="mut">No quotes added yet.</p>{% endif %}</div>
+<button>{{ 'Save changes' if f.row else 'Add quote' }}</button>{% if f.row %} <a class="back" href="/admin/quotes">Cancel</a>{% endif %}</form>{% endif %}</div>
+<div class="card qa"><h2>Quotes in the sheet ({{quotes|length}})</h2>
+{% if quotes %}<div class="qa-wrap"><table class="qa-t"><tr><th>Row</th><th>Language</th><th>Quote</th><th>Author</th><th></th></tr>
+{% for q in quotes %}<tr><td>{{q.row}}</td><td>{% if q.label %}<span class="qa-lang">{{q.label}}</span>{% endif %}</td><td>{{q.text}}</td><td>{{q.author}}</td>
+<td><div class="qa-acts"><a class="back sm" href="/admin/quotes?edit={{q.row}}">Edit</a><form method="post" action="/admin/quotes/{{q.row}}/delete" onsubmit="return confirm('Delete this quote from the sheet?')"><button class="sm">Delete</button></form></div></td></tr>{% endfor %}</table></div>
+{% else %}<p class="mut">No quotes in the sheet.</p>{% endif %}</div>
 <div class="card qa"><h2>Today's rotation</h2><p class="mut">Which quote each employee sees today, and tomorrow.</p>
-{% if plan %}<div class="qa-wrap"><table class="qa-t"><tr><th>Employee</th><th>Today</th><th>Tomorrow</th></tr>
-{% for r in plan %}<tr><td>{{r.name}} <span class="mut">({{r.id}})</span></td><td>{{r.today}}</td><td>{{r.tomorrow}}</td></tr>{% endfor %}</table></div>{% else %}<p class="mut">No employees found.</p>{% endif %}</div>
+{% if plan and quotes %}<div class="qa-wrap"><table class="qa-t"><tr><th>Employee</th><th>Today</th><th>Tomorrow</th></tr>
+{% for r in plan %}<tr><td>{{r.name}} <span class="mut">({{r.id}})</span></td><td>{{r.today}}</td><td>{{r.tomorrow}}</td></tr>{% endfor %}</table></div>{% else %}<p class="mut">Nothing to show yet.</p>{% endif %}</div>
 """
 
 def welcome_overlay_html(name):
@@ -7068,6 +7066,8 @@ def employee_login():
                 except Exception as ex_: print("login count error:", repr(ex_)); _lno = 1
                 track_login(session["emp_id"], session["name"], session["band"])
                 session["dq_id"] = uuid.uuid4().hex; session["dq_n"] = int(_lno)      # Update284: quote pending for THIS login (kept in the signed session, so no login can miss it)
+                try: ql_sheet(True)      # Update285: read the Quotes sheet live at every login so the newest quotes are used
+                except Exception as ex_: print("quotes refresh error:", repr(ex_))
                 try: quote_begin(session.get("att_id"), _lno)      # Update281: daily quote overlay until Close is pressed
                 except Exception as ex_: print("daily quote start error:", repr(ex_))
                 _bg(warm_employee_cache)                  # dashboard data loads while the welcome animation plays

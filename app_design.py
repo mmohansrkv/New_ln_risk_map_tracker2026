@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update287: the "Quotes" worksheet is checked automatically - used as it is if it exists (no duplicate), created with the headers Quote / Language / Author / Status if it is missing; no error is shown. Admin add / edit / delete and the employee quote screen work on that sheet right away.
   * Update286: the quote screen shows only the quote from the Quotes sheet (+ author if the sheet has one), the 3D animation, the X and the Close & Continue button - greeting, Login #, language label and the "Take a moment..." line removed.
   * Update285: ALL employee quotes now come from the "Quotes" worksheet of the Google Sheet (single source; nothing hardcoded or generated). Added / edited / deleted rows reach all employees automatically; per-employee daily rotation; hidden Admin page /admin/quotes edits that same sheet.
   * Update284: the daily quote is a separate full-screen layer over the Productivity Entry (Daily entry) page - the page stays visible (blurred) behind it; Close & Continue reveals it. Pending quote is now kept in the login session itself, so every login (also repeated ones) always shows it. Quotes added by Admin reach all employees at their next login.
@@ -4729,10 +4730,26 @@ def _ql_lang(v):
     if k in ("en", "english"): return "en"
     return t[:20]
 
-def _ql_find_ws():
-    for w in _with_retry(book().worksheets):
-        if w.title.strip().lower() in ("quotes", "quote", "daily quotes", "motivational quotes"): return w
-    return None
+QL_HEAD = ["Quote", "Language", "Author", "Status"]
+_QL_NAMES = ("quotes", "quote", "daily quotes", "motivational quotes")
+
+def _ql_find_ws(create=True):
+    """Update287: the existing Quotes worksheet is used as it is (never duplicated, its columns are never touched); if there is none it is created with the headers Quote / Language / Author / Status."""
+    def look():
+        wl = _with_retry(book().worksheets)
+        for want in _QL_NAMES:
+            w = next((w for w in wl if w.title.strip().lower() == want), None)
+            if w is not None: return w
+        return None
+    w = look()
+    if w is None and create:
+        with _QL_LOCK:
+            w = look()      # look again right before creating, so two requests never make two sheets
+            if w is None:
+                try: w = _with_retry(book().add_worksheet, title="Quotes", rows=1000, cols=max(8, len(QL_HEAD))); _with_retry(w.update, range_name="A1", values=[QL_HEAD]); print("Quotes worksheet created")
+                except Exception as ex:
+                    print("Quotes worksheet create:", repr(ex)); w = look()      # another worker created it at the same moment
+    return w
 
 def _ql_cols(head):
     h = [str(x).strip().lower() for x in head]
@@ -4750,8 +4767,10 @@ def ql_sheet(fresh=False):
         if not fresh and _QL["meta"].get("ok") and time.time() - _QL["t"] < QL_TTL: return _QL["items"], _QL["meta"]
     try:
         ws = _ql_find_ws()
-        if ws is None: raise RuntimeError('no worksheet named "Quotes" in the Google Sheet')
+        if ws is None: raise RuntimeError('the "Quotes" worksheet could not be created')
         vals = _with_retry(ws.get_all_values)
+        if not vals or not any(str(c).strip() for c in vals[0]):      # Update287: a completely empty sheet gets its header row (row 1 is never a quote)
+            _with_retry(ws.update, range_name="A1", values=[QL_HEAD]); vals = [list(QL_HEAD)] + list(vals[1:])
         cols = _ql_cols(vals[0] if vals else []); items = []
         for i, r in enumerate(vals[1:], start=2):
             g = lambda c: (str(r[c]).strip() if c is not None and c < len(r) else "")
@@ -4864,7 +4883,7 @@ QUOTES_ADM = r"""<style>
 </style>
 <div class="card qa"><h2>Daily quotes - Google Sheet "{{meta.title}}"</h2>
 <p class="mut">The <b>{{meta.title}}</b> worksheet of the Google Sheet is the only source of employee quotes. Add, edit or delete rows here or directly in the sheet - every employee gets the change at their next login. Each employee sees a different quote every day, and everyone moves to the next one daily.</p>
-{% if not meta.ok %}<p class="flash err">The quotes sheet could not be read: {{meta.err}}. Employees will not see a quote until it can be read.</p>{% elif not quotes %}<p class="flash err">The sheet has no quotes yet, so employees see no quote screen. Add one below.</p>{% elif meta.err %}<p class="mut">Last sheet read had a problem ({{meta.err}}); showing the last copy read from the sheet.</p>{% endif %}
+{% if not meta.ok %}<p class="flash err">The quotes sheet could not be read: {{meta.err}}. Employees will not see a quote until it can be read.</p>{% elif not quotes %}<p class="mut"><b>The Quotes sheet is ready but empty.</b> Add the first quote below - employees see a quote at login as soon as there is one.</p>{% elif meta.err %}<p class="mut">Last sheet read had a problem ({{meta.err}}); showing the last copy read from the sheet.</p>{% endif %}
 {% if meta.ok %}<h3>{{ 'Edit quote (row ' ~ f.row ~ ')' if f.row else 'Add a quote' }}</h3>
 <form method="post" action="/admin/quotes/save"><input type="hidden" name="row" value="{{f.row}}">
 <div class="qa-row">{% if meta.cols.l is not none %}<label>Language<select name="lang">{% for k,v in labels.items() %}<option value="{{k}}" {{'selected' if f.lang==k}}>{{v}}</option>{% endfor %}</select></label>{% else %}<span></span>{% endif %}

@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update290: LOGIN SPEED + quotes. (1) The login no longer waits for Google Sheets: the Attendance-sheet read that only counted logins (not shown any more) and the live Quotes-sheet read were done INSIDE the login request - both removed from it; the Quotes sheet + the Thanglish conversion are prepared in a background thread. (2) The Employees list is read once per login (was three times). (3) The Employee page no longer reads the Quotes sheet while it is built: the quote popup is a light shell, the page opens first and the popup then asks /employee/quote-data (English shown at once, Thanglish filled in under it when ready). (4) Quotes: English from the Quotes sheet; Thanglish = online English->Tamil translation (Google Translate web endpoint, MyMemory as a second service) transliterated to Latin letters here; the result is cached and saved once into an EMPTY Thanglish cell of the sheet; if the online service fails the English quote still shows. Popup heading \"Today's Thought\". Quotes sheet is found from the already-loaded worksheet list (one API call less), reads are single-flight. Admin and Employee pages, themes and layouts unchanged.
   * Update289: FIX - quotes never appeared on the Employee page because the variable _QUOTE_DONE was used but never defined (NameError inside quote_overlay_html(), silently swallowed, so no quote screen was ever built). Now defined. Also: the Quotes sheet columns are detected more reliably (an \"English\" / \"English Quote\" column is preferred, Tamil / Thanglish columns are never taken as the English quote), the sheet read reports why rows were skipped, errors in the quote screen are printed with a full traceback, and a new admin check page /admin/quotes/check shows the Google Sheet connection, the worksheets found, the detected columns and the quote an employee will get (add ?emp=<Employee ID>). Existing tracker functionality unchanged.
   * Update288: quote screen = the English quote (Quotes sheet, column Quote) big in the centre + its Thanglish translation (column Thanglish, added to the sheet automatically if missing) smaller right below, over the blurred Productivity Entry page, with the 3D animation and Close button. Shown at every login.
   * Update287: the "Quotes" worksheet is checked automatically - used as it is if it exists (no duplicate), created with the headers Quote / Language / Author / Status if it is missing; no error is shown. Admin add / edit / delete and the employee quote screen work on that sheet right away.
@@ -1092,6 +1093,8 @@ def _prewarm_employees():
     try:
         with _rows_cache_lock: c = _rows_cache.get("Employees")
         if c is None or time.monotonic() - c[0] > _ROWS_CACHE_TTL: _refresh_bg("Employees")
+        try: ql_prewarm()      # Update290: the Quotes sheet is read in the background while the person types the password
+        except Exception: pass
         _now = time.monotonic()          # Update230: warm every sheet the Employee page needs WHILE the person types the password, so the page opens from memory right after login
         for _n in EMP_PAGE_SHEETS:
             if _n == "Employees": continue
@@ -4644,6 +4647,7 @@ QUOTE_CSS = r"""<style id="dq-css">
 .dq-by{margin:2px 0 0;padding:0;font-size:14px;color:#e9d5ff;opacity:.95}
 .dq-x{position:absolute;top:12px;right:14px;width:36px;height:36px;border-radius:50%;border:1px solid #ffffff55;background:#ffffff1f;color:#fff;font:700 18px/1 system-ui,sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;z-index:2}
 .dq-x:hover{background:#ffffff40}.dq-x:focus-visible{outline:3px solid #fde68a;outline-offset:2px}
+.dq-hd{margin:6px 0 2px;font-size:clamp(18px,3vw,26px);font-weight:800;letter-spacing:.3px;color:#fde68a;text-shadow:0 3px 0 #92400e,0 0 22px #fbbf24aa;animation:dqBob 3.6s ease-in-out infinite}
 .dq-note{margin:14px 0 0;font-size:12.5px;color:#ddd6fe}
 .dq-btn{margin-top:16px;position:relative;overflow:hidden;cursor:pointer;border:0;border-radius:999px;padding:12px 34px;font:800 16px/1 inherit;font-family:inherit;color:#fff;letter-spacing:.3px;background:linear-gradient(135deg,#22c55e,#06b6d4);box-shadow:0 6px 0 #0f766e,0 16px 24px -8px #06b6d4aa,inset 0 1px 0 #ffffff77;transition:transform .15s ease,box-shadow .15s ease;animation:dqBtn 2.4s ease-in-out infinite}
 @keyframes dqBtn{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
@@ -4663,53 +4667,56 @@ QUOTE_HTML = r"""<div class="dq" id="dq" role="dialog" aria-modal="true" aria-la
 <span class="dq-cube" style="--s:28px;--x:70%;--y:84%;--d:16s"><i></i><i></i><i></i><i></i><i></i><i></i></span>
 <span class="dq-sp" style="--s:22px;--x:30%;--y:8%;--dl:0s">&#10022;</span><span class="dq-sp" style="--s:16px;--x:62%;--y:90%;--dl:-1.2s">&#10022;</span><span class="dq-sp" style="--s:26px;--x:92%;--y:18%;--dl:-2s">&#10022;</span><span class="dq-sp" style="--s:18px;--x:4%;--y:46%;--dl:-.6s">&#10022;</span>
 <div class="dq-card" id="dq-card"><button type="button" class="dq-x" id="dq-x" aria-label="Close" title="Close">&times;</button>
-<div class="dq-mark" aria-hidden="true">&ldquo;</div>
+<div class="dq-hd" aria-hidden="true">&#10024; Today&rsquo;s Thought &#10024;</div>
 <p class="dq-q" id="dq-q"></p><p class="dq-tg" id="dq-tg"></p><p class="dq-by" id="dq-by"></p>
 <button type="button" class="dq-btn" id="dq-close">Close &amp; Continue</button>
 </div></div>"""
 
-QUOTE_JS = r"""<script>(function(){var el=document.getElementById('dq');if(!el)return;el.classList.add('dq-on');var q=document.getElementById('dq-q'),by=document.getElementById('dq-by'),tg=document.getElementById('dq-tg'),btn=document.getElementById('dq-close'),xb=document.getElementById('dq-x'),card=document.getElementById('dq-card'),done=false;
-var prevOv=document.documentElement.style.overflow;document.documentElement.style.overflow='hidden';
-function show(d){if(!d||!d.text){close();return}q.textContent='';var ws=String(d.text).split(/\s+/);for(var i=0;i<ws.length;i++){var s=document.createElement('span');s.className='w';s.style.setProperty('--i',i);s.textContent=ws[i];q.appendChild(s)}
-q.setAttribute('aria-label',d.text);tg.textContent='';var tw=String(d.tg||'').split(/\s+/).filter(Boolean);for(var k=0;k<tw.length;k++){var t=document.createElement('span');t.className='w';t.style.setProperty('--i',ws.length+k+3);t.textContent=tw[k];tg.appendChild(t)}
-by.textContent=d.author?('\u2014 '+d.author):''}
-var emb=document.getElementById('dq-data');if(emb){try{show(JSON.parse(emb.textContent))}catch(e){show(null)}}
-else{fetch('/employee/quote-data',{credentials:'same-origin'}).then(function(r){return r.json()}).then(show).catch(function(){show(null)})}
+QUOTE_JS = r"""<script>(function(){var el=document.getElementById('dq');if(!el)return;
+var q=document.getElementById('dq-q'),by=document.getElementById('dq-by'),tg=document.getElementById('dq-tg'),btn=document.getElementById('dq-close'),xb=document.getElementById('dq-x'),card=document.getElementById('dq-card'),done=false,shown=false,nq=0,prevOv='';
+function put(box,text,off){box.textContent='';var ws=String(text||'').split(/\s+/).filter(Boolean);for(var i=0;i<ws.length;i++){var s=document.createElement('span');s.className='w';s.style.setProperty('--i',i+off);s.textContent=ws[i];box.appendChild(s)}return ws.length}
+function cleanup(){var c=document.getElementById('dq-css');if(el.parentNode)el.parentNode.removeChild(el);if(c&&c.parentNode)c.parentNode.removeChild(c)}
+function open(){if(shown||done)return;shown=true;el.classList.add('dq-on');prevOv=document.documentElement.style.overflow;document.documentElement.style.overflow='hidden';setTimeout(function(){try{btn.focus({preventScroll:true})}catch(e){}},900)}
+function fillTg(t){if(done||!t)return;put(tg,t,nq+3)}
+function show(d){if(done)return;if(!d||!d.text){cleanup();return}nq=put(q,d.text,0);q.setAttribute('aria-label',d.text);by.textContent=d.author?('\u2014 '+d.author):'';open();
+if(d.tg)fillTg(d.tg);else if(d.need){fetch('/employee/quote-data?tg=1',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(x){fillTg(x&&x.tg)}).catch(function(){})}}
 function close(){if(done)return;done=true;try{fetch('/employee/quote/close',{method:'POST',credentials:'same-origin',keepalive:true}).catch(function(){})}catch(e){}
-el.classList.add('out');document.documentElement.style.overflow=prevOv;setTimeout(function(){if(el.parentNode)el.parentNode.removeChild(el);var c=document.getElementById('dq-css');if(c&&c.parentNode)c.parentNode.removeChild(c);var d=document.getElementById('dq-data');if(d&&d.parentNode)d.parentNode.removeChild(d)},380)}
-btn.addEventListener('click',close);if(xb)xb.addEventListener('click',close);
-el.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();close()}else if(e.key==='Tab'){e.preventDefault();(document.activeElement===btn&&xb?xb:btn).focus()}});
+el.classList.add('out');if(shown)document.documentElement.style.overflow=prevOv;setTimeout(cleanup,380)}
+function mark(){try{sessionStorage.setItem('dqTry',Date.now())}catch(e){}}
+function go(){var last=0;try{last=+sessionStorage.getItem('dqTry')||0}catch(e){}
+if(Date.now()-last<20000){cleanup();return}
+fetch('/employee/quote-data',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(d){if(!d||!d.text)mark();show(d)}).catch(function(){mark();cleanup()})}
+btn.addEventListener('click',close);xb.addEventListener('click',close);
+el.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();close()}else if(e.key==='Tab'){e.preventDefault();(document.activeElement===btn?xb:btn).focus()}});
 el.addEventListener('pointermove',function(e){var r=window.innerWidth,h=window.innerHeight;card.style.setProperty('--ry',((e.clientX/r-.5)*10)+'deg');card.style.setProperty('--rx',((.5-e.clientY/h)*8)+'deg')});
 el.addEventListener('pointerleave',function(){card.style.setProperty('--ry','0deg');card.style.setProperty('--rx','0deg')});
-setTimeout(function(){try{btn.focus({preventScroll:true})}catch(e){}},900)})();</script>"""
+if(document.readyState==='complete')setTimeout(go,60);else window.addEventListener('load',function(){setTimeout(go,60)})})();</script>"""
 
 def quote_overlay_html():
-    """Update281: the blocking quote overlay for this login (empty once Close was pressed, on bare pages and for the Admin)."""
-    st = None
-    if session.get("role") == "employee" and session.get("dq_id") and session["dq_id"] not in _QUOTE_DONE:      # Update284
-        st = dict(n=int(session.get("dq_n") or 1))
-    if not st: return ""
-    import html as _hq
-    nm = str(session.get("name") or "").strip()[:40]
-    hello = ("Welcome Back, %s!" % nm) if st["n"] > 1 else ("Welcome, %s!" % nm)
-    if not nm: hello = "Welcome Back!" if st["n"] > 1 else "Welcome!"
-    q = None
-    try: q = quote_for_employee(session.get("emp_id"))      # Update283: this employee's own quote for today
-    except Exception as ex_:
-        import traceback; traceback.print_exc(); print("employee quote pick error:", repr(ex_))
-    if not q: return ""      # Update285: no quote in the Google Sheet = no quote screen (nothing is invented)
-    out = QUOTE_CSS + QUOTE_HTML
-    if True:
-        data = json.dumps(dict(text=q["text"], tg=q.get("thanglish", ""), author=q.get("author", "")), ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-        out += '<script type="application/json" id="dq-data">' + data + '</script>'
-    return out + QUOTE_JS
+    """Update290: only a light, hidden shell is added to the page - NO Google Sheets read happens while the Employee page is built, so the page opens first.
+    The popup script asks /employee/quote-data after the page has loaded and shows the popup when the quote arrives (English at once, Thanglish under it when ready)."""
+    if session.get("role") == "employee" and session.get("dq_id") and session["dq_id"] not in _QUOTE_DONE:
+        return QUOTE_CSS + QUOTE_HTML + QUOTE_JS
+    return ""
 
 @app.route("/employee/quote-data")
 @need("employee")
 def employee_quote_data():
-    q = quote_for_employee(session.get("emp_id"))
-    if not q: return jsonify(text="", tg="", author="")
-    return jsonify(text=q["text"], tg=q.get("thanglish", ""), author=q.get("author", ""))
+    """Update290: English quote at once; Thanglish from the sheet / cache, else (?tg=1) converted online - separate request, never part of login or page load."""
+    resp = None
+    try:
+        if not session.get("dq_id") or session["dq_id"] in _QUOTE_DONE: resp = jsonify(text="", tg="")      # nothing pending for this login
+        else:
+            q = quote_for_employee(session.get("emp_id"))
+            if not q: resp = jsonify(text="", tg="")
+            else:
+                tg = (q.get("thanglish") or "").strip() or _TG_CACHE.get(q["text"], "")
+                if not tg and request.args.get("tg"): tg = quote_thanglish(q["text"], q.get("row"))
+                resp = jsonify(text=q["text"], tg=tg, need=(not tg and not request.args.get("tg")), author=q.get("author", ""))
+    except Exception as ex_:
+        import traceback; traceback.print_exc(); print("employee quote-data error:", repr(ex_)); resp = jsonify(text="", tg="")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 @app.route("/employee/quote/close", methods=["POST"])
 @need("employee")
@@ -4725,7 +4732,7 @@ def employee_quote_close():
 # Columns are found by their header (any order): a header containing "quote" (else Text / Message / Thought, else the first column) = the quote; "Language"; "Author"; "Status" / "Active" (No / Inactive / Deleted / Hidden hides a row).
 # Rows are read live (never older than QL_TTL seconds, and freshly at every employee login), so adding / editing / deleting a row in the sheet reaches every employee at once.
 # Each employee gets a different row every day: row number = (today's day number + the employee's fixed position) % number of quotes. No quotes in the sheet = no quote screen (nothing is invented).
-QL_TTL, QL_MAX, QL_LEN = 15.0, 2000, 250
+QL_TTL, QL_MAX, QL_LEN = 30.0, 2000, 250
 _QL, _QL_LOCK = dict(t=0.0, items=[], meta=dict(ok=False, err="not read yet", title="Quotes", cols={}, ncols=0)), threading.Lock()
 _QL_OFF = ("no", "n", "inactive", "disabled", "deleted", "hidden", "archived", "off", "false", "0", "stopped")
 
@@ -4743,10 +4750,12 @@ _QL_NAMES = ("quotes", "quote", "daily quotes", "motivational quotes")
 def _ql_find_ws(create=True):
     """Update287: the existing Quotes worksheet is used as it is (never duplicated, its columns are never touched); if there is none it is created with the headers Quote / Language / Author / Status."""
     def look():
-        wl = _with_retry(book().worksheets)
-        for want in _QL_NAMES:
-            w = next((w for w in wl if w.title.strip().lower() == want), None)
-            if w is not None: return w
+        book()      # Update290: the worksheet objects are already loaded by book() - look there first (no API call); ask Google only if the sheet is not among them
+        for pool in (list(_ws_cache.values()), None):
+            wl = pool if pool is not None else _with_retry(book().worksheets)
+            for want in _QL_NAMES:
+                w = next((w for w in wl if w.title.strip().lower() == want), None)
+                if w is not None: return w
         return None
     w = look()
     if w is None and create:
@@ -4774,7 +4783,7 @@ def _ql_cols(head):
     return dict(q=q if q is not None else 0, t=t, l=first(lambda x: x in ("language", "lang", "quote language") or x.startswith("lang")),
                 a=first(lambda x: x in ("author", "by", "source", "said by", "quote by")), s=first(lambda x: x in ("status", "active", "enabled", "show", "display")))
 
-def ql_sheet(fresh=False):
+def _ql_sheet_read(fresh=False):
     """-> (items, meta). items = [{row, text, lang, label, author}] in sheet order. A failed read keeps the last good copy of the SHEET (never invented text)."""
     with _QL_LOCK:
         if not fresh and _QL["meta"].get("ok") and time.time() - _QL["t"] < QL_TTL: return _QL["items"], _QL["meta"]
@@ -4814,9 +4823,122 @@ def ql_sheet(fresh=False):
             _QL["meta"] = m
             return _QL["items"], m
 
+_QL_RD, _QL_KEYS = threading.Lock(), dict(t=0.0, v=[])
+
+def ql_sheet(fresh=False):
+    """Update290: ONE Quotes-sheet read at a time. The login's background warm-up and the popup request share it; a normal call is served from memory (QL_TTL), fresh=True always reads the sheet."""
+    with _QL_LOCK:
+        if not fresh and _QL["meta"].get("ok") and time.time() - _QL["t"] < QL_TTL: return _QL["items"], _QL["meta"]
+    with _QL_RD:
+        with _QL_LOCK:
+            if not fresh and _QL["meta"].get("ok") and time.time() - _QL["t"] < QL_TTL: return _QL["items"], _QL["meta"]      # another thread just read it while this one waited
+        return _ql_sheet_read(True)
+
+def ql_prewarm():
+    """Read the Quotes sheet in the background (login page open / after login) so the popup never waits for it."""
+    with _QL_LOCK:
+        if _QL["meta"].get("ok") and time.time() - _QL["t"] < QL_TTL: return
+    _bg(ql_sheet)
+
 def ql_employee_keys():
-    try: return sorted({_key(e["id"]) for e in _nt_emps() if not e["locked"]})
-    except Exception as ex: print("quote employee list error:", repr(ex)); return []
+    if _QL_KEYS["v"] and time.time() - _QL_KEYS["t"] < 60: return _QL_KEYS["v"]
+    try: v = sorted({_key(e["id"]) for e in _nt_emps() if not e["locked"]})
+    except Exception as ex: print("quote employee list error:", repr(ex)); return _QL_KEYS["v"]
+    _QL_KEYS.update(t=time.time(), v=v); return v
+
+# ---------------------------------------------------------------- Update290: English -> Thanglish (online translation + local Latin-letter conversion)
+# 1) English -> Tamil with an online service (Google Translate web endpoint, then MyMemory). 2) The Tamil text is written in Latin letters here (Thanglish).
+# Result is cached in memory and saved ONCE into an EMPTY Thanglish cell of the Quotes sheet (so every quote is converted only once). If the online services fail, the English quote still shows.
+_TG_CACHE, _TG_FAIL, _TG_LOCKS, _TG_GLOCK = {}, {}, {}, threading.Lock()
+_TA_RE = re.compile(r"[\u0B80-\u0BFF]")
+_TA_CONS = {"க": "k", "ங": "ng", "ச": "ch", "ஞ": "nj", "ட": "t", "ண": "n", "த": "th", "ந": "n", "ப": "p", "ம": "m", "ய": "y", "ர": "r", "ல": "l", "வ": "v", "ழ": "zh", "ள": "l", "ற": "r", "ன": "n", "ஜ": "j", "ஷ": "sh", "ஸ": "s", "ஹ": "h"}
+_TA_VIND = {"அ": "a", "ஆ": "aa", "இ": "i", "ஈ": "ee", "உ": "u", "ஊ": "oo", "எ": "e", "ஏ": "e", "ஐ": "ai", "ஒ": "o", "ஓ": "o", "ஔ": "au"}
+_TA_VSIGN = {"\u0bbe": "aa", "\u0bbf": "i", "\u0bc0": "ee", "\u0bc1": "u", "\u0bc2": "oo", "\u0bc6": "e", "\u0bc7": "e", "\u0bc8": "ai", "\u0bca": "o", "\u0bcb": "o", "\u0bcc": "au"}
+_TA_CLUSTER = (("ற்ற", "tr"), ("ன்ற", "ndr"), ("ங்க", "ng"), ("ஞ்ச", "nj"), ("ம்ப", "mb"), ("ண்ட", "nd"))
+_TA_VOICE, _TA_VOICE_N = {"k": "g", "ch": "s", "t": "d", "th": "dh", "p": "b"}, {"k": "g", "ch": "j", "t": "d", "th": "dh", "p": "b"}
+_TA_NASAL = set("ஙஞணநமன")
+
+def _tamil_to_thanglish(ta):
+    s = str(ta or "").replace("\u0bc6\u0bbe", "\u0bca").replace("\u0bc7\u0bbe", "\u0bcb").replace("\u0bc6\u0bd7", "\u0bcc")
+    cons = dict(_TA_CONS)
+    for i, (src, lat) in enumerate(_TA_CLUSTER):
+        ch = chr(0xE000 + i); s = s.replace(src, ch); cons[ch] = lat
+    out, prev, i, n = [], None, 0, len(s)
+    while i < n:
+        ch = s[i]
+        if ch in cons:
+            c, j = cons[ch], i + 1
+            if j < n and s[j] in _TA_VSIGN: v, pul = _TA_VSIGN[s[j]], False; j += 1
+            elif j < n and s[j] == "\u0bcd": v, pul = "", True; j += 1
+            else: v, pul = "a", False
+            if not pul and prev is not None:
+                if prev["vowel"] and c in _TA_VOICE: c = _TA_VOICE[c]
+                elif prev["nasal"] and c in _TA_VOICE_N: c = _TA_VOICE_N[c]
+            if ch == "ச" and prev is None and not pul: c = "s"
+            out.append(c + v); prev = dict(vowel=not pul, nasal=bool(pul and ch in _TA_NASAL)); i = j
+        elif ch in _TA_VIND: out.append(_TA_VIND[ch]); prev = dict(vowel=True, nasal=False); i += 1
+        elif ch == "\u0b83": out.append("k"); prev = dict(vowel=False, nasal=False); i += 1
+        elif ch == "\u0bcd" or ch in _TA_VSIGN: i += 1
+        else: out.append(ch); prev = None; i += 1
+    t = re.sub(r"\s+", " ", "".join(out)).strip().replace("chch", "cch")
+    t = re.sub(r"\s+([.,!?;:])", r"\1", t)
+    return (t[:1].upper() + t[1:])[:320]
+
+def _ta_translate(text):
+    """English -> Tamil with an online service; '' when every service fails (the English quote is then shown alone)."""
+    try:
+        r = requests.get("https://translate.googleapis.com/translate_a/single", params={"client": "gtx", "sl": "en", "tl": "ta", "dt": "t", "q": text}, timeout=(2.5, 5), headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code == 200:
+            d = r.json(); ta = "".join(str(seg[0]) for seg in (d[0] or []) if seg and seg[0])
+            if _TA_RE.search(ta): return ta
+    except Exception as ex: print("translate (google) failed:", repr(ex))
+    try:
+        r = requests.get("https://api.mymemory.translated.net/get", params={"q": text, "langpair": "en|ta"}, timeout=(2.5, 5))
+        if r.status_code == 200:
+            ta = str((r.json().get("responseData") or {}).get("translatedText", "")).strip()
+            if _TA_RE.search(ta) and "MYMEMORY" not in ta.upper(): return ta
+    except Exception as ex: print("translate (mymemory) failed:", repr(ex))
+    return ""
+
+def _ql_save_tg(row, text, tg):
+    """Saves the converted Thanglish into the sheet - only into an EMPTY Thanglish cell of that same quote (nothing typed by the Admin is ever overwritten)."""
+    try:
+        ws = _ql_find_ws(False)
+        with _QL_LOCK: c = dict(_QL["meta"].get("cols") or {})
+        if ws is None or c.get("t") is None or not row: return
+        cur = _with_retry(ws.row_values, int(row))
+        g = lambda k: (str(cur[c[k]]).strip() if c.get(k) is not None and c[k] < len(cur) else "")
+        if re.sub(r"\s+", " ", g("q")) != text or g("t"): return
+        _with_retry(ws.update, range_name=gspread.utils.rowcol_to_a1(int(row), c["t"] + 1), values=[[_ql_cell(tg)]], value_input_option="RAW")
+        with _QL_LOCK:
+            for it in _QL["items"]:
+                if it["row"] == row and it["text"] == text and not it["thanglish"]: it["thanglish"] = tg
+    except Exception as ex: print("Thanglish save skipped:", repr(ex))
+
+def quote_thanglish(text, row=None):
+    """Thanglish for one English quote ('' if the online conversion is not possible right now). Converted once per quote, then served from memory / the sheet."""
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not text: return ""
+    if text in _TG_CACHE: return _TG_CACHE[text]
+    if time.time() - _TG_FAIL.get(text, 0) < 120: return ""      # a failed conversion is not retried for 2 minutes
+    with _TG_GLOCK: lk = _TG_LOCKS.setdefault(text, threading.Lock())
+    with lk:      # many employees with the same quote -> one conversion, the others wait for it
+        if text in _TG_CACHE: return _TG_CACHE[text]
+        ta = _ta_translate(text)
+        tg = _tamil_to_thanglish(ta) if ta else ""
+        if not tg: _TG_FAIL[text] = time.time(); return ""
+        if len(_TG_CACHE) > 3000: _TG_CACHE.clear()
+        _TG_CACHE[text] = tg
+    if row: _bg(_ql_save_tg, row, text, tg)
+    with _TG_GLOCK: _TG_LOCKS.pop(text, None)
+    return tg
+
+def quote_prepare(eid):
+    """Runs in the BACKGROUND right after an employee login: refreshes the Quotes sheet and converts today's quote for this employee, so the popup finds everything ready."""
+    items, meta = ql_sheet(True)
+    print("login quotes ready:", len(items))
+    q = quote_for_employee(eid, pool=items)
+    if q and not (q.get("thanglish") or "").strip(): quote_thanglish(q["text"], q.get("row"))
 
 def quote_for_employee(eid, day=None, pool=None, keys=None):
     pool = pool if pool is not None else ql_sheet()[0]
@@ -7111,13 +7233,14 @@ def employee_login():
         return _wrong_area("employee")
     if request.method != "POST": _prewarm_employees()
     if request.method == "POST":
+        _emps_ = rows("Employees")      # Update290: the Employees list is read ONCE per login (was three times)
         u_typed = request.form["u"].strip()[:120]; u = u_typed.lower()      # Update269: u_typed is shown again in the field after a failed sign-in
-        _hit0 = next((x for x in rows("Employees") if u in (str(x["Employee ID"]).lower(), str(x["Email"]).lower())), None)      # Update271
+        _hit0 = next((x for x in _emps_ if u in (str(x["Employee ID"]).lower(), str(x["Email"]).lower())), None)      # Update271
         if _hit0 is not None and emp_locked(_hit0):      # Locked or Resigned / NCNS: never signs in, whatever the password
             flash("Your account is locked. Please contact your Manager, Team Lead, or Admin.", "error")
             return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee", lxg="", u=u_typed,
                         admin_avatar=render_fast(AVATAR3D, gender="male", initials="E"))
-        for e in rows("Employees"):
+        for e in _emps_:
             if u in (str(e["Employee ID"]).lower(), str(e["Email"]).lower()) and eq(request.form["p"], e["Password"]):
                 if emp_locked(e):                                   # Update96: locked accounts cannot log in
                     flash("Your account is locked. Please contact your Manager, Team Lead, or Admin.", "error")
@@ -7127,14 +7250,9 @@ def employee_login():
                 session.clear()
                 session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"],
                                designation=str(e.get("Designation", "")))      # Update230: the one-time welcome overlay (Update227) is switched off - it held the page for ~4 s after login
-                try: _lno = _login_number(session["emp_id"])      # Update281: login # (counted before this login is written to Attendance)
-                except Exception as ex_: print("login count error:", repr(ex_)); _lno = 1
                 track_login(session["emp_id"], session["name"], session["band"])
-                session["dq_id"] = uuid.uuid4().hex; session["dq_n"] = int(_lno)      # Update284: quote pending for THIS login (kept in the signed session, so no login can miss it)
-                try: print("login quotes ready:", len(ql_sheet(True)[0]))      # Update285 / Update289: read the Quotes sheet live at every login so the newest quotes are used
-                except Exception as ex_: print("quotes refresh error:", repr(ex_))
-                try: quote_begin(session.get("att_id"), _lno)      # Update281: daily quote overlay until Close is pressed
-                except Exception as ex_: print("daily quote start error:", repr(ex_))
+                session["dq_id"] = uuid.uuid4().hex; session["dq_n"] = 1      # Update290: a quote is pending for THIS login (shown at every login; kept in the signed session)
+                _bg(quote_prepare, session["emp_id"])      # Update290: Quotes sheet + Thanglish are prepared in the BACKGROUND - the login never waits for them (the Attendance read for the login number is gone too)
                 _bg(warm_employee_cache)                  # dashboard data loads while the welcome animation plays
                 resp = redirect("/employee")                  # Update202: straight to the Employee Panel (no welcome page)
                 try:      # Update212: remember only "m" / "f" so the next login page on this browser shows the matching character
@@ -7143,7 +7261,7 @@ def employee_login():
                     else: resp.delete_cookie("lxg")
                 except Exception: pass
                 return resp
-        _hit = next((x for x in rows("Employees") if u in (str(x["Employee ID"]).lower(), str(x["Email"]).lower())), None)      # Update270
+        _hit = next((x for x in _emps_ if u in (str(x["Employee ID"]).lower(), str(x["Email"]).lower())), None)      # Update270
         if _hit is None: flash("Username not found or account locked. Please contact your Manager, Team Lead, or Admin.", "error")      # unknown / invalid username, or locked account (whatever the password)
         else: flash("Wrong username or password. Please try again.", "error")
     return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee", lxg="", u=(u_typed if request.method == "POST" else ""),

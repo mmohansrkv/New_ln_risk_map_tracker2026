@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update282: Daily quote overlay hardened - it is hidden until its script confirms it can run (so no stray "Quotes" text / label can ever show on the Employee page), is shielded from page-wide CSS, stays centred with the 3D animation, and can now be closed with the Close & Continue button, the X button or Esc. Employee page layout / functionality unchanged.
   * Update281: Employee login - after EVERY login (also repeated logins the same day) a full-screen 3D animated "Daily Inspiration" overlay appears on the first Employee page: "Welcome Back, <name>! Login #N", today's motivational quote (language Tamil / English / Thanglish picked at random per day, same quote for everyone that day; English quotes are fetched online with a built-in fallback, Tamil / Thanglish are built-in) and a "Close & Continue" button - the overlay cannot be dismissed any other way (no timeout / Esc / outside click) and stays on every Employee page until Close is pressed. Display only: nothing is written to the Productivity log, so the quote is never counted as productive hours. Login # = number of this employee's sessions in the Attendance sheet (incl. the current one). New Settings key daily_quote. Routes /employee/quote-data, /employee/quote/close. Existing Employee page design unchanged after closing.
   * Update280: Employee page (Daily entry) - the small "Monthly Productivity Summary" strip now also shows "Permission: N Hrs" = the total hours of this employee's APPROVED permissions in the current month (Pending / Rejected not counted). Read live from the Permissions sheet on every page load, so it follows new / approved / changed records. Display only; same one-line strip, nothing else changed.
   * Update279: Admin > Theme & Layout (menu item "Theme & Layout") now manages the Employee Panel and the Admin Panel SEPARATELY - each has its own Layout (Top bar / Sidebar) and Theme (Employee: or "Same as Admin"), a live preview before applying, and an Apply button; an applied Employee layout / theme is used by every Employee page from its next load. Reset Employee panel returns to Top bar + Admin theme. Only CSS / menu position changes (new Settings keys ui_admin_layout, ui_emp_layout, ui_emp_theme); employee data, routes and features are untouched. The Sidebar layout of Update277 can be chosen again.
@@ -4655,6 +4656,8 @@ def quote_begin(att_id, n):
     _bg(get_daily_quote)      # fetch / pick today's quote while the first page loads
 
 QUOTE_CSS = r"""<style id="dq-css">
+.dq,.dq *{box-sizing:border-box}
+.dq:not(.dq-on){display:none!important}
 .dq{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:18px;overflow:hidden;font-family:"Noto Sans Tamil","Nirmala UI","Latha","Tamil Sangam MN",system-ui,-apple-system,"Segoe UI",sans-serif;color:#fff;perspective:1100px;
  background:radial-gradient(900px 520px at 15% 10%,#7c3aedcc,transparent 60%),radial-gradient(800px 500px at 88% 90%,#ec4899b3,transparent 60%),radial-gradient(700px 420px at 80% 8%,#06b6d4aa,transparent 60%),linear-gradient(135deg,#1e1b4b,#312e81 45%,#4c1d95);background-size:140% 140%;animation:dqIn .5s ease both,dqBg 16s ease-in-out infinite alternate}
 .dq.out{animation:dqOut .35s ease forwards}
@@ -4674,7 +4677,7 @@ QUOTE_CSS = r"""<style id="dq-css">
 @property --ang{syntax:"<angle>";inherits:false;initial-value:0deg}
 .dq-card::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:2px;background:conic-gradient(from var(--ang),#22d3ee,#a78bfa,#f472b6,#fbbf24,#22d3ee);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;animation:dqSpinB 6s linear infinite;pointer-events:none}
 @keyframes dqSpinB{to{--ang:360deg}}
-.dq-hi{font-size:clamp(20px,3.4vw,30px);font-weight:800;letter-spacing:.2px;margin:0;text-shadow:0 3px 0 #4c1d95,0 0 22px #a78bfaaa;animation:dqBob 3.6s ease-in-out infinite}
+.dq-hi{padding:0;border:0;background:none;color:#fff;text-align:center;font-size:clamp(20px,3.4vw,30px);font-weight:800;letter-spacing:.2px;margin:0;text-shadow:0 3px 0 #4c1d95,0 0 22px #a78bfaaa;animation:dqBob 3.6s ease-in-out infinite}
 @keyframes dqBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
 .dq-meta{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin:10px 0 4px}
 .dq-pill{display:inline-block;padding:4px 14px;border-radius:999px;font-size:13px;font-weight:700;background:linear-gradient(120deg,#f59e0b,#ec4899);box-shadow:0 4px 0 #9d174d,0 10px 18px -6px #ec4899aa;position:relative;overflow:hidden}
@@ -4682,11 +4685,13 @@ QUOTE_CSS = r"""<style id="dq-css">
 .dq-pill::after{content:"";position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(100deg,transparent,#ffffffaa,transparent);transform:skewX(-20deg);animation:dqShine 3.2s ease-in-out infinite}
 @keyframes dqShine{0%{left:-60%}55%,100%{left:140%}}
 .dq-mark{font:900 78px/0.7 Georgia,serif;color:#fde68a;text-shadow:0 4px 0 #b45309,0 0 26px #fbbf24aa;margin:14px 0 0;animation:dqBob 4.2s ease-in-out infinite}
-.dq-q{margin:6px 0 4px;font-size:clamp(21px,3.5vw,35px);font-weight:700;line-height:1.5;text-shadow:0 2px 12px #0006;min-height:2.6em}
+.dq-q{padding:0;color:#fff;text-align:center;margin:6px 0 4px;font-size:clamp(21px,3.5vw,35px);font-weight:700;line-height:1.5;text-shadow:0 2px 12px #0006;min-height:2.6em}
 .dq-q .w{display:inline-block;opacity:0;margin:0 .13em;transform:translateY(26px) rotateX(-80deg) scale(.7);animation:dqW .75s cubic-bezier(.2,.9,.25,1.2) forwards;animation-delay:calc(var(--i)*.075s + .6s)}
 .dq-q .w:nth-child(5n+2){color:#fde68a}.dq-q .w:nth-child(7n+4){color:#a5f3fc}.dq-q .w:nth-child(9n+6){color:#fbcfe8}
 @keyframes dqW{to{opacity:1;transform:none}}
-.dq-by{margin:2px 0 0;font-size:14px;color:#e9d5ff;opacity:.95}
+.dq-by{margin:2px 0 0;padding:0;font-size:14px;color:#e9d5ff;opacity:.95}
+.dq-x{position:absolute;top:12px;right:14px;width:36px;height:36px;border-radius:50%;border:1px solid #ffffff55;background:#ffffff1f;color:#fff;font:700 18px/1 system-ui,sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;z-index:2}
+.dq-x:hover{background:#ffffff40}.dq-x:focus-visible{outline:3px solid #fde68a;outline-offset:2px}
 .dq-note{margin:14px 0 0;font-size:12.5px;color:#ddd6fe}
 .dq-btn{margin-top:16px;position:relative;overflow:hidden;cursor:pointer;border:0;border-radius:999px;padding:12px 34px;font:800 16px/1 inherit;font-family:inherit;color:#fff;letter-spacing:.3px;background:linear-gradient(135deg,#22c55e,#06b6d4);box-shadow:0 6px 0 #0f766e,0 16px 24px -8px #06b6d4aa,inset 0 1px 0 #ffffff77;transition:transform .15s ease,box-shadow .15s ease;animation:dqBtn 2.4s ease-in-out infinite}
 @keyframes dqBtn{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
@@ -4705,26 +4710,26 @@ QUOTE_HTML = r"""<div class="dq" id="dq" role="dialog" aria-modal="true" aria-la
 <span class="dq-cube" style="--s:46px;--x:16%;--y:30%;--d:18s"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="dq-cube" style="--s:34px;--x:88%;--y:34%;--d:14s"><i></i><i></i><i></i><i></i><i></i><i></i></span>
 <span class="dq-cube" style="--s:28px;--x:70%;--y:84%;--d:16s"><i></i><i></i><i></i><i></i><i></i><i></i></span>
 <span class="dq-sp" style="--s:22px;--x:30%;--y:8%;--dl:0s">&#10022;</span><span class="dq-sp" style="--s:16px;--x:62%;--y:90%;--dl:-1.2s">&#10022;</span><span class="dq-sp" style="--s:26px;--x:92%;--y:18%;--dl:-2s">&#10022;</span><span class="dq-sp" style="--s:18px;--x:4%;--y:46%;--dl:-.6s">&#10022;</span>
-<div class="dq-card" id="dq-card">
+<div class="dq-card" id="dq-card"><button type="button" class="dq-x" id="dq-x" aria-label="Close" title="Close">&times;</button>
 <h2 class="dq-hi" id="dq-hi">@@HELLO@@</h2>
-<div class="dq-meta"><span class="dq-pill">Login #@@N@@</span><span class="dq-pill l" id="dq-lang">&hellip;</span></div>
+<div class="dq-meta"><span class="dq-pill">Login #@@N@@</span><span class="dq-pill l" id="dq-lang"></span></div>
 <div class="dq-mark" aria-hidden="true">&ldquo;</div>
 <p class="dq-q" id="dq-q"></p><p class="dq-by" id="dq-by"></p>
 <p class="dq-note">Take a moment to read today&rsquo;s thought, then continue to your work.</p>
 <button type="button" class="dq-btn" id="dq-close">Close &amp; Continue</button>
 </div></div>"""
 
-QUOTE_JS = r"""<script>(function(){var el=document.getElementById('dq');if(!el)return;var q=document.getElementById('dq-q'),by=document.getElementById('dq-by'),lg=document.getElementById('dq-lang'),btn=document.getElementById('dq-close'),card=document.getElementById('dq-card'),done=false;
+QUOTE_JS = r"""<script>(function(){var el=document.getElementById('dq');if(!el)return;el.classList.add('dq-on');var q=document.getElementById('dq-q'),by=document.getElementById('dq-by'),lg=document.getElementById('dq-lang'),btn=document.getElementById('dq-close'),xb=document.getElementById('dq-x'),card=document.getElementById('dq-card'),done=false;
 var prevOv=document.documentElement.style.overflow;document.documentElement.style.overflow='hidden';
 var FALL={text:'Every day is a new chance to grow.',author:'',label:'English'};
 function show(d){if(!d||!d.text)d=FALL;lg.textContent=d.label||'';q.textContent='';var ws=String(d.text).split(/\s+/);for(var i=0;i<ws.length;i++){var s=document.createElement('span');s.className='w';s.style.setProperty('--i',i);s.textContent=ws[i];q.appendChild(s)}
 q.setAttribute('aria-label',d.text);by.textContent=d.author?('\u2014 '+d.author+(d.src&&d.src!=='built-in'?'  \u00b7 via '+d.src:'')):''}
 var emb=document.getElementById('dq-data');if(emb){try{show(JSON.parse(emb.textContent))}catch(e){show(null)}}
-else{lg.textContent='\u2026';fetch('/employee/quote-data',{credentials:'same-origin'}).then(function(r){return r.json()}).then(show).catch(function(){show(null)})}
+else{fetch('/employee/quote-data',{credentials:'same-origin'}).then(function(r){return r.json()}).then(show).catch(function(){show(null)})}
 function close(){if(done)return;done=true;try{fetch('/employee/quote/close',{method:'POST',credentials:'same-origin',keepalive:true}).catch(function(){})}catch(e){}
 el.classList.add('out');document.documentElement.style.overflow=prevOv;setTimeout(function(){if(el.parentNode)el.parentNode.removeChild(el);var c=document.getElementById('dq-css');if(c&&c.parentNode)c.parentNode.removeChild(c);var d=document.getElementById('dq-data');if(d&&d.parentNode)d.parentNode.removeChild(d)},380)}
-btn.addEventListener('click',close);
-el.addEventListener('keydown',function(e){if(e.key==='Tab'){e.preventDefault();btn.focus()}});
+btn.addEventListener('click',close);if(xb)xb.addEventListener('click',close);
+el.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();close()}else if(e.key==='Tab'){e.preventDefault();(document.activeElement===btn&&xb?xb:btn).focus()}});
 el.addEventListener('pointermove',function(e){var r=window.innerWidth,h=window.innerHeight;card.style.setProperty('--ry',((e.clientX/r-.5)*10)+'deg');card.style.setProperty('--rx',((.5-e.clientY/h)*8)+'deg')});
 el.addEventListener('pointerleave',function(){card.style.setProperty('--ry','0deg');card.style.setProperty('--rx','0deg')});
 setTimeout(function(){try{btn.focus({preventScroll:true})}catch(e){}},900)})();</script>"""

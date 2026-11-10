@@ -3,7 +3,7 @@
   * Update270: Employee login messages - an unknown / invalid username OR a locked account (any password) now shows exactly: "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." The typed username stays in the field. A valid, unlocked username with a wrong password shows "Wrong username or password. Please try again." The male / female / lead picture still appears while typing and, for a locked account, still appears whenever the username matches an employee record (the picture lookup ignores the lock). Admin login unchanged.
   * Update269: Employee login - the username stays in the field after a failed sign-in (also for a locked account) and the cursor moves to the password box. Locked or invalid usernames now show: "Wrong username or password, or the account is locked / not valid. Please contact your Manager, Team Lead, or Admin." A locked account with the correct password shows "Your account is locked. Please contact your Manager, Team Lead, or Admin to unlock it." The message is the same for a locked, unknown or wrong-password attempt, so it never reveals which usernames exist. Admin login also keeps the typed username.
   * Update268: Tracking Agent - installation fixed + employee notice & CONSENT. (1) The "Agent credentials were revoked - computer ... must be reinstalled" error kept coming back after the Admin prepared a new installer, because the OLD agent still running on that PC re-reported the error every few minutes. While a new installer is waiting, the employee now shows "Pending Installation" (no more flip back to Error); run the new installer on that PC and it turns Active. (2) CONSENT: the server accepts agent data / enrolment only from employees who have ACCEPTED the tracking notice (new sheet 'Agent Consent'). Admin > Work Time > Install Windows Tracking Agent: Install / Reinstall / Install for All now also sends the employee an in-app notice (banner on every Employee page) and the table shows each employee's consent (Requested / Accepted / Declined / Withdrawn) with a Send / Resend button. (3) The employee reads exactly what is and is not recorded at Employee > /employee/tracking-consent, accepts or declines (can withdraw any time - tracking stops at once), and after accepting can install the agent on their OWN PC from that page (personal installer, no administrator rights) once the Admin has prepared it. deploy_all.ps1 (GPO / Intune) works the same way: an agent only enrols for employees who accepted. Existing installed agents stop reporting until their employee accepts.
-  * Update273: Admin > Overview (main table, leads table) and Overview check page - NEW \"Permission\" column after Absent = number of APPROVED permissions in the period (View Only leads show -). No other figure changed.\n  * Update272: (1) Admin > Log > Celebrations Log: NEW \"Christmas\" occasion/theme (ready-made wish, red-green card, tree / star / bell / gift border, Santa + snowman, falling snow, fireworks + confetti); also selectable as a decoration style for own themes. (2) Employee page: small one-line \"Monthly Productivity Summary\" under the greeting - hours completed this month (productive + non-productive, hover shows the split) and overall monthly productivity %. Nothing else changed.\n  * Update267: Productivity Entry - Save no longer reloads or redirects. The entry is saved in the background (one request instead of save + redirect + second page load + a forced reload 3-4 s later), the employee STAYS on the same Productivity Entry page, every entered value stays in the form, and a green "Saved successfully" line (plus the existing animation) confirms it. After the first save the button becomes "Update entry": further changes update that same entry (no duplicate-date error); changing the Date starts a new entry. Errors (e.g. incomplete hours, duplicate day) are shown on the page without losing anything typed. The Employee-page celebration check runs every 30 s (was 20 s) to lighten the server load.
+  * Update274: NEW Admin > /admin/designs \"Design Studio\" (also linked from Theme & Layout): a different design for the ADMIN pages (Aurora Command - floating glass dock, drifting aurora, gradient 3D cards; Titanium Grid - blueprint grid, steel sidebar, amber, compact tables) and for the EMPLOYEE pages (Sunrise Horizon - sunset gradient, sun glow, chunky 3D cards; Mint Orbit - orbit rings, pill buttons, accent-stripe cards). Side-by-side Admin | Employee compare, \"Try on my pages\" (Admin session only), Apply, Reset to Classic. Pure CSS appended after the theme (new settings ui_admin_design / ui_emp_design); responsive, animation off on phones / reduced-motion; no route, data or script of the existing pages changed.\n  * Update273: Admin > Overview (main table, leads table) and Overview check page - NEW \"Permission\" column after Absent = number of APPROVED permissions in the period (View Only leads show -). No other figure changed.\n  * Update272: (1) Admin > Log > Celebrations Log: NEW \"Christmas\" occasion/theme (ready-made wish, red-green card, tree / star / bell / gift border, Santa + snowman, falling snow, fireworks + confetti); also selectable as a decoration style for own themes. (2) Employee page: small one-line \"Monthly Productivity Summary\" under the greeting - hours completed this month (productive + non-productive, hover shows the split) and overall monthly productivity %. Nothing else changed.\n  * Update267: Productivity Entry - Save no longer reloads or redirects. The entry is saved in the background (one request instead of save + redirect + second page load + a forced reload 3-4 s later), the employee STAYS on the same Productivity Entry page, every entered value stays in the form, and a green "Saved successfully" line (plus the existing animation) confirms it. After the first save the button becomes "Update entry": further changes update that same entry (no duplicate-date error); changing the Date starts a new entry. Errors (e.g. incomplete hours, duplicate day) are shown on the page without losing anything typed. The Employee-page celebration check runs every 30 s (was 20 s) to lighten the server load.
   * Update266: NEW Admin > Log > "Celebrations Log" - the ONE place for every celebration control (the Celebrations tab is removed from Notes & Messages; the old address redirects here). Admin picks a THEME - Pongal (mango-leaf toran, marigolds, sun, kolam, sugarcane / pot border, falling petals), Diwali (string lights, hanging lanterns, flickering diyas, sparkles), Birthday (bunting, rising balloons, cake & gifts), New Year, Work anniversary, Other festival - or adds / edits / deletes his OWN themes (name, wish, colours, emoji, animation, decoration style) under "Celebration themes". Start now / Stop, custom title + message, schedule and duration (now 5-120 s, or Continuous until Stop) are as before. The Employee page shows the chosen theme's background decoration + animations automatically, and removes ALL of it (also while it is still playing) within about 20-30 s after the Admin clicks Stop / Switch off / Delete. New sheet 'Celebration Themes' (created automatically). Employee pages and every other page unchanged.
   * Update265: Admin - a bold notification bar at the TOP of every Admin page whenever an employee submits a Leave or Permission request (who, what, dates / hours, reason, time). It stays on every Admin page, and keeps appearing after logout / login, until the Admin clicks Clear (one request) or Clear all; cleared notifications disappear for good. New ones appear within about 30 seconds without reloading the page. 'Review requests' opens Admin > Leave & Permission Log. Stored in the new sheet 'Admin Alerts' (created automatically). An alert never blocks or delays the employee's submission.
   * Update264: Productivity entry is never held up by a Leave / Permission that is still waiting for Admin approval. When an entry is saved or edited, the required working hours now already allow for a PENDING permission (e.g. 2 hrs) or PENDING half-day leave (4 hrs) - before, only APPROVED ones were allowed for, so an employee with a pending 2-hr permission who logged 6 hrs got "Entry incomplete: 6 of the required 8 hours" until the Admin approved it. Same rule in the entry page's "Required ... hrs" hint and the 100% bloom. A pending full-day leave never blocked entry and still does not. A Rejected request counts for nothing (full day required again). Reports, Productivity %, Missed entries, attendance and calendars are unchanged and still follow APPROVED requests only.
@@ -4120,7 +4120,7 @@ def theme_choice():
 
 def _theme_css():
     try:
-        tid, pl, ll = theme_choice(); return _theme_css_for(tid, pl == "1", ll == "1")
+        tid, pl, ll = theme_choice(); return _theme_css_for(tid, pl == "1", ll == "1") + _design_css_now()      # Update274: per-panel design (Admin / Employee) on top of the theme
     except Exception as ex:
         print("theme css error:", repr(ex)); return ""
 
@@ -4144,7 +4144,7 @@ THEME_PAGE = """<style>
 #tpv .c u{flex:1;height:46px;border-radius:10px;background:#fff;box-shadow:0 6px 12px -6px #0004;text-decoration:none}
 #tpv .c em{align-self:flex-end;width:54px;height:20px;border-radius:7px;background:linear-gradient(135deg,var(--a),var(--b));box-shadow:0 4px 0 var(--s3)}
 </style>
-<div class="head"><div><h1>Theme &amp; Layout</h1><p class="mut">Choose how every Employee and Admin login page and panel looks. The change applies to everyone right after you save.</p></div></div>
+<div class="head"><div><h1>Theme &amp; Layout</h1><p class="mut"><a href="/admin/designs">Design Studio</a> - separate 3D designs for the Admin and Employee pages, with side-by-side preview. &nbsp;Choose how every Employee and Admin login page and panel looks. The change applies to everyone right after you save.</p></div></div>
 <form method="post" id="tpf">
 <h2>Theme</h2>
 <div class="tp-grid">{% for t in themes %}<label class="tp-card"><input type="radio" name="theme" value="{{t.id}}" {{'checked' if t.id==cur[0] else ''}} data-a="{{t.pri}}" data-b="{{t.pri2}}" data-s1="{{t.s1}}" data-s3="{{t.s3}}"><span class="tp-sw" style="background:linear-gradient(135deg,{{t.s1}},{{t.s3}})"><i style="background:linear-gradient(135deg,{{t.pri}},{{t.pri2}})"></i></span><b>{{t.name}}</b><small>{{t.note}}</small></label>{% endfor %}</div>
@@ -4177,6 +4177,205 @@ def admin_theme():
         return redirect("/admin/theme")
     prefetch("Settings")
     return page(THEME_PAGE, title="Theme & Layout", themes=THEMES, panels=PANEL_LAYOUTS, logins=LOGIN_LAYOUTS, cur=theme_choice())
+
+# ---------------------------------------------------------------- Update274: Design Studio - a DIFFERENT design for the Admin pages and for the Employee pages (CSS only; routes, data, forms and scripts untouched).
+# Admin > /admin/designs: pick a design per panel, compare Admin | Employee side by side (live mock-ups), try it on the real Admin pages (only for the Admin's own session), then Apply.
+# Settings keys ui_admin_design / ui_emp_design ("classic" = the current look, nothing added). Works on top of Theme & Layout (/admin/theme); the top-bar layout choice is respected.
+DESIGNS = {
+    "admin": [
+        dict(id="classic", name="Classic", note="Current look", k="classic", a1="#6366f1", a2="#8b5cf6", s1="#0f1535", s2="#1a2050", s3="#2a2a73", edge="#3730a3", bg1="#e6e3ff", bg2="#dff3ff", base="#f5f7fc"),
+        dict(id="aurora", name="Aurora Command", note="Floating glass dock, drifting aurora glow, gradient-edged 3D cards", k="aurora", a1="#06b6d4", a2="#7c3aed", s1="#07102b", s2="#0f1b4d", s3="#3b1d8f", edge="#5b21b6", bg1="#cffafe", bg2="#ddd6fe", base="#eef2ff"),
+        dict(id="titan", name="Titanium Grid", note="Blueprint grid, steel sidebar, amber accents, compact data tables", k="titan", a1="#f59e0b", a2="#ea580c", s1="#0b1220", s2="#1e293b", s3="#334155", edge="#b45309", bg1="#e2e8f0", bg2="#fef3c7", base="#f1f5f9"),
+    ],
+    "employee": [
+        dict(id="classic", name="Classic", note="Current look", k="classic", a1="#6366f1", a2="#8b5cf6", s1="#0f1535", s2="#1a2050", s3="#2a2a73", edge="#3730a3", bg1="#e6e3ff", bg2="#dff3ff", base="#f5f7fc"),
+        dict(id="sunrise", name="Sunrise Horizon", note="Warm sunset gradient, glowing sun, chunky rounded 3D cards", k="sunrise", a1="#f97316", a2="#ec4899", s1="#3b0764", s2="#86198f", s3="#c2410c", edge="#be185d", bg1="#fed7aa", bg2="#fbcfe8", base="#fff7ed"),
+        dict(id="orbit", name="Mint Orbit", note="Cool mint and sky, orbit rings, pill buttons, accent-stripe cards", k="orbit", a1="#10b981", a2="#0ea5e9", s1="#022c22", s2="#065f46", s3="#0e7490", edge="#047857", bg1="#a7f3d0", bg2="#bae6fd", base="#f0fdfa"),
+    ],
+}
+def _design_of(role, did):
+    L = DESIGNS.get(role, []); return next((d for d in L if d["id"] == did), L[0] if L else None)
+
+DZ_COMMON = """
+@S@{--pri:@A1@;--pri2:@A2@;isolation:isolate;background:@BASE@}
+@S@::before{content:"";position:fixed;inset:-15%;z-index:-1;pointer-events:none}
+@S@ aside{background:linear-gradient(185deg,@S1@ 0%,@S2@ 55%,@S3@ 100%)}
+@S@ aside a.on{background:linear-gradient(135deg,@A1@,@A2@);box-shadow:0 8px 18px -6px @A1@99}
+@S@ .primary,@S@ .btnl{background:linear-gradient(135deg,@A1@,@A2@)}
+body @S@ main :is(.primary,.btnl){--bedge:@EDGE@!important}
+@S@ .primary:hover,@S@ .btnl:hover{background:linear-gradient(135deg,@A2@,@A1@)}
+@S@ input:focus,@S@ select:focus,@S@ textarea:focus{border-color:@A1@;box-shadow:0 0 0 4px @A1@26}
+@S@ .bar u{background:linear-gradient(90deg,@A1@,@A2@)}
+@S@ ::-webkit-scrollbar-thumb{background:@A1@66}
+"""
+DZ_EXTRA = {
+ "aurora": """
+@S@::before{background:radial-gradient(620px 360px at 16% 10%,@A1@55,transparent 65%),radial-gradient(560px 340px at 84% 6%,@A2@4d,transparent 65%),radial-gradient(520px 320px at 58% 96%,@A1@33,transparent 65%);animation:dzDrift 30s ease-in-out infinite alternate}
+@media(min-width:801px){@S@ aside{margin:12px 0 12px 12px;height:calc(100vh - 24px);top:12px;border-radius:24px;border:1px solid #ffffff24;box-shadow:0 24px 50px -18px @S3@cc,inset 0 1px 0 #ffffff26;-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}}
+body @S@ .card,body @S@ .kpi{background:linear-gradient(#ffffffee,#ffffffee) padding-box,linear-gradient(135deg,@A1@,@A2@) border-box;border:1px solid transparent;border-radius:18px;box-shadow:0 14px 32px -16px @A1@80,0 2px 0 #fff inset}
+body @S@ .card:hover,body @S@ .kpi:hover{transform:perspective(900px) translateY(-3px) rotateX(1.4deg);box-shadow:0 22px 40px -16px @A2@88}
+@S@ .kpi b{background:linear-gradient(135deg,@A1@,@A2@);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent}
+@S@ th{background:linear-gradient(135deg,@S1@,@S3@);color:#dbe4ff}
+@S@ tbody tr:hover{background:@A1@14!important}
+@S@ .welcome{background:linear-gradient(120deg,#fff 0%,@BG1@ 60%,@BG2@ 100%);border-color:@A1@44}
+""",
+ "titan": """
+@S@::before{background:radial-gradient(520px 300px at 0% 0%,@A1@2e,transparent 65%),linear-gradient(@S3@14 1px,transparent 1px) 0 0/34px 34px,linear-gradient(90deg,@S3@14 1px,transparent 1px) 0 0/34px 34px}
+@S@ aside{border-right:3px solid @A1@;border-radius:0;box-shadow:8px 0 26px -12px #0b1220aa}
+@S@ aside a{border-radius:6px}@S@ aside a.on{border-radius:6px;box-shadow:inset 3px 0 0 #fff,0 8px 18px -8px @A1@aa}
+body @S@ .card,body @S@ .kpi{background:#fffffff2;border:1px solid #cbd5e1;border-top:3px solid @A1@;border-radius:8px;box-shadow:0 1px 0 #fff inset,0 8px 20px -14px #0b1220aa}
+body @S@ .card:hover,body @S@ .kpi:hover{transform:translateY(-1px);box-shadow:0 14px 26px -14px @A2@88}
+@S@ .kpi b{color:@S2@}
+@S@ table{border-radius:8px}@S@ th{background:@S2@;color:#e2e8f0;border-bottom:2px solid @A1@}
+@S@ td{padding:7px 12px}@S@ tbody tr:nth-child(even){background:#f1f5f9}@S@ tbody tr:hover{background:@A1@1f!important}
+@S@ .welcome{border-radius:10px;background:linear-gradient(120deg,#fff 0%,@BG1@ 70%,@BG2@ 100%);border:1px solid #cbd5e1;border-left:5px solid @A1@}
+@S@ input,@S@ select,@S@ textarea{border-radius:6px}
+""",
+ "sunrise": """
+@S@::before{background:radial-gradient(circle at 90% 4%,#fde68a 0,@A1@66 14%,transparent 36%),radial-gradient(300px 300px at 10% 84%,@A2@38,transparent 70%),radial-gradient(360px 360px at 54% 30%,@A1@22,transparent 70%);animation:dzDrift 34s ease-in-out infinite alternate}
+@S@ aside{border-radius:0 28px 28px 0;box-shadow:10px 0 34px -14px @S2@99}
+@S@ aside a{border-radius:14px}
+body @S@ .card,body @S@ .kpi{background:#fffffff0;border:1px solid @BG1@;border-radius:26px;box-shadow:0 5px 0 @BG1@,0 20px 32px -16px @A2@66}
+body @S@ .card:hover,body @S@ .kpi:hover{transform:translateY(-3px);box-shadow:0 8px 0 @BG1@,0 26px 38px -16px @A2@88}
+@S@ .kpi b{background:linear-gradient(135deg,@A1@,@A2@);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent}
+@S@ .welcome{border-radius:26px;border:1px solid @BG1@;background:linear-gradient(120deg,#fff7ed 0%,@BG1@ 55%,@BG2@ 100%);box-shadow:0 6px 0 @BG1@,0 22px 34px -18px @A2@77}
+@S@ th{background:@BG1@66;color:@S3@}@S@ table{border-radius:20px}
+@S@ input,@S@ select,@S@ textarea{border-radius:14px}
+""",
+ "orbit": """
+@S@::before{background:repeating-radial-gradient(circle at 92% 6%,transparent 0 46px,@A1@22 47px 48px),repeating-radial-gradient(circle at 4% 98%,transparent 0 60px,@A2@22 61px 62px),radial-gradient(520px 320px at 50% 0%,@BG1@aa,transparent 70%);animation:dzDrift 40s ease-in-out infinite alternate}
+@S@ aside{border-right:1px solid @A1@55;box-shadow:6px 0 28px -14px @S2@aa}
+body @S@ .card,body @S@ .kpi{background:#fffffff2;border:1px solid @BG1@;border-left:5px solid @A1@;border-radius:14px;box-shadow:0 12px 26px -16px @S3@88}
+body @S@ .card:hover,body @S@ .kpi:hover{transform:translateX(3px);box-shadow:0 16px 30px -14px @A2@88;border-left-color:@A2@}
+@S@ .kpi b{color:@S2@}
+@S@ .welcome{border-radius:16px;border:1px solid @BG1@;border-left:5px solid @A2@;background:linear-gradient(120deg,#fff 0%,@BG1@aa 60%,@BG2@aa 100%)}
+@S@ th{background:@S2@;color:#d1fae5}
+body @S@ main :is(.primary,.btnl,.back,.pbtn){border-radius:999px!important;padding-left:14px!important;padding-right:14px!important}
+@S@ tbody tr:hover{background:@A1@14!important}
+""",
+}
+DZ_TAIL = """
+@keyframes dzDrift{from{transform:translate3d(-2%,-1%,0) scale(1)}to{transform:translate3d(3%,2%,0) scale(1.08)}}
+@media(max-width:800px){@S@::before{animation:none}@S@ aside{margin:0;height:auto;border-radius:0}}
+@media(prefers-reduced-motion:reduce){@S@::before{animation:none}body @S@ .card:hover,body @S@ .kpi:hover{transform:none}}
+@media print{@S@::before{display:none}}
+"""
+@lru_cache(maxsize=32)
+def _design_css_for(role, did, panel_b):
+    d = _design_of(role, did)
+    if not d or d["k"] == "classic": return ""
+    css = DZ_COMMON + DZ_EXTRA.get(d["k"], "") + DZ_TAIL
+    if panel_b: css = css.replace("margin:12px 0 12px 12px;height:calc(100vh - 24px);top:12px;", "")      # top-bar layout keeps its own geometry
+    S = ".app.emp3d" if role == "employee" else ".app:not(.emp3d)"
+    for k_, v_ in (("@S@", S), ("@A1@", d["a1"]), ("@A2@", d["a2"]), ("@S1@", d["s1"]), ("@S2@", d["s2"]), ("@S3@", d["s3"]), ("@EDGE@", d["edge"]), ("@BG1@", d["bg1"]), ("@BG2@", d["bg2"]), ("@BASE@", d["base"])):
+        css = css.replace(k_, v_)
+    return re.sub(r"\s*\n\s*", "", css)
+
+def design_choice(role):
+    try:
+        did = _setting("ui_admin_design" if role == "admin" else "ui_emp_design") or "classic"
+    except Exception as ex:
+        print("design settings read error:", repr(ex)); return "classic"
+    return did if _design_of(role, did) and _design_of(role, did)["id"] == did else "classic"
+
+def _design_css_now():
+    try:
+        role = session.get("role")
+        if role not in ("admin", "employee"): return ""
+        did = (session.get("dz_try") or "") if role == "admin" else ""      # Admin-only "try it" preview (this browser session only)
+        if not did: did = design_choice(role)
+        return _design_css_for(role, did, theme_choice()[1] == "1")
+    except Exception as ex:
+        print("design css error:", repr(ex)); return ""
+
+def dz_try_banner():
+    did = session.get("dz_try")
+    if session.get("role") != "admin" or not did: return ""
+    d = _design_of("admin", did)
+    return ('<div class="no-print" style="position:fixed;right:14px;bottom:14px;z-index:99999;display:flex;gap:8px;align-items:center;padding:8px 12px;border-radius:12px;background:#0f172a;color:#fff;font:12px system-ui;box-shadow:0 12px 30px -8px #000a">'
+            'Previewing <b>%s</b> (only you see this) <a href="/admin/designs" style="color:#67e8f9">Back to Design Studio</a> <a href="/admin/designs/stop" style="color:#fca5a5">Stop preview</a></div>' % (d["name"] if d else did))
+
+DZ_PAGE = """<style>
+.dz-g{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;margin:8px 0 14px}
+.dz-opt{position:relative;display:block;cursor:pointer;border:2px solid var(--line);border-radius:16px;padding:10px;background:#fff;margin:0 0 10px}
+.dz-opt input{position:absolute;opacity:0;width:1px;height:1px}.dz-opt:has(input:checked){border-color:var(--pri);box-shadow:0 12px 26px -12px var(--pri)}
+.dz-opt:has(input:focus-visible){outline:3px solid var(--pri);outline-offset:2px}.dz-opt b{display:block;margin-top:6px}.dz-opt small{color:var(--mut)}
+.mk{display:flex;height:96px;border-radius:12px;overflow:hidden;position:relative;background:var(--base);border:1px solid #0001;isolation:isolate}
+.mk.big{height:250px;border-radius:16px;box-shadow:0 22px 40px -22px #000a}
+.mk::before{content:"";position:absolute;inset:0;z-index:-1;background:radial-gradient(60% 60% at 15% 10%,var(--a1),transparent 70%),radial-gradient(60% 60% at 90% 0,var(--a2),transparent 70%);opacity:.28}
+.mk .ms{width:17%;min-width:36px;margin:0;padding:8px 6px;background:linear-gradient(185deg,var(--s1),var(--s2) 55%,var(--s3));flex:none}
+.mk .ms i{display:block;height:6px;border-radius:4px;background:#ffffff40;margin-bottom:6px}.mk.big .ms i{height:12px;margin-bottom:10px}.mk .ms i.on{background:linear-gradient(135deg,var(--a1),var(--a2))}
+.mk .mm{flex:1;padding:9px;display:flex;flex-direction:column;gap:6px;min-width:0}.mk.big .mm{padding:16px;gap:12px}
+.mk .mh{height:10px;width:46%;border-radius:5px;background:linear-gradient(90deg,var(--s2),var(--a1))}.mk.big .mh{height:18px}
+.mk .mk3{display:flex;gap:6px}.mk .mk3 u{flex:1;height:22px;border-radius:7px;background:#fff;box-shadow:0 4px 8px -5px #0007;text-decoration:none}.mk.big .mk3 u{height:56px;border-radius:12px}
+.mk .mt{flex:1;border-radius:7px;background:#fff;overflow:hidden;box-shadow:0 4px 8px -6px #0007}.mk .mt b{display:block;height:9px;background:linear-gradient(135deg,var(--s1),var(--s3))}.mk.big .mt b{height:18px}
+.mk .mt s{display:block;height:5px;margin:5px 6px;border-radius:3px;background:#0000001a;text-decoration:none}.mk.big .mt s{height:9px;margin:10px}
+.mk em{position:absolute;right:10px;bottom:8px;width:34px;height:12px;border-radius:5px;background:linear-gradient(135deg,var(--a1),var(--a2));box-shadow:0 3px 0 var(--edge)}.mk.big em{width:90px;height:26px;border-radius:9px}
+.mk[data-k=aurora] .ms{margin:6px 0 6px 6px;border-radius:12px;box-shadow:0 10px 18px -8px var(--s3)}.mk[data-k=aurora] .mk3 u{background:linear-gradient(#fff,#fff) padding-box,linear-gradient(135deg,var(--a1),var(--a2)) border-box;border:1px solid transparent}
+.mk[data-k=titan]{background-image:linear-gradient(#33415522 1px,transparent 1px),linear-gradient(90deg,#33415522 1px,transparent 1px);background-size:14px 14px}.mk[data-k=titan] .ms{border-right:3px solid var(--a1)}.mk[data-k=titan] .mk3 u{border-top:2px solid var(--a1);border-radius:4px}.mk[data-k=titan] .mt{border-radius:4px}
+.mk[data-k=sunrise] .ms{border-radius:0 16px 16px 0}.mk[data-k=sunrise] .mk3 u{border-radius:14px;box-shadow:0 3px 0 var(--bg1),0 8px 10px -6px var(--a2)}.mk[data-k=sunrise]::after{content:"";position:absolute;right:-14px;top:-14px;width:54px;height:54px;border-radius:50%;background:radial-gradient(circle,#fde68a,var(--a1) 60%,transparent 72%);opacity:.85}
+.mk[data-k=orbit] .mk3 u{border-left:4px solid var(--a1);border-radius:8px}.mk[data-k=orbit] em{border-radius:999px}.mk[data-k=orbit]::after{content:"";position:absolute;right:-30px;top:-30px;width:90px;height:90px;border-radius:50%;border:2px solid var(--a1);box-shadow:0 0 0 12px #0000, 0 0 0 14px var(--a2);opacity:.35}
+.dz-cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;margin:8px 0 14px}.dz-cmp h3{margin:0 0 6px;font-size:14px}
+.dz-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+</style>
+<div class="head"><div><h1>Design Studio</h1><p class="mut">Give the <b>Admin pages</b> and the <b>Employee pages</b> completely different designs. Pick one for each, compare them side by side, try the Admin design on your own pages, then apply. Colours, 3D accents and layout change only - no data, menu, form or feature is touched. <a href="/admin/theme">Classic theme &amp; layout options</a></p></div></div>
+<form method="post" action="/admin/designs/apply" id="dzf">
+<div class="dz-g">
+{% for role,title in (('admin','Admin page design'),('employee','Employee page design')) %}<div><h2 style="margin-top:0">{{title}}</h2>
+{% for d in designs[role] %}<label class="dz-opt"><input type="radio" name="{{role}}" value="{{d.id}}" {{'checked' if d.id==cur[role] else ''}} data-k="{{d.k}}" data-v="--a1:{{d.a1}};--a2:{{d.a2}};--s1:{{d.s1}};--s2:{{d.s2}};--s3:{{d.s3}};--edge:{{d.edge}};--bg1:{{d.bg1}};--bg2:{{d.bg2}};--base:{{d.base}}" data-n="{{d.name}}">
+<div class="mk" data-k="{{d.k}}" style="--a1:{{d.a1}};--a2:{{d.a2}};--s1:{{d.s1}};--s2:{{d.s2}};--s3:{{d.s3}};--edge:{{d.edge}};--bg1:{{d.bg1}};--bg2:{{d.bg2}};--base:{{d.base}}"><div class="ms"><i class="on"></i><i></i><i></i><i></i></div><div class="mm"><div class="mh"></div><div class="mk3"><u></u><u></u><u></u></div><div class="mt"><b></b><s></s><s></s></div></div><em></em></div>
+<b>{{d.name}}{% if d.id==cur[role] %} <span class="pill in">Applied</span>{% endif %}</b><small>{{d.note}}</small></label>{% endfor %}
+</div>{% endfor %}</div>
+<h2>Compare - Admin vs Employee <span class="mut" style="font-size:12px;font-weight:400">(updates as you pick)</span></h2>
+<div class="dz-cmp"><div><h3>Admin page: <span id="dz-an"></span></h3><div class="mk big" id="dz-am"><div class="ms"><i class="on"></i><i></i><i></i><i></i><i></i></div><div class="mm"><div class="mh"></div><div class="mk3"><u></u><u></u><u></u></div><div class="mt"><b></b><s></s><s></s><s></s><s></s></div></div><em></em></div></div>
+<div><h3>Employee page: <span id="dz-en"></span></h3><div class="mk big" id="dz-em"><div class="ms"><i class="on"></i><i></i><i></i><i></i><i></i></div><div class="mm"><div class="mh"></div><div class="mk3"><u></u><u></u><u></u></div><div class="mt"><b></b><s></s><s></s><s></s><s></s></div></div><em></em></div></div></div>
+<div class="dz-bar"><button class="primary" type="submit">Apply designs</button>
+<a class="btnl" id="dz-try" href="/admin/designs/try?design=aurora" title="Shows the chosen Admin design on the real Admin pages for you only">Try the Admin design on my pages</a>
+<button class="back" type="submit" name="reset" value="1" title="Back to the current look for both">Reset both to Classic</button></div>
+<p class="mut">The Employee design can be compared here but is shown to employees only after you apply it (employees' pages need an employee login). Designs are pure CSS (no images, no extra scripts), so pages load as fast as before; animation switches off on phones and for people whose device asks for reduced motion.</p>
+</form>
+<script>(function(){var f=document.getElementById('dzf');function put(el,i){el.setAttribute('data-k',i.dataset.k);el.style.cssText=i.dataset.v}
+function up(){var a=f.querySelector('input[name=admin]:checked'),e=f.querySelector('input[name=employee]:checked');
+if(a){put(document.getElementById('dz-am'),a);document.getElementById('dz-an').textContent=a.dataset.n;document.getElementById('dz-try').href='/admin/designs/try?design='+encodeURIComponent(a.value)}
+if(e){put(document.getElementById('dz-em'),e);document.getElementById('dz-en').textContent=e.dataset.n}}
+f.addEventListener('change',up);up()})();</script>"""
+
+@app.route("/admin/designs")
+@need("admin")
+def admin_designs():
+    prefetch("Settings")
+    return page(DZ_PAGE, title="Design Studio", designs=DESIGNS, cur=dict(admin=design_choice("admin"), employee=design_choice("employee")))
+
+@app.route("/admin/designs/apply", methods=["POST"])
+@need("admin")
+def admin_designs_apply():
+    a, e = request.form.get("admin", "classic"), request.form.get("employee", "classic")
+    if request.form.get("reset"): a = e = "classic"
+    if not _design_of("admin", a) or _design_of("admin", a)["id"] != a or not _design_of("employee", e) or _design_of("employee", e)["id"] != e:
+        flash("Please pick a design for each page.", "error"); return redirect("/admin/designs")
+    try:
+        _set_setting("ui_admin_design", a); _set_setting("ui_emp_design", e)
+    except Exception as ex:
+        print("design save error:", repr(ex)); flash("Could not save the designs. Please try again.", "error"); return redirect("/admin/designs")
+    session.pop("dz_try", None)
+    flash("Designs applied - Admin: %s, Employee: %s." % (_design_of("admin", a)["name"], _design_of("employee", e)["name"]))
+    return redirect("/admin/designs")
+
+@app.route("/admin/designs/try")
+@need("admin")
+def admin_designs_try():
+    did = request.args.get("design", "")
+    d = _design_of("admin", did)
+    if not d or d["id"] != did: return redirect("/admin/designs")
+    if d["id"] == "classic": session.pop("dz_try", None)
+    else: session["dz_try"] = did
+    return redirect("/admin/summary")
+
+@app.route("/admin/designs/stop")
+@need("admin")
+def admin_designs_stop():
+    session.pop("dz_try", None); return redirect("/admin/designs")
+
 
 def hide_entry_pages():
     """Update236: Associate Manager / Team Lead / Senior Team Lead (matched live by Designation) have no Daily entry and no Productivity Info page."""
@@ -4352,7 +4551,7 @@ def page(body, title="Productivity Tracker", **ctx):
         try: _ntm += cl_html()      # Update260: celebration animations (Admin > Notes & Messages > Celebrations)
         except Exception as ex_: print("Celebration overlay failed:", repr(ex_))
     if session.get("role") == "admin" and not ctx.get("bare"):      # Update265: Leave / Permission notifications at the top of every Admin page
-        try: _ntm = admin_alert_box() + _ntm
+        try: _ntm = dz_try_banner() + admin_alert_box() + _ntm
         except Exception as ex_: print("Admin alert bar failed:", repr(ex_))
     elif session.get("role") == "employee" and not ctx.get("bare") and not str(request.path).startswith("/employee/tracking-consent"):      # Update268: tracking notice waiting for the employee's answer
         try: _ntm = consent_banner() + _ntm

@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update288: quote screen = the English quote (Quotes sheet, column Quote) big in the centre + its Thanglish translation (column Thanglish, added to the sheet automatically if missing) smaller right below, over the blurred Productivity Entry page, with the 3D animation and Close button. Shown at every login.
   * Update287: the "Quotes" worksheet is checked automatically - used as it is if it exists (no duplicate), created with the headers Quote / Language / Author / Status if it is missing; no error is shown. Admin add / edit / delete and the employee quote screen work on that sheet right away.
   * Update286: the quote screen shows only the quote from the Quotes sheet (+ author if the sheet has one), the 3D animation, the X and the Close & Continue button - greeting, Login #, language label and the "Take a moment..." line removed.
   * Update285: ALL employee quotes now come from the "Quotes" worksheet of the Google Sheet (single source; nothing hardcoded or generated). Added / edited / deleted rows reach all employees automatically; per-employee daily rotation; hidden Admin page /admin/quotes edits that same sheet.
@@ -4633,7 +4634,9 @@ QUOTE_CSS = r"""<style id="dq-css">
 @keyframes dqShine{0%{left:-60%}55%,100%{left:140%}}
 .dq-mark{font:900 78px/0.7 Georgia,serif;color:#fde68a;text-shadow:0 4px 0 #b45309,0 0 26px #fbbf24aa;margin:14px 0 0;animation:dqBob 4.2s ease-in-out infinite}
 .dq-q{padding:0;color:#fff;text-align:center;margin:6px 0 4px;font-size:clamp(21px,3.5vw,35px);font-weight:700;line-height:1.5;text-shadow:0 2px 12px #0006;min-height:2.6em}
-.dq-q .w{display:inline-block;opacity:0;margin:0 .13em;transform:translateY(26px) rotateX(-80deg) scale(.7);animation:dqW .75s cubic-bezier(.2,.9,.25,1.2) forwards;animation-delay:calc(var(--i)*.075s + .6s)}
+.dq-q .w,.dq-tg .w{display:inline-block;opacity:0;margin:0 .13em;transform:translateY(26px) rotateX(-80deg) scale(.7);animation:dqW .75s cubic-bezier(.2,.9,.25,1.2) forwards;animation-delay:calc(var(--i)*.075s + .6s)}
+.dq-tg{margin:12px auto 2px;max-width:92%;font-size:clamp(14px,2.1vw,20px);font-weight:500;font-style:italic;line-height:1.6;color:#fef3c7;text-shadow:0 2px 10px #0006;min-height:1.2em}
+.dq-tg:empty{display:none}
 .dq-q .w:nth-child(5n+2){color:#fde68a}.dq-q .w:nth-child(7n+4){color:#a5f3fc}.dq-q .w:nth-child(9n+6){color:#fbcfe8}
 @keyframes dqW{to{opacity:1;transform:none}}
 .dq-by{margin:2px 0 0;padding:0;font-size:14px;color:#e9d5ff;opacity:.95}
@@ -4647,7 +4650,7 @@ QUOTE_CSS = r"""<style id="dq-css">
 .dq-btn:focus-visible{outline:3px solid #fde68a;outline-offset:3px}
 .dq-btn::after{content:"";position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(100deg,transparent,#ffffffaa,transparent);transform:skewX(-20deg);animation:dqShine 3s ease-in-out infinite}
 @media(max-width:600px){.dq-o,.dq-cube:nth-of-type(n+3){display:none}.dq-mark{font-size:60px}}
-@media(prefers-reduced-motion:reduce){.dq,.dq *,.dq-card::before{animation:none!important}.dq-q .w{opacity:1;transform:none}.dq-card{transition:none}}
+@media(prefers-reduced-motion:reduce){.dq,.dq *,.dq-card::before{animation:none!important}.dq-q .w,.dq-tg .w{opacity:1;transform:none}.dq-card{transition:none}}
 @media print{.dq{display:none!important}}
 </style>"""
 
@@ -4659,14 +4662,15 @@ QUOTE_HTML = r"""<div class="dq" id="dq" role="dialog" aria-modal="true" aria-la
 <span class="dq-sp" style="--s:22px;--x:30%;--y:8%;--dl:0s">&#10022;</span><span class="dq-sp" style="--s:16px;--x:62%;--y:90%;--dl:-1.2s">&#10022;</span><span class="dq-sp" style="--s:26px;--x:92%;--y:18%;--dl:-2s">&#10022;</span><span class="dq-sp" style="--s:18px;--x:4%;--y:46%;--dl:-.6s">&#10022;</span>
 <div class="dq-card" id="dq-card"><button type="button" class="dq-x" id="dq-x" aria-label="Close" title="Close">&times;</button>
 <div class="dq-mark" aria-hidden="true">&ldquo;</div>
-<p class="dq-q" id="dq-q"></p><p class="dq-by" id="dq-by"></p>
+<p class="dq-q" id="dq-q"></p><p class="dq-tg" id="dq-tg"></p><p class="dq-by" id="dq-by"></p>
 <button type="button" class="dq-btn" id="dq-close">Close &amp; Continue</button>
 </div></div>"""
 
-QUOTE_JS = r"""<script>(function(){var el=document.getElementById('dq');if(!el)return;el.classList.add('dq-on');var q=document.getElementById('dq-q'),by=document.getElementById('dq-by'),btn=document.getElementById('dq-close'),xb=document.getElementById('dq-x'),card=document.getElementById('dq-card'),done=false;
+QUOTE_JS = r"""<script>(function(){var el=document.getElementById('dq');if(!el)return;el.classList.add('dq-on');var q=document.getElementById('dq-q'),by=document.getElementById('dq-by'),tg=document.getElementById('dq-tg'),btn=document.getElementById('dq-close'),xb=document.getElementById('dq-x'),card=document.getElementById('dq-card'),done=false;
 var prevOv=document.documentElement.style.overflow;document.documentElement.style.overflow='hidden';
 function show(d){if(!d||!d.text){close();return}q.textContent='';var ws=String(d.text).split(/\s+/);for(var i=0;i<ws.length;i++){var s=document.createElement('span');s.className='w';s.style.setProperty('--i',i);s.textContent=ws[i];q.appendChild(s)}
-q.setAttribute('aria-label',d.text);by.textContent=d.author?('\u2014 '+d.author+(d.src&&d.src!=='built-in'?'  \u00b7 via '+d.src:'')):''}
+q.setAttribute('aria-label',d.text);tg.textContent='';var tw=String(d.tg||'').split(/\s+/).filter(Boolean);for(var k=0;k<tw.length;k++){var t=document.createElement('span');t.className='w';t.style.setProperty('--i',ws.length+k+3);t.textContent=tw[k];tg.appendChild(t)}
+by.textContent=d.author?('\u2014 '+d.author):''}
 var emb=document.getElementById('dq-data');if(emb){try{show(JSON.parse(emb.textContent))}catch(e){show(null)}}
 else{fetch('/employee/quote-data',{credentials:'same-origin'}).then(function(r){return r.json()}).then(show).catch(function(){show(null)})}
 function close(){if(done)return;done=true;try{fetch('/employee/quote/close',{method:'POST',credentials:'same-origin',keepalive:true}).catch(function(){})}catch(e){}
@@ -4693,7 +4697,7 @@ def quote_overlay_html():
     if not q: return ""      # Update285: no quote in the Google Sheet = no quote screen (nothing is invented)
     out = QUOTE_CSS + QUOTE_HTML
     if True:
-        data = json.dumps(dict(text=q["text"], author=q.get("author", ""), src=q.get("src", ""), label=q.get("label", "")), ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+        data = json.dumps(dict(text=q["text"], tg=q.get("thanglish", ""), author=q.get("author", "")), ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
         out += '<script type="application/json" id="dq-data">' + data + '</script>'
     return out + QUOTE_JS
 
@@ -4701,8 +4705,8 @@ def quote_overlay_html():
 @need("employee")
 def employee_quote_data():
     q = quote_for_employee(session.get("emp_id"))
-    if not q: return jsonify(text="", author="", src="", label="")
-    return jsonify(text=q["text"], author=q.get("author", ""), src="", label=q.get("label", ""))
+    if not q: return jsonify(text="", tg="", author="")
+    return jsonify(text=q["text"], tg=q.get("thanglish", ""), author=q.get("author", ""))
 
 @app.route("/employee/quote/close", methods=["POST"])
 @need("employee")
@@ -4730,7 +4734,7 @@ def _ql_lang(v):
     if k in ("en", "english"): return "en"
     return t[:20]
 
-QL_HEAD = ["Quote", "Language", "Author", "Status"]
+QL_HEAD = ["Quote", "Thanglish", "Author", "Status"]      # Update288: Quote = English text, Thanglish = its Thanglish translation (shown smaller under it)
 _QL_NAMES = ("quotes", "quote", "daily quotes", "motivational quotes")
 
 def _ql_find_ws(create=True):
@@ -4755,10 +4759,12 @@ def _ql_cols(head):
     h = [str(x).strip().lower() for x in head]
     def first(pred):
         return next((i for i, x in enumerate(h) if pred(x)), None)
-    q = first(lambda x: "quote" in x) 
+    t = first(lambda x: any(k in x for k in ("thanglish", "tanglish", "translation", "transliteration")))
+    q = first(lambda x: "english" in x and first(lambda y: y == x) != t) if False else None
+    q = first(lambda x: "quote" in x and not any(k in x for k in ("thanglish", "tanglish", "translation", "transliteration")))
     if q is None: q = first(lambda x: x in ("text", "message", "thought", "motivation", "motivational", "content", "description"))
-    if q is None: q = first(lambda x: x not in ("", "s.no", "sno", "no", "no.", "id", "#", "sl.no", "sl no", "s no", "date", "language", "lang", "author", "status", "active"))
-    return dict(q=q if q is not None else 0, l=first(lambda x: x in ("language", "lang", "quote language") or x.startswith("lang")),
+    if q is None: q = first(lambda x: x not in ("", "s.no", "sno", "no", "no.", "id", "#", "sl.no", "sl no", "s no", "date", "language", "lang", "author", "status", "active") and first(lambda y: y == x) != t and not any(k in x for k in ("thanglish", "tanglish", "translation", "transliteration")))
+    return dict(q=q if q is not None else 0, t=t, l=first(lambda x: x in ("language", "lang", "quote language") or x.startswith("lang")),
                 a=first(lambda x: x in ("author", "by", "source", "said by", "quote by")), s=first(lambda x: x in ("status", "active", "enabled", "show", "display")))
 
 def ql_sheet(fresh=False):
@@ -4771,14 +4777,22 @@ def ql_sheet(fresh=False):
         vals = _with_retry(ws.get_all_values)
         if not vals or not any(str(c).strip() for c in vals[0]):      # Update287: a completely empty sheet gets its header row (row 1 is never a quote)
             _with_retry(ws.update, range_name="A1", values=[QL_HEAD]); vals = [list(QL_HEAD)] + list(vals[1:])
-        cols = _ql_cols(vals[0] if vals else []); items = []
+        cols = _ql_cols(vals[0] if vals else [])
+        if cols["t"] is None:      # Update288: the sheet has no Thanglish column yet -> add one header cell at the end of row 1 (nothing else is touched)
+            nc = len([c for c in vals[0]]) + 1
+            try:
+                if ws.col_count < nc: _with_retry(ws.add_cols, nc - ws.col_count)
+                _with_retry(ws.update, range_name=gspread.utils.rowcol_to_a1(1, nc), values=[["Thanglish"]], value_input_option="RAW")
+                vals[0] = list(vals[0]) + ["Thanglish"]; cols["t"] = nc - 1
+            except Exception as ex_: print("Thanglish column add skipped:", repr(ex_))
+        items = []
         for i, r in enumerate(vals[1:], start=2):
             g = lambda c: (str(r[c]).strip() if c is not None and c < len(r) else "")
             text = re.sub(r"\s+", " ", g(cols["q"])).strip()
             if not text or g(cols["s"]).lower() in _QL_OFF: continue
             lg = _ql_lang(g(cols["l"]))
-            label = QUOTE_LABEL.get(lg, lg) if lg else ("தமிழ்" if re.search(r"[\u0B80-\u0BFF]", text) else "")
-            items.append(dict(row=i, text=text, lang=lg, label=label, author=g(cols["a"])))
+            if lg in ("ta", "tg") or re.search(r"[\u0B80-\u0BFF]", text): continue      # Update288: the quote screen is English + Thanglish translation, so Tamil / Thanglish-only rows are not used
+            items.append(dict(row=i, text=text, thanglish=re.sub(r"\s+", " ", g(cols["t"])).strip(), lang=lg, label="", author=g(cols["a"])))
         meta = dict(ok=True, err="", title=ws.title, cols=cols, ncols=max(len(vals[0]) if vals else 0, 1))
         with _QL_LOCK: _QL.update(t=time.time(), items=items, meta=meta)
         return items, meta
@@ -4808,16 +4822,17 @@ def _ql_cell(v):
     v = re.sub(r"\s+", " ", str(v or "")).strip()
     return ("'" + v) if v[:1] in "=+-@" else v
 
-def _ql_put(ws, meta, row, text, lang, author, new):
+def _ql_put(ws, meta, row, text, thanglish, author, new):
     c = meta["cols"]; n = max(meta["ncols"], max([x for x in c.values() if x is not None] + [0]) + 1)
     vals = [""] * n; vals[c["q"]] = _ql_cell(text)
-    if c["l"] is not None: vals[c["l"]] = lang
+    if c["t"] is not None: vals[c["t"]] = _ql_cell(thanglish)
+    if c["l"] is not None: vals[c["l"]] = "English"
     if c["a"] is not None: vals[c["a"]] = _ql_cell(author)
     if c["s"] is not None: vals[c["s"]] = "Active"
     if new:
         ws.append_row(vals, value_input_option="RAW")
     else:
-        for key_, v in (("q", vals[c["q"]]), ("l", lang), ("a", vals[c["a"]] if c["a"] is not None else "")):
+        for key_, v in (("q", vals[c["q"]]), ("t", vals[c["t"]] if c["t"] is not None else ""), ("a", vals[c["a"]] if c["a"] is not None else "")):
             if c[key_] is not None: ws.update(range_name=gspread.utils.rowcol_to_a1(row, c[key_] + 1), values=[[v]], value_input_option="RAW")
 
 @app.route("/admin/quotes")
@@ -4830,18 +4845,18 @@ def admin_quotes():
         q = quote_for_employee(k, today, items, keys); tq = quote_for_employee(k, today + dt.timedelta(days=1), items, keys)
         plan.append(dict(id=em[k]["id"], name=em[k]["name"], today=q["text"] if q else "", tomorrow=tq["text"] if tq else ""))
     plan.sort(key=lambda x: x["name"].lower())
-    f = dict(row="", lang="en", text="", author="")
+    f = dict(row="", thanglish="", text="", author="")
     er = request.args.get("edit", "").strip()
     if er.isdigit():
         x = next((x for x in items if x["row"] == int(er)), None)
-        if x: f = dict(row=x["row"], lang=x["lang"] or "en", text=x["text"], author=x["author"])
+        if x: f = dict(row=x["row"], thanglish=x["thanglish"], text=x["text"], author=x["author"])
     return page(QUOTES_ADM, title="Daily Quotes", f=f, quotes=items, labels=QUOTE_LABEL, plan=plan, meta=meta, qlen=QL_LEN)
 
 @app.route("/admin/quotes/save", methods=["POST"])
 @need("admin")
 def admin_quotes_save():
     fm = request.form; row = fm.get("row", "").strip(); text = re.sub(r"\s+", " ", fm.get("text", "")).strip()[:QL_LEN]; author = re.sub(r"\s+", " ", fm.get("author", "")).strip()[:60]
-    lang = fm.get("lang", "") if fm.get("lang", "") in QUOTE_LABEL else "en"; lang_cell = QUOTE_LABEL[lang]
+    thg = re.sub(r"\s+", " ", fm.get("thanglish", "")).strip()[:QL_LEN * 2]
     back = "/admin/quotes" + (("?edit=" + row) if row.isdigit() else "")
     if not text: flash("Please type the quote.", "error"); return redirect(back)
     try:
@@ -4850,10 +4865,10 @@ def admin_quotes_save():
         items, meta = ql_sheet(True)
         if row.isdigit():
             if not any(x["row"] == int(row) for x in items): flash("That quote no longer exists in the sheet.", "error"); return redirect("/admin/quotes")
-            _ql_put(ws, meta, int(row), text, lang_cell, author, False); flash("Quote updated in the sheet. Employees see the change from their next login.")
+            _ql_put(ws, meta, int(row), text, thg, author, False); flash("Quote updated in the sheet. Employees see the change from their next login.")
         else:
             if len(items) >= QL_MAX: flash("The Quotes sheet is full.", "error"); return redirect(back)
-            _ql_put(ws, meta, 0, text, lang_cell, author, True); flash("Quote added to the sheet. Employees see it from their next login.")
+            _ql_put(ws, meta, 0, text, thg, author, True); flash("Quote added to the sheet. Employees see it from their next login.")
         ql_sheet(True)
     except Exception as ex:
         print("quote save error:", repr(ex)); flash("Could not save the quote. Please try again.", "error"); return redirect(back)
@@ -4882,17 +4897,17 @@ QUOTES_ADM = r"""<style>
 .qa-wrap{overflow-x:auto}.qa-acts{display:flex;gap:6px;white-space:nowrap}.qa-acts form{margin:0}
 </style>
 <div class="card qa"><h2>Daily quotes - Google Sheet "{{meta.title}}"</h2>
-<p class="mut">The <b>{{meta.title}}</b> worksheet of the Google Sheet is the only source of employee quotes. Add, edit or delete rows here or directly in the sheet - every employee gets the change at their next login. Each employee sees a different quote every day, and everyone moves to the next one daily.</p>
+<p class="mut">The <b>{{meta.title}}</b> worksheet of the Google Sheet is the only source of employee quotes. Column <b>Quote</b> = the English quote, column <b>Thanglish</b> = its translation. Add, edit or delete rows here or directly in the sheet - every employee gets the change at their next login. Each employee sees a different quote every day, and everyone moves to the next one daily.</p>
 {% if not meta.ok %}<p class="flash err">The quotes sheet could not be read: {{meta.err}}. Employees will not see a quote until it can be read.</p>{% elif not quotes %}<p class="mut"><b>The Quotes sheet is ready but empty.</b> Add the first quote below - employees see a quote at login as soon as there is one.</p>{% elif meta.err %}<p class="mut">Last sheet read had a problem ({{meta.err}}); showing the last copy read from the sheet.</p>{% endif %}
 {% if meta.ok %}<h3>{{ 'Edit quote (row ' ~ f.row ~ ')' if f.row else 'Add a quote' }}</h3>
 <form method="post" action="/admin/quotes/save"><input type="hidden" name="row" value="{{f.row}}">
-<div class="qa-row">{% if meta.cols.l is not none %}<label>Language<select name="lang">{% for k,v in labels.items() %}<option value="{{k}}" {{'selected' if f.lang==k}}>{{v}}</option>{% endfor %}</select></label>{% else %}<span></span>{% endif %}
-{% if meta.cols.a is not none %}<label>Author / source <span class="mut">(optional)</span><input type="text" name="author" maxlength="60" value="{{f.author}}"></label>{% else %}<span></span>{% endif %}</div>
-<label>Quote<textarea name="text" maxlength="{{qlen}}" required placeholder="Type the quote in Tamil, English or Thanglish...">{{f.text}}</textarea></label>
+<label>English quote<textarea name="text" maxlength="{{qlen}}" required placeholder="Type the English quote...">{{f.text}}</textarea></label>
+<label>Thanglish translation <span class="mut">(shown smaller, under the English quote)</span><textarea name="thanglish" maxlength="{{qlen*2}}" placeholder="Type the Thanglish translation...">{{f.thanglish}}</textarea></label>
+{% if meta.cols.a is not none %}<label>Author / source <span class="mut">(optional)</span><input type="text" name="author" maxlength="60" value="{{f.author}}"></label>{% endif %}
 <button>{{ 'Save changes' if f.row else 'Add quote' }}</button>{% if f.row %} <a class="back" href="/admin/quotes">Cancel</a>{% endif %}</form>{% endif %}</div>
 <div class="card qa"><h2>Quotes in the sheet ({{quotes|length}})</h2>
-{% if quotes %}<div class="qa-wrap"><table class="qa-t"><tr><th>Row</th><th>Language</th><th>Quote</th><th>Author</th><th></th></tr>
-{% for q in quotes %}<tr><td>{{q.row}}</td><td>{% if q.label %}<span class="qa-lang">{{q.label}}</span>{% endif %}</td><td>{{q.text}}</td><td>{{q.author}}</td>
+{% if quotes %}<div class="qa-wrap"><table class="qa-t"><tr><th>Row</th><th>English quote</th><th>Thanglish</th><th>Author</th><th></th></tr>
+{% for q in quotes %}<tr><td>{{q.row}}</td><td>{{q.text}}</td><td>{{q.thanglish}}</td><td>{{q.author}}</td>
 <td><div class="qa-acts"><a class="back sm" href="/admin/quotes?edit={{q.row}}">Edit</a><form method="post" action="/admin/quotes/{{q.row}}/delete" onsubmit="return confirm('Delete this quote from the sheet?')"><button class="sm">Delete</button></form></div></td></tr>{% endfor %}</table></div>
 {% else %}<p class="mut">No quotes in the sheet.</p>{% endif %}</div>
 <div class="card qa"><h2>Today's rotation</h2><p class="mut">Which quote each employee sees today, and tomorrow.</p>

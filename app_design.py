@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update283: Admin Quotes page (add / edit / delete Tamil, English, Thanglish quotes) at /admin/quotes - not in the Admin menu. Every employee sees a quote at EVERY login; quotes are assigned per employee and rotate daily (employee position + day number), so employees get different quotes the same day. Admin menu: Theme & Layout link hidden (/admin/theme still works).
   * Update282: Daily quote overlay hardened - it is hidden until its script confirms it can run (so no stray "Quotes" text / label can ever show on the Employee page), is shielded from page-wide CSS, stays centred with the 3D animation, and can now be closed with the Close & Continue button, the X button or Esc. Employee page layout / functionality unchanged.
   * Update281: Employee login - after EVERY login (also repeated logins the same day) a full-screen 3D animated "Daily Inspiration" overlay appears on the first Employee page: "Welcome Back, <name>! Login #N", today's motivational quote (language Tamil / English / Thanglish picked at random per day, same quote for everyone that day; English quotes are fetched online with a built-in fallback, Tamil / Thanglish are built-in) and a "Close & Continue" button - the overlay cannot be dismissed any other way (no timeout / Esc / outside click) and stays on every Employee page until Close is pressed. Display only: nothing is written to the Productivity log, so the quote is never counted as productive hours. Login # = number of this employee's sessions in the Attendance sheet (incl. the current one). New Settings key daily_quote. Routes /employee/quote-data, /employee/quote/close. Existing Employee page design unchanged after closing.
   * Update280: Employee page (Daily entry) - the small "Monthly Productivity Summary" strip now also shows "Permission: N Hrs" = the total hours of this employee's APPROVED permissions in the current month (Pending / Rejected not counted). Read live from the Permissions sheet on every page load, so it follows new / approved / changed records. Display only; same one-line strip, nothing else changed.
@@ -4532,7 +4533,7 @@ NAVS = {
               ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log"),
               ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes"),
-              ("/admin/notes", "Notes & Messages"), ("/admin/theme", "Theme & Layout")],   # Update279: Theme & Layout (Admin / Employee panel layout + theme) is back in the menu
+              ("/admin/notes", "Notes & Messages"), ("/admin/theme", "Theme & Layout")],   # Update283: Theme & Layout stays registered but is no longer shown in the Admin menu (open /admin/theme directly)
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
@@ -4653,7 +4654,6 @@ def quote_begin(att_id, n):
     now_ = time.time()
     for k_ in [k for k, v in _QUOTE_PENDING.items() if now_ - v["t"] > 43200]: _QUOTE_PENDING.pop(k_, None)
     _QUOTE_PENDING[att_id] = dict(n=n, t=now_)
-    _bg(get_daily_quote)      # fetch / pick today's quote while the first page loads
 
 QUOTE_CSS = r"""<style id="dq-css">
 .dq,.dq *{box-sizing:border-box}
@@ -4743,8 +4743,10 @@ def quote_overlay_html():
     hello = ("Welcome Back, %s!" % nm) if st["n"] > 1 else ("Welcome, %s!" % nm)
     if not nm: hello = "Welcome Back!" if st["n"] > 1 else "Welcome!"
     out = QUOTE_CSS + QUOTE_HTML.replace("@@HELLO@@", _hq.escape(hello)).replace("@@N@@", str(int(st["n"])))
-    q = _QUOTE_CACHE.get(str(today_local()))
-    if q:      # already known: no extra request, the text animates in at once
+    q = None
+    try: q = quote_for_employee(session.get("emp_id"))      # Update283: this employee's own quote for today
+    except Exception as ex_: print("employee quote pick error:", repr(ex_))
+    if q:
         data = json.dumps(dict(text=q["text"], author=q.get("author", ""), src=q.get("src", ""), label=q.get("label", "")), ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
         out += '<script type="application/json" id="dq-data">' + data + '</script>'
     return out + QUOTE_JS
@@ -4752,7 +4754,7 @@ def quote_overlay_html():
 @app.route("/employee/quote-data")
 @need("employee")
 def employee_quote_data():
-    q = get_daily_quote()
+    q = quote_for_employee(session.get("emp_id")) or dict(text="Every day is a new chance to grow.", author="", src="built-in", label="English")
     return jsonify(text=q["text"], author=q.get("author", ""), src=q.get("src", ""), label=q.get("label", ""))
 
 @app.route("/employee/quote/close", methods=["POST"])
@@ -4760,6 +4762,118 @@ def employee_quote_data():
 def employee_quote_close():
     _QUOTE_PENDING.pop(session.get("att_id"), None)      # display only: nothing is saved to the Productivity log or the working-time hours
     return jsonify(ok=True)
+
+# ---------------------------------------------------------------- Update283: Quotes library (Admin) + per-employee daily rotation
+# Admin-added quotes live in Settings key quotes_lib (JSON list). With no Admin quotes the built-in QUOTES lists are used.
+# Each employee gets a different quote every day: index = (today's day number + the employee's fixed position) % number of quotes.
+# Same employee + same day = same quote on every login; next day everybody moves on by one, so all quotes rotate through all employees.
+# The Quotes page is NOT in the Admin menu - it is opened directly at /admin/quotes.
+QL_KEY, QL_MAX, QL_LEN = "quotes_lib", 120, 250
+
+def ql_load(fresh=False):
+    try: lst = json.loads(_setting(QL_KEY, fresh) or "[]")
+    except Exception: lst = []
+    return [x for x in lst if isinstance(x, dict) and x.get("id") and str(x.get("text", "")).strip() and x.get("lang") in QUOTE_LABEL]
+
+def ql_save(lst):
+    _set_setting(QL_KEY, json.dumps(lst, ensure_ascii=False, separators=(",", ":")))
+
+def ql_pool():
+    """-> [{id, lang, label, text, author, src}] - Admin quotes if there are any, else the built-in ones (stable order)."""
+    mine = ql_load()
+    if mine:
+        return [dict(id=x["id"], lang=x["lang"], label=QUOTE_LABEL[x["lang"]], text=str(x["text"]).strip(), author=str(x.get("author", "")).strip(), src="") for x in sorted(mine, key=lambda x: x["id"])]
+    return [dict(id="b-%s-%d" % (l, i), lang=l, label=QUOTE_LABEL[l], text=t, author="", src="built-in") for i in range(max(len(v) for v in QUOTES.values())) for l, v in QUOTES.items() if i < len(v) for t in [v[i]]]
+
+def ql_employee_keys():
+    try: return sorted({_key(e["id"]) for e in _nt_emps() if not e["locked"]})
+    except Exception as ex: print("quote employee list error:", repr(ex)); return []
+
+def quote_for_employee(eid, day=None, pool=None, keys=None):
+    pool = pool if pool is not None else ql_pool()
+    if not pool: return None
+    keys = keys if keys is not None else ql_employee_keys()
+    k = _key(eid); n = (day or today_local()).toordinal()
+    rank = keys.index(k) if k in keys else (sum(ord(c) for c in k) % max(len(pool), 1))
+    return pool[(n + rank) % len(pool)]
+
+def _ql_clean(v, n): return re.sub(r"\s+", " ", str(v or "")).strip()[:n]
+
+@app.route("/admin/quotes")
+@need("admin")
+def admin_quotes():
+    prefetch("Settings", "Employees")
+    mine = ql_load(); pool = ql_pool(); keys = ql_employee_keys(); today = today_local()
+    em = {_key(e["id"]): e for e in _nt_emps()}
+    plan = []
+    for k in keys:
+        q = quote_for_employee(k, today, pool, keys); tq = quote_for_employee(k, today + dt.timedelta(days=1), pool, keys)
+        plan.append(dict(id=em[k]["id"], name=em[k]["name"], today=q["text"] if q else "", tomorrow=tq["text"] if tq else ""))
+    plan.sort(key=lambda x: x["name"].lower())
+    f = dict(id="", lang="en", text="", author="")
+    eid = request.args.get("edit", "").strip()
+    if eid:
+        x = next((x for x in mine if x["id"] == eid), None)
+        if x: f = dict(id=x["id"], lang=x["lang"], text=x["text"], author=x.get("author", ""))
+    return page(QUOTES_ADM, title="Daily Quotes", f=f, quotes=sorted(mine, key=lambda x: x["id"], reverse=True), labels=QUOTE_LABEL, plan=plan, builtin=(not mine), npool=len(pool), maxq=QL_MAX, qlen=QL_LEN)
+
+@app.route("/admin/quotes/save", methods=["POST"])
+@need("admin")
+def admin_quotes_save():
+    fm = request.form; qid = fm.get("id", "").strip(); text = _ql_clean(fm.get("text"), QL_LEN); author = _ql_clean(fm.get("author"), 60); lang = fm.get("lang", "")
+    back = "/admin/quotes" + (("?edit=" + urllib.parse.quote(qid, safe="")) if qid else "")
+    if not text: flash("Please type the quote.", "error"); return redirect(back)
+    if lang not in QUOTE_LABEL: flash("Please choose Tamil, English or Thanglish.", "error"); return redirect(back)
+    try:
+        lst = ql_load(True)
+        if qid:
+            x = next((x for x in lst if x["id"] == qid), None)
+            if x is None: flash("That quote no longer exists.", "error"); return redirect("/admin/quotes")
+            x.update(lang=lang, text=text, author=author); flash("Quote updated. Employees see the change from their next login.")
+        else:
+            if len(lst) >= QL_MAX: flash("You can keep up to %d quotes. Please delete an old one first." % QL_MAX, "error"); return redirect(back)
+            import uuid as _uq
+            lst.append(dict(id="Q" + now_local().strftime("%y%m%d%H%M%S") + _uq.uuid4().hex[:3], lang=lang, text=text, author=author)); flash("Quote added.")
+        ql_save(lst)
+    except Exception as ex:
+        print("quote save error:", repr(ex)); flash("Could not save the quote. Please try again.", "error"); return redirect(back)
+    return redirect("/admin/quotes")
+
+@app.route("/admin/quotes/<qid>/delete", methods=["POST"])
+@need("admin")
+def admin_quotes_delete(qid):
+    try:
+        lst = ql_load(True); new = [x for x in lst if x["id"] != qid]
+        if len(new) != len(lst): ql_save(new); flash("Quote deleted.")
+        else: flash("Nothing changed.", "error")
+    except Exception as ex:
+        print("quote delete error:", repr(ex)); flash("Could not delete the quote. Please try again.", "error")
+    return redirect("/admin/quotes")
+
+QUOTES_ADM = r"""<style>
+.qa label{display:block;font-weight:600;font-size:13px;margin:12px 0 4px}.qa textarea,.qa input[type=text],.qa select{width:100%;box-sizing:border-box}.qa textarea{min-height:90px;resize:vertical;line-height:1.5}
+.qa-row{display:grid;grid-template-columns:200px 1fr;gap:12px;align-items:end}@media(max-width:640px){.qa-row{grid-template-columns:1fr}}
+.qa-lang{display:inline-block;padding:2px 10px;border-radius:99px;background:#eef0ff;color:#4338ca;border:1px solid #c7d2fe;font-size:11.5px;font-weight:700}
+.qa-t{width:100%;border-collapse:collapse}.qa-t th,.qa-t td{padding:8px 10px;border-bottom:1px solid #e3e7f7;text-align:left;vertical-align:top;font-size:13px}
+.qa-wrap{overflow-x:auto}.qa-acts{display:flex;gap:6px;white-space:nowrap}.qa-acts form{margin:0}
+</style>
+<div class="card qa"><h2>{{ 'Edit quote' if f.id else 'Add a motivational quote' }}</h2>
+<p class="mut">Every employee sees one quote at each login (Close &amp; Continue). Quotes are shared out so employees get <b>different</b> quotes on the same day, and everyone moves to the next quote each day. {% if builtin %}You have not added any quotes yet, so the {{npool}} built-in quotes are in use. Once you add your own, only your quotes are used.{% else %}Currently rotating through your {{npool}} quote(s).{% endif %}</p>
+<form method="post" action="/admin/quotes/save"><input type="hidden" name="id" value="{{f.id}}">
+<div class="qa-row"><label>Language<select name="lang">{% for k,v in labels.items() %}<option value="{{k}}" {{'selected' if f.lang==k}}>{{v}}</option>{% endfor %}</select></label>
+<label>Author / source <span class="mut">(optional)</span><input type="text" name="author" maxlength="60" value="{{f.author}}"></label></div>
+<label>Quote<textarea name="text" maxlength="{{qlen}}" required placeholder="Type the quote in Tamil, English or Thanglish...">{{f.text}}</textarea></label>
+<p class="mut">Up to {{qlen}} characters &middot; up to {{maxq}} quotes.</p>
+<button>{{ 'Save changes' if f.id else 'Add quote' }}</button>{% if f.id %} <a class="back" href="/admin/quotes">Cancel</a>{% endif %}</form></div>
+<div class="card qa"><h2>Your quotes ({{quotes|length}})</h2>
+{% if quotes %}<div class="qa-wrap"><table class="qa-t"><tr><th>Language</th><th>Quote</th><th>Author</th><th></th></tr>
+{% for q in quotes %}<tr><td><span class="qa-lang">{{labels[q.lang]}}</span></td><td>{{q.text}}</td><td>{{q.author}}</td>
+<td><div class="qa-acts"><a class="back sm" href="/admin/quotes?edit={{q.id}}">Edit</a><form method="post" action="/admin/quotes/{{q.id}}/delete" onsubmit="return confirm('Delete this quote?')"><button class="sm">Delete</button></form></div></td></tr>{% endfor %}</table></div>
+{% else %}<p class="mut">No quotes added yet.</p>{% endif %}</div>
+<div class="card qa"><h2>Today's rotation</h2><p class="mut">Which quote each employee sees today, and tomorrow.</p>
+{% if plan %}<div class="qa-wrap"><table class="qa-t"><tr><th>Employee</th><th>Today</th><th>Tomorrow</th></tr>
+{% for r in plan %}<tr><td>{{r.name}} <span class="mut">({{r.id}})</span></td><td>{{r.today}}</td><td>{{r.tomorrow}}</td></tr>{% endfor %}</table></div>{% else %}<p class="mut">No employees found.</p>{% endif %}</div>
+"""
 
 def welcome_overlay_html(name):
     """Update227: one-time animated 'Welcome, <nickname>!' overlay (pure CSS, transform / opacity only, auto-hides after ~4 s, click / key / Esc closes it). Display only."""
@@ -4826,7 +4940,7 @@ def page(body, title="Productivity Tracker", **ctx):
         by_h = {n[0]: n for n in nav}
         nav = [by_h["/admin/summary"], by_h["/admin/processes"],
                ("/admin/log", "Log", any(k[2] for k in log_kids), log_kids),
-               by_h["/admin/employee-info"], by_h["/admin/notes"], by_h["/admin/theme"]]      # Update248: Notes & Messages / Update211: Theme & Layout removed from the menu
+               by_h["/admin/employee-info"], by_h["/admin/notes"]]      # Update248: Notes & Messages / Update211: Theme & Layout removed from the menu
     side_avatar = ""
     if session.get("role") == "admin":
         side_avatar = ADMIN3D_HTML

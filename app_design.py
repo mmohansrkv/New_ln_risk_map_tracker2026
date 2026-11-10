@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update279: Admin > Theme & Layout (menu item "Theme & Layout") now manages the Employee Panel and the Admin Panel SEPARATELY - each has its own Layout (Top bar / Sidebar) and Theme (Employee: or "Same as Admin"), a live preview before applying, and an Apply button; an applied Employee layout / theme is used by every Employee page from its next load. Reset Employee panel returns to Top bar + Admin theme. Only CSS / menu position changes (new Settings keys ui_admin_layout, ui_emp_layout, ui_emp_theme); employee data, routes and features are untouched. The Sidebar layout of Update277 can be chosen again.
   * Update278: Admin AND Employee pages - the left sidebar is REMOVED; every menu item (incl. the Log / Employee Info dropdowns, Calendar, profile avatar + name and Logout) now sits in a compact TOP navigation bar. On phones the bar collapses behind a menu button. Navigation layout only - pages, themes, colours, animations, routes and data are unchanged. The Theme & Layout "Panel layout" choice is now fixed to Top bar.
   * Update271: Employee login - a username whose account is Locked or Resigned / NCNS (Admin > Employee Login Access) now shows "Your account is locked. Please contact your Manager, Team Lead, or Admin." whatever password is typed, the username stays in the field, the male / female / lead picture still appears for it, and these accounts can never sign in. An unknown username still shows "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." (Update270).
   * Update270: Employee login messages - an unknown / invalid username OR a locked account (any password) now shows exactly: "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." The typed username stays in the field. A valid, unlocked username with a wrong password shows "Wrong username or password. Please try again." The male / female / lead picture still appears while typing and, for a locked account, still appears whenever the username matches an employee record (the picture lookup ignores the lock). Admin login unchanged.
@@ -3514,7 +3515,7 @@ html body .app.emp3d table tbody tr:hover td{background:#f4f3ff}
 @media(prefers-reduced-motion:reduce){html body .app.emp3d .kpi{transition:none}}
 </style>{% endif %}</head><body>
 {% if bare %}{{body|safe}}
-{% elif session.role %}<div class="app{{' emp3d' if session.role=='employee' else ''}}">{% if session.role=='employee' %}<script>document.documentElement.classList.add('fit188')</script><div id="fly3d" aria-hidden="true"><div class="fo" style="--s:64px;--x0:-12vw;--y0:78vh;--x1:112vw;--y1:-14vh;--z0:-380px;--z1:160px;--d:46s;--dl:0s;--c1:#6366f1;--c2:#a78bfa;--t:24s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:44px;--x0:110vw;--y0:64vh;--x1:-14vw;--y1:20vh;--z0:-120px;--z1:220px;--d:38s;--dl:-9s;--c1:#ec4899;--c2:#f9a8d4;--t:21s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:86px;--x0:-10vw;--y0:22vh;--x1:112vw;--y1:88vh;--z0:-420px;--z1:-60px;--d:58s;--dl:-21s;--c1:#06b6d4;--c2:#67e8f9;--t:28s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:52px;--x0:30vw;--y0:112vh;--x1:70vw;--y1:-16vh;--z0:-200px;--z1:240px;--d:34s;--dl:-14s;--c1:#f59e0b;--c2:#fcd34d;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:72px;--x0:112vw;--y0:92vh;--x1:-12vw;--y1:40vh;--z0:-340px;--z1:120px;--d:52s;--dl:-30s;--c1:#8b5cf6;--c2:#c4b5fd;--t:26s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:38px;--x0:-10vw;--y0:48vh;--x1:110vw;--y1:6vh;--z0:-60px;--z1:260px;--d:30s;--dl:-4s;--c1:#10b981;--c2:#6ee7b7;--t:20s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:58px;--x0:60vw;--y0:-14vh;--x1:16vw;--y1:114vh;--z0:-260px;--z1:180px;--d:44s;--dl:-26s;--c1:#3b82f6;--c2:#93c5fd;--t:23s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:48px;--x0:88vw;--y0:112vh;--x1:40vw;--y1:-14vh;--z0:-160px;--z1:200px;--d:36s;--dl:-17s;--c1:#f43f5e;--c2:#fda4af;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:90px;--x0:-14vw;--y0:60vh;--x1:112vw;--y1:20vh;--z0:-300px;--z1:140px;--d:50s;--dl:-6s;--c1:#6366f1;--c2:#6366f1;--t:29s"><div class="fr"></div></div><div class="fo" style="--s:64px;--x0:112vw;--y0:18vh;--x1:-14vw;--y1:80vh;--z0:-180px;--z1:200px;--d:42s;--dl:-19s;--c1:#ec4899;--c2:#ec4899;--t:24s"><div class="fr"></div></div><div class="fo" style="--s:110px;--x0:20vw;--y0:114vh;--x1:84vw;--y1:-18vh;--z0:-400px;--z1:60px;--d:60s;--dl:-33s;--c1:#06b6d4;--c2:#06b6d4;--t:32s"><div class="fr"></div></div><div class="fo" style="--s:56px;--x0:80vw;--y0:-14vh;--x1:6vw;--y1:100vh;--z0:-100px;--z1:240px;--d:40s;--dl:-12s;--c1:#f59e0b;--c2:#f59e0b;--t:23s"><div class="fr"></div></div><div class="fo" style="--s:54px;--x0:-12vw;--y0:34vh;--x1:112vw;--y1:70vh;--z0:-240px;--z1:180px;--d:48s;--dl:-2s;--c1:#6366f1;--c2:#22d3ee;--t:23s"><div class="ft"></div></div><div class="fo" style="--s:40px;--x0:112vw;--y0:50vh;--x1:-12vw;--y1:8vh;--z0:-80px;--z1:240px;--d:34s;--dl:-23s;--c1:#ec4899;--c2:#f59e0b;--t:20s"><div class="ft"></div></div><div class="fo" style="--s:70px;--x0:46vw;--y0:-14vh;--x1:92vw;--y1:114vh;--z0:-320px;--z1:100px;--d:54s;--dl:-36s;--c1:#8b5cf6;--c2:#06b6d4;--t:25s"><div class="ft"></div></div><div class="fo" style="--s:46px;--x0:-12vw;--y0:104vh;--x1:114vw;--y1:30vh;--z0:-140px;--z1:220px;--d:40s;--dl:-28s;--c1:#10b981;--c2:#3b82f6;--t:21s"><div class="ft"></div></div></div>{% endif %}<aside class="emp{{' tlside' if hol_only else ''}}">
+{% elif session.role %}<div class="app{{' emp3d' if session.role=='employee' else ''}}{{' sbar' if sbar else ''}}">{% if session.role=='employee' %}<script>document.documentElement.classList.add('fit188')</script><div id="fly3d" aria-hidden="true"><div class="fo" style="--s:64px;--x0:-12vw;--y0:78vh;--x1:112vw;--y1:-14vh;--z0:-380px;--z1:160px;--d:46s;--dl:0s;--c1:#6366f1;--c2:#a78bfa;--t:24s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:44px;--x0:110vw;--y0:64vh;--x1:-14vw;--y1:20vh;--z0:-120px;--z1:220px;--d:38s;--dl:-9s;--c1:#ec4899;--c2:#f9a8d4;--t:21s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:86px;--x0:-10vw;--y0:22vh;--x1:112vw;--y1:88vh;--z0:-420px;--z1:-60px;--d:58s;--dl:-21s;--c1:#06b6d4;--c2:#67e8f9;--t:28s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:52px;--x0:30vw;--y0:112vh;--x1:70vw;--y1:-16vh;--z0:-200px;--z1:240px;--d:34s;--dl:-14s;--c1:#f59e0b;--c2:#fcd34d;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:72px;--x0:112vw;--y0:92vh;--x1:-12vw;--y1:40vh;--z0:-340px;--z1:120px;--d:52s;--dl:-30s;--c1:#8b5cf6;--c2:#c4b5fd;--t:26s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:38px;--x0:-10vw;--y0:48vh;--x1:110vw;--y1:6vh;--z0:-60px;--z1:260px;--d:30s;--dl:-4s;--c1:#10b981;--c2:#6ee7b7;--t:20s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:58px;--x0:60vw;--y0:-14vh;--x1:16vw;--y1:114vh;--z0:-260px;--z1:180px;--d:44s;--dl:-26s;--c1:#3b82f6;--c2:#93c5fd;--t:23s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:48px;--x0:88vw;--y0:112vh;--x1:40vw;--y1:-14vh;--z0:-160px;--z1:200px;--d:36s;--dl:-17s;--c1:#f43f5e;--c2:#fda4af;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:90px;--x0:-14vw;--y0:60vh;--x1:112vw;--y1:20vh;--z0:-300px;--z1:140px;--d:50s;--dl:-6s;--c1:#6366f1;--c2:#6366f1;--t:29s"><div class="fr"></div></div><div class="fo" style="--s:64px;--x0:112vw;--y0:18vh;--x1:-14vw;--y1:80vh;--z0:-180px;--z1:200px;--d:42s;--dl:-19s;--c1:#ec4899;--c2:#ec4899;--t:24s"><div class="fr"></div></div><div class="fo" style="--s:110px;--x0:20vw;--y0:114vh;--x1:84vw;--y1:-18vh;--z0:-400px;--z1:60px;--d:60s;--dl:-33s;--c1:#06b6d4;--c2:#06b6d4;--t:32s"><div class="fr"></div></div><div class="fo" style="--s:56px;--x0:80vw;--y0:-14vh;--x1:6vw;--y1:100vh;--z0:-100px;--z1:240px;--d:40s;--dl:-12s;--c1:#f59e0b;--c2:#f59e0b;--t:23s"><div class="fr"></div></div><div class="fo" style="--s:54px;--x0:-12vw;--y0:34vh;--x1:112vw;--y1:70vh;--z0:-240px;--z1:180px;--d:48s;--dl:-2s;--c1:#6366f1;--c2:#22d3ee;--t:23s"><div class="ft"></div></div><div class="fo" style="--s:40px;--x0:112vw;--y0:50vh;--x1:-12vw;--y1:8vh;--z0:-80px;--z1:240px;--d:34s;--dl:-23s;--c1:#ec4899;--c2:#f59e0b;--t:20s"><div class="ft"></div></div><div class="fo" style="--s:70px;--x0:46vw;--y0:-14vh;--x1:92vw;--y1:114vh;--z0:-320px;--z1:100px;--d:54s;--dl:-36s;--c1:#8b5cf6;--c2:#06b6d4;--t:25s"><div class="ft"></div></div><div class="fo" style="--s:46px;--x0:-12vw;--y0:104vh;--x1:114vw;--y1:30vh;--z0:-140px;--z1:220px;--d:40s;--dl:-28s;--c1:#10b981;--c2:#3b82f6;--t:21s"><div class="ft"></div></div></div>{% endif %}<aside class="emp{{' tlside' if hol_only else ''}}">
 <button type="button" class="tb-toggle" aria-label="Menu" aria-expanded="false" onclick="var a=this.closest('aside');var o=a.classList.toggle('tb-open');this.setAttribute('aria-expanded',o?'true':'false')">&#9776;</button>
 <div class="panel-ttl">{{ 'Admin Panel' if session.role=='admin' else 'Employee Panel' }}</div>
 {% for h,l,on,kids in nav %}{% if kids %}<div class="ng{{' open' if (on and session.role!='admin') else ''}}{{' ng-act' if on else ''}}"><a class="ng-h" href="{{h}}" role="button" aria-expanded="{{'true' if (on and session.role!='admin') else 'false'}}" onclick="var g=this.parentNode;var w=!g.classList.contains('open');document.querySelectorAll('.ng.open').forEach(function(x){x.classList.remove('open');x.firstElementChild.setAttribute('aria-expanded','false')});if(w){g.classList.add('open');this.setAttribute('aria-expanded','true')}return false">{{l}}<span class="chev">&#9650;</span></a>
@@ -3534,7 +3535,7 @@ html body .app.emp3d table tbody tr:hover td{background:#f4f3ff}
 var M=['January','February','March','April','May','June','July','August','September','October','November','December'],W=['S','M','T','W','T','F','S'];
 var now=new Date();if(window.SRVTODAY){var sp=window.SRVTODAY.split('-');now=new Date(+sp[0],+sp[1]-1,+sp[2])}var y=now.getFullYear(),m=now.getMonth(),NH='';
 var HL=window.HOL||{},PRM=window.PRM||{},A=window.ATT||null,FM=['January','February','March','April','May','June','July','August','September','October','November','December'];
-
+if(document.querySelector('.app.sbar')&&((window.matchMedia&&window.matchMedia('(min-width:801px)').matches)||A))d.open=true;
 function z(n){return(n<10?'0':'')+n}
 function iso(d){return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())}
 function nextHol(){var tk=iso(now),ks=Object.keys(HL).filter(function(k){return k>=tk}).sort();return ks.length?ks[0]:''}
@@ -3604,9 +3605,11 @@ window.addEventListener('online',function(){setTimeout(check,1500)})
 var root=document.querySelector('.app.emp3d');if(!root)return;
 var aside=root.querySelector('aside.emp'),main=root.querySelector('main'),mb=root.querySelector('.mbody');
 if(!aside||!main||!mb)return;
+var SB=root.classList.contains('sbar');
 var mq=window.matchMedia('(min-width:801px)'),FS=0.9,FM=0.95,MS=1,MM=1,STEP=0.025,sbin=null,fin=null,tm=null,profEl=aside.querySelector('.prof');
 function wrap(){
-
+ if(SB){if(!sbin){sbin=document.createElement('div');sbin.className='sbin';while(aside.firstChild)sbin.appendChild(aside.firstChild);aside.appendChild(sbin)}
+ if(profEl&&profEl.parentNode!==aside)aside.appendChild(profEl)}
  if(!fin){fin=document.createElement('div');fin.className='fitin';while(mb.firstChild)fin.appendChild(mb.firstChild);mb.appendChild(fin)}
 }
 function reset(){
@@ -3646,7 +3649,7 @@ function fitMain(){
 }
 function fit(){
  if(!mq.matches){reset();return}
- wrap();fitMain()
+ wrap();if(SB)fitSide();fitMain()
 }
 function sched(){clearTimeout(tm);tm=setTimeout(fit,60)}
 mb.addEventListener('scroll',function(){if(!mb.classList.contains('fit-scroll')&&(mb.scrollTop||mb.scrollLeft)){mb.scrollTop=0;mb.scrollLeft=0}});
@@ -3657,7 +3660,7 @@ if(mq.addEventListener)mq.addEventListener('change',sched);
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(sched);
 if(window.MutationObserver){
  var mo=new MutationObserver(sched),o={childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['class','hidden','open']};
- wrap();mo.observe(aside,o);mo.observe(fin,o)
+ wrap();mo.observe(SB?sbin:aside,o);mo.observe(fin,o)
 }
 fit();setTimeout(fit,400);setTimeout(fit,1500)
 })();
@@ -4075,7 +4078,7 @@ THEMES = [
     dict(id="porcelain", name="Porcelain",    note="Clean and bright", pri="#3b82f6", pri2="#1d4ed8", s1="#0c1f4a", s2="#14337a", s3="#1d4ed8", t1="#d7e6ff", t2="#e4efff", base="#f3f7fd", l1="#0c1f4a", l2="#1d4ed8", l3="#60a5fa"),
     dict(id="rose",      name="Rose Quartz",  note="Soft and friendly", pri="#db2777", pri2="#be185d", s1="#2e0e25", s2="#5b1a45", s3="#8a2a62", t1="#fbd5e5", t2="#ffe4ee", base="#fff6f9", l1="#2e0e25", l2="#7d1442", l3="#f0468d"),
 ]
-PANEL_LAYOUTS = [("1", "Top bar", "Menu across the top, more room for tables (Update278: the sidebar was removed)")]
+PANEL_LAYOUTS = [("top", "Top bar", "Menu across the top, more room for tables (current)"), ("side", "Sidebar", "Menu on the left, as before Update278")]
 LOGIN_LAYOUTS = [("0", "Window with scene", "Animated 3D scene beside the form (current)"), ("1", "Centered card", "Clean, single card in the middle")]
 
 from functools import lru_cache
@@ -4114,13 +4117,23 @@ def _theme_css_for(tid, panel_b, login_b):
             'body .win.admin .lcard{width:min(360px,100%)}')
     return "".join(css)
 
-def theme_choice():
-    """-> (theme id, panel layout '0'/'1', login layout '0'/'1') as saved by the Admin; defaults = the current design."""
+def _role_ui(role):
+    """Update279: -> (theme id, layout 'top'/'side') for the Admin panel / Employee panel. Employee theme '' = follows the Admin theme; login pages use the Admin theme."""
+    tid = _setting("ui_theme") or "indigo"
+    lay = "top"
+    if role == "employee":
+        tid = _setting("ui_emp_theme") or tid; lay = _setting("ui_emp_layout") or "top"
+    elif role == "admin":
+        lay = _setting("ui_admin_layout") or "top"
+    return (tid if any(x["id"] == tid for x in THEMES) else "indigo"), ("side" if lay == "side" else "top")
+
+def theme_choice(role=None):
+    """-> (theme id, panel layout '1' = top bar / '0' = sidebar, login layout '0'/'1') for the signed-in role (Update279: Admin and Employee are configured separately)."""
     try:
-        tid = _setting("ui_theme") or "indigo"; pl = _setting("ui_panel_layout") or "0"; ll = _setting("ui_login_layout") or "0"
+        tid, lay = _role_ui(role or session.get("role")); ll = _setting("ui_login_layout") or "0"
     except Exception as ex:
-        print("theme settings read error:", repr(ex)); return "indigo", "0", "0"
-    return (tid if any(x["id"] == tid for x in THEMES) else "indigo"), "1", ("1" if ll == "1" else "0")      # Update278: panel layout is always the Top bar
+        print("theme settings read error:", repr(ex)); return "indigo", "1", "0"
+    return tid, ("0" if lay == "side" else "1"), ("1" if ll == "1" else "0")
 
 
 TOPBAR_CSS = r"""
@@ -4180,6 +4193,8 @@ from functools import lru_cache as _lru_tb
 def _topbar_css_for(s1, s2):
     return re.sub(r"\s*\n\s*", "", TOPBAR_CSS.replace("@S1@", s1).replace("@S2@", s2))
 
+_TB_HIDE = "html body .app aside .tb-toggle{display:none!important}"      # Update279: sidebar layout has no menu button
+
 def _topbar_css_now():
     """Update278: the top navigation bar stylesheet, coloured from the active theme / design (dropdown + calendar panels)."""
     try:
@@ -4196,63 +4211,109 @@ def _topbar_css_now():
 
 def _theme_css():
     try:
-        tid, pl, ll = theme_choice(); return _theme_css_for(tid, False, ll == "1") + _design_css_now() + _topbar_css_now()      # Update274: per-panel design (Admin / Employee) on top of the theme
+        tid, pl, ll = theme_choice(); return _theme_css_for(tid, False, ll == "1") + _design_css_now() + (_topbar_css_now() if pl == "1" else _TB_HIDE)      # Update274: per-panel design (Admin / Employee) on top of the theme
     except Exception as ex:
         print("theme css error:", repr(ex)); return ""
 
 THEME_PAGE = """<style>
-.tp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin:10px 0 22px}
-.tp-card{position:relative;display:block;cursor:pointer;border:2px solid var(--line);border-radius:16px;padding:10px;background:#fff}
+.tp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:8px 0 16px}
+.tp-card{position:relative;display:block;cursor:pointer;border:2px solid var(--line);border-radius:14px;padding:9px;background:#fff}
 .tp-card input{position:absolute;opacity:0;width:1px;height:1px}
 .tp-card:has(input:checked){border-color:var(--pri);box-shadow:0 12px 26px -10px var(--pri)}
 .tp-card:has(input:focus-visible){outline:3px solid var(--pri);outline-offset:2px}
-.tp-sw{display:block;height:74px;border-radius:12px;position:relative;box-shadow:inset 0 -10px 18px #0004,0 10px 18px -8px #0006}
-.tp-sw i{position:absolute;right:12px;bottom:12px;width:44px;height:22px;border-radius:8px;box-shadow:0 4px 0 #0005}
-.tp-card b{display:block;margin-top:8px}.tp-card small{color:var(--mut)}
-.tp-opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:10px 0 18px}
-#tpv{--a:#6366f1;--b:#8b5cf6;--s1:#0f1535;--s3:#2a2a73;display:flex;height:150px;max-width:460px;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:#f5f7fc;box-shadow:0 18px 30px -14px #0006;margin:8px 0 18px}
-#tpv[data-p="1"]{flex-direction:column}
-#tpv .m{background:linear-gradient(185deg,var(--s1),var(--s3));width:64px;padding:10px 8px;flex:none}
-#tpv[data-p="1"] .m{width:auto;height:30px;padding:6px 10px;display:flex;gap:6px}
-#tpv .m i{display:block;height:9px;border-radius:5px;background:#ffffff40;margin-bottom:7px}
-#tpv[data-p="1"] .m i{width:44px;margin:0}#tpv .m i.on{background:linear-gradient(135deg,var(--a),var(--b))}
-#tpv .c{flex:1;padding:12px;display:flex;gap:8px;align-items:flex-start}
-#tpv .c u{flex:1;height:46px;border-radius:10px;background:#fff;box-shadow:0 6px 12px -6px #0004;text-decoration:none}
-#tpv .c em{align-self:flex-end;width:54px;height:20px;border-radius:7px;background:linear-gradient(135deg,var(--a),var(--b));box-shadow:0 4px 0 var(--s3)}
+.tp-sw{display:block;height:56px;border-radius:10px;position:relative;box-shadow:inset 0 -10px 18px #0004,0 8px 14px -8px #0006}
+.tp-sw i{position:absolute;right:10px;bottom:10px;width:38px;height:18px;border-radius:7px;box-shadow:0 3px 0 #0005}
+.tp-card b{display:block;margin-top:6px}.tp-card small{color:var(--mut)}
+.tp-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px;align-items:start}
+.tp-box{border:1px solid var(--line);border-radius:16px;padding:14px 16px;background:#fff}
+.tp-lay{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:8px 0 14px}
+.tp-note{font-size:12px;color:var(--mut);margin:4px 0 10px}
+.tp-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.pv{--a:#6366f1;--b:#8b5cf6;--s1:#0f1535;--s3:#2a2a73;display:flex;flex-direction:column;height:236px;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:#f5f7fc;box-shadow:0 16px 28px -14px #0006;margin:8px 0 6px}
+.pv[data-p="side"]{flex-direction:row}
+.pv-nav{background:linear-gradient(185deg,var(--s1),var(--s3));display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:7px 10px;color:#fff;font-size:10.5px;flex:none}
+.pv[data-p="side"] .pv-nav{flex-direction:column;flex-wrap:nowrap;align-items:stretch;width:112px;padding:9px 7px}
+.pv-t{font-weight:700;padding:0 8px 0 2px}.pv[data-p="side"] .pv-t{padding:0 4px 6px;border-bottom:1px solid #ffffff2e;margin-bottom:3px}
+.pv-i{padding:4px 8px;border-radius:8px;color:#d5dbf7;white-space:nowrap}.pv-i.on{background:linear-gradient(135deg,var(--a),var(--b));color:#fff}
+.pv-u{margin-left:auto;display:flex;align-items:center;gap:6px}.pv[data-p="side"] .pv-u{margin:auto 0 0;flex-direction:column}
+.pv-av{width:20px;height:20px;border-radius:50%;background:linear-gradient(135deg,var(--a),var(--b));box-shadow:0 0 0 2px #ffffff55}
+.pv-u em{font-style:normal;background:#ffffff22;border-radius:7px;padding:3px 9px}
+.pv-main{flex:1;padding:12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.pv-card{height:40px;border-radius:10px;background:#fff;box-shadow:0 6px 12px -6px #0004}.pv-card.w{border-left:5px solid var(--a)}
+.pv-row{display:flex;gap:8px}.pv-row .pv-card{flex:1;height:46px}
+.pv-tbl{background:#fff;border-radius:10px;padding:7px 9px;box-shadow:0 6px 12px -6px #0004;display:flex;flex-direction:column;gap:6px}.pv-tbl i{display:block;height:7px;border-radius:4px;background:#e6eaf3}.pv-tbl i:first-child{background:linear-gradient(90deg,var(--a),var(--b));opacity:.8}
 </style>
-<div class="head"><div><h1>Theme &amp; Layout</h1><p class="mut"><a href="/admin/designs">Design Studio</a> - separate 3D designs for the Admin and Employee pages, with side-by-side preview. &nbsp;Choose how every Employee and Admin login page and panel looks. The change applies to everyone right after you save.</p></div></div>
-<form method="post" id="tpf">
-<h2>Theme</h2>
-<div class="tp-grid">{% for t in themes %}<label class="tp-card"><input type="radio" name="theme" value="{{t.id}}" {{'checked' if t.id==cur[0] else ''}} data-a="{{t.pri}}" data-b="{{t.pri2}}" data-s1="{{t.s1}}" data-s3="{{t.s3}}"><span class="tp-sw" style="background:linear-gradient(135deg,{{t.s1}},{{t.s3}})"><i style="background:linear-gradient(135deg,{{t.pri}},{{t.pri2}})"></i></span><b>{{t.name}}</b><small>{{t.note}}</small></label>{% endfor %}</div>
-<div class="tp-opts"><div><h2>Panel layout</h2>{% for v,n,d in panels %}<label class="tp-card" style="margin:8px 0"><input type="radio" name="panel" value="{{v}}" {{'checked' if v==cur[1] else ''}}><b>{{n}}</b><small>{{d}}</small></label>{% endfor %}</div>
-<div><h2>Login page layout</h2>{% for v,n,d in logins %}<label class="tp-card" style="margin:8px 0"><input type="radio" name="login" value="{{v}}" {{'checked' if v==cur[2] else ''}}><b>{{n}}</b><small>{{d}}</small></label>{% endfor %}</div></div>
-<h2>Preview</h2>
-<div id="tpv" data-p="{{cur[1]}}"><div class="m"><i class="on"></i><i></i><i></i><i></i></div><div class="c"><u></u><u></u><em></em></div></div>
-<button class="primary" type="submit">Save theme &amp; layout</button>
+<div class="head"><div><h1>Theme &amp; Layout</h1><p class="mut">Manage how the <b>Admin</b> and <b>Employee</b> panels look. Each panel has its own theme and layout. Pick options and check the preview first - nothing changes until you press Apply. <a href="/admin/designs">Design Studio</a> (3D designs) is separate and keeps working on top of these choices.</p></div></div>
+<div class="tp-two">
+<form method="post" class="tp-box" id="tpf-e">
+<h2 style="margin-top:0">Employee Panel</h2>
+<p class="tp-note">Applies to every Employee page (all employees) the moment you press Apply. Only the menu layout and colours change - employee data, entries and features are not touched.</p>
+<h3>Layout</h3>
+<div class="tp-lay">{% for v,n,d in layouts %}<label class="tp-card"><input type="radio" name="layout" value="{{v}}" {{'checked' if v==cur.e_layout else ''}}><b>{{n}}</b><small>{{d}}</small></label>{% endfor %}</div>
+<h3>Theme</h3>
+<div class="tp-grid"><label class="tp-card"><input type="radio" name="theme" value="" {{'checked' if not cur.e_theme else ''}} data-a="{{cur.a_pal.pri}}" data-b="{{cur.a_pal.pri2}}" data-s1="{{cur.a_pal.s1}}" data-s3="{{cur.a_pal.s3}}"><span class="tp-sw" style="background:linear-gradient(135deg,{{cur.a_pal.s1}},{{cur.a_pal.s3}})"><i style="background:linear-gradient(135deg,{{cur.a_pal.pri}},{{cur.a_pal.pri2}})"></i></span><b>Same as Admin</b><small>Follows the Admin theme</small></label>
+{% for t in themes %}<label class="tp-card"><input type="radio" name="theme" value="{{t.id}}" {{'checked' if t.id==cur.e_theme else ''}} data-a="{{t.pri}}" data-b="{{t.pri2}}" data-s1="{{t.s1}}" data-s3="{{t.s3}}"><span class="tp-sw" style="background:linear-gradient(135deg,{{t.s1}},{{t.s3}})"><i style="background:linear-gradient(135deg,{{t.pri}},{{t.pri2}})"></i></span><b>{{t.name}}</b><small>{{t.note}}</small></label>{% endfor %}</div>
+<h3>Preview <span class="mut" style="font-weight:400">(not applied yet)</span></h3>
+<div class="pv" id="pv-e" data-p="{{cur.e_layout}}"><div class="pv-nav"><span class="pv-t">Employee Panel</span><span class="pv-i on">Daily entry</span><span class="pv-i">Leave &amp; Permission</span><span class="pv-i">Personal details</span><span class="pv-i">Calendar</span><span class="pv-u"><i class="pv-av"></i><em>Logout</em></span></div><div class="pv-main"><div class="pv-card w"></div><div class="pv-row"><div class="pv-card"></div><div class="pv-card"></div></div><div class="pv-tbl"><i></i><i></i><i></i></div></div></div>
+<p class="tp-note">Schematic preview of the menu position and colours. Open Employee pages pick up an applied change the next time they load or the employee opens another page.</p>
+<div class="tp-btns"><button class="primary" type="submit" name="scope" value="employee" onclick="return confirm('Apply this layout and theme to every Employee page now?')">Apply to all Employee pages</button><button class="btnl" type="submit" name="scope" value="reset_employee" onclick="return confirm('Reset the Employee panel to the Top bar layout and the Admin theme?')">Reset Employee panel</button></div>
 </form>
+<form method="post" class="tp-box" id="tpf-a">
+<h2 style="margin-top:0">Admin Panel</h2>
+<p class="tp-note">Applies to the Admin pages and the login pages. The Employee panel keeps its own settings.</p>
+<h3>Layout</h3>
+<div class="tp-lay">{% for v,n,d in layouts %}<label class="tp-card"><input type="radio" name="layout" value="{{v}}" {{'checked' if v==cur.a_layout else ''}}><b>{{n}}</b><small>{{d}}</small></label>{% endfor %}</div>
+<h3>Theme</h3>
+<div class="tp-grid">{% for t in themes %}<label class="tp-card"><input type="radio" name="theme" value="{{t.id}}" {{'checked' if t.id==cur.a_theme else ''}} data-a="{{t.pri}}" data-b="{{t.pri2}}" data-s1="{{t.s1}}" data-s3="{{t.s3}}"><span class="tp-sw" style="background:linear-gradient(135deg,{{t.s1}},{{t.s3}})"><i style="background:linear-gradient(135deg,{{t.pri}},{{t.pri2}})"></i></span><b>{{t.name}}</b><small>{{t.note}}</small></label>{% endfor %}</div>
+<h3>Login page layout</h3>
+<div class="tp-lay">{% for v,n,d in logins %}<label class="tp-card"><input type="radio" name="login" value="{{v}}" {{'checked' if v==cur.login else ''}}><b>{{n}}</b><small>{{d}}</small></label>{% endfor %}</div>
+<h3>Preview <span class="mut" style="font-weight:400">(not applied yet)</span></h3>
+<div class="pv" id="pv-a" data-p="{{cur.a_layout}}"><div class="pv-nav"><span class="pv-t">Admin Panel</span><span class="pv-i on">Overview</span><span class="pv-i">Processes</span><span class="pv-i">Log</span><span class="pv-i">Employee Info</span><span class="pv-i">Notes</span><span class="pv-u"><i class="pv-av"></i><em>Logout</em></span></div><div class="pv-main"><div class="pv-card w"></div><div class="pv-row"><div class="pv-card"></div><div class="pv-card"></div></div><div class="pv-tbl"><i></i><i></i><i></i></div></div></div>
+<div class="tp-btns"><button class="primary" type="submit" name="scope" value="admin">Apply to Admin panel</button></div>
+</form>
+</div>
 <script>
-(function(){var f=document.getElementById('tpf'),v=document.getElementById('tpv');
-function up(){var t=f.querySelector('input[name=theme]:checked'),p=f.querySelector('input[name=panel]:checked');
+(function(){function wire(fid,pid){var f=document.getElementById(fid),v=document.getElementById(pid);if(!f||!v)return;
+function up(){var t=f.querySelector('input[name=theme]:checked'),l=f.querySelector('input[name=layout]:checked');
 if(t){v.style.setProperty('--a',t.dataset.a);v.style.setProperty('--b',t.dataset.b);v.style.setProperty('--s1',t.dataset.s1);v.style.setProperty('--s3',t.dataset.s3)}
-if(p)v.dataset.p=p.value}
-f.addEventListener('change',up);up()})();
-</script>"""
+if(l)v.dataset.p=l.value}
+f.addEventListener('change',up);up()}
+wire('tpf-e','pv-e');wire('tpf-a','pv-a')})();
+</script>
+"""
 
 @app.route("/admin/theme", methods=["GET", "POST"])
 @need("admin")
 def admin_theme():
+    """Update279: Admin manages the Admin panel and the Employee panel separately (layout + theme). CSS only - no employee data is read or written."""
     if request.method == "POST":
-        tid = request.form.get("theme", "indigo"); pl = "1"; ll = request.form.get("login", "0")      # Update278: Top bar only
-        if not any(x["id"] == tid for x in THEMES) or ll not in ("0", "1"):
-            flash("Please pick a theme and a layout.", "error"); return redirect("/admin/theme")
+        scope = request.form.get("scope", ""); tid = request.form.get("theme", ""); lay = request.form.get("layout", "top"); ll = request.form.get("login", "0")
+        ok_t = any(x["id"] == tid for x in THEMES)
         try:
-            _set_setting("ui_theme", tid); _set_setting("ui_panel_layout", pl); _set_setting("ui_login_layout", ll)
+            if scope == "admin" and ok_t and lay in ("top", "side") and ll in ("0", "1"):
+                _set_setting("ui_theme", tid); _set_setting("ui_admin_layout", lay); _set_setting("ui_login_layout", ll)
+                flash("Admin panel saved - the Admin pages and login pages now use it.")
+            elif scope == "employee" and (tid == "" or ok_t) and lay in ("top", "side"):
+                _set_setting("ui_emp_theme", tid); _set_setting("ui_emp_layout", lay)
+                flash("Employee panel saved - every Employee page now uses it.")
+            elif scope == "reset_employee":
+                _set_setting("ui_emp_theme", ""); _set_setting("ui_emp_layout", "top")
+                flash("Employee panel reset to the Top bar layout and the Admin theme.")
+            else:
+                flash("Please pick a theme and a layout.", "error")
         except Exception as ex:
-            print("theme save error:", repr(ex)); flash("Could not save the theme. Please try again.", "error"); return redirect("/admin/theme")
-        flash("Theme and layout saved - every login page and panel now uses it.")
+            print("theme save error:", repr(ex)); flash("Could not save. Please try again.", "error")
         return redirect("/admin/theme")
     prefetch("Settings")
-    return page(THEME_PAGE, title="Theme & Layout", themes=THEMES, panels=PANEL_LAYOUTS, logins=LOGIN_LAYOUTS, cur=theme_choice())
+    try:
+        a_t, a_pl, ll = theme_choice("admin"); e_t, e_pl, _l = theme_choice("employee")
+        e_raw = _setting("ui_emp_theme")
+        e_raw = e_raw if any(x["id"] == e_raw for x in THEMES) else ""
+    except Exception as ex:
+        print("theme page read error:", repr(ex)); a_t, a_pl, ll, e_raw, e_pl = "indigo", "1", "0", "", "1"
+    cur = dict(a_theme=a_t, a_layout=("side" if a_pl == "0" else "top"), e_theme=e_raw, e_layout=("side" if e_pl == "0" else "top"), login=ll,
+               a_pal=next((x for x in THEMES if x["id"] == a_t), THEMES[0]))
+    return page(THEME_PAGE, title="Theme & Layout", themes=THEMES, layouts=PANEL_LAYOUTS, logins=LOGIN_LAYOUTS, cur=cur)
 
 # ---------------------------------------------------------------- Update274: Design Studio - a DIFFERENT design for the Admin pages and for the Employee pages (CSS only; routes, data, forms and scripts untouched).
 # Admin > /admin/designs: pick a design per panel, compare Admin | Employee side by side (live mock-ups), try it on the real Admin pages (only for the Admin's own session), then Apply.
@@ -4297,7 +4358,7 @@ body @S@ .card:hover,body @S@ .kpi:hover{transform:perspective(900px) translateY
 """,
  "titan": """
 @S@::before{background:radial-gradient(520px 300px at 0% 0%,@A1@2e,transparent 65%),linear-gradient(@S3@14 1px,transparent 1px) 0 0/34px 34px,linear-gradient(90deg,@S3@14 1px,transparent 1px) 0 0/34px 34px}
-@S@ aside{border-bottom:3px solid @A1@;border-radius:0;box-shadow:0 8px 26px -12px #0b1220aa}
+@S@ aside{border-right:3px solid @A1@;border-radius:0;box-shadow:8px 0 26px -12px #0b1220aa}
 @S@ aside a{border-radius:6px}@S@ aside a.on{border-radius:6px;box-shadow:inset 3px 0 0 #fff,0 8px 18px -8px @A1@aa}
 body @S@ .card,body @S@ .kpi{background:#fffffff2;border:1px solid #cbd5e1;border-top:3px solid @A1@;border-radius:8px;box-shadow:0 1px 0 #fff inset,0 8px 20px -14px #0b1220aa}
 body @S@ .card:hover,body @S@ .kpi:hover{transform:translateY(-1px);box-shadow:0 14px 26px -14px @A2@88}
@@ -4309,7 +4370,7 @@ body @S@ .card:hover,body @S@ .kpi:hover{transform:translateY(-1px);box-shadow:0
 """,
  "sunrise": """
 @S@::before{background:radial-gradient(circle at 90% 4%,#fde68a 0,@A1@66 14%,transparent 36%),radial-gradient(300px 300px at 10% 84%,@A2@38,transparent 70%),radial-gradient(360px 360px at 54% 30%,@A1@22,transparent 70%);animation:dzDrift 34s ease-in-out infinite alternate}
-@S@ aside{border-radius:0 0 28px 28px;box-shadow:0 10px 34px -14px @S2@99}
+@S@ aside{border-radius:0 28px 28px 0;box-shadow:10px 0 34px -14px @S2@99}
 @S@ aside a{border-radius:14px}
 body @S@ .card,body @S@ .kpi{background:#fffffff0;border:1px solid @BG1@;border-radius:26px;box-shadow:0 5px 0 @BG1@,0 20px 32px -16px @A2@66}
 body @S@ .card:hover,body @S@ .kpi:hover{transform:translateY(-3px);box-shadow:0 8px 0 @BG1@,0 26px 38px -16px @A2@88}
@@ -4320,7 +4381,7 @@ body @S@ .card:hover,body @S@ .kpi:hover{transform:translateY(-3px);box-shadow:0
 """,
  "orbit": """
 @S@::before{background:repeating-radial-gradient(circle at 92% 6%,transparent 0 46px,@A1@22 47px 48px),repeating-radial-gradient(circle at 4% 98%,transparent 0 60px,@A2@22 61px 62px),radial-gradient(520px 320px at 50% 0%,@BG1@aa,transparent 70%);animation:dzDrift 40s ease-in-out infinite alternate}
-@S@ aside{border-bottom:1px solid @A1@55;box-shadow:0 6px 28px -14px @S2@aa}
+@S@ aside{border-right:1px solid @A1@55;box-shadow:6px 0 28px -14px @S2@aa}
 body @S@ .card,body @S@ .kpi{background:#fffffff2;border:1px solid @BG1@;border-left:5px solid @A1@;border-radius:14px;box-shadow:0 12px 26px -16px @S3@88}
 body @S@ .card:hover,body @S@ .kpi:hover{transform:translateX(3px);box-shadow:0 16px 30px -14px @A2@88;border-left-color:@A2@}
 @S@ .kpi b{color:@S2@}
@@ -4341,7 +4402,12 @@ def _design_css_for(role, did, panel_b):
     d = _design_of(role, did)
     if not d or d["k"] == "classic": return ""
     css = DZ_COMMON + DZ_EXTRA.get(d["k"], "") + DZ_TAIL
-    if panel_b: css = css.replace("margin:12px 0 12px 12px;height:calc(100vh - 24px);top:12px;", "")      # top-bar layout keeps its own geometry
+    if panel_b:      # top-bar layout keeps its own geometry (Update278: accent edge / shadow along the bottom of the bar)
+        css = css.replace("margin:12px 0 12px 12px;height:calc(100vh - 24px);top:12px;", "")
+        for o_, n_ in (("@S@ aside{border-right:3px solid @A1@;border-radius:0;box-shadow:8px 0 26px -12px #0b1220aa}", "@S@ aside{border-bottom:3px solid @A1@;border-radius:0;box-shadow:0 8px 26px -12px #0b1220aa}"),
+                       ("@S@ aside{border-radius:0 28px 28px 0;box-shadow:10px 0 34px -14px @S2@99}", "@S@ aside{border-radius:0 0 28px 28px;box-shadow:0 10px 34px -14px @S2@99}"),
+                       ("@S@ aside{border-right:1px solid @A1@55;box-shadow:6px 0 28px -14px @S2@aa}", "@S@ aside{border-bottom:1px solid @A1@55;box-shadow:0 6px 28px -14px @S2@aa}")):
+            css = css.replace(o_, n_)
     S = ".app.emp3d" if role == "employee" else ".app:not(.emp3d)"
     for k_, v_ in (("@S@", S), ("@A1@", d["a1"]), ("@A2@", d["a2"]), ("@S1@", d["s1"]), ("@S2@", d["s2"]), ("@S3@", d["s3"]), ("@EDGE@", d["edge"]), ("@BG1@", d["bg1"]), ("@BG2@", d["bg2"]), ("@BASE@", d["base"])):
         css = css.replace(k_, v_)
@@ -4463,7 +4529,7 @@ NAVS = {
               ("/admin/leave-permission", "Leave & Permission Log"),
               ("/admin/employee-info", "Employee Info"), ("/admin/audit", "Audit Log"),
               ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes"),
-              ("/admin/notes", "Notes & Messages")],   # Update248 / Update211: Theme & Layout is link-only (/admin/theme), not in the menu
+              ("/admin/notes", "Notes & Messages"), ("/admin/theme", "Theme & Layout")],   # Update279: Theme & Layout (Admin / Employee panel layout + theme) is back in the menu
     "employee": [("/employee", "Daily entry"), ("/employee/leave", "Leave & Permission"),
                  ("/employee/profile", "Personal details"), ("/employee/productivity", "Productivity Info")],
 }
@@ -4567,7 +4633,7 @@ def page(body, title="Productivity Tracker", **ctx):
         by_h = {n[0]: n for n in nav}
         nav = [by_h["/admin/summary"], by_h["/admin/processes"],
                ("/admin/log", "Log", any(k[2] for k in log_kids), log_kids),
-               by_h["/admin/employee-info"], by_h["/admin/notes"]]      # Update248: Notes & Messages / Update211: Theme & Layout removed from the menu
+               by_h["/admin/employee-info"], by_h["/admin/notes"], by_h["/admin/theme"]]      # Update248: Notes & Messages / Update211: Theme & Layout removed from the menu
     side_avatar = ""
     if session.get("role") == "admin":
         side_avatar = ADMIN3D_HTML
@@ -4633,7 +4699,7 @@ def page(body, title="Productivity Tracker", **ctx):
         try: _ntm = consent_banner() + _ntm
         except Exception as ex_: print("Consent banner failed:", repr(ex_))
     _html = render_fast(BASE, body=_ntm + render_fast(body, **ctx), title=title, nav=nav,
-                                  side_avatar=side_avatar, side_name=side_name, side_name_html=side_name_html, welcome_html=welcome_html, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, hol_only=bool(ctx["hide_status"]), srv_today=str(today_local()), theme_css=_theme_css())
+                                  side_avatar=side_avatar, side_name=side_name, side_name_html=side_name_html, welcome_html=welcome_html, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, hol_only=bool(ctx["hide_status"]), srv_today=str(today_local()), theme_css=_theme_css(), sbar=bool(session.get("role") in ("admin", "employee") and theme_choice()[1] == "0"))
     return _html
 
 

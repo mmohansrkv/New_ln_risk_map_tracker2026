@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update281: Employee login - after EVERY login (also repeated logins the same day) a full-screen 3D animated "Daily Inspiration" overlay appears on the first Employee page: "Welcome Back, <name>! Login #N", today's motivational quote (language Tamil / English / Thanglish picked at random per day, same quote for everyone that day; English quotes are fetched online with a built-in fallback, Tamil / Thanglish are built-in) and a "Close & Continue" button - the overlay cannot be dismissed any other way (no timeout / Esc / outside click) and stays on every Employee page until Close is pressed. Display only: nothing is written to the Productivity log, so the quote is never counted as productive hours. Login # = number of this employee's sessions in the Attendance sheet (incl. the current one). New Settings key daily_quote. Routes /employee/quote-data, /employee/quote/close. Existing Employee page design unchanged after closing.
   * Update280: Employee page (Daily entry) - the small "Monthly Productivity Summary" strip now also shows "Permission: N Hrs" = the total hours of this employee's APPROVED permissions in the current month (Pending / Rejected not counted). Read live from the Permissions sheet on every page load, so it follows new / approved / changed records. Display only; same one-line strip, nothing else changed.
   * Update279: Admin > Theme & Layout (menu item "Theme & Layout") now manages the Employee Panel and the Admin Panel SEPARATELY - each has its own Layout (Top bar / Sidebar) and Theme (Employee: or "Same as Admin"), a live preview before applying, and an Apply button; an applied Employee layout / theme is used by every Employee page from its next load. Reset Employee panel returns to Top bar + Admin theme. Only CSS / menu position changes (new Settings keys ui_admin_layout, ui_emp_layout, ui_emp_theme); employee data, routes and features are untouched. The Sidebar layout of Update277 can be chosen again.
   * Update278: Admin AND Employee pages - the left sidebar is REMOVED; every menu item (incl. the Log / Employee Info dropdowns, Calendar, profile avatar + name and Logout) now sits in a compact TOP navigation bar. On phones the bar collapses behind a menu button. Navigation layout only - pages, themes, colours, animations, routes and data are unchanged. The Theme & Layout "Panel layout" choice is now fixed to Top bar.
@@ -4569,6 +4570,192 @@ WELCOME_CSS = """<style id="wlc-css">
 @media(prefers-reduced-motion:reduce){.wlc{animation:wlcIn .2s ease both,wlcOut .4s ease 2s forwards}.wlc-glow,.wlc-sweep{animation:none}.wlc-t i{animation:none;opacity:1}}
 </style>"""
 
+# ---------------------------------------------------------------- Update281: Daily Inspirational Quote after every Employee login
+# One quote per day (language ta / en / tg picked at random for the day), shown in a full-screen 3D overlay after EVERY employee login (also repeated logins the same day).
+# The employee must press "Close & Continue"; nothing is written to the Productivity log, so the quote is never counted as productive time.
+# English quotes are fetched online (ZenQuotes / DummyJSON, work-related ones preferred) with a built-in fallback; Tamil / Thanglish come from the built-in lists (no reliable free online source).
+QUOTES = {
+ "en": ["Small steps taken every day add up to big results.", "Focus on progress, not perfection.", "Great teams are built on trust, respect, and shared goals.",
+        "Success is the sum of small efforts repeated day after day.", "Learn something new today and you are already ahead of yesterday.", "Do the work with full focus, and the results will follow.",
+        "Alone we go fast, together we go far.", "Your attitude today shapes your results tomorrow.", "Plan your day, then give it your best effort.",
+        "Every challenge is a chance to grow stronger.", "Consistency beats intensity when it comes to success.", "Help a teammate today - success tastes better when it is shared.",
+        "Quality work starts with a calm mind and a clear goal.", "Don't wait for motivation. Start, and motivation will join you."],
+ "ta": ["ஒவ்வொரு நாளும் செய்யும் சிறிய முயற்சி, பெரிய வெற்றிக்கு அடித்தளம்.", "இன்றைய உழைப்பே நாளைய வெற்றி.", "குழுவாக இணைந்தால் எந்த இலக்கும் எளிதாகும்.",
+        "தொடங்குவதே பாதி வெற்றி; தொடர்வதே முழு வெற்றி.", "கற்றுக்கொள்ளும் மனம் எப்போதும் வளர்ந்துகொண்டே இருக்கும்.", "கவனத்துடன் செய்யும் வேலை எப்போதும் சிறப்பாக அமையும்.",
+        "தோல்வி என்பது முடிவல்ல; அது அடுத்த முயற்சிக்கான பாடம்.", "நேரத்தை மதித்தால் நேரம் உங்களை உயர்த்தும்.", "ஒற்றுமையே வலிமை; ஒன்றாகச் செய்தால் வெற்றி நிச்சயம்.",
+        "இன்று நீங்கள் செய்யும் நல்ல வேலை, நாளை உங்கள் அடையாளமாகும்.", "நம்பிக்கையோடு முயற்சி செய்; வழி தானாகத் திறக்கும்.", "சிறிய முன்னேற்றமும் முன்னேற்றமே; அதைக் கொண்டாடுங்கள்.",
+        "திட்டமிட்டுச் செயல்படுங்கள்; நாள் முழுவதும் நிறைவாக இருக்கும்.", "உங்களால் முடியும் என்று நம்புங்கள்; பாதி வேலை முடிந்துவிடும்."],
+ "tg": ["Daily chinna effort edutha, periya vetri kidaikkum.", "Innaiku seiyura velai thaan naalaiya vetri.", "Team-aa serndhu velai senjaa, edhuvum easy-aa mudiyum.",
+        "Aarambikkradhu paadhi vetri; thodarvadhu muzhu vetri.", "Dhinamum puthusa edhaavadhu kathukonga, neenga valarndhutte irupeenga.", "Focus-oda seiyura velai eppavum best-aa irukkum.",
+        "Thotrangal mudivu illa; adhu adutha muyarchikku paadam.", "Neram-a madhicha, neram ungala uyarthum.", "Otrumai thaan balam; serndhu senjaa vetri nichayam.",
+        "Nambikkaiyoda muyarchi pannunga, vazhi thaanaa thirakkum.", "Chinna munnetram kooda munnetram dhaan; adha kondaadunga.", "Plan pannitu velai seiyunga, naal muzhukka nimmadhiya irukkum.",
+        "Ungalala mudiyum nu nambunga; paadhi velai mudinjidum.", "Unga positive attitude dhaan unga result-a decide pannum."],
+}
+QUOTE_LABEL = {"en": "English", "ta": "தமிழ்", "tg": "Thanglish"}
+_QUOTE_WORDS = ("work", "success", "team", "effort", "goal", "grow", "learn", "believe", "courage", "persever", "disciplin", "action", "habit", "focus", "progress", "improve", "dream", "strength", "patience", "begin", "start", "mistake", "try", "hard", "great")
+_QUOTE_CACHE, _QUOTE_LOCK = {}, threading.Lock()          # {date: quote dict} - this process
+_QUOTE_PENDING = {}                                      # {attendance session id: {"n": login number, "t": time}} - quotes waiting for the Close click (server-side, so a stale cookie can never bring one back)
+_LOGIN_N, _LOGIN_N_LOCK = {}, threading.Lock()           # {employee id: logins so far} - seeded once from the Attendance sheet
+
+def _quote_online():
+    """-> (text, author, source) of a work-related English quote from the web, or None. Short time budget; never raises."""
+    t0 = time.time(); cands = []
+    for url, pick in (("https://zenquotes.io/api/today", lambda d: (d[0]["q"], d[0]["a"], "zenquotes.io")),) + (("https://dummyjson.com/quotes/random", lambda d: (d["quote"], d["author"], "dummyjson.com")),) * 4:
+        if time.time() - t0 > 7: break
+        try:
+            d = requests.get(url, timeout=2.5, headers={"User-Agent": "ProductivityTracker/1.0"}).json()
+            q, a, src = pick(d); q = str(q).strip(); a = str(a).strip()
+            if not (12 <= len(q) <= 200) or a.lower() == "zenquotes.io": continue          # ZenQuotes answers with an 'author' of zenquotes.io when it is rate-limiting
+            if any(w in q.lower() for w in _QUOTE_WORDS): return q, a, src
+            cands.append((q, a, src))
+        except Exception as ex:
+            print("quote fetch failed:", url, repr(ex))
+    return None      # nothing work-related found online: use the built-in English list
+
+def get_daily_quote():
+    """Update281: today's quote {date, lang, text, author, src} - same for everyone, saved once a day in Settings (key daily_quote) so restarts / workers agree."""
+    day = str(today_local())
+    with _QUOTE_LOCK:
+        q = _QUOTE_CACHE.get(day)
+        if q: return q
+        try:
+            sv = json.loads(_setting("daily_quote") or "{}")
+            if sv.get("date") == day and sv.get("text"):
+                _QUOTE_CACHE.clear(); _QUOTE_CACHE[day] = sv; return sv
+        except Exception: pass
+        lang = random.Random("quote-" + day).choice(("ta", "en", "tg"))
+        text, author, src = "", "", "built-in"
+        if lang == "en":
+            got = _quote_online()
+            if got: text, author, src = got
+        if not text:
+            lst = QUOTES[lang]; text = lst[dt.date.fromisoformat(day).toordinal() % len(lst)]
+        q = dict(date=day, lang=lang, label=QUOTE_LABEL[lang], text=text, author=author, src=src)
+        _QUOTE_CACHE.clear(); _QUOTE_CACHE[day] = q
+    try: _set_setting("daily_quote", json.dumps(q, ensure_ascii=False))
+    except Exception as ex: print("daily quote save error:", repr(ex))
+    return q
+
+def _login_number(eid):
+    """This employee's login count including the login happening now (counted from the Attendance sheet once, then kept in memory)."""
+    k = str(eid)
+    with _LOGIN_N_LOCK:
+        if k not in _LOGIN_N:
+            try: _LOGIN_N[k] = sum(1 for r in rows("Attendance") if str(r.get("Employee ID", "")) == k)
+            except Exception as ex: print("login count read error:", repr(ex)); _LOGIN_N[k] = 0
+        _LOGIN_N[k] += 1
+        return _LOGIN_N[k]
+
+def quote_begin(att_id, n):
+    """Called right after an employee login: the next Employee page shows the quote until Close is pressed."""
+    if not att_id: return
+    now_ = time.time()
+    for k_ in [k for k, v in _QUOTE_PENDING.items() if now_ - v["t"] > 43200]: _QUOTE_PENDING.pop(k_, None)
+    _QUOTE_PENDING[att_id] = dict(n=n, t=now_)
+    _bg(get_daily_quote)      # fetch / pick today's quote while the first page loads
+
+QUOTE_CSS = r"""<style id="dq-css">
+.dq{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:18px;overflow:hidden;font-family:"Noto Sans Tamil","Nirmala UI","Latha","Tamil Sangam MN",system-ui,-apple-system,"Segoe UI",sans-serif;color:#fff;perspective:1100px;
+ background:radial-gradient(900px 520px at 15% 10%,#7c3aedcc,transparent 60%),radial-gradient(800px 500px at 88% 90%,#ec4899b3,transparent 60%),radial-gradient(700px 420px at 80% 8%,#06b6d4aa,transparent 60%),linear-gradient(135deg,#1e1b4b,#312e81 45%,#4c1d95);background-size:140% 140%;animation:dqIn .5s ease both,dqBg 16s ease-in-out infinite alternate}
+.dq.out{animation:dqOut .35s ease forwards}
+@keyframes dqIn{from{opacity:0}to{opacity:1}}@keyframes dqOut{to{opacity:0;visibility:hidden}}@keyframes dqBg{from{background-position:0 0}to{background-position:100% 100%}}
+.dq-o{position:absolute;pointer-events:none;border-radius:50%;background:radial-gradient(circle at 30% 28%,#fff 0,var(--c) 38%,#0000 72%);opacity:.75;filter:blur(.3px);animation:dqFloat var(--d) ease-in-out infinite;animation-delay:var(--dl);left:var(--x);top:var(--y);width:var(--s);height:var(--s)}
+@keyframes dqFloat{0%,100%{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(var(--mx),-34px,60px) scale(1.12)}}
+.dq-cube{position:absolute;pointer-events:none;width:var(--s);height:var(--s);left:var(--x);top:var(--y);transform-style:preserve-3d;animation:dqSpin var(--d) linear infinite}
+.dq-cube i{position:absolute;inset:0;border:2px solid #ffffff88;background:#ffffff14;box-shadow:inset 0 0 14px #ffffff33}
+.dq-cube i:nth-child(1){transform:translateZ(calc(var(--s)/2))}.dq-cube i:nth-child(2){transform:rotateY(180deg) translateZ(calc(var(--s)/2))}.dq-cube i:nth-child(3){transform:rotateY(90deg) translateZ(calc(var(--s)/2))}
+.dq-cube i:nth-child(4){transform:rotateY(-90deg) translateZ(calc(var(--s)/2))}.dq-cube i:nth-child(5){transform:rotateX(90deg) translateZ(calc(var(--s)/2))}.dq-cube i:nth-child(6){transform:rotateX(-90deg) translateZ(calc(var(--s)/2))}
+@keyframes dqSpin{from{transform:rotateX(20deg) rotateY(0)}to{transform:rotateX(380deg) rotateY(360deg)}}
+.dq-sp{position:absolute;pointer-events:none;font-size:var(--s);left:var(--x);top:var(--y);color:#fde68a;text-shadow:0 0 12px #fde68a;animation:dqTw 3.2s ease-in-out infinite;animation-delay:var(--dl)}
+@keyframes dqTw{0%,100%{opacity:.15;transform:scale(.6) rotate(0)}50%{opacity:1;transform:scale(1.15) rotate(25deg)}}
+.dq-card{--rx:0deg;--ry:0deg;--ang:0deg;position:relative;width:min(760px,94vw);max-height:92vh;overflow:auto;border-radius:28px;padding:30px clamp(18px,4vw,46px) 26px;text-align:center;background:linear-gradient(150deg,#ffffff26,#ffffff0d);
+ -webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 40px 80px -24px #000a,0 0 0 1px #ffffff40,inset 0 1px 0 #ffffff66;transform:rotateX(var(--rx)) rotateY(var(--ry));transition:transform .15s ease-out;animation:dqPop .8s cubic-bezier(.2,.9,.25,1.1) both .1s}
+@keyframes dqPop{from{opacity:0;transform:translateY(60px) rotateX(28deg) scale(.86)}to{opacity:1;transform:rotateX(var(--rx)) rotateY(var(--ry))}}
+@property --ang{syntax:"<angle>";inherits:false;initial-value:0deg}
+.dq-card::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:2px;background:conic-gradient(from var(--ang),#22d3ee,#a78bfa,#f472b6,#fbbf24,#22d3ee);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;animation:dqSpinB 6s linear infinite;pointer-events:none}
+@keyframes dqSpinB{to{--ang:360deg}}
+.dq-hi{font-size:clamp(20px,3.4vw,30px);font-weight:800;letter-spacing:.2px;margin:0;text-shadow:0 3px 0 #4c1d95,0 0 22px #a78bfaaa;animation:dqBob 3.6s ease-in-out infinite}
+@keyframes dqBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+.dq-meta{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin:10px 0 4px}
+.dq-pill{display:inline-block;padding:4px 14px;border-radius:999px;font-size:13px;font-weight:700;background:linear-gradient(120deg,#f59e0b,#ec4899);box-shadow:0 4px 0 #9d174d,0 10px 18px -6px #ec4899aa;position:relative;overflow:hidden}
+.dq-pill.l{background:#ffffff26;box-shadow:inset 0 0 0 1px #ffffff55;font-weight:600}
+.dq-pill::after{content:"";position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(100deg,transparent,#ffffffaa,transparent);transform:skewX(-20deg);animation:dqShine 3.2s ease-in-out infinite}
+@keyframes dqShine{0%{left:-60%}55%,100%{left:140%}}
+.dq-mark{font:900 78px/0.7 Georgia,serif;color:#fde68a;text-shadow:0 4px 0 #b45309,0 0 26px #fbbf24aa;margin:14px 0 0;animation:dqBob 4.2s ease-in-out infinite}
+.dq-q{margin:6px 0 4px;font-size:clamp(21px,3.5vw,35px);font-weight:700;line-height:1.5;text-shadow:0 2px 12px #0006;min-height:2.6em}
+.dq-q .w{display:inline-block;opacity:0;margin:0 .13em;transform:translateY(26px) rotateX(-80deg) scale(.7);animation:dqW .75s cubic-bezier(.2,.9,.25,1.2) forwards;animation-delay:calc(var(--i)*.075s + .6s)}
+.dq-q .w:nth-child(5n+2){color:#fde68a}.dq-q .w:nth-child(7n+4){color:#a5f3fc}.dq-q .w:nth-child(9n+6){color:#fbcfe8}
+@keyframes dqW{to{opacity:1;transform:none}}
+.dq-by{margin:2px 0 0;font-size:14px;color:#e9d5ff;opacity:.95}
+.dq-note{margin:14px 0 0;font-size:12.5px;color:#ddd6fe}
+.dq-btn{margin-top:16px;position:relative;overflow:hidden;cursor:pointer;border:0;border-radius:999px;padding:12px 34px;font:800 16px/1 inherit;font-family:inherit;color:#fff;letter-spacing:.3px;background:linear-gradient(135deg,#22c55e,#06b6d4);box-shadow:0 6px 0 #0f766e,0 16px 24px -8px #06b6d4aa,inset 0 1px 0 #ffffff77;transition:transform .15s ease,box-shadow .15s ease;animation:dqBtn 2.4s ease-in-out infinite}
+@keyframes dqBtn{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+.dq-btn:hover{transform:translateY(-4px) scale(1.04);box-shadow:0 10px 0 #0f766e,0 22px 30px -8px #06b6d4cc,inset 0 1px 0 #ffffff77;animation:none}
+.dq-btn:active{transform:translateY(4px);box-shadow:0 1px 0 #0f766e,0 4px 8px -2px #06b6d488}
+.dq-btn:focus-visible{outline:3px solid #fde68a;outline-offset:3px}
+.dq-btn::after{content:"";position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(100deg,transparent,#ffffffaa,transparent);transform:skewX(-20deg);animation:dqShine 3s ease-in-out infinite}
+@media(max-width:600px){.dq-o,.dq-cube:nth-of-type(n+3){display:none}.dq-mark{font-size:60px}}
+@media(prefers-reduced-motion:reduce){.dq,.dq *,.dq-card::before{animation:none!important}.dq-q .w{opacity:1;transform:none}.dq-card{transition:none}}
+@media print{.dq{display:none!important}}
+</style>"""
+
+QUOTE_HTML = r"""<div class="dq" id="dq" role="dialog" aria-modal="true" aria-labelledby="dq-hi" aria-describedby="dq-q">
+<span class="dq-o" style="--c:#22d3ee;--s:150px;--x:6%;--y:14%;--d:9s;--dl:0s;--mx:30px"></span><span class="dq-o" style="--c:#f472b6;--s:110px;--x:84%;--y:62%;--d:11s;--dl:-3s;--mx:-26px"></span>
+<span class="dq-o" style="--c:#fbbf24;--s:80px;--x:76%;--y:10%;--d:8s;--dl:-5s;--mx:18px"></span><span class="dq-o" style="--c:#a78bfa;--s:130px;--x:12%;--y:70%;--d:12s;--dl:-2s;--mx:-20px"></span>
+<span class="dq-cube" style="--s:46px;--x:16%;--y:30%;--d:18s"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="dq-cube" style="--s:34px;--x:88%;--y:34%;--d:14s"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+<span class="dq-cube" style="--s:28px;--x:70%;--y:84%;--d:16s"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+<span class="dq-sp" style="--s:22px;--x:30%;--y:8%;--dl:0s">&#10022;</span><span class="dq-sp" style="--s:16px;--x:62%;--y:90%;--dl:-1.2s">&#10022;</span><span class="dq-sp" style="--s:26px;--x:92%;--y:18%;--dl:-2s">&#10022;</span><span class="dq-sp" style="--s:18px;--x:4%;--y:46%;--dl:-.6s">&#10022;</span>
+<div class="dq-card" id="dq-card">
+<h2 class="dq-hi" id="dq-hi">@@HELLO@@</h2>
+<div class="dq-meta"><span class="dq-pill">Login #@@N@@</span><span class="dq-pill l" id="dq-lang">&hellip;</span></div>
+<div class="dq-mark" aria-hidden="true">&ldquo;</div>
+<p class="dq-q" id="dq-q"></p><p class="dq-by" id="dq-by"></p>
+<p class="dq-note">Take a moment to read today&rsquo;s thought, then continue to your work.</p>
+<button type="button" class="dq-btn" id="dq-close">Close &amp; Continue</button>
+</div></div>"""
+
+QUOTE_JS = r"""<script>(function(){var el=document.getElementById('dq');if(!el)return;var q=document.getElementById('dq-q'),by=document.getElementById('dq-by'),lg=document.getElementById('dq-lang'),btn=document.getElementById('dq-close'),card=document.getElementById('dq-card'),done=false;
+var prevOv=document.documentElement.style.overflow;document.documentElement.style.overflow='hidden';
+var FALL={text:'Every day is a new chance to grow.',author:'',label:'English'};
+function show(d){if(!d||!d.text)d=FALL;lg.textContent=d.label||'';q.textContent='';var ws=String(d.text).split(/\s+/);for(var i=0;i<ws.length;i++){var s=document.createElement('span');s.className='w';s.style.setProperty('--i',i);s.textContent=ws[i];q.appendChild(s)}
+q.setAttribute('aria-label',d.text);by.textContent=d.author?('\u2014 '+d.author+(d.src&&d.src!=='built-in'?'  \u00b7 via '+d.src:'')):''}
+var emb=document.getElementById('dq-data');if(emb){try{show(JSON.parse(emb.textContent))}catch(e){show(null)}}
+else{lg.textContent='\u2026';fetch('/employee/quote-data',{credentials:'same-origin'}).then(function(r){return r.json()}).then(show).catch(function(){show(null)})}
+function close(){if(done)return;done=true;try{fetch('/employee/quote/close',{method:'POST',credentials:'same-origin',keepalive:true}).catch(function(){})}catch(e){}
+el.classList.add('out');document.documentElement.style.overflow=prevOv;setTimeout(function(){if(el.parentNode)el.parentNode.removeChild(el);var c=document.getElementById('dq-css');if(c&&c.parentNode)c.parentNode.removeChild(c);var d=document.getElementById('dq-data');if(d&&d.parentNode)d.parentNode.removeChild(d)},380)}
+btn.addEventListener('click',close);
+el.addEventListener('keydown',function(e){if(e.key==='Tab'){e.preventDefault();btn.focus()}});
+el.addEventListener('pointermove',function(e){var r=window.innerWidth,h=window.innerHeight;card.style.setProperty('--ry',((e.clientX/r-.5)*10)+'deg');card.style.setProperty('--rx',((.5-e.clientY/h)*8)+'deg')});
+el.addEventListener('pointerleave',function(){card.style.setProperty('--ry','0deg');card.style.setProperty('--rx','0deg')});
+setTimeout(function(){try{btn.focus({preventScroll:true})}catch(e){}},900)})();</script>"""
+
+def quote_overlay_html():
+    """Update281: the blocking quote overlay for this login (empty once Close was pressed, on bare pages and for the Admin)."""
+    st = _QUOTE_PENDING.get(session.get("att_id")) if session.get("role") == "employee" else None
+    if not st: return ""
+    import html as _hq
+    nm = str(session.get("name") or "").strip()[:40]
+    hello = ("Welcome Back, %s!" % nm) if st["n"] > 1 else ("Welcome, %s!" % nm)
+    if not nm: hello = "Welcome Back!" if st["n"] > 1 else "Welcome!"
+    out = QUOTE_CSS + QUOTE_HTML.replace("@@HELLO@@", _hq.escape(hello)).replace("@@N@@", str(int(st["n"])))
+    q = _QUOTE_CACHE.get(str(today_local()))
+    if q:      # already known: no extra request, the text animates in at once
+        data = json.dumps(dict(text=q["text"], author=q.get("author", ""), src=q.get("src", ""), label=q.get("label", "")), ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+        out += '<script type="application/json" id="dq-data">' + data + '</script>'
+    return out + QUOTE_JS
+
+@app.route("/employee/quote-data")
+@need("employee")
+def employee_quote_data():
+    q = get_daily_quote()
+    return jsonify(text=q["text"], author=q.get("author", ""), src=q.get("src", ""), label=q.get("label", ""))
+
+@app.route("/employee/quote/close", methods=["POST"])
+@need("employee")
+def employee_quote_close():
+    _QUOTE_PENDING.pop(session.get("att_id"), None)      # display only: nothing is saved to the Productivity log or the working-time hours
+    return jsonify(ok=True)
+
 def welcome_overlay_html(name):
     """Update227: one-time animated 'Welcome, <nickname>!' overlay (pure CSS, transform / opacity only, auto-hides after ~4 s, click / key / Esc closes it). Display only."""
     import html as _hh
@@ -4675,6 +4862,9 @@ def page(body, title="Productivity Tracker", **ctx):
     if session.get("role") == "employee" and not ctx.get("bare") and session.pop("welcome", None):      # Update227: shown once, right after login
         try: welcome_html = welcome_overlay_html(side_name)
         except Exception as ex: print("welcome overlay error:", repr(ex))
+    if session.get("role") == "employee" and not ctx.get("bare"):      # Update281: daily quote overlay (until Close is pressed)
+        try: welcome_html = quote_overlay_html() + welcome_html
+        except Exception as ex_: print("quote overlay error:", repr(ex_))
     att_json, hol_json, prm_json = "", "{}", "{}"              # Update158: attendance for the sidebar calendar (employees only)
     if session.get("role") == "employee" and not ctx.get("bare"):
         try:
@@ -6747,7 +6937,11 @@ def employee_login():
                 session.clear()
                 session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"],
                                designation=str(e.get("Designation", "")))      # Update230: the one-time welcome overlay (Update227) is switched off - it held the page for ~4 s after login
+                try: _lno = _login_number(session["emp_id"])      # Update281: login # (counted before this login is written to Attendance)
+                except Exception as ex_: print("login count error:", repr(ex_)); _lno = 1
                 track_login(session["emp_id"], session["name"], session["band"])
+                try: quote_begin(session.get("att_id"), _lno)      # Update281: daily quote overlay until Close is pressed
+                except Exception as ex_: print("daily quote start error:", repr(ex_))
                 _bg(warm_employee_cache)                  # dashboard data loads while the welcome animation plays
                 resp = redirect("/employee")                  # Update202: straight to the Employee Panel (no welcome page)
                 try:      # Update212: remember only "m" / "f" so the next login page on this browser shows the matching character

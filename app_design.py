@@ -1,11 +1,4 @@
 """Productivity Tracker - Flask + Google Sheets.
-  * Update236: (1) Admin > Productivity Log: clicking an employee's NAME opens that employee's complete Productivity Log (/admin/employee-info/<id>/productivity-log) - every date (all time by default, optional month filter) with Date / Process / Target count / Completed count / Achieved or Not Achieved / Productivity % / hours / submitted-at, a date-wise summary, a process-wise summary and non-productive time, all read from the same Productivity log data. Works for every employee. (2) Employees whose Designation is Associate Manager / Team Lead / Senior Team Lead (matched live) no longer have the Daily entry and Productivity Info pages: both menu items are hidden and the URLs redirect to Leave & Permission. Other employees are unchanged.
-  * Update235: Admin > Employee Info > clicking the name of an employee whose Designation is Associate Manager / Team Lead / Senior Team Lead opens ONLY their detailed Productivity Log (/admin/employee-info/<id>/productivity-log): process-wise summary (days, hours, target count, completed count, Achieved / Not Achieved, productivity %), every daily process line with the same details, non-productive time, month filter. Read-only; no Daily Entry or Productivity Info sections. Other designations unchanged.
-  * Update234: Managers & Team Leads (Designation Associate Manager / Manager / Team Lead / Senior Team Lead, matched live). (1) Admin > Employee Info has a new tab "Managers & Leads": each of these employees with month entries, productivity %, missed entries + dates and links to their Productivity Log and Missed Entries Log. (2) When they log in, their panel gets a read-only "Team Logs" menu: Productivity Log and Missed Entries Log of all employees (month + search filters; no edit / delete / e-mail actions). Other employees get 403 on those URLs and see no menu item. Nothing else changed.
-  * Update233: (1) Employee LOGIN page - NO name / nickname is shown any more (the display, its script and the name returned by /login-char are removed; the lookup now returns only m / f / n for the character, so the page and the server stay light). The old "Employee system" caption stays as before. (2) Employee panel - the name above the Logout button keeps the 3D letter animation, now in LIGHT colours (white / pale blue letters with depth and glow). Nothing else changed.
-  * Update232: Employee panel name under the avatar - bolder gold 3D letters (extruded depth + glow), springy letter-by-letter flip-in, continuous 3D swing and a moving light sheen. Layout unchanged.
-  * Update230b: FASTER page after Employee login. (1) The one-time "Welcome" overlay (Update227) is no longer shown - it covered the page for about 4 seconds. (2) While the login page is open, every sheet the Employee page needs is read in the background (not only Employees), so the Employee page opens from memory right after sign-in instead of waiting for 8 Google Sheets reads. (3) Single-flight reads: the page no longer asks Google again for a sheet that is already being read. Password check, lock check, session handling and all tracking are unchanged.
-  * Update230: Employee LOGIN page - the nickname under the 3D character is plain static text again (3D effects and letter animation removed; simple fade-in only). Layout and other animations unchanged.
   * Update229: Login nickname - bigger, clearer solid 3D letters (extruded depth, cyan glow, springy letter-by-letter flip-in, continuous 3D swing); the small "Employee system" caption fades out while a nickname is shown so they never overlap. Layout unchanged.
   * Update228: Employee LOGIN page - the nickname under the 3D character now appears letter by letter with a 3D flip-in, glowing cyan / violet letters, a pulsing light behind it and a gentle wave (script builds the letters with textContent; CSS transform / opacity only). Layout unchanged.
   * Update227: Employee panel - ONE-TIME animated welcome right after login: "Welcome, <nickname>!" (saved Profile Name, else full name) with letter-by-letter 3D flip-in, glowing letters, pulsing light and a light sweep, then it fades out by itself (~4 s; click / Enter / Esc closes it). Pure CSS (transform / opacity), no libraries, shown on the first page only; layout and functionality unchanged.
@@ -977,19 +970,12 @@ def _prewarm_employees():
     try:
         with _rows_cache_lock: c = _rows_cache.get("Employees")
         if c is None or time.monotonic() - c[0] > _ROWS_CACHE_TTL: _refresh_bg("Employees")
-        _now = time.monotonic()          # Update230: warm every sheet the Employee page needs WHILE the person types the password, so the page opens from memory right after login
-        for _n in EMP_PAGE_SHEETS:
-            if _n == "Employees": continue
-            with _rows_cache_lock: _c = _rows_cache.get(_n)
-            if _c is None or _now - _c[0] > 30: _refresh_bg(_n)
     except Exception:
         pass
 
 def warm_employee_cache():
-    """Read every sheet the Employee dashboard needs, all at once (only the ones that are not already fresh)."""
-    now = time.monotonic()
-    with _rows_cache_lock: cold = [n for n in EMP_PAGE_SHEETS if n not in _rows_cache or now - _rows_cache[n][0] > 30]
-    ths = [threading.Thread(target=_safe_fetch, args=(n,), daemon=True) for n in cold]
+    """Read every sheet the Employee dashboard needs, all at once."""
+    ths = [threading.Thread(target=_safe_fetch, args=(n,), daemon=True) for n in EMP_PAGE_SHEETS]
     for t in ths: t.start()
     for t in ths: t.join(timeout=25)
 
@@ -1005,21 +991,8 @@ def prefetch(*names):
     for t in ths: t.join(timeout=20)
 
 def _safe_fetch(name):
-    # Update230: single flight - if this sheet is already being read (login-page warm-up / background refresh), WAIT for that read instead of asking Google a second time
-    with _rows_cache_lock:
-        busy = name in _refreshing
-        if not busy: _refreshing.add(name)
-    if busy:
-        t_end = time.monotonic() + 25
-        while time.monotonic() < t_end:
-            with _rows_cache_lock:
-                if name not in _refreshing: return
-            time.sleep(0.03)
-        return
     try: _fetch_rows(name)
-    except Exception as e:
-        print("prefetch error:", e)
-        with _rows_cache_lock: _refreshing.discard(name)
+    except Exception as e: print("prefetch error:", e)
 
 def num(x):
     """Update170: tolerant number read - '2', '2.5', '2,5', '1,250', '2 hrs', '1:30' (= 1.5) and '85%' all give a number; blank / text gives 0."""
@@ -2513,16 +2486,15 @@ aside.emp{position:sticky;top:0;height:100vh;overflow-y:auto;align-self:flex-sta
 .prof .av3d{width:84px;height:84px;margin:0 0 6px}
 .prof-name{font-size:14.5px;font-weight:600;color:#fff;letter-spacing:.2px;text-shadow:0 2px 6px #0006;word-break:break-word;line-height:1.25}
 /* Update226: employee nickname (Profile Name, else full name) under the 3D avatar - letter-by-letter 3D flip-in, then a slow wave + gold sheen. Transform / opacity only. */
-.nm3d{display:inline-block;perspective:520px;font-size:1.22em;padding:2px 2px 7px;position:relative}
+.nm3d{display:inline-block;perspective:520px}
 .nm3d .w{display:inline-block;white-space:nowrap}
-.nm3d i{font-style:normal;display:inline-block;font-weight:900;letter-spacing:.5px;transform-origin:50% 100%;transform-style:preserve-3d;opacity:0;color:#f8fbff;
-  text-shadow:0 1px 0 #dbeafe,0 2px 0 #bfdbfe,0 3px 0 #93c5fd,0 4px 0 #6d8fd6,0 7px 7px rgba(0,0,0,.5),0 0 10px rgba(224,242,254,.85),0 0 22px rgba(165,243,252,.5);
-  animation:nm3In .9s cubic-bezier(.2,.9,.25,1.25) forwards,nm3Wave 2.8s ease-in-out infinite;animation-delay:calc(var(--i)*85ms + .1s),calc(var(--i)*140ms + 1.3s)}
-.nm3d::after{content:"";position:absolute;top:0;bottom:0;left:-30%;width:26%;pointer-events:none;background:linear-gradient(100deg,transparent,rgba(255,255,255,.28),transparent);transform:skewX(-18deg);animation:nm3Sheen 3.6s ease-in-out 1.6s infinite}
-@keyframes nm3In{0%{opacity:0;transform:translateY(20px) rotateX(-110deg) scale(.5)}60%{opacity:1;transform:translateY(-4px) rotateX(14deg) scale(1.15)}100%{opacity:1;transform:none}}
-@keyframes nm3Wave{0%,100%{transform:translateY(0) rotateY(-16deg)}50%{transform:translateY(-3px) rotateY(16deg)}}
-@keyframes nm3Sheen{0%{left:-30%}55%,100%{left:125%}}
-@media(prefers-reduced-motion:reduce){.nm3d i{animation:none;opacity:1}.nm3d::after{display:none}}
+.nm3d i{font-style:normal;display:inline-block;font-weight:800;letter-spacing:.4px;transform-origin:50% 100%;opacity:0;
+  background:linear-gradient(180deg,#ffffff 0%,#fff1b8 45%,#f5b83a 100%);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;
+  filter:drop-shadow(0 1px 0 #92400e) drop-shadow(0 2px 0 #6b3306) drop-shadow(0 4px 5px #0009);
+  animation:nm3In .75s cubic-bezier(.2,.9,.25,1.15) forwards,nm3Wave 4s ease-in-out infinite;animation-delay:calc(var(--i)*60ms + .15s),calc(var(--i)*110ms + 1.4s)}
+@keyframes nm3In{0%{opacity:0;transform:translateY(16px) rotateX(-95deg) scale(.7)}60%{opacity:1}100%{opacity:1;transform:none}}
+@keyframes nm3Wave{0%,100%{transform:translateY(0) rotateY(0)}50%{transform:translateY(-2px) rotateY(14deg)}}
+@media(prefers-reduced-motion:reduce){.nm3d i{animation:none;opacity:1}}
 .prof-sub{font-size:12px;color:#9aa3c7;line-height:1.4;margin-top:2px;word-break:break-word}
 .prof-out{display:block;text-align:center;padding:6px 18px;color:#fff;background:#2b3560;border-radius:7px;font-size:13px;transition:background .2s ease,transform .15s ease}
 .prof-out:hover{background:#e5484d;transform:translateY(-1px)}@media print{.prof{display:none!important}}
@@ -3931,11 +3903,6 @@ def admin_theme():
     prefetch("Settings")
     return page(THEME_PAGE, title="Theme & Layout", themes=THEMES, panels=PANEL_LAYOUTS, logins=LOGIN_LAYOUTS, cur=theme_choice())
 
-def hide_entry_pages():
-    """Update236: Associate Manager / Team Lead / Senior Team Lead (matched live by Designation) have no Daily entry and no Productivity Info page."""
-    try: return session.get("role") == "employee" and is_view_only(session.get("emp_id", ""))
-    except Exception: return False
-
 NAVS = {
     "admin": [("/admin/summary", "Overview"), ("/admin/processes", "Processes"), ("/admin/log", "Productivity log"), 
               ("/admin/leave-permission", "Leave & Permission Log"),
@@ -3999,16 +3966,11 @@ def page(body, title="Productivity Tracker", **ctx):
     ctx["title"] = title
     p = request.path
     items = list(NAVS.get(session.get("role"), []))
-    if hide_entry_pages(): items = [it for it in items if it[0] not in ("/employee", "/employee/productivity")]      # Update236
     if session.get("role") == "employee":
         try:      # Admin-controlled: the menu item exists only while Audit Log access is enabled for this employee
             if audit_active(audit_access(session.get("emp_id", ""))): items.append(("/employee/audit", "Audit Log"))
         except Exception:
             pass
-        try:      # Update234: Managers / Team Leads (by Designation) get the read-only Team Logs
-            if team_log_access(): items.append(("/employee/team-logs", "Team Logs"))
-        except Exception as ex_:
-            print("Team Logs menu check failed:", repr(ex_))
         try:      # Admin-controlled: Mahizhchi appears only while it is published AND shared with this employee
             if mz_active(session.get("emp_id", "")): items.append(("/employee/mahizhchi", MZ_TITLE))
         except Exception as e:
@@ -4356,6 +4318,25 @@ html{scrollbar-gutter:stable}
 .chr-box.ca{left:69%;width:30%;--ar:1/1;--sh:88%;--skin:#f0b08a;--skin2:#e59e77;--hcx:49%;--hcy:22%;--hrw:20%;--hrh:21%;--pvx:50%;--pvy:36.5%;--e1x:48%;--e1y:28.4%;--e1w:5%;--e1h:4%;--e2x:57.8%;--e2y:25.1%;--e2w:3.8%;--e2h:4.4%;--l1l:45.1%;--l1t:26%;--l1w:6.2%;--l1h:5.1%;--l2l:55.3%;--l2t:22.2%;--l2w:4.9%;--l2h:5.8%;--mcx:54.9%;--mcy:31.6%;--mw:7.5%;--mh:3.5%}
 .ca .chr-p{background-image:url(/char/b.webp)}
 .ca .chr-shine{-webkit-mask-image:url(/char/b.webp);mask-image:url(/char/b.webp)}
+/* Update225: employee display name (Profile Name, else full name) directly below the 3D character */
+.chr-name{position:absolute;left:50%;top:100%;transform:translate(-50%,4px);max-width:150%;text-align:center;font-weight:700;font-size:clamp(13px,1.25vw,18px);line-height:1.2;letter-spacing:.3px;color:#fff;text-shadow:0 0 10px #38bdf8aa,0 2px 6px #000a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0;transition:opacity .28s ease;pointer-events:none}
+.chr-name.on{opacity:1}
+/* Update228: letter-by-letter 3D glowing nickname (letters are built by the script with textContent; transform / opacity only) */
+.chr-name{overflow:visible;text-overflow:clip;perspective:520px}
+.chr-name::before{content:"";position:absolute;left:50%;top:50%;width:150%;height:260%;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;z-index:-1;
+ background:radial-gradient(closest-side,rgba(103,232,249,.35),rgba(129,140,248,.18) 55%,transparent);animation:cnGlow 2.8s ease-in-out infinite}
+.chr-name .w{display:inline-block;white-space:nowrap;margin:0 .1em}
+.chr-name{font-size:clamp(17px,1.9vw,26px);transform:translate(-50%,10px)}
+.chr-name i{font-style:normal;display:inline-block;font-weight:900;opacity:0;transform-origin:50% 100%;transform-style:preserve-3d;color:#fff;
+ text-shadow:0 1px 0 #38bdf8,0 2px 0 #0ea5e9,0 3px 0 #0284c7,0 4px 0 #0369a1,0 5px 0 #075985,0 10px 10px rgba(0,0,0,.55),0 0 14px rgba(103,232,249,.95),0 0 28px rgba(129,140,248,.8);
+ animation:cnLet .85s cubic-bezier(.2,.9,.25,1.25) both,cnBob 2.6s ease-in-out infinite;animation-delay:calc(var(--i)*80ms),calc(var(--i)*130ms + 1.3s)}
+/* the plain "Employee system" caption steps aside while a nickname is shown (the nickname takes its place) */
+.lx.emp text.lx-lb[x="144"]{transition:opacity .3s ease}
+.lx.emp.hasnm text.lx-lb[x="144"]{opacity:0}
+@keyframes cnLet{0%{opacity:0;transform:translateY(26px) rotateX(-110deg) scale(.5)}60%{opacity:1;transform:translateY(-5px) rotateX(15deg) scale(1.15)}100%{opacity:1;transform:none}}
+@keyframes cnBob{0%,100%{transform:translateY(0) rotateY(-14deg)}50%{transform:translateY(-4px) rotateY(14deg)}}
+@keyframes cnGlow{0%,100%{opacity:.55}50%{opacity:1}}
+@media(prefers-reduced-motion:reduce){.chr-name i{animation:none;opacity:1}.chr-name::before{animation:none}}
 /* Update216: neutral (unknown / no gender) hologram character + smooth character swap when the username changes */
 .chr-box{transition:opacity .28s ease,transform .28s ease}
 .chr-box.sw{opacity:0;transform:translateY(8px) scale(.96)}
@@ -4465,7 +4446,7 @@ html{scrollbar-gutter:stable}
 </svg>
 <div class="lx-srv" aria-hidden="true"><div class="srv-box {{ 'sa' if role=='admin' else 'se' }}"><div class="srv-aura"></div><div class="srv-fl"></div><div class="srv-3d"><div class="tq-3d"><div class="tq-scene"><div class="tq-p tq-base"></div><div class="tq-p tq-head"></div><div class="tq-p tq-hand"></div><div class="tq-glow"></div><div class="tq-scr"><i style="top:8%;--w:70%;--t:-6.0s"></i><i style="top:22%;--w:55%;--t:-5.1s"></i><i style="top:36%;--w:80%;--t:-4.2s"></i><i style="top:50%;--w:40%;--t:-3.3s"></i><i style="top:64%;--w:65%;--t:-2.4s"></i><i style="top:78%;--w:30%;--t:-1.5s"></i><b></b></div><i class="tq-u" style="top:8.07%;--d:-0.00s"></i><i class="tq-u" style="top:15.33%;--d:-0.45s"></i><i class="tq-u" style="top:22.71%;--d:-0.90s"></i><i class="tq-u" style="top:30.10%;--d:-1.35s"></i><i class="tq-u" style="top:37.24%;--d:-1.80s"></i><i class="tq-u" style="top:66.50%;--d:-2.25s"></i><i class="tq-u" style="top:73.80%;--d:-2.70s"></i><i class="tq-u" style="top:81.05%;--d:-3.15s"></i><i class="tq-pk" style="top:11.07%;--d:0s;--w:2.1s"><b></b></i><i class="tq-pk" style="top:18.33%;--d:-0.7s;--w:1.7s"><b></b></i><i class="tq-pk" style="top:25.71%;--d:-1.4s;--w:2.4s"><b></b></i><i class="tq-pk" style="top:33.10%;--d:-0.3s;--w:1.9s"><b></b></i><i class="tq-pk" style="top:40.24%;--d:-1.1s;--w:2.2s"><b></b></i><i class="tq-pk" style="top:69.50%;--d:-0.5s;--w:1.8s"><b></b></i><i class="tq-pk" style="top:76.80%;--d:-1.6s;--w:2.5s"><b></b></i><i class="tq-pk" style="top:84.05%;--d:-0.9s;--w:2.0s"><b></b></i><i class="tq-led" style="top:11.07%;animation-delay:-0.00s"></i><i class="tq-led g" style="top:18.33%;animation-delay:-0.37s"></i><i class="tq-led" style="top:25.71%;animation-delay:-0.74s"></i><i class="tq-led g" style="top:33.10%;animation-delay:-1.11s"></i><i class="tq-led" style="top:40.24%;animation-delay:-1.48s"></i><i class="tq-led g" style="top:69.50%;animation-delay:-1.85s"></i><i class="tq-led" style="top:76.80%;animation-delay:-2.22s"></i><i class="tq-led g" style="top:84.05%;animation-delay:-2.59s"></i><div class="tq-shine"><i></i></div></div></div></div></div></div>
 <script>(function(){var s=document.querySelector('.tq-3d');if(!s||!window.matchMedia||window.matchMedia('(prefers-reduced-motion:reduce)').matches)return;var r=0,x=0,y=0;addEventListener('pointermove',function(e){x=e.clientX/innerWidth-.5;y=e.clientY/innerHeight-.5;if(!r)r=requestAnimationFrame(function(){r=0;s.style.setProperty('--px',x.toFixed(3));s.style.setProperty('--py',y.toFixed(3))})},{passive:true})})();</script>
-<div class="lx-chr" aria-hidden="true"><div class="chr-box {{ 'ca' if role=='admin' else ('cf' if lxg=='f' else ('cm' if lxg=='m' else 'cn')) }}"><div class="chr-sh"></div><div class="chr-fx"><div class="chr-3d"><div class="chr-stage"><div class="chr-p chr-base"></div><div class="chr-p chr-head"><div class="chr-p chr-eyes"></div><i class="chr-lid l1"></i><i class="chr-lid l2"></i><div class="chr-p chr-mouth"></div></div><div class="chr-p chr-shine"></div></div></div></div></div></div>
+<div class="lx-chr" aria-hidden="true"><div class="chr-box {{ 'ca' if role=='admin' else ('cf' if lxg=='f' else ('cm' if lxg=='m' else 'cn')) }}"><div class="chr-sh"></div><div class="chr-fx"><div class="chr-3d"><div class="chr-stage"><div class="chr-p chr-base"></div><div class="chr-p chr-head"><div class="chr-p chr-eyes"></div><i class="chr-lid l1"></i><i class="chr-lid l2"></i><div class="chr-p chr-mouth"></div></div><div class="chr-p chr-shine"></div></div></div></div>{% if role!='admin' %}<div class="chr-name" id="chr_name" aria-live="polite"></div>{% endif %}</div></div>
 <div class="lx-card"><img src="/logo.png" alt="Mobius Technologies and Services" width="150" height="78"><h2>Welcome back</h2><p>{{title}}</p>
 """
 LOGIN_NEW_MID = r"""</div>
@@ -4554,8 +4535,14 @@ LOGIN_CHR_JS = r"""<script>
 LOGIN_CHR_PICK = r"""<script>
 /* Update216: show the matching character as soon as the username is recognised (no sign-in needed). Display only - never touches the form. */
 (function(){
-  var lx = document.querySelector('.lx.emp'), u = document.getElementById('login_u'), box = lx && lx.querySelector('.chr-box');
+  var lx = document.querySelector('.lx.emp'), u = document.getElementById('login_u'), box = lx && lx.querySelector('.chr-box'), nmEl = document.getElementById('chr_name');
   if (!u || !box) return;
+  var nmT = 0;
+  function setName(t){ if (!nmEl) return; clearTimeout(nmT); nmEl.classList.remove('on'); if (!t) { if (lx) lx.classList.remove('hasnm'); return; } nmT = setTimeout(function(){ if (lx) lx.classList.add('hasnm');
+    nmEl.textContent = ''; nmEl.setAttribute('aria-label', t); var n = 0;
+    t.split(/\s+/).forEach(function(word){ if (!word) return; var w = document.createElement('span'); w.className = 'w'; w.setAttribute('aria-hidden', 'true');
+      for (var k = 0; k < word.length; k++) { var i = document.createElement('i'); i.style.setProperty('--i', n++); i.textContent = word.charAt(k); w.appendChild(i); } n++; nmEl.appendChild(w); });
+    nmEl.classList.add('on'); }, 200); }
   var cur = box.classList.contains('cf') ? 'f' : box.classList.contains('cm') ? 'm' : 'n', timer = 0, seq = 0, last = null, cache = {}, busy = 0;
   function show(g){
     if (g === cur) return; cur = g; var my = ++busy;
@@ -4564,12 +4551,12 @@ LOGIN_CHR_PICK = r"""<script>
   }
   function ask(){
     var v = (u.value || '').trim(); if (v === last) return; last = v;
-    if (!v) { seq++; show('n'); return; }
-    var k = v.toLowerCase(); if (cache[k]) { seq++; show(cache[k]); return; }
+    if (!v) { seq++; show('n'); setName(''); return; }
+    var k = v.toLowerCase(); if (cache[k]) { seq++; show(cache[k].g); setName(cache[k].n); return; }
     var my = ++seq;
     fetch('/login-char?u=' + encodeURIComponent(v), {credentials: 'same-origin', cache: 'no-store'})
       .then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(d){ if (!d || my !== seq) return; var g = (d.g === 'f' || d.g === 'm') ? d.g : 'n'; cache[k] = g; show(g); })
+      .then(function(d){ if (!d || my !== seq) return; var g = (d.g === 'f' || d.g === 'm') ? d.g : 'n'; var nm = (typeof d.n === 'string') ? d.n : ''; cache[k] = {g: g, n: nm}; show(g); setName(nm); })
       .catch(function(){});
   }
   function sched(){ clearTimeout(timer); timer = setTimeout(ask, 350); }
@@ -4618,7 +4605,7 @@ SAVED_ANIM = """{% if saved_anim %}<script>window.__cmSaved={{ session.name|tojs
 
 LIST = """<table><tr><th>Date</th>{% if session.role=='admin' %}<th>Employee</th><th>Designation</th>{% endif %}
 <th>Productive hrs</th><th>Non-productive hrs</th><th>Total</th><th>Target count</th><th>Completed</th><th>Target status</th><th>Productivity</th><th></th></tr>
-{% for s in subs %}<tr{% if s.late %} class="late-row" title="Submitted / updated on {{s.subat}} - after the entry date"{% endif %}><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; <a href="/admin/employee-info/{{s.emp_id|urlencode}}/productivity-log" title="Open this employee's complete Productivity Log"><b>{{s.emp_name}}</b></a></td><td>{{s.designation}}</td>{% endif %}
+{% for s in subs %}<tr{% if s.late %} class="late-row" title="Submitted / updated on {{s.subat}} - after the entry date"{% endif %}><td>{{s.date}}</td>{% if session.role=='admin' %}<td>{{s.emp_id}} &middot; {{s.emp_name}}</td><td>{{s.designation}}</td>{% endif %}
 <td>{{s.prod|g}}</td><td>{{s.non|g}}</td><td>{{s.total|g}}</td>
 <td>{{ (s.tgt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td><td>{{ (s.cnt_total|cnt) if s.tgt_state in ('met','miss') else '-' }}</td>
 <td>{% if s.tgt_state=='met' %}<span class="tg-badge met">&#9989; Achieved</span>{% elif s.tgt_state=='miss' %}<span class="tg-badge miss" title="Below target: {{s.tgt_miss|join(', ')}}">&#10060; Not Achieved</span>{% else %}-{% endif %}</td>
@@ -5361,7 +5348,6 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <div class="tabs no-print"><a href="/admin/employee-info" class="{{'on' if view=='employees' else ''}}">Employees</a>
 <a href="/admin/employee-info?view=access" class="{{'on' if view=='access' else ''}}">Employee Login Access</a>
 <a href="/admin/employee-info?view=productivity" class="{{'on' if view=='productivity' else ''}}">Productivity</a>
-<a href="/admin/employee-info?view=leads" class="{{'on' if view=='leads' else ''}}">Managers &amp; Leads</a>
 <a href="/admin/employee-info?view=notifications" class="{{'on' if view=='notifications' else ''}}">Notifications{% if new_count %} ({{new_count}} new){% endif %}</a></div>
 {% if view=='access' %}
 <div class="card no-print" id="addlogin"><h2 style="margin-top:0">Add employee login</h2>
@@ -5390,22 +5376,13 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <form class="grid no-print" method="get"><input type="hidden" name="view" value="productivity"><input type="month" name="month" value="{{month}}"><button class="primary">Show</button><a href="/admin/employee-info?view=productivity">This month</a></form>
 <p class="mut">{{label}} &middot; working days are counted from each employee's joining date (a new joiner is counted only from that day; existing employees are unchanged). Weekly offs and holidays are excluded.</p>
 <table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Joining date</th><th>Tracking from</th><th>Working days</th><th>Entries</th><th>Missed</th><th>Attendance</th><th>Productivity</th></tr>
-{% for p in prows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
+{% for p in prows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
 <td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}} <span class="pill act">New joiner</span>{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td>
 <td>{{p.pstart.strftime('%d %b %Y')}}</td>
 {% if not p.active %}<td colspan="5" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
 {% elif p.r.vo %}<td colspan="5" class="mut">View only (no productivity entry for this designation)</td>
 {% else %}<td>{{p.r.wd}}</td><td>{{p.entries}}</td><td>{{p.missed}}</td><td>{{p.r.att}}%</td><td><b>{{p.r.pct}}%</b></td>{% endif %}</tr>
 {% else %}<tr><td colspan="10">No employees found.</td></tr>{% endfor %}</table>
-{% elif view=='leads' %}
-<form class="grid no-print" method="get"><input type="hidden" name="view" value="leads"><input type="month" name="month" value="{{month}}"><button class="primary">Show</button><a href="/admin/employee-info?view=leads">This month</a></form>
-<p class="mut">{{label}} &middot; Associate Managers, Managers, Team Leads and Senior Team Leads: their own Productivity Log and Missed Entries Log. These employees also see the read-only <b>Team Logs</b> (Productivity Log + Missed Entries Log of all employees) in their own panel when they log in. Access follows the Designation automatically.</p>
-<table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Entries</th><th>Productivity</th><th>Missed entries</th><th>Missed dates</th><th>Logs</th></tr>
-{% for p in lrows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
-{% if not p.active %}<td colspan="3" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>{% elif p.vo %}<td colspan="3" class="mut">View only</td>{% else %}<td>{{p.entries}}</td><td><b>{{p.pct}}%</b></td><td>{{p.missed|length}}</td>{% endif %}
-<td>{{p.missed|join(', ') or '-'}}</td>
-<td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}{% endif %}">Productivity Log</a> &middot; <a href="/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=missed&amp;month={{month}}">Missed Entries Log</a></td></tr>
-{% else %}<tr><td colspan="8">No employee with the designation Associate Manager, Manager, Team Lead or Senior Team Lead.</td></tr>{% endfor %}</table>
 {% elif view=='notifications' %}
 <table><tr><th>Employee Name</th><th>Date &amp; Time</th><th>Section / Log</th><th>Action</th><th>Details</th><th>Summary</th></tr>
 {% for r in log %}<tr{% if r.new %} style="font-weight:600"{% endif %}>
@@ -5531,8 +5508,6 @@ def admin_employee_info():
                     ad=session.pop("_ad", {}), today=str(today_local()))
     if request.args.get("view") == "productivity":      # Update224: Productivity section of the employee log (Admin only)
         return admin_productivity_overview(emps, q)
-    if request.args.get("view") == "leads":             # Update234: Managers & Leads - their Productivity Log + Missed Entries Log (Admin only)
-        return admin_leads_overview(emps, q)
     # Employees with unseen login/logout notifications get their name highlighted in red.
     unseen_ids = {str(r["Employee ID"]) for r in rows("Notifications") if str(r.get("Seen", "")).strip() != "Yes"}
     for e in emps: e["flag"] = str(e["Employee ID"]) in unseen_ids
@@ -5623,8 +5598,6 @@ def admin_set_joining(eid):
 @need("admin")
 def admin_employee_detail(eid):
     emp = emp_or_404(eid); eid = str(emp["Employee ID"])
-    if "tab" not in request.args and desig_view_only(emp.get("Designation", "")):      # Update235: Associate Manager / Team Lead / Senior Team Lead -> name click opens ONLY the detailed Productivity Log
-        return redirect("/admin/employee-info/%s/productivity-log" % urllib.parse.quote(eid, safe=""))
     tab = request.args.get("tab", "personal")
     if tab not in dict(TABS): tab = "personal"
     today = today_local()
@@ -5701,89 +5674,6 @@ def admin_employee_detail(eid):
         body = T_NOTIF; ctx["data"] = data
     return page(EMP_HEAD + body, title=emp["Name"], **ctx)
 
-# ---------------------------------------------------------------- Update235: detailed Productivity Log of Associate Manager / Team Lead / Senior Team Lead
-# Admin > Employee Info > click the employee's name. Shows ONLY the Productivity Log details (no Daily Entry, no Productivity Info). Read-only.
-app.jinja_env.globals["is_plog_desig"] = lambda d: desig_view_only(d)
-
-T_PLOG = """<div class="head"><div><h1>{{emp['Name']}} &mdash; Productivity Log</h1>
-<p class="mut">{{emp['Employee ID']}} &middot; {{emp['Designation'] or 'No designation'}} &middot; Band {{emp['Band']}} &middot; {{label}}</p></div>
-<a href="/admin/log">&larr; Productivity Log</a></div>
-<form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><button class="primary">Show month</button>
-<a href="/admin/employee-info/{{emp['Employee ID']|urlencode}}/productivity-log">All time</a>
-<a href="/admin/employee-info/{{emp['Employee ID']|urlencode}}?tab=personal">Personal details</a></form>
-<div class="kpis"><div class="kpi"><span>Entries (days)</span><b>{{n_days}}</b></div><div class="kpi"><span>Processes worked</span><b>{{procsum|length}}</b></div>
-<div class="kpi"><span>Target count</span><b>{{tot_t|cnt}}</b></div><div class="kpi"><span>Completed count</span><b>{{tot_c|cnt}}</b></div>
-<div class="kpi"><span>Targets achieved</span><b>{{n_met}}</b></div><div class="kpi"><span>Targets not achieved</span><b>{{n_miss}}</b></div>
-<div class="kpi"><span>Productive hrs</span><b>{{tot_h|g}}</b></div><div class="kpi"><span>Non-productive hrs</span><b>{{tot_n|g}}</b></div>
-<div class="kpi"><span>Avg. day productivity</span><b>{{avg_pct}}</b></div></div>
-<h2>Date-wise summary</h2>
-<p class="mut">Every date in the Productivity Log for this employee (newest first). Weekly-off / holiday entries are saved but not counted.</p>
-<div style="overflow-x:auto"><table><tr><th>Date</th><th>Day</th><th>Processes worked</th><th>Productive hrs</th><th>Non-productive hrs</th><th>Total hrs</th><th>Target count</th><th>Completed count</th><th>Target status</th><th>Productivity %</th><th>Submitted at</th></tr>
-{% for d in dates %}<tr{% if d.late %} class="late-row" title="Submitted / updated after the entry date"{% endif %}><td>{{d.date}}</td><td>{{d.day}}</td><td>{{d.procs or '-'}}</td><td>{{d.prod|g}}</td><td>{{d.non|g}}</td><td>{{d.total|g}}</td>
-<td>{{ (d.tgt|cnt) if d.state in ('met','miss') else '-' }}</td><td>{{ (d.cnt|cnt) if d.state in ('met','miss') else '-' }}</td>
-<td>{% if d.state=='met' %}<span class="tg-badge met">&#9989; Achieved</span>{% elif d.state=='miss' %}<span class="tg-badge miss" title="Below target: {{d.missed|join(', ')}}">&#10060; Not Achieved</span>{% elif d.state=='off' %}<span class="mut">Off / holiday</span>{% else %}-{% endif %}</td>
-<td>{{ 'Not counted' if d.state=='off' else ((d.pct ~ '%') if d.pct is not none else '-') }}</td><td>{{d.subat or '-'}}</td></tr>
-{% else %}<tr><td colspan="11">No Productivity Log entries for this employee.</td></tr>{% endfor %}</table></div>
-<h2>Process-wise summary</h2>
-<p class="mut">Weekly-off / holiday entries are shown in the daily log below but are not counted here.</p>
-<div style="overflow-x:auto"><table><tr><th>Process</th><th>Days worked</th><th>Hours</th><th>Target count</th><th>Completed count</th><th>Target status</th><th>Productivity %</th></tr>
-{% for p in procsum %}<tr><td><b>{{p.name}}</b></td><td>{{p.days}}</td><td>{{p.hour|g}}</td><td>{{ (p.target|cnt) if p.rate else '-' }}</td><td>{{ p.count|cnt }}</td>
-<td>{% if not p.rate %}-{% elif p.met %}<span class="tg-badge met">&#9989; Achieved</span>{% else %}<span class="tg-badge miss">&#10060; Not Achieved</span>{% endif %}</td>
-<td>{{ (p.pct ~ '%') if p.pct is not none else '-' }}</td></tr>
-{% else %}<tr><td colspan="7">No process entries in the Productivity Log for this period.</td></tr>{% endfor %}</table></div>
-<h2>Detailed log</h2>
-<div style="overflow-x:auto"><table><tr><th>Date</th><th>Day</th><th>Process</th><th>Description</th><th>Hours</th><th>Target count</th><th>Completed count</th><th>Target status</th><th>Productivity % (process)</th><th>Day productivity %</th><th>Submitted at</th></tr>
-{% for r in lines %}<tr{% if r.late %} class="late-row" title="Submitted / updated after the entry date"{% endif %}>
-<td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.name}}</td><td>{{r.desc or '-'}}</td><td>{{r.hour|g}}</td>
-<td>{{ (r.target|cnt) if r.rate else '-' }}</td><td>{{ r.count|cnt }}</td>
-<td>{% if r.off %}<span class="mut">Off / holiday</span>{% elif not r.rate %}-{% elif r.met %}<span class="tg-badge met">&#9989; Achieved</span>{% else %}<span class="tg-badge miss">&#10060; Not Achieved</span>{% endif %}</td>
-<td>{{ (r.pct ~ '%') if (r.pct is not none and not r.off) else '-' }}</td><td>{{ 'Weekend / Holiday - not counted' if r.off else ((r.day_pct ~ '%') if r.day_pct is not none else '-') }}</td><td>{{r.subat or '-'}}</td></tr>
-{% else %}<tr><td colspan="11">No Productivity Log entries for this period.</td></tr>{% endfor %}</table></div>
-{% if notes %}<h2>Non-productive / other time</h2>
-<div style="overflow-x:auto"><table><tr><th>Date</th><th>Details</th><th>Hours</th></tr>
-{% for n in notes %}<tr><td>{{n.date}}</td><td>{{n.desc or '-'}}</td><td>{{n.hour|g}}</td></tr>{% endfor %}</table></div>{% endif %}"""
-
-@app.route("/admin/employee-info/<eid>/productivity-log")
-@need("admin")
-def admin_employee_plog(eid):
-    emp = emp_or_404(eid); eid = str(emp["Employee ID"])
-    month = request.args.get("month", "").strip()
-    subs = load_subs(eid)
-    label = "All time"
-    if month:
-        try: m0, m1 = month_range(month); month = m0.strftime("%Y-%m"); label = m0.strftime("%B %Y")
-        except Exception: month = ""
-        else: subs = [x for x in subs if str(m0) <= str(x["date"]) <= str(m1)]
-    tph = process_rates()
-    lines, notes, agg, dates = [], [], {}, []
-    tot_h = tot_n = tot_t = tot_c = 0.0; n_met = n_miss = 0; pcts = []
-    for x in sorted(subs, key=lambda z: str(z["date"]), reverse=True):
-        try: dname = dt.date.fromisoformat(str(x["date"])).strftime("%a")
-        except ValueError: dname = ""
-        dates.append(dict(date=x["date"], day=dname, procs=", ".join(dict.fromkeys(p["name"] for p in x["procs"])), prod=x["prod"], non=x["non"], total=x["total"],
-                          tgt=x["tgt_total"], cnt=x["cnt_total"], state=x["tgt_state"], missed=x["tgt_miss"], pct=x["pct"], late=x["late"], subat=x["subat"]))
-        for p in x["procs"]:
-            rate = tph.get(p["name"], 0) or 0; tgt = p["hour"] * rate
-            met = bool(rate) and p["count"] + 1e-9 >= tgt
-            lines.append(dict(date=x["date"], day=dname, name=p["name"], desc=p.get("desc", ""), hour=p["hour"], rate=rate, target=round(tgt, 2),
-                              count=p["count"], met=met, pct=p["pct"], day_pct=x["pct"], off=x["off"], late=x["late"], subat=x["subat"]))
-            if x["off"]: continue
-            a = agg.setdefault(p["name"], dict(name=p["name"], days=set(), hour=0.0, target=0.0, count=0.0, rate=0))
-            a["days"].add(x["date"]); a["hour"] += p["hour"]; a["count"] += p["count"]; a["rate"] = a["rate"] or rate
-            if rate: a["target"] += tgt; tot_t += tgt; tot_c += p["count"]; n_met += met; n_miss += (not met)
-        for n in x["notes"]: notes.append(dict(date=x["date"], desc=n["desc"], hour=n["hour"]))
-        if not x["off"]:
-            tot_h += x["prod"]; tot_n += x["non"]
-            if x["pct"] is not None: pcts.append(x["pct"])
-    procsum = []
-    for a in sorted(agg.values(), key=lambda z: z["name"].lower()):
-        a["days"] = len(a["days"]); a["met"] = bool(a["rate"]) and a["count"] + 1e-9 >= a["target"]
-        a["pct"] = round(a["count"] / a["target"] * 100) if a["target"] else None
-        procsum.append(a)
-    avg = ("%d%%" % round(sum(pcts) / len(pcts))) if pcts else "-"
-    return page(T_PLOG, title=emp["Name"] + " - Productivity Log", emp=emp, month=month, label=label, lines=lines, notes=notes, procsum=procsum, dates=dates,
-                n_days=len([x for x in subs if not x["off"]]), tot_h=tot_h, tot_n=tot_n, tot_t=tot_t, tot_c=tot_c, n_met=n_met, n_miss=n_miss, avg_pct=avg)
-
 @app.route("/admin/employee-info/<eid>/leave", methods=["POST"])
 @need("admin")
 def admin_employee_leave_add(eid):
@@ -5844,7 +5734,7 @@ def login_char_lookup():
     hits = [t for t in _lc_hits.get(ip, []) if now - t < 60]
     hits.append(now); _lc_hits[ip] = hits
     if len(_lc_hits) > 5000: _lc_hits.clear()
-    g = "n"
+    g = "n"; nm = ""
     if len(hits) <= 90:
         u = (request.args.get("u", "") or "").strip().lower()[:120]
         if u:
@@ -5853,10 +5743,12 @@ def login_char_lookup():
                     if u in (str(e.get("Employee ID", "")).strip().lower(), str(e.get("Email", "")).strip().lower()):
                         v = str(e.get("Gender", "")).strip().lower()
                         g = "m" if v in ("male", "m", "man", "boy") or v.startswith("male") else ("f" if v in ("female", "f", "woman", "girl") or v.startswith("female") else "n")
+                        # Update225: ONLY the display name (saved Profile Name, else the full name) is returned - never the ID, e-mail, gender text or any other detail
+                        nm = (str(e.get("Profile Name", "") or "").strip() or str(e.get("Name", "") or "").strip())[:40]
                         break
             except Exception:
-                g = "n"
-    resp = Response(_j.dumps({"g": g}), mimetype="application/json")
+                g = "n"; nm = ""
+    resp = Response(_j.dumps({"g": g, "n": nm}), mimetype="application/json")
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
@@ -5877,7 +5769,7 @@ def employee_login():
                 track_logout(auto=True, reason="New login")      # closes a previous session in this browser, if any
                 session.clear()
                 session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"],
-                               designation=str(e.get("Designation", "")))      # Update230: the one-time welcome overlay (Update227) is switched off - it held the page for ~4 s after login
+                               designation=str(e.get("Designation", "")), welcome=1)      # Update227: one-time animated welcome on the first page after login
                 track_login(session["emp_id"], session["name"], session["band"])
                 _bg(warm_employee_cache)                  # dashboard data loads while the welcome animation plays
                 resp = redirect("/employee")                  # Update202: straight to the Employee Panel (no welcome page)
@@ -7217,7 +7109,6 @@ def employee_welcome():
 @app.route("/employee")
 @need("employee")
 def employee_home():
-    if hide_entry_pages(): return redirect("/employee/leave")      # Update236: no Daily entry page for Associate Manager / Team Lead / Senior Team Lead
     prefetch(*EMP_PAGE_SHEETS)          # cold cache: fetch all sheets together instead of one by one
     today = str(today_local())
     session["designation"] = find_designation(session["emp_id"], session["name"], session["band"])
@@ -7264,7 +7155,6 @@ def prod_months():
 def employee_productivity():
     """Productivity Info: this employee's submissions for the chosen month (current month by default; the previous month is also
     available from the month picker, with View / Edit / Delete on every entry). Only the employee's OWN entries are ever listed."""
-    if hide_entry_pages(): return redirect("/employee/leave")      # Update236: no Productivity Info page for Associate Manager / Team Lead / Senior Team Lead
     prefetch("Productivity log", "Processes", "Employees", "Settings", "Permissions", "Holidays")
     today = today_local()
     months = prod_months()
@@ -7809,7 +7699,7 @@ EMP_TOP = EMP_GREET_CSS + """<div class="head hero"><div class="welcome wflex g3
 VIEW_ONLY_CARD = """<div class="card"><h2 style="margin-top:0">Productivity &mdash; View Only</h2>
 <p class="mut">Your designation ({{session.designation}}) has <b>View Only</b> access to Productivity. Daily productivity entry is not required,
 no productivity % is calculated, and no missed-entry reminders are sent. Leave &amp; Permission works as usual.</p>
-<a class="btnl" href="/employee/leave">Leave &amp; Permission</a></div>"""
+<a class="btnl" href="/employee/leave">Leave &amp; Permission</a> <a class="btnl" href="/employee/productivity">Productivity Info</a></div>"""
 
 SUMMARY = """<div class="head ov-head"><div><h1>Overview</h1>
 <p class="mut">{{label}} &middot; {{wd}} working days (weekly off excluded). Attendance = present days / working days. Productivity = productive hours logged &divide; the daily target of {{target|g}} hrs per present day (capped at 100%).</p></div>
@@ -10214,89 +10104,6 @@ def missed_scope(month, subs, leaves):
 def mail_history(eid=None, limit=40):
     out = [r for r in rows(MISSED_LOG) if str(r.get("Employee ID", "")) != "__RUN__" and str(r.get("Mode", "")) in ("Manual", "Auto") and (eid is None or _key(r.get("Employee ID", "")) == _key(eid))]
     return sorted(out, key=lambda r: str(r.get("Sent at", "")), reverse=True)[:limit]
-
-# ---------------------------------------------------------------- Update234: Managers & Team Leads - logs
-# Designations: Associate Manager, Manager, Team Lead, Senior Team Lead (same matching as the summary e-mail). Admin sees them under Employee Info > Managers & Leads;
-# these employees get a read-only "Team Logs" menu (Productivity Log + Missed Entries Log of all employees) in their own panel. Access follows the Designation live.
-def is_lead_emp(e): return is_summary_recipient_designation(e.get("Designation", ""))
-
-def team_log_access():
-    try:
-        if session.get("role") != "employee": return False
-        me = my_emp_row()
-        return is_lead_emp(me) and not emp_locked(me)
-    except Exception:
-        return False
-
-def team_need(f):
-    @wraps(f)
-    def w(*a, **k):
-        if not team_log_access(): abort(403)
-        return f(*a, **k)
-    return w
-
-def admin_leads_overview(emps, q):
-    today = today_local(); month = request.args.get("month") or today.strftime("%Y-%m")
-    m0, m1 = month_range(month)
-    leads = [e for e in emps if is_lead_emp(e)]
-    subs, leaves = load_subs(), rows("Leave")
-    out = []
-    for e in leads:
-        d = emp_prod_month(e, subs, leaves, m0, m1)
-        r = d["r"]
-        out.append(dict(e=e, jd=d["jd"], active=d["active"], vo=bool(r.get("vo")), entries=d["entries"], pct=r.get("pct", 0), missed=sorted(d["missed"])))
-    return page(EMP_LIST, title="Employee Info", view="leads", emps=emps, q=request.args.get("q", ""), lrows=out,
-                month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), new_count=sum(1 for r in update_log() if r["new"]))
-
-TEAM_TABS = """<div class="tabs no-print"><a href="/employee/team-logs" class="{{'on' if tl=='prod' else ''}}">Productivity Log</a><a href="/employee/team-logs/missed" class="{{'on' if tl=='missed' else ''}}">Missed Entries Log</a></div>"""
-TEAM_PROD = TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all employees</h2>
-<p class="mut">{{label}} &middot; read-only. Weekly-off / holiday entries are shown but not counted.</p>
-<form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><input name="emp" placeholder="Employee ID / name" value="{{emp}}"><button class="primary">Show</button><a href="/employee/team-logs">Reset</a></form>
-<div style="overflow-x:auto"><table><tr><th>Date</th><th>Employee</th><th>Designation</th><th>Productive hrs</th><th>Non-productive hrs</th><th>Productivity %</th><th>Target</th></tr>
-{% for s in subs %}<tr><td>{{s.date}}</td><td>{{s.emp_id}} &middot; {{s.emp_name}}</td><td>{{s.designation or '-'}}</td><td>{{'%.2f'|format(s.prod)}}</td><td>{{'%.2f'|format(s.non)}}</td><td>{% if s.pct is none %}-{% else %}{{s.pct}}%{% endif %}</td>
-<td>{{ {'met':'Met','miss':'Missed','none':'-','off':'Off'}[s.tgt_state] }}</td></tr>
-{% else %}<tr><td colspan="7">No entries for this period.</td></tr>{% endfor %}</table></div>
-{% if more %}<p class="mut">Showing the latest {{subs|length}} of {{total}} entries - narrow the month or search for an employee.</p>{% endif %}</div>"""
-TEAM_MISSED = TEAM_TABS + """<div class="card"><h2>Missed Entries Log &mdash; all employees</h2>
-<p class="mut">{{label}} &middot; working days with no productivity entry and no leave (weekly offs, holidays and dates before joining excluded). Today is not included. Read-only.</p>
-<form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><input name="emp" placeholder="Employee ID / name" value="{{emp}}"><button class="primary">Show</button><a href="/employee/team-logs/missed">Reset</a></form>
-<div class="kpis"><div class="kpi"><span>Missed entries</span><b>{{total}}</b></div><div class="kpi"><span>Employees affected</span><b>{{summary|length}}</b></div></div>
-<div style="overflow-x:auto"><table><tr><th>Date</th><th>Employee ID &middot; Name</th><th>Missed Entries</th></tr>
-{% for x in summary %}<tr><td>{{x.dates|join(', ')}}</td><td>{{x.id}} &middot; {{x.name}}</td><td><b>{{x.dates|length}}</b></td></tr>
-{% else %}<tr><td colspan="3">No missed entries for this period.</td></tr>{% endfor %}</table></div></div>"""
-
-@app.route("/employee/team-logs")
-@need("employee")
-@team_need
-def employee_team_prod():
-    prefetch("Employees", "Productivity log", "Leave", "Holidays", "Processes", "Permissions")
-    month = request.args.get("month") or today_local().strftime("%Y-%m")
-    q = request.args.get("emp", "").strip().lower()
-    m0, m1 = month_range(month)
-    subs = [x for x in load_subs() if str(m0) <= str(x["date"]) <= str(m1) and (not q or q in str(x["emp_id"]).lower() or q in str(x["emp_name"]).lower())]
-    total = len(subs); subs = subs[:600]
-    return page(TEAM_PROD, title="Team Logs - Productivity Log", tl="prod", month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), emp=request.args.get("emp", ""),
-                subs=subs, total=total, more=total > len(subs))
-
-@app.route("/employee/team-logs/missed")
-@need("employee")
-@team_need
-def employee_team_missed():
-    prefetch("Employees", "Productivity log", "Leave", "Holidays")
-    month = request.args.get("month") or today_local().strftime("%Y-%m")
-    q = request.args.get("emp", "").strip().lower()
-    subs, leaves, emps = load_subs(), rows("Leave"), rows("Employees")
-    start, end, label = missed_scope(month, subs, leaves)
-    summary, total = [], 0
-    for e in emps:
-        if q and q not in str(e["Employee ID"]).lower() and q not in str(e["Name"]).lower(): continue
-        k = _key(e["Employee ID"])
-        dates = missing_dates(e["Employee ID"], [x for x in subs if _key(x["emp_id"]) == k], [l for l in leaves if _key(l["Employee ID"]) == k], start, end, fmt="%Y-%m-%d")
-        if not dates: continue
-        total += len(dates)
-        summary.append(dict(id=e["Employee ID"], name=e["Name"], dates=sorted(dates, reverse=True)))
-    summary.sort(key=lambda x: str(x["name"]).lower())
-    return page(TEAM_MISSED, title="Team Logs - Missed Entries Log", tl="missed", month=month, label=label, emp=request.args.get("emp", ""), summary=summary, total=total)
 
 @app.route("/admin/missed-log")
 @need("admin")

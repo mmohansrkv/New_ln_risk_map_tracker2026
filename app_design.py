@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update298: the status popup (Update297) is now centred on the Admin page with a 3D animated theme (perspective card, rotating 3D emblem in the status colour, glow, mouse tilt, smooth 3D entry and exit), the status text large and clear in the centre, and a Close (X) button (also Esc / click outside the card). The page behind stays usable (no blocking overlay). Display only; same trigger and one-status rule as Update297.
   * Update297: Admin - when the Admin opens (clicks the name / details of) a Resigned, NCNS or Login Locked employee (Employee Info, Audit Log, Work Time, Missed log, Overview check) a small non-blocking popup in the top-right corner shows that employee's ONE status (Resigned / NCNS / Login Locked) with a Close (X) button; it does not cover or lock the page, is not repeated when moving between tabs of the same employee, and nothing else changed.
   * Update296: Admin pages - colour indicator ONLY (no text, no colour key, no explanation line) on the rows of Resigned (violet), NCNS (red) and Login Locked (amber) employees; one colour per employee. Status text is shown only on the Overview check page opened by clicking the name (Update295). Display only.
   * Update295: Overview - clicking an employee's name opens the existing Overview check page, which now shows that employee's ONE current status next to the name: Resigned, NCNS, or "Login Locked" (only the applicable one; nothing for active employees). Display only - no other page, layout, record or login rule changed (Resigned / NCNS / locked accounts still can never log in).
@@ -2512,6 +2513,44 @@ function run(){var rows=document.querySelectorAll('tr'),i;
 var t=0;function sched(){if(t)return;t=setTimeout(function(){t=0;try{run()}catch(e){}},120)}
 run();try{new MutationObserver(sched).observe(document.body,{childList:true,subtree:true})}catch(e){}})();"""
 
+SEP_POP_HTML = """<style>
+#seppop{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;pointer-events:none;perspective:1100px;--c:@@COL@@}
+#seppop .spc{position:relative;pointer-events:auto;min-width:280px;max-width:min(88vw,380px);padding:30px 34px 26px;border-radius:22px;text-align:center;color:#fff;transform-style:preserve-3d;
+ background:linear-gradient(145deg,rgba(var(--c),.96),rgba(20,24,48,.97));border:1px solid rgba(255,255,255,.28);box-shadow:0 30px 70px rgba(0,0,0,.45),0 0 0 1px rgba(var(--c),.5),0 0 60px rgba(var(--c),.55);
+ transform:rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));animation:spIn .7s cubic-bezier(.2,.9,.25,1.2) both}
+#seppop.out .spc{animation:spOut .38s cubic-bezier(.5,0,.8,.4) both}
+#seppop .spc::before{content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(115deg,transparent 30%,rgba(255,255,255,.28) 48%,transparent 66%);background-size:250% 100%;animation:spSheen 3.4s ease-in-out infinite;pointer-events:none}
+#seppop .spe{width:74px;height:74px;margin:0 auto 14px;position:relative;transform-style:preserve-3d;animation:spSpin 7s linear infinite;transform:translateZ(40px)}
+#seppop .spe i{position:absolute;inset:0;border-radius:18px;border:3px solid rgba(255,255,255,.9);background:rgba(255,255,255,.12);box-shadow:0 0 18px rgba(var(--c),.9),inset 0 0 14px rgba(255,255,255,.25)}
+#seppop .spe i:nth-child(1){transform:translateZ(26px)}#seppop .spe i:nth-child(2){transform:rotateY(90deg) translateZ(26px)}
+#seppop .spe i:nth-child(3){transform:rotateY(180deg) translateZ(26px)}#seppop .spe i:nth-child(4){transform:rotateY(-90deg) translateZ(26px)}
+#seppop .spe i:nth-child(5){transform:rotateX(90deg) translateZ(26px)}#seppop .spe i:nth-child(6){transform:rotateX(-90deg) translateZ(26px)}
+#seppop .spt{font:800 30px/1.2 system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:.5px;text-shadow:0 3px 14px rgba(0,0,0,.45);transform:translateZ(60px);animation:spFloat 3s ease-in-out infinite}
+#seppop .spx{position:absolute;top:10px;right:12px;width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,255,255,.45);background:rgba(255,255,255,.16);color:#fff;font-size:16px;line-height:1;cursor:pointer;transform:translateZ(70px);transition:background .2s,transform .2s}
+#seppop .spx:hover{background:rgba(255,255,255,.34);transform:translateZ(70px) rotate(90deg)}
+@keyframes spIn{0%{opacity:0;transform:translateY(40px) rotateX(-70deg) rotateY(30deg) scale(.55)}100%{opacity:1;transform:rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg))}}
+@keyframes spOut{0%{opacity:1}100%{opacity:0;transform:translateY(-30px) rotateX(60deg) rotateY(-35deg) scale(.5)}}
+@keyframes spSpin{to{transform:translateZ(40px) rotateX(-18deg) rotateY(360deg)}}
+@keyframes spFloat{0%,100%{transform:translateZ(60px) translateY(0)}50%{transform:translateZ(60px) translateY(-4px)}}
+@keyframes spSheen{0%{background-position:160% 0}60%,100%{background-position:-60% 0}}
+@media (prefers-reduced-motion:reduce){#seppop .spc,#seppop .spe,#seppop .spt,#seppop .spc::before{animation:none!important}}
+</style>
+<div id="seppop" class="no-print" role="status" aria-live="polite" data-eid="@@EID@@"><div class="spc"><button type="button" class="spx" id="seppopx" aria-label="Close" title="Close">&#10005;</button>
+<div class="spe" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="spt">@@TXT@@</div></div></div>
+<script>(function(){var p=document.getElementById("seppop");if(!p)return;var e=p.getAttribute("data-eid"),same=false,c=p.querySelector(".spc");
+p.style.setProperty("--c",p.style.getPropertyValue("--c"));
+var K=function(x){return String(x==null?"":x).replace(/\\s+/g,"").toUpperCase()};
+try{var u=new URL(document.referrer||"about:blank");if(u.origin===location.origin){var pa=K(decodeURIComponent(u.pathname))+"/";
+same=pa.indexOf("/"+e+"/")>-1||(u.pathname==="/admin/summary/check"&&location.pathname==="/admin/summary/check"&&K(u.searchParams.get("emp"))===e)}}catch(x){}
+if(same)return;p.style.display="flex";
+function close(){if(p.classList.contains("out"))return;p.classList.add("out");document.removeEventListener("keydown",kd);document.removeEventListener("pointermove",mv);document.removeEventListener("pointerdown",od,true);setTimeout(function(){p.style.display="none"},380)}
+function od(ev){if(!c.contains(ev.target))close()}
+function kd(ev){if(ev.key==="Escape")close()}
+function mv(ev){var r=c.getBoundingClientRect(),x=(ev.clientX-(r.left+r.width/2))/400,y=(ev.clientY-(r.top+r.height/2))/300;
+c.style.setProperty("--ry",Math.max(-14,Math.min(14,x*14))+"deg");c.style.setProperty("--rx",Math.max(-10,Math.min(10,-y*10))+"deg")}
+document.getElementById("seppopx").onclick=close;document.addEventListener("keydown",kd);document.addEventListener("pointermove",mv);
+document.addEventListener("pointerdown",od,true)})();</script>"""
+
 def sep_theme_parts():
     """Update296: Admin pages only - colour class per employee row ('res' / 'ncns' / 'lock'); no text is added anywhere."""
     if session.get("role") != "admin": return "", ""
@@ -2533,14 +2572,7 @@ def sep_theme_parts():
         if kd:
             txt = {"res": "Resigned", "ncns": "NCNS", "lock": "\U0001F512 Login Locked"}[kd]
             col = {"res": "124,58,237", "ncns": "220,38,38", "lock": "217,119,6"}[kd]
-            pop = ('<div id="seppop" class="no-print" role="status" data-eid="' + _hp.escape(_key(eid_)) + '" style="display:none;position:fixed;top:70px;right:18px;z-index:9999;min-width:170px;max-width:260px;padding:10px 38px 10px 14px;'
-                   'border-radius:12px;background:#fff;color:#1f2433;border:1px solid rgb(' + col + ');border-left:6px solid rgb(' + col + ');box-shadow:0 6px 22px rgba(0,0,0,.22);font-size:14px;font-weight:700">'
-                   + _hp.escape(txt) + '<button type="button" id="seppopx" aria-label="Close" title="Close" style="position:absolute;top:4px;right:6px;border:0;background:transparent;color:#1f2433;font-size:16px;line-height:1;cursor:pointer;padding:4px 6px">&#10005;</button></div>'
-                   """<script>(function(){var p=document.getElementById("seppop");if(!p)return;var e=p.getAttribute("data-eid"),same=false;
-var K=function(x){return String(x==null?"":x).replace(/\\s+/g,"").toUpperCase()};
-try{var u=new URL(document.referrer||"about:blank");if(u.origin===location.origin){var pa=K(decodeURIComponent(u.pathname))+"/";
-same=pa.indexOf("/"+e+"/")>-1||(u.pathname==="/admin/summary/check"&&location.pathname==="/admin/summary/check"&&K(u.searchParams.get("emp"))===e)}}catch(x){}
-if(!same)p.style.display="block";document.getElementById("seppopx").onclick=function(){p.style.display="none"}})();</script>""")
+            pop = SEP_POP_HTML.replace("@@COL@@", col).replace("@@TXT@@", _hp.escape(txt)).replace("@@EID@@", _hp.escape(_key(eid_)))
     except Exception as ex_: print("Status popup failed:", repr(ex_))
     return ('<style>' + SEP_CSS + '</style>',
             '<script type="application/json" id="sepmap">' + json.dumps(m, separators=(",", ":")).replace("</", "<\\/") + '</script><script>' + SEP_JS + '</script>' + pop)

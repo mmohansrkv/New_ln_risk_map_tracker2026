@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update297: Admin - when the Admin opens (clicks the name / details of) a Resigned, NCNS or Login Locked employee (Employee Info, Audit Log, Work Time, Missed log, Overview check) a small non-blocking popup in the top-right corner shows that employee's ONE status (Resigned / NCNS / Login Locked) with a Close (X) button; it does not cover or lock the page, is not repeated when moving between tabs of the same employee, and nothing else changed.
   * Update296: Admin pages - colour indicator ONLY (no text, no colour key, no explanation line) on the rows of Resigned (violet), NCNS (red) and Login Locked (amber) employees; one colour per employee. Status text is shown only on the Overview check page opened by clicking the name (Update295). Display only.
   * Update295: Overview - clicking an employee's name opens the existing Overview check page, which now shows that employee's ONE current status next to the name: Resigned, NCNS, or "Login Locked" (only the applicable one; nothing for active employees). Display only - no other page, layout, record or login rule changed (Resigned / NCNS / locked accounts still can never log in).
   * Update293: FIX Audit Log (Admin, and Associate Manager / Team Lead / Senior Team Lead, and employees with per-process access) showed no / old data. (1) Causes: every Audit Log page used the per-worker cached sheet read, which can be minutes old and differs between server workers (the Admin Productivity Log already reads live since Update168) - all Audit Log pages now read Productivity log / Leave / Permissions / Employees / Settings / Holidays / Processes / Audit Access (and Attendance on the employee page) LIVE. (2) Process names in the log are now matched to the Processes sheet ignoring case and stray spaces (before, \"Data Entry \" or \"data entry\" never matched and the process showed 0 employees). (3) Tool lines (Update292) are never counted as a process. Design, permissions and everything else unchanged.
@@ -2522,8 +2523,27 @@ def sep_theme_parts():
         if sp: m[k] = "res" if sp == "Resigned" else "ncns"
         elif emp_locked(e): m[k] = "lock"
     if not m: return "", ""
+    pop = ""
+    try:      # Update297: small popup with the ONE applicable status when an employee's page is opened
+        from urllib.parse import unquote
+        import html as _hp
+        mt = re.match(r"^/admin/(?:employee-info|audit|work-time/employee|missed-log)/([^/]+)", request.path or "")
+        eid_ = unquote(mt.group(1)) if mt else (request.args.get("emp", "") if request.path == "/admin/summary/check" else "")
+        kd = m.get(_key(eid_)) if eid_ else None
+        if kd:
+            txt = {"res": "Resigned", "ncns": "NCNS", "lock": "\U0001F512 Login Locked"}[kd]
+            col = {"res": "124,58,237", "ncns": "220,38,38", "lock": "217,119,6"}[kd]
+            pop = ('<div id="seppop" class="no-print" role="status" data-eid="' + _hp.escape(_key(eid_)) + '" style="display:none;position:fixed;top:70px;right:18px;z-index:9999;min-width:170px;max-width:260px;padding:10px 38px 10px 14px;'
+                   'border-radius:12px;background:#fff;color:#1f2433;border:1px solid rgb(' + col + ');border-left:6px solid rgb(' + col + ');box-shadow:0 6px 22px rgba(0,0,0,.22);font-size:14px;font-weight:700">'
+                   + _hp.escape(txt) + '<button type="button" id="seppopx" aria-label="Close" title="Close" style="position:absolute;top:4px;right:6px;border:0;background:transparent;color:#1f2433;font-size:16px;line-height:1;cursor:pointer;padding:4px 6px">&#10005;</button></div>'
+                   """<script>(function(){var p=document.getElementById("seppop");if(!p)return;var e=p.getAttribute("data-eid"),same=false;
+var K=function(x){return String(x==null?"":x).replace(/\\s+/g,"").toUpperCase()};
+try{var u=new URL(document.referrer||"about:blank");if(u.origin===location.origin){var pa=K(decodeURIComponent(u.pathname))+"/";
+same=pa.indexOf("/"+e+"/")>-1||(u.pathname==="/admin/summary/check"&&location.pathname==="/admin/summary/check"&&K(u.searchParams.get("emp"))===e)}}catch(x){}
+if(!same)p.style.display="block";document.getElementById("seppopx").onclick=function(){p.style.display="none"}})();</script>""")
+    except Exception as ex_: print("Status popup failed:", repr(ex_))
     return ('<style>' + SEP_CSS + '</style>',
-            '<script type="application/json" id="sepmap">' + json.dumps(m, separators=(",", ":")).replace("</", "<\\/") + '</script><script>' + SEP_JS + '</script>')
+            '<script type="application/json" id="sepmap">' + json.dumps(m, separators=(",", ":")).replace("</", "<\\/") + '</script><script>' + SEP_JS + '</script>' + pop)
 
 def emp_status(emp_id):
     """'ok' | 'locked' | 'deleted' for a signed-in employee (uses the short-lived sheet cache, so it costs no extra Google call)."""

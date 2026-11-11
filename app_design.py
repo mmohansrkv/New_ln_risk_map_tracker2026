@@ -1,4 +1,7 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update294: Resigned / NCNS / Login Locked employees - DISPLAY THEME ONLY. They stay listed on every Admin page (Overview, Employee Info, Productivity, Productivity log, Leave & Permission, Missed entries log, Work Time, Audit Log, Managers & Leads ...) and on the read-only Employee Details / Team Logs pages of Associate Manager / Team Lead / Senior Team Lead, with all their Productivity Logs, Audit Logs and employee details still open to the Admin - nothing is deleted, hidden or rewritten. Their rows now get a separate theme (diagonal tint + coloured left edge) and status labels: Resigned (violet), NCNS (red), Login Locked (amber); an employee detail page (Employee Info / Audit / Work Time / Missed log) shows a banner with the status and relieving date, a colour key appears above any page that lists such employees, and employee drop-downs add \"(Resigned)\" / \"(NCNS)\" / \"(Login Locked)\" to the name. Resigned / NCNS and locked accounts still can never log in (unchanged). No data, sheet, login or calculation logic was changed.
+  * Update293: FIX Audit Log (Admin, and Associate Manager / Team Lead / Senior Team Lead, and employees with per-process access) showed no / old data. (1) Causes: every Audit Log page used the per-worker cached sheet read, which can be minutes old and differs between server workers (the Admin Productivity Log already reads live since Update168) - all Audit Log pages now read Productivity log / Leave / Permissions / Employees / Settings / Holidays / Processes / Audit Access (and Attendance on the employee page) LIVE. (2) Process names in the log are now matched to the Processes sheet ignoring case and stray spaces (before, \"Data Entry \" or \"data entry\" never matched and the process showed 0 employees). (3) Tool lines (Update292) are never counted as a process. Design, permissions and everything else unchanged.
+  * Update292: Employee page - Process Entry lines get a TYPE dropdown (Production / Tool). Production = the existing Process + Hours + Count + Description line. Tool = Tool Name (typed) + Hours (HR) + Description (no Count, no count target; its hours count as productive hours like Training). The selected Type is saved in the existing \"Type\" column of the \"Productivity log\" sheet for every line (\"Production\" / \"Tool\"; notes stay \"Note\"; rows saved earlier as \"Process\" are read as Production, nothing is rewritten). Reports, Excel export, recalculation, CSV import and the entry View / Edit pages understand the new values. Everything else unchanged.
   * Update291: (1) Audit Log for Associate Manager / Team Lead / Senior Team Lead (matched live by Designation, same test as Team Logs): new menu item \"Audit Log\" (/employee/team-audit) = the Admin's By Process Audit Log, READ-ONLY - they pick a process, see the employees who worked on it (productivity, productivity %, attendance), open an employee's Productivity / Attendance details and use the Productivity report (Print / Excel). The Admin-only parts (By Employee / Access tab, Process Audit Access, the Granted / Not granted column) are not shown to them; every route is also checked on the server (403 for everyone else). (2) Process name GROUPING in the Audit Log process list (Admin and these designations): process names that share a common prefix (split at \"_\") are grouped automatically - e.g. CA_Kings_Weekly, CA_Kings_YLB, CA_Kings_NVS -> group \"CA_Kings\" (3 Processes). Only the group name is shown first; clicking it expands the processes, each with Open audit. The same rule applies to every process (group_processes()); a process with no shared prefix stays a normal row. Admin permissions, the Admin Audit Log and the employee-side per-process Audit Log access are unchanged.
   * Update290: LOGIN SPEED + quotes. (1) The login no longer waits for Google Sheets: the Attendance-sheet read that only counted logins (not shown any more) and the live Quotes-sheet read were done INSIDE the login request - both removed from it; the Quotes sheet + the Thanglish conversion are prepared in a background thread. (2) The Employees list is read once per login (was three times). (3) The Employee page no longer reads the Quotes sheet while it is built: the quote popup is a light shell, the page opens first and the popup then asks /employee/quote-data (English shown at once, Thanglish filled in under it when ready). (4) Quotes: English from the Quotes sheet; Thanglish = online English->Tamil translation (Google Translate web endpoint, MyMemory as a second service) transliterated to Latin letters here; the result is cached and saved once into an EMPTY Thanglish cell of the sheet; if the online service fails the English quote still shows. Popup heading \"Today's Thought\". Quotes sheet is found from the already-loaded worksheet list (one API call less), reads are single-flight. Admin and Employee pages, themes and layouts unchanged.
   * Update289: FIX - quotes never appeared on the Employee page because the variable _QUOTE_DONE was used but never defined (NameError inside quote_overlay_html(), silently swallowed, so no quote screen was ever built). Now defined. Also: the Quotes sheet columns are detected more reliably (an \"English\" / \"English Quote\" column is preferred, Tamil / Thanglish columns are never taken as the English quote), the sheet read reports why rows were skipped, errors in the quote screen are printed with a full traceback, and a new admin check page /admin/quotes/check shows the Google Sheet connection, the worksheets found, the detected columns and the quote an employee will get (add ?emp=<Employee ID>). Existing tracker functionality unchanged.
@@ -1310,6 +1313,18 @@ def entry_metrics(date, emp_id, procs):
     avail = max(target_hours() - deduction_map(emp_id).get((_key(emp_id), str(date)), 0.0), 0.0)
     return targets, ("" if is_off(date) else _day_pct(prod, avail, tph, items))
 
+# ---- Update292: Type of a Process Entry line: "Production" (Process + Count, as before) or "Tool" (Tool Name + Hours + Description) ----
+def is_tool_type(t): return str(t or "").strip().lower() == "tool"
+def is_proc_type(t):
+    t = str(t or "").strip().lower()
+    return t.startswith("process") or t in ("productive", "production", "tool")      # "Process" = rows saved before Update292 (same as Production)
+class PRow(tuple):
+    """(name, hours, count, description) exactly as before, plus .typ = 'Production' / 'Tool' - old code that unpacks 4 values keeps working."""
+    typ = "Production"
+def mk_prow(n, h, c, d, typ="Production"):
+    r = PRow((n, h, c, d)); r.typ = "Tool" if is_tool_type(typ) else "Production"; return r
+def prow_type(p): return "Tool" if is_tool_type(getattr(p, "typ", "")) else "Production"
+
 def load_subs(emp_id=None):
     """All submissions, or (emp_id given) only that employee's - far less work on a big Productivity log."""
     T = target_hours()
@@ -1346,12 +1361,12 @@ def load_subs(emp_id=None):
         typ_ = str(g_("type")).strip().lower()
         name_ = g_("processdescription", "process")
         cnt_ = g_("count")
-        is_proc = typ_.startswith("process") or typ_ == "productive" or (typ_ == "" and str(cnt_).strip() != "")
+        is_proc = typ_.startswith("process") or typ_ in ("productive", "production", "tool") or (typ_ == "" and str(cnt_).strip() != "")
         if is_proc:
             h = eff_hours(name_, h)          # Update90: "Other" always shows / counts as 8 hrs
             rate = tph.get(name_, 0)
             c = num(cnt_); t = h * rate
-            s["procs"].append(dict(name=name_, hour=h, count=c, training=no_count(name_),
+            s["procs"].append(dict(name=name_, hour=h, count=c, training=(no_count(name_) or typ_ == "tool"), typ=("Tool" if typ_ == "tool" else "Production"),
                                    desc=str(g_("description")),
                                    target=round(t, 1), pct=round(c / t * 100) if t else None,
                                    earned=(c / rate) if rate else 0.0))
@@ -1448,7 +1463,9 @@ def parse_form(emp_id):
     try: d = dt.date.fromisoformat(date)
     except ValueError: d = None
     rows_p = list(zip(g("pn"), g("ph"), g("pc"), g("pd")))
-    procs = [(n, eff_hours(n, num(h)), (0.0 if no_count(n) else num(c)), desc.strip()) for n, h, c, desc in rows_p]     # Update90: "Other" = 8 hrs, others = hours entered
+    _pt = g("pt"); ptypes = ["Tool" if is_tool_type(_pt[i] if i < len(_pt) else "") else "Production" for i in range(len(rows_p))]      # Update292: Type of each line (missing = Production)
+    procs = [mk_prow((n.strip() if ptypes[i] == "Tool" else n), eff_hours(n, num(h)), (0.0 if (ptypes[i] == "Tool" or no_count(n)) else num(c)), desc.strip(), ptypes[i])
+             for i, (n, h, c, desc) in enumerate(rows_p)]     # Update90: "Other" = 8 hrs, others = hours entered
     notes = [(t.strip(), num(h)) for t, h in zip(g("nd"), g("nh")) if num(h) > 0]
     tot = sum(p[1] for p in procs) + sum(n[1] for n in notes)
     half = any(num(h) <= 0 and t.strip() for t, h in zip(g("nd"), g("nh")))
@@ -1458,14 +1475,18 @@ def parse_form(emp_id):
     elif session.get("role") == "employee" and join_date(emp_id) and d < join_date(emp_id):
         err = f"Productivity entry is available only from your joining date ({join_date(emp_id).strftime('%d %b %Y')}). You cannot submit an entry for {date}."
     elif not procs: err = "Add at least one process entry."
-    elif any(not str(n).strip() or (not str(h).strip() or num(h) <= 0) or (not str(c).strip() and not no_count(n)) or not desc.strip()
-             for n, h, c, desc in rows_p):
-        if any((is_other(n) or is_poc(n) or is_genai(n)) and (not str(h).strip() or num(h) <= 0 or not desc.strip()) for n, h, c, desc in rows_p):
+    elif any(not str(n).strip() or (not str(h).strip() or num(h) <= 0) or (not str(c).strip() and not no_count(n) and ptypes[i] != "Tool") or not desc.strip()
+             for i, (n, h, c, desc) in enumerate(rows_p)):
+        if any(ptypes[i] == "Tool" and (not str(n).strip() or not str(h).strip() or num(h) <= 0 or not desc.strip()) for i, (n, h, c, desc) in enumerate(rows_p)):
+            err = "For a Tool entry, Tool Name, Hours (HR) and Description are all required - please fill them before saving."
+        elif any(ptypes[i] != "Tool" and (is_other(n) or is_poc(n) or is_genai(n)) and (not str(h).strip() or num(h) <= 0 or not desc.strip()) for i, (n, h, c, desc) in enumerate(rows_p)):
             err = "For \u201cOthers\u201d, \u201cPOC_Sample\u201d and \u201cGenAI\u201d, Hour and Description are required (no Count) - please fill them before saving."
         else:
             err = "All Process Entry fields (Process, Hour, Count and Description) are mandatory - please fill every field before saving. (Training, Others, POC_Sample and GenAI need only Hour and Description.)"
     elif half: err = "Please enter the Hour for every note you filled in - a note without hours is not saved."
-    elif sum(1 for p_ in procs if is_other(p_[0])) > 1: err = "\u201cOther\u201d can be added only once per day (enter all its hours in one line)."
+    elif any(prow_type(p_) == "Tool" and p_[0].strip().lower() in {k.lower() for k in process_targets()} for p_ in procs):
+        err = "A Tool name cannot be the same as a Process that has a count target - choose Type \u201cProduction\u201d for that process, or give the tool its own name."
+    elif sum(1 for p_ in procs if is_other(p_[0]) and prow_type(p_) == "Production") > 1: err = "\u201cOther\u201d can be added only once per day (enter all its hours in one line)."
     elif tot > day_limit():
         err = f"Total {tot:g} hrs is more than {day_limit():g} hrs."
     else:
@@ -1536,7 +1557,8 @@ def write_sub(sid, date, emp, procs, notes):
     base = [sid, date, *emp]      # emp = (band, id, name)
     try: tgts, dpct = entry_metrics(date, emp[1], [(n, h, c) for n, h, c, _d in procs])      # Update137: never blocks a save
     except Exception as ex: print("entry metrics error:", repr(ex)); tgts, dpct = [""] * len(procs), ""
-    out = [base + ["Process", n, h, c, tgts[i], dpct, now, d] for i, (n, h, c, d) in enumerate(procs)] + \
+    # Update292: Type column = "Production" / "Tool" (notes stay "Note")
+    out = [base + [prow_type(procs[i]), n, h, ("" if prow_type(procs[i]) == "Tool" else c), tgts[i], dpct, now, d] for i, (n, h, c, d) in enumerate(procs)] + \
           [base + ["Note", t, h, "", "", dpct, now, ""] for t, h in notes]      # Update166: row order follows the new sheet column order (Target Count / Productivity % moved right after Count)
     last = None
     for attempt in range(5):          # Update96: retry a failed write (Update157: 5 tries, longer waits - the Sheets quota resets within a minute), but first check the rows did not already land (no duplicates, no loss)
@@ -1614,7 +1636,7 @@ def _proc_txt(name, hour, count):
     return f"{_short(name)} ({_fmt_num(hour)} hr, count {_fmt_num(count)})"
 
 def entry_added_details(date, procs, notes):
-    parts = [_proc_txt(n, h, c) for n, h, c, _d in procs]
+    parts = [(f"Tool {_short(p[0])} ({_fmt_num(p[1])} hr)" if prow_type(p) == "Tool" else _proc_txt(p[0], p[1], p[2])) for p in procs]      # Update292
     parts += [f"Non-productive: {_short(t)} ({_fmt_num(h)} hr)" for t, h in notes]
     return f"Entry {date}: " + "; ".join(parts)
 
@@ -1628,6 +1650,7 @@ def entry_diff(old, date, procs, notes):
         if i < len(op) and i < len(procs):
             o, (n, h, c, d) = op[i], procs[i]
             tag = f" [{_short(n)}]"
+            if str(o.get("typ", "Production")) != prow_type(procs[i]): ch.append(f"Type from {o.get('typ', 'Production')} to {prow_type(procs[i])}{tag}")      # Update292
             if str(o["name"]).strip() != str(n).strip(): ch.append(f"Process from {_short(o['name'])} to {_short(n)}")
             if abs(o["hour"] - h) > 1e-9: ch.append(f"Hours from {_fmt_num(o['hour'])} to {_fmt_num(h)}{tag}")
             if abs(o["count"] - c) > 1e-9: ch.append(f"Count from {_fmt_num(o['count'])} to {_fmt_num(c)}{tag}")
@@ -2463,6 +2486,97 @@ def sep_fields(e):
     except ValueError: e["rel_iso"] = ""; e["rel_txt"] = rv
     e["login_on"] = not emp_locked(e)
     return e
+
+# ---- Update294: Resigned / NCNS / Login Locked employees keep every record; only a separate DISPLAY theme + status labels are added (no data is changed or hidden) ----
+SEP_CSS = """
+.sp.sp-res{background:#ede9fe;color:#5b21b6;border:1px solid #c4b5fd}
+.sp.sp-ncns{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
+.sp.sp-lock{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}
+.sp{font-weight:700;white-space:nowrap;vertical-align:middle}
+.sepb{display:inline-block;margin-left:6px;white-space:nowrap}.sepb .sp{margin-left:3px;padding:1px 8px;font-size:11px;line-height:1.6;border-radius:10px;display:inline-block}
+tr.sepr>td,tr.sepr>th{background-image:repeating-linear-gradient(135deg,rgba(var(--sepc),.14) 0,rgba(var(--sepc),.14) 8px,rgba(var(--sepc),.05) 8px,rgba(var(--sepc),.05) 16px)}
+tr.sepr>td:first-child{box-shadow:inset 4px 0 0 rgb(var(--sepc))}
+tr.sepk-res{--sepc:124,58,237}tr.sepk-ncns{--sepc:220,38,38}tr.sepk-lock{--sepc:217,119,6}
+option.sepo{font-style:italic}
+.seplg{display:none;align-items:center;flex-wrap:wrap;gap:6px;margin:0 0 10px;padding:6px 10px;border:1px dashed rgba(120,120,140,.55);border-radius:10px;font-size:12px}
+.seplg.on{display:flex}.seplg .sp{padding:1px 8px;font-size:11px;border-radius:10px}
+.sepban{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 12px;padding:10px 14px;border-radius:12px;border:1px solid;font-size:13px;background-image:repeating-linear-gradient(135deg,rgba(var(--sepc),.13) 0,rgba(var(--sepc),.13) 8px,rgba(var(--sepc),.05) 8px,rgba(var(--sepc),.05) 16px);border-color:rgb(var(--sepc));border-left-width:5px}
+.sepban.sepk-res{--sepc:124,58,237}.sepban.sepk-ncns{--sepc:220,38,38}.sepban.sepk-lock{--sepc:217,119,6}
+"""
+SEP_JS = r"""
+(function(){
+var el=document.getElementById('sepmap');if(!el)return;var M={};try{M=JSON.parse(el.textContent||'{}')}catch(e){return}
+var K=function(s){return String(s==null?'':s).replace(/[\s\u200b\u200c\u200d\ufeff]+/g,'').toUpperCase()};
+var kind=function(v){return v[0]==='Resigned'?'res':(v[0]==='NCNS'?'ncns':'lock')};
+var badges=function(v){var h='';if(v[0])h+='<span class="pill sp sp-'+(v[0]==='NCNS'?'ncns':'res')+'">'+v[0]+'</span>';if(v[1])h+='<span class="pill sp sp-lock">&#128274; Login Locked</span>';return h};
+var own=function(n,tr){return n.closest('tr')===tr};
+function idOf(tr){var i,j,v,l,p,c;
+ l=tr.querySelectorAll('input[name=eid],input[name=emp_id],input[name=employee_id]');
+ for(i=0;i<l.length;i++){if(!own(l[i],tr))continue;v=K(l[i].value);if(M[v])return{id:v,cell:null}}
+ l=tr.querySelectorAll('a[href]');
+ for(i=0;i<l.length;i++){if(!own(l[i],tr))continue;p=l[i].getAttribute('href').split('#')[0].split('?')[0].split('/');
+  for(j=p.length-1;j>=0;j--){try{v=K(decodeURIComponent(p[j]))}catch(e){v=K(p[j])}if(M[v])return{id:v,cell:l[i].closest('td,th')}}}
+ c=tr.children;for(i=0;i<c.length;i++){v=K(c[i].textContent);if(M[v])return{id:v,cell:c[i]}}
+ return null}
+function run(){var any=false,i,rows=document.querySelectorAll('tr');
+ for(i=0;i<rows.length;i++){var tr=rows[i];if(tr.hasAttribute('data-sepd')){any=true;continue}
+  if(tr.querySelector('th')&&!tr.querySelector('td'))continue;
+  var h=idOf(tr);if(!h)continue;var v=M[h.id];tr.setAttribute('data-sepd',h.id);tr.classList.add('sepr','sepk-'+kind(v));any=true;
+  var cell=h.cell||tr.querySelector('td');
+  if(cell&&K(cell.textContent)===h.id&&cell.nextElementSibling&&cell.nextElementSibling.tagName==='TD'&&K(cell.nextElementSibling.textContent))cell=cell.nextElementSibling;
+  if(cell&&!cell.querySelector('.sepb')){var s=document.createElement('span');s.className='sepb';s.innerHTML=badges(v);cell.appendChild(s)}}
+ var o=document.querySelectorAll('option[value]');
+ for(i=0;i<o.length;i++){if(o[i].hasAttribute('data-sepo'))continue;var w=M[K(o[i].value)];if(!w)continue;
+  o[i].setAttribute('data-sepo','1');o[i].classList.add('sepo');o[i].textContent=o[i].textContent+' ('+(w[0]||'Login Locked')+')'}
+ var lg=document.getElementById('seplg');if(lg&&(any||document.querySelector('.sepban')))lg.classList.add('on')}
+var t=0;function sched(){if(t)return;t=setTimeout(function(){t=0;try{run()}catch(e){}},120)}
+run();try{new MutationObserver(sched).observe(document.body,{childList:true,subtree:true})}catch(e){}
+})();
+"""
+
+def sep_theme_map():
+    """Update294: {EMPLOYEE ID (normalised): [Resigned / NCNS / '', 1 if the login is locked, relieving date text]} for every employee that is Resigned, NCNS or Login Locked. Read-only - nothing is written."""
+    out = {}
+    for e in rows("Employees"):
+        k = _key(e.get("Employee ID", ""))
+        if not k: continue
+        s_, lk_ = emp_sep(e), emp_locked(e)
+        if not (s_ or lk_): continue
+        rv = str(e.get("Relieving date", "")).strip()
+        try: rv = dt.date.fromisoformat(rv[:10]).strftime("%d %b %Y")
+        except ValueError: pass
+        out[k] = [s_, 1 if lk_ else 0, rv if s_ else ""]
+    return out
+
+def sep_theme_parts():
+    """Update294: (html_before_page_body, html_after_page_body). Admin pages and the read-only Employee Details / Team Logs pages of Associate Manager / Team Lead / Senior Team Lead only;
+    every other employee page gets nothing. Display only: colour theme, status labels, colour key and a banner on an employee's own detail page."""
+    role = session.get("role")
+    if role == "employee":
+        try: ok = bool(team_log_access() or pd_user())
+        except Exception: ok = False
+        if not ok: return "", ""
+    elif role != "admin": return "", ""
+    m = sep_theme_map()
+    pre = '<style id="sepcss">' + SEP_CSS + '</style>'
+    if m:
+        pre += ('<div id="seplg" class="seplg no-print" role="note"><b>Colour key:</b><span class="pill sp sp-res">Resigned</span><span class="pill sp sp-ncns">NCNS</span>'
+                '<span class="pill sp sp-lock">&#128274; Login Locked</span><span>&mdash; their records are kept and still open to the Admin; they cannot log in.</span></div>')
+    if role == "admin":
+        mt = re.match(r"^/admin/(?:employee-info|audit|work-time/employee|missed-log)/([^/]+)", request.path or "")
+        if mt:
+            from urllib.parse import unquote
+            import html as _hh      # (local import - same module the rest of the file uses)
+            v = m.get(_key(unquote(mt.group(1))))
+            if v:
+                kd = "res" if v[0] == "Resigned" else ("ncns" if v[0] == "NCNS" else "lock")
+                lab = (f'<span class="pill sp sp-{"ncns" if v[0] == "NCNS" else "res"}">{v[0]}</span>' if v[0] else "") + ('<span class="pill sp sp-lock">&#128274; Login Locked</span>' if v[1] else "")
+                note = "Resigned / NCNS employee" if v[0] else "Login-locked employee"
+                pre += (f'<div class="sepban sepk-{kd} no-print" role="note">{lab}<span><b>{note}</b>'
+                        + (f" &mdash; relieving date: {_hh.escape(v[2])}" if v[2] else "")
+                        + ' &mdash; this employee cannot log in. All productivity logs, audit logs and details below are kept for reference.</span></div>')
+    post = '<script type="application/json" id="sepmap">' + json.dumps(m, separators=(",", ":")).replace("</", "<\\/") + '</script><script>' + SEP_JS + '</script>' if m else ""
+    return pre, post
 
 def emp_status(emp_id):
     """'ok' | 'locked' | 'deleted' for a signed-in employee (uses the short-lived sheet cache, so it costs no extra Google call)."""
@@ -5202,7 +5316,11 @@ def page(body, title="Productivity Tracker", **ctx):
     elif session.get("role") == "employee" and not ctx.get("bare") and not str(request.path).startswith("/employee/tracking-consent"):      # Update268: tracking notice waiting for the employee's answer
         try: _ntm = consent_banner() + _ntm
         except Exception as ex_: print("Consent banner failed:", repr(ex_))
-    _html = render_fast(BASE, body=_ntm + render_fast(body, **ctx), title=title, nav=nav,
+    _sp, _sq = "", ""
+    if not ctx.get("bare"):      # Update294: Resigned / NCNS / Login Locked display theme (Admin + read-only lead pages)
+        try: _sp, _sq = sep_theme_parts()
+        except Exception as ex_: print("Resigned / NCNS theme failed:", repr(ex_))
+    _html = render_fast(BASE, body=_ntm + _sp + render_fast(body, **ctx) + _sq, title=title, nav=nav,
                                   side_avatar=side_avatar, side_name=side_name, side_name_html=side_name_html, welcome_html=welcome_html, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, hol_only=bool(ctx["hide_status"]), srv_today=str(today_local()), theme_css=_theme_css(), sbar=bool(session.get("role") in ("admin", "employee") and theme_choice()[1] == "0"))
     return _html
 
@@ -5953,7 +6071,7 @@ const P={{names|tojson}}, T={{tph|tojson}}, DAY={{day|g}}, TGT={{target|g}}, OTH
 const isOther=v=>['other','others'].includes(String(v==null?'':v).trim().toLowerCase()), isPoc=v=>String(v==null?'':v).trim().toLowerCase().replace(/ /g,'_')==='poc_sample', isGenai=v=>String(v==null?'':v).trim().toLowerCase().replace(/[ _-]/g,'')==='genai', isTrain=v=>String(v==null?'':v).trim().toLowerCase()==='training';
 const effH=(nm,h)=>h;      // Update96: hours are exactly what the employee typed
 function rowH(r){return effH((r.querySelector('[name=pn]')||{}).value,+((r.querySelector('[name=ph]')||{}).value)||0)}
-function otherUI(r){const pv=(r.querySelector('[name=pn]')||{}).value,o=isOther(pv),pc_=isPoc(pv),ga_=isGenai(pv),tr=isTrain(pv)||o||pc_||ga_,d=r.querySelector('[name=pd]'),c=r.querySelector('[name=pc]');if(!d)return;
+function otherUI(r){if(isToolRow(r))return;const pv=(r.querySelector('[name=pn]')||{}).value,o=isOther(pv),pc_=isPoc(pv),ga_=isGenai(pv),tr=isTrain(pv)||o||pc_||ga_,d=r.querySelector('[name=pd]'),c=r.querySelector('[name=pc]');if(!d)return;
  let n=r.querySelector('.oth-note');
  if(c){if(tr){c.type='hidden';c.required=false;c.value='0'}else{if(c.type==='hidden'){c.type='number';c.value=''}c.required=true}}      // Training: Count is not shown / not required
  if(o||pc_||ga_||tr){d.placeholder=isTrain(pv)?'Training details *':'Description of the work done *';d.size=48;d.style.minWidth='320px';
@@ -5963,12 +6081,26 @@ function otherUI(r){const pv=(r.querySelector('[name=pn]')||{}).value,o=isOther(
 const E=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function row(h){const d=document.createElement('div');d.className='r';
  d.innerHTML=h+'<button type="button" class="danger" onclick="this.parentNode.remove();calc()">X</button>';return d}
-function addProc(p){p=p||{};const _r=row(
- '<select name="pn" required onchange="otherUI(this.parentNode);calc()">'+P.map(n=>'<option '+(n==p.name?'selected':'')+'>'+E(n)+'</option>').join('')+'</select>'+
+const isToolRow=r=>{const t=r.querySelector('[name=pt]');return !!t&&t.value==='Tool'};
+function typeUI(r,keep){      /* Update292: Type = Production (Process + Hours + Count + Description) or Tool (Tool Name + Hours + Description) */
+ keep=keep||{};const t=r.querySelector('[name=pt]').value,slot=r.querySelector('.pnw'),ph=r.querySelector('[name=ph]'),pd=r.querySelector('[name=pd]'),c=r.querySelector('[name=pc]');
+ if(t==='Tool'){slot.innerHTML='<input name="pn" required placeholder="Tool Name *" size="22" value="'+E(keep.name)+'" oninput="calc()">';
+  ph.placeholder='Hours (HR) *';
+  if(c){c.type='hidden';c.required=false;c.value='0'}
+  pd.placeholder='Description *';pd.size=28;pd.style.minWidth='';
+  const n=r.querySelector('.oth-note');if(n)n.remove()}
+ else{slot.innerHTML='<select name="pn" required onchange="otherUI(this.parentNode);calc()">'+P.map(n=>'<option '+(n==keep.name?'selected':'')+'>'+E(n)+'</option>').join('')+'</select>';
+  ph.placeholder='Hour *';
+  if(c&&c.type==='hidden'){c.type='number';c.value=''}
+  otherUI(r)}
+ calc()}
+function addProc(p){p=p||{};const tl=p.typ==='Tool',_r=row(
+ '<select name="pt" required title="Type" onchange="typeUI(this.parentNode)"><option value="Production"'+(tl?'':' selected')+'>Production</option><option value="Tool"'+(tl?' selected':'')+'>Tool</option></select>'+
+ '<span class="pnw" style="display:contents"></span>'+
  '<input name="ph" type="number" step="0.25" min="0.25" required placeholder="Hour *" value="'+(p.hour||'')+'" oninput="calc()">'+
  '<input name="pc" type="number" min="0" required placeholder="Count *" value="'+(p.count||'')+'" oninput="calc()">'+
  '<input name="pd" required placeholder="Description *" size="28" value="'+E(p.desc)+'">');
- document.getElementById('procs').appendChild(_r);otherUI(_r);calc()}
+ document.getElementById('procs').appendChild(_r);typeUI(_r,p)}
 function addNote(n){n=n||{};document.getElementById('notes').appendChild(row(
  '<input name="nd" placeholder="Description" size="30" value="'+E(n.desc)+'">'+
  '<input name="nh" type="number" step="0.25" min="0" placeholder="Hour" value="'+(n.hour||'')+'" oninput="calc()">'));calc()}
@@ -5982,7 +6114,7 @@ function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e
  tstat.style.color=left>0?'#b45309':'#15803d';
  const prows=[...document.querySelectorAll('#procs .r')];                 // Target Count/Hour check (Admin-set, per process)
  const met=prows.length>0 && prows.every(row=>{
-  const rate=T[(row.querySelector('[name=pn]')||{}).value]||0;
+  const rate=isToolRow(row)?0:(T[(row.querySelector('[name=pn]')||{}).value]||0);
   const hr=rowH(row);
   const ct=+((row.querySelector('[name=pc]')||{}).value)||0;
   const need=rate*hr;
@@ -5992,7 +6124,7 @@ function calc(){const s=q=>[...document.querySelectorAll(q)].reduce((a,e)=>a+(+e
  entryCard.classList.toggle('tgt-miss',!met);
  tgtBadge.textContent=met?'Target: Met':'Target: Not met';
  tgtBadge.className=met?'met':'miss';
- const low=[];prows.forEach(row=>{const nm=(row.querySelector('[name=pn]')||{}).value,rate=T[nm]||0,hr=rowH(row),ct=+((row.querySelector('[name=pc]')||{}).value)||0,need=rate*hr;
+ const low=[];prows.forEach(row=>{const nm=(row.querySelector('[name=pn]')||{}).value,rate=isToolRow(row)?0:(T[nm]||0),hr=rowH(row),ct=+((row.querySelector('[name=pc]')||{}).value)||0,need=rate*hr;
   if(need>0&&ct<need)low.push(nm+': '+ct+' of '+Math.round(need*100)/100)});
  tgtMsg.textContent=low.length?('⚠ Target not achieved (count per hour × hours worked) – '+low.join(' | ')):'';tgtMsg.style.display=low.length?'block':'none'}
 document.querySelector('[name=date]').addEventListener('change',calc);
@@ -6029,8 +6161,8 @@ window.addEventListener('pageshow',function(){const b=document.querySelector('fo
 </script>"""
 
 VIEW = """<div class="card"><h2>{{s.date}} &middot; {{s.emp_name}} ({{s.emp_id}}{% if s.designation %}, {{s.designation}}{% endif %}, Band {{s.band}})</h2>
-<table><tr><th>Process</th><th>Description</th><th>Hour</th><th>Count</th><th>Target count</th><th>Achievement</th></tr>
-{% for p in s.procs %}<tr><td>{{p.name}}</td><td>{{p.desc}}</td><td>{{p.hour|g}}</td><td>{{ '-' if p.training else (p.count|g) }}</td><td>{{ '-' if p.training else (p.target|g) }}</td>
+<table><tr><th>Type</th><th>Process / Tool</th><th>Description</th><th>Hour</th><th>Count</th><th>Target count</th><th>Achievement</th></tr>
+{% for p in s.procs %}<tr><td>{{p.typ}}</td><td>{{p.name}}</td><td>{{p.desc}}</td><td>{{p.hour|g}}</td><td>{{ '-' if p.training else (p.count|g) }}</td><td>{{ '-' if p.training else (p.target|g) }}</td>
 <td>{{ (p.pct ~ '%') if p.pct is not none else '-' }}</td></tr>{% endfor %}</table><br>
 <table><tr><th>Notes</th><th>Hour</th></tr>{% for n in s.notes %}<tr><td>{{n.desc}}</td><td>{{n.hour|g}}</td></tr>{% endfor %}</table>
 <div class="totals">Productive: <b>{{s.prod|g}}</b> hrs &middot; Non-productive: <b>{{s.non|g}}</b> hrs &middot; Total: <b>{{s.total|g}}</b> / {{day|g}} hrs &middot; {% if s.off %}<b>Weekend / Holiday entry - not counted</b>{% else %}Productivity: <b>{{s.pct}}%</b> ({{s.avail|g}} hrs = 100%{% if s.ded %} &ndash; {{target|g}}-hr day less {{s.ded|g}} hr permission / half-day leave{% endif %}){% endif %}</div>
@@ -6309,7 +6441,7 @@ def log_report_data(period, emp_q="", on=None):
                         s["prod"], s["non"], s["total"], pct, s["tgt_total"], s["cnt_total"], tstat])
         base = [s["date"], day(s["date"]), s["emp_id"], s["emp_name"], s["designation"], s["band"]]
         for p_ in s["procs"]:
-            detail.append(base + ["Process", p_["name"], p_["desc"], p_["hour"], p_["count"], p_["target"],
+            detail.append(base + [p_.get("typ", "Production"), p_["name"], p_["desc"], p_["hour"], p_["count"], p_["target"],
                                   "" if p_["pct"] is None else p_["pct"]])
         for n_ in s["notes"]:
             detail.append(base + ["Note", n_["desc"], "", n_["hour"], "", "", ""])
@@ -6415,7 +6547,7 @@ def admin_log_recalc():
         x = subs.get(str(r["Submission ID"]))
         if not x: continue
         rate = tph.get(r["Process / Description"], 0)
-        tgt = round(eff_hours(r["Process / Description"], num(r["Hour"])) * rate, 2) if r["Type"] == "Process" and rate > 0 else ""
+        tgt = round(eff_hours(r["Process / Description"], num(r["Hour"])) * rate, 2) if is_proc_type(r["Type"]) and not is_tool_type(r["Type"]) and rate > 0 else ""
         vals[r["_row"] - 2] = [tgt, "" if x["off"] else x["pct"]]
     ws = ws_of("Productivity log")
     for i in range(0, len(vals), 4000):
@@ -6697,8 +6829,8 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <p class="mut">Login enabled: <b>{{n_on}}</b> &middot; Login disabled: <b>{{n_off}}</b> &middot; Resigned: <b>{{n_res}}</b> &middot; NCNS: <b>{{n_ncns}}</b></p>
 <table><tr><th>Employee ID</th><th>Employee Name</th><th>Designation</th><th>Office Email ID</th><th>Login Access Status</th><th>Status (Resigned / NCNS)</th><th>Relieving Date</th><th class="no-print">Action (Admin only)</th></tr>
 {% for e in emps %}{% set off = e.login_off %}<tr><td>{{e['Employee ID']}}</td><td><b>{{e['Name']}}</b></td><td>{{e['Designation'] or '-'}}</td><td>{{e['Email'] or '-'}}</td>
-<td>{% if off %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% endif %}</td>
-<td>{% if e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% elif is_plog_desig(e['Designation']) %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% else %}-{% endif %}</td><td>{{ e.rel_txt or '-' }}</td>
+<td>{% if off %}<span class="pill sp sp-lock">&#128274; Login Locked</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% endif %}</td>
+<td>{% if e.sep=='Resigned' %}<span class="pill sp sp-res">Resigned</span>{% elif e.sep=='NCNS' %}<span class="pill sp sp-ncns">NCNS</span>{% elif is_plog_desig(e['Designation']) %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% else %}-{% endif %}</td><td>{{ e.rel_txt or '-' }}</td>
 <td class="act no-print">
 <form method="post" action="/admin/employee-info/login-access/{{e['_row']}}/separation" onsubmit="var f=this,st=f.status.value;if(st==='clear'){return confirm('Set {{e['Employee ID']}} ({{e['Name']}}) to Active? The Resigned / NCNS status is cleared; the login stays disabled until you click Enable Login.')}if(!f.relieving.value){alert('Enter the relieving date.');return false}return confirm('Mark {{e['Employee ID']}} ({{e['Name']}}) as '+st+' with relieving date '+f.relieving.value+'? Login access will be disabled automatically.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}">
 <select name="status" title="Action (Admin only)" style="width:auto"><option value="clear" {{'selected' if not e.sep else ''}}>Active</option><option value="Resigned" {{'selected' if e.sep=='Resigned' else ''}}>Resigned</option><option value="NCNS" {{'selected' if e.sep=='NCNS' else ''}}>NCNS (No Call, No Show)</option></select>
@@ -6715,7 +6847,7 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 {% for p in prows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
 <td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}} <span class="pill act">New joiner</span>{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td>
 <td>{{p.pstart.strftime('%d %b %Y')}}</td>
-{% if p.sepst %}<td><span class="pill" style="{{ 'background:#fde8e8;color:#b42318' if p.sepst=='Resigned' else 'background:#fff1db;color:#b45309' }}">{{p.sepst}}</span></td><td colspan="4" class="mut">{% if p.e.rel_txt %}Relieving date: {{p.e.rel_txt}} &mdash; {% endif %}not counted in working days, pending entries or reminders</td>
+{% if p.sepst %}<td><span class="pill sp {{ 'sp-res' if p.sepst=='Resigned' else 'sp-ncns' }}">{{p.sepst}}</span></td><td colspan="4" class="mut">{% if p.e.rel_txt %}Relieving date: {{p.e.rel_txt}} &mdash; {% endif %}not counted in working days, pending entries or reminders</td>
 {% elif not p.active %}<td colspan="5" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
 {% elif p.r.vo %}<td colspan="5" class="mut">View only (no productivity entry for this designation)</td>
 {% else %}<td>{{p.r.wd}}</td><td>{{p.entries}}</td><td>{{p.missed}}</td><td>{{p.r.att}}%</td><td><b>{{p.r.pct}}%</b></td>{% endif %}</tr>
@@ -6725,7 +6857,7 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <p class="mut">{{label}} &middot; Associate Managers, Managers, Team Leads and Senior Team Leads: their own Productivity Log and Missed Entries Log. These employees also see the read-only <b>Team Logs</b> (Productivity Log + Missed Entries Log of all employees) in their own panel when they log in. Access follows the Designation automatically.</p>
 <table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Login Access</th><th>Status</th><th>Relieving Date</th><th>Entries</th><th>Productivity</th><th>Missed entries</th><th>Missed dates</th><th>Logs</th></tr>
 {% for p in lrows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
-<td>{% if p.e.login_on %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% else %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% endif %}</td><td>{% if p.e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif p.e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td><td>{{ p.e.rel_txt or '-' }}</td>
+<td>{% if p.e.login_on %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% else %}<span class="pill sp sp-lock">&#128274; Login Locked</span>{% endif %}</td><td>{% if p.e.sep=='Resigned' %}<span class="pill sp sp-res">Resigned</span>{% elif p.e.sep=='NCNS' %}<span class="pill sp sp-ncns">NCNS</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td><td>{{ p.e.rel_txt or '-' }}</td>
 {% if not p.active %}<td colspan="3" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>{% elif p.vo %}<td colspan="3" class="mut">View only</td>{% else %}<td>{{p.entries}}</td><td><b>{{p.pct}}%</b></td><td>{{p.missed|length}}</td>{% endif %}
 <td>{{p.missed|join(', ') or '-'}}</td>
 <td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}{% endif %}">Productivity Log</a> &middot; <a href="/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=missed&amp;month={{month}}">Missed Entries Log</a></td></tr>
@@ -8238,7 +8370,7 @@ def _imp_plan(items):
         d = norm_date(it.get("Date")); eid = it.get("Employee ID", "").strip(); e = emps.get(_key(eid))
         typ = (it.get("Type") or "Process").strip().title(); desc = it.get("Process / Description", "").strip()
         why = ("date not recognised" if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) else "unknown Employee ID" if e is None else
-               "View Only designation" if is_view_only(eid) else "Type must be Process or Note" if typ not in ("Process", "Note") else "no process / description" if not desc else "")
+               "View Only designation" if is_view_only(eid) else "Type must be Production, Tool, Process or Note" if typ not in ("Process", "Production", "Tool", "Note") else "no process / description" if not desc else "")
         if why: cnt["bad"] += 1; bad.append("row %d: %s" % (n, why)); continue
         h, c = num(it.get("Hour")), num(it.get("Count"))
         k = (d, _key(eid), typ, desc.lower(), round(h, 2), round(c, 2))
@@ -8248,21 +8380,21 @@ def _imp_plan(items):
                                                                     "Band": it.get("Band") or str(e.get("Band", "")), "Type": typ, "Process / Description": desc, "_h": h, "_c": c}))
     out, now = [], now_local().strftime("%Y-%m-%d %H:%M:%S")
     for (d, ek), g in groups.items():
-        procs = [(x["Process / Description"], x["_h"], x["_c"]) for x in g if x["Type"] == "Process"]
+        procs = [(x["Process / Description"], x["_h"], x["_c"]) for x in g if x["Type"] != "Note"]
         try: tgts, dpct = entry_metrics(d, g[0]["Employee ID"], procs)
         except Exception as ex: print("import metrics error:", repr(ex)); tgts, dpct = [""] * len(procs), ""
         sid = next((x["Submission ID"] for x in g if x.get("Submission ID")), "") or "IMP-" + _ih.sha1(("%s|%s" % (d, ek)).encode()).hexdigest()[:10]
         pi = 0
         for x in g:
             tg = pct = ""
-            if x["Type"] == "Process": tg = x.get("Target Count") or (tgts[pi] if pi < len(tgts) else ""); pi += 1
+            if x["Type"] != "Note": tg = x.get("Target Count") or (tgts[pi] if pi < len(tgts) else ""); pi += 1
             pct = x.get("Productivity %") or dpct
-            out.append([sid, d, x["Band"], x["Employee ID"], x["Employee name"], x["Type"], x["Process / Description"], x["_h"], x["_c"] if x["Type"] == "Process" else "",
+            out.append([sid, d, x["Band"], x["Employee ID"], x["Employee name"], x["Type"], x["Process / Description"], x["_h"], x["_c"] if x["Type"] in ("Process", "Production") else "",
                         tg, pct, x.get("Submitted at") or now, x.get("Description", "")])
     return out, cnt, bad
 
 IMPORT_PAGE = """<div class="card"><h2 style="margin-top:0">Import Productivity log</h2>
-<p class="mut">Upload a CSV or XLSX with a header row. Recognised columns: Date, Employee ID, Employee name, Band, Type (Process / Note, default Process), Process / Description, Hour, Count,
+<p class="mut">Upload a CSV or XLSX with a header row. Recognised columns: Date, Employee ID, Employee name, Band, Type (Production / Tool / Note, or the older Process; default Process), Process / Description, Hour, Count,
 Target Count, Productivity %, Description, Submission ID. Dates may be 2026-10-08, 08/10/2026, 08-10-2026, 08.10.2026 or 08 Oct 2026. Rows already in the log are skipped.</p>
 <form method="post" enctype="multipart/form-data"><input type="file" name="file" accept=".csv,.xlsx,.xlsm" required>
 <label style="display:block;margin:8px 0"><input type="checkbox" name="save" value="1"> Save to the Productivity log (leave unticked to preview only)</label>
@@ -10034,17 +10166,24 @@ def group_processes(names):
     out.sort(key=lambda g: (g["group"] or g["members"][0]).lower())
     return out
 
+AUDIT_SHEETS = LIVE_REPORT_SHEETS + ("Audit Access",)      # Update293: every Audit Log page reads these sheets live (no stale per-worker cache)
+def _proc_canon():
+    """Update293: {case / space-insensitive key: exact process name of the Processes sheet}."""
+    return {_key(n): n for n in audit_process_names()}
+def _canon(name, cm): return cm.get(_key(name), str(name).strip())
+
 def audit_allowed(acc):
     """Process names Admin ticked for this employee (only those that still exist) - never 'everything'."""
     return [p for p in audit_process_names() if p in acc["procs"]]
 
 def _audit_worked(subs):
     """{EMPLOYEE KEY: {process: [entries, last date]}} - the processes each employee actually logged work on."""
-    out = {}
+    out = {}; cm = _proc_canon()
     for s in subs:                                   # subs are newest-first, so the first date seen is the last one
         d = out.setdefault(_key(s["emp_id"]), {})
         for pr in s["procs"]:
-            w = d.setdefault(pr["name"], [0, s["date"]]); w[0] += 1
+            if pr.get("typ") == "Tool": continue      # Update293: a Tool line is not a process
+            w = d.setdefault(_canon(pr["name"], cm), [0, s["date"]]); w[0] += 1
     return out
 
 def audit_write(emp, enabled, raw):
@@ -10072,11 +10211,12 @@ def _aud_month():
 
 def _aud_proc_rows(subs, start, end):
     """Every process line an employee logged in the period (weekly-off days are not counted)."""
-    out = []
+    out = []; cm = _proc_canon()
     for s in subs:
         if s["off"] or not (str(start) <= str(s["date"]) <= str(end)): continue
         for p in s["procs"]:
-            out.append(dict(date=s["date"], name=p["name"], hour=p["hour"], count=p["count"], target=p["target"],
+            if p.get("typ") == "Tool": continue      # Update293
+            out.append(dict(date=s["date"], name=_canon(p["name"], cm), hour=p["hour"], count=p["count"], target=p["target"],
                             pct=p["pct"], desc=p["desc"]))
     return sorted(out, key=lambda r: (r["date"], r["name"]), reverse=True)
 
@@ -10250,11 +10390,12 @@ def _audit_process_view(base, ro=False):
     T = target_hours()
     subs = [x for x in load_subs() if not is_view_only(x["emp_id"])]          # Update105
     emap = {_key(e["Employee ID"]): e for e in rows("Employees")}
-    agg = {}          # process -> {employee key: totals}
+    agg = {}; cm = _proc_canon()          # process -> {employee key: totals}
     for sub in subs:
         if sub["off"] or not (a <= str(sub["date"]) <= b): continue
         for pr in sub["procs"]:
-            e = agg.setdefault(pr["name"], {}).setdefault(_key(sub["emp_id"]), dict(
+            if pr.get("typ") == "Tool": continue      # Update293: a Tool line is not a process
+            e = agg.setdefault(_canon(pr["name"], cm), {}).setdefault(_key(sub["emp_id"]), dict(
                 id=str(sub["emp_id"]), name=sub["emp_name"], hour=0.0, count=0.0, target=0.0, days=set(), entries=0))
             e["hour"] += pr["hour"]; e["count"] += pr["count"]; e["target"] += pr["target"] or 0
             e["days"].add(sub["date"]); e["entries"] += 1
@@ -10355,13 +10496,13 @@ def _aud_prod_report(process, start, end, emp_id=""):
     """All productivity lines for ONE process in ONE month (optionally one employee). Weekly-off days are not counted."""
     T = target_hours()
     emap = {_key(e["Employee ID"]): e for e in rows("Employees")}
-    lines, per = [], {}
+    lines, per = [], {}; cm = _proc_canon()
     for sub in load_subs():
         if is_view_only(sub["emp_id"]): continue                  # Update105
         if sub["off"] or not (str(start) <= str(sub["date"]) <= str(end)): continue
         if emp_id and _key(sub["emp_id"]) != _key(emp_id): continue
         for pr in sub["procs"]:
-            if pr["name"] != process: continue
+            if pr.get("typ") == "Tool" or _canon(pr["name"], cm) != process: continue      # Update293
             lines.append(dict(date=str(sub["date"]), id=str(sub["emp_id"]), name=sub["emp_name"], desc=pr["desc"],
                               hour=pr["hour"], count=pr["count"], target=pr["target"] or 0))
             e = per.setdefault(_key(sub["emp_id"]), dict(id=str(sub["emp_id"]), name=sub["emp_name"], hour=0.0, count=0.0,
@@ -10430,6 +10571,7 @@ def _aud_prod_page(base):      # Update291: shared by Admin and the read-only le
 
 @app.route("/admin/audit/productivity")
 @need("admin")
+@live_data(*(AUDIT_SHEETS))
 def admin_audit_productivity(): return _aud_prod_page("/admin/audit")
 
 AUD_SUM_HEADS = ["Employee ID", "Employee name", "Designation", "Band", "Days worked", "Entries", "Hours",
@@ -10508,17 +10650,20 @@ def _aud_prod_export(back):      # Update291: shared by Admin and the read-only 
 
 @app.route("/admin/audit/productivity/export")
 @need("admin")
+@live_data(*(AUDIT_SHEETS))
 def admin_audit_productivity_export(): return _aud_prod_export("/admin/audit")
 
 # ---- Admin side
 @app.route("/admin/audit")
 @need("admin")
+@live_data(*(AUDIT_SHEETS))
 def admin_audit():
     if request.args.get("view") == "employee": return _audit_list("/admin/audit", True)
     return _audit_process_view("/admin/audit")
 
 @app.route("/admin/audit/<eid>")
 @need("admin")
+@live_data(*(AUDIT_SHEETS + ("Attendance",)))
 def admin_audit_detail(eid): return _audit_detail("/admin/audit", eid, True)
 
 @app.route("/admin/audit/<eid>/access", methods=["POST"])
@@ -10551,11 +10696,13 @@ def admin_audit_toggle(eid):
 @app.route("/employee/audit")
 @need("employee")
 @audit_need
+@live_data(*(AUDIT_SHEETS + ("Attendance",)))
 def employee_audit(acc): return _audit_detail("/employee/audit", session["emp_id"], False, acc)
 
 @app.route("/employee/audit/<eid>")
 @need("employee")
 @audit_need
+@live_data(*(AUDIT_SHEETS + ("Attendance",)))
 def employee_audit_detail(acc, eid): return _audit_detail("/employee/audit", eid, False, acc)   # 403 unless it is their own ID
 
 # ================================================================ Mahizhchi (Question & Answer)  - Update62
@@ -12047,7 +12194,7 @@ PEOPLE_LIST = """<div class="head"><div><h1>Employee Details</h1><p class="mut">
 <div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Designation</th><th>Gender</th><th>Address Line_1</th><th>Address Line_2</th><th>City</th><th>PIN</th><th>Phone</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID</th><th>Profile Name</th><th>Login Access Status</th><th>Status (Resigned / NCNS)</th><th>Relieving Date</th><th>Last updated</th><th></th></tr>
 {% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td><a href="/employee/people/{{e['_row']}}"><b>{{e['Name']}}</b></a></td><td>{{e['Designation'] or '-'}}</td><td>{{e['Gender'] or '-'}}</td><td>{{e['Address Line_1'] or '-'}}</td><td>{{e['Address Line_2'] or '-'}}</td>
 <td>{{e['City'] or '-'}}</td><td>{{e['PIN'] or '-'}}</td><td>{{e['Phone Number'] or '-'}}</td><td>{{e['Emergency no'] or '-'}}</td><td>{{e['Personal Email ID'] or '-'}}</td><td>{{e['Email'] or '-'}}</td><td>{{e['Profile Name'] or '-'}}</td>
-<td>{% if e.login_on %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% else %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% endif %}</td><td>{% if e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td><td>{{ e.rel_txt or '-' }}</td>
+<td>{% if e.login_on %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% else %}<span class="pill sp sp-lock">&#128274; Login Locked</span>{% endif %}</td><td>{% if e.sep=='Resigned' %}<span class="pill sp sp-res">Resigned</span>{% elif e.sep=='NCNS' %}<span class="pill sp sp-ncns">NCNS</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td><td>{{ e.rel_txt or '-' }}</td>
 <td>{{(e['Profile updated at'] or '-')|t12}}</td><td class="act"><a href="/employee/people/{{e['_row']}}">Edit</a></td></tr>
 {% else %}<tr><td colspan="18">No employees found.</td></tr>{% endfor %}</table></div>"""
 
@@ -12108,7 +12255,7 @@ TEAM_PLOG = TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all em
 {% else %}<div style="overflow-x:auto"><table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Joining Date</th><th>Tracking From</th><th>Working Days</th><th>Entries</th><th>Missed</th>{% if not hide_status %}<th>Attendance</th>{% endif %}<th>Productivity</th></tr>
 {% for p in lrows %}<tr><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}">{{p.e['Employee ID']}}</a></td><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
 <td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}}{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td><td>{{p.pstart.strftime('%d %b %Y')}}</td>
-{% if p.sepst %}<td><span class="pill" style="{{ 'background:#fde8e8;color:#b42318' if p.sepst=='Resigned' else 'background:#fff1db;color:#b45309' }}">{{p.sepst}}</span></td><td colspan="{{ 3 if hide_status else 4 }}" class="mut">{% if p.e.rel_txt %}Relieving date: {{p.e.rel_txt}} &mdash; {% endif %}not counted in working days, pending entries or reminders</td>
+{% if p.sepst %}<td><span class="pill sp {{ 'sp-res' if p.sepst=='Resigned' else 'sp-ncns' }}">{{p.sepst}}</span></td><td colspan="{{ 3 if hide_status else 4 }}" class="mut">{% if p.e.rel_txt %}Relieving date: {{p.e.rel_txt}} &mdash; {% endif %}not counted in working days, pending entries or reminders</td>
 {% elif not p.active %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
 {% elif p.r.vo %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">View only (no productivity entry for this designation)</td>
 {% else %}<td>{{p.r.wd}}</td><td>{{p.entries}}</td><td>{{p.missed}}</td>{% if not hide_status %}<td>{{p.r.att}}%</td>{% endif %}<td><b>{{p.r.pct}}%</b></td>{% endif %}</tr>
@@ -12164,21 +12311,25 @@ def _team_plog_page():
 @app.route("/employee/team-audit")
 @need("employee")
 @team_need
+@live_data(*(AUDIT_SHEETS))
 def employee_team_audit(): return _audit_process_view("/employee/team-audit", ro=True)
 
 @app.route("/employee/team-audit/productivity")
 @need("employee")
 @team_need
+@live_data(*(AUDIT_SHEETS))
 def employee_team_audit_productivity(): return _aud_prod_page("/employee/team-audit")
 
 @app.route("/employee/team-audit/productivity/export")
 @need("employee")
 @team_need
+@live_data(*(AUDIT_SHEETS))
 def employee_team_audit_productivity_export(): return _aud_prod_export("/employee/team-audit")
 
 @app.route("/employee/team-audit/<eid>")
 @need("employee")
 @team_need
+@live_data(*(AUDIT_SHEETS + ("Attendance",)))
 def employee_team_audit_detail(eid): return _audit_detail("/employee/team-audit", eid, False, ro=True)
 
 @app.route("/employee/team-logs/employee/<eid>")
@@ -13278,7 +13429,7 @@ MN_PAGE = r"""<div class="head"><div><h1>Mail Notes</h1>
  var ed=document.getElementById('mn-ed'), bar=document.getElementById('mn-tb'), rich=document.getElementById('mn-rich'),
      sizeSel=document.getElementById('mn-size'), colorIn=document.getElementById('mn-color'), saved=null, pendingPx=16, clean='', tmr=null, seq=0;
  var PH='<p style="margin:0 0 14px 0;color:#94a3b8;">Your message appears here.</p>';
- function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
+ function hasText(){return ed.innerText.replace(/ /g,' ').trim()!=='';}
  function paint(){
   var v={subject:esc(sub.value.trim())||'Your subject appears here', message:(hasText()&&clean)?clean:PH};
   frame.srcdoc=T.replace(/[{][{](\w+)[}][}]/g,function(m,k){return (k in v)?v[k]:m;});}

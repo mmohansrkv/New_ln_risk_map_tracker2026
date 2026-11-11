@@ -1,4 +1,6 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update300: Employee page - the Type dropdown (Production / Tool) in each Process Entry line (#procs > div > select) is removed. New lines are always Production (Process + Hour + Count + Description, as before); a hidden value keeps saving / reading the Type column exactly as before, so entries already saved with Tool lines still open and save unchanged. Nothing else changed.
+  * Update299: status message box made compact (small font, small 3D emblem) and it closes by itself after 2 seconds (the X button, Esc and click-outside still close it at once); still at the exact centre of the Admin page with the 3D open / close animation. Display only.
   * Update298: the status popup (Update297) is now centred on the Admin page with a 3D animated theme (perspective card, rotating 3D emblem in the status colour, glow, mouse tilt, smooth 3D entry and exit), the status text large and clear in the centre, and a Close (X) button (also Esc / click outside the card). The page behind stays usable (no blocking overlay). Display only; same trigger and one-status rule as Update297.
   * Update297: Admin - when the Admin opens (clicks the name / details of) a Resigned, NCNS or Login Locked employee (Employee Info, Audit Log, Work Time, Missed log, Overview check) a small non-blocking popup in the top-right corner shows that employee's ONE status (Resigned / NCNS / Login Locked) with a Close (X) button; it does not cover or lock the page, is not repeated when moving between tabs of the same employee, and nothing else changed.
   * Update296: Admin pages - colour indicator ONLY (no text, no colour key, no explanation line) on the rows of Resigned (violet), NCNS (red) and Login Locked (amber) employees; one colour per employee. Status text is shown only on the Overview check page opened by clicking the name (Update295). Display only.
@@ -2515,22 +2517,22 @@ run();try{new MutationObserver(sched).observe(document.body,{childList:true,subt
 
 SEP_POP_HTML = """<style>
 #seppop{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;pointer-events:none;perspective:1100px;--c:@@COL@@}
-#seppop .spc{position:relative;pointer-events:auto;min-width:280px;max-width:min(88vw,380px);padding:30px 34px 26px;border-radius:22px;text-align:center;color:#fff;transform-style:preserve-3d;
- background:linear-gradient(145deg,rgba(var(--c),.96),rgba(20,24,48,.97));border:1px solid rgba(255,255,255,.28);box-shadow:0 30px 70px rgba(0,0,0,.45),0 0 0 1px rgba(var(--c),.5),0 0 60px rgba(var(--c),.55);
- transform:rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));animation:spIn .7s cubic-bezier(.2,.9,.25,1.2) both}
+#seppop .spc{position:relative;pointer-events:auto;min-width:150px;max-width:min(80vw,220px);padding:14px 30px 12px;border-radius:16px;text-align:center;color:#fff;transform-style:preserve-3d;
+ background:linear-gradient(145deg,rgba(var(--c),.96),rgba(20,24,48,.97));border:1px solid rgba(255,255,255,.28);box-shadow:0 30px 70px rgba(0,0,0,.45),0 0 0 1px rgba(var(--c),.5),0 0 60px rgba(var(--c),.45);
+ transform:rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));animation:spIn .5s cubic-bezier(.2,.9,.25,1.2) both}
 #seppop.out .spc{animation:spOut .38s cubic-bezier(.5,0,.8,.4) both}
 #seppop .spc::before{content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(115deg,transparent 30%,rgba(255,255,255,.28) 48%,transparent 66%);background-size:250% 100%;animation:spSheen 3.4s ease-in-out infinite;pointer-events:none}
-#seppop .spe{width:74px;height:74px;margin:0 auto 14px;position:relative;transform-style:preserve-3d;animation:spSpin 7s linear infinite;transform:translateZ(40px)}
-#seppop .spe i{position:absolute;inset:0;border-radius:18px;border:3px solid rgba(255,255,255,.9);background:rgba(255,255,255,.12);box-shadow:0 0 18px rgba(var(--c),.9),inset 0 0 14px rgba(255,255,255,.25)}
-#seppop .spe i:nth-child(1){transform:translateZ(26px)}#seppop .spe i:nth-child(2){transform:rotateY(90deg) translateZ(26px)}
-#seppop .spe i:nth-child(3){transform:rotateY(180deg) translateZ(26px)}#seppop .spe i:nth-child(4){transform:rotateY(-90deg) translateZ(26px)}
-#seppop .spe i:nth-child(5){transform:rotateX(90deg) translateZ(26px)}#seppop .spe i:nth-child(6){transform:rotateX(-90deg) translateZ(26px)}
-#seppop .spt{font:800 30px/1.2 system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:.5px;text-shadow:0 3px 14px rgba(0,0,0,.45);transform:translateZ(60px);animation:spFloat 3s ease-in-out infinite}
-#seppop .spx{position:absolute;top:10px;right:12px;width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,255,255,.45);background:rgba(255,255,255,.16);color:#fff;font-size:16px;line-height:1;cursor:pointer;transform:translateZ(70px);transition:background .2s,transform .2s}
+#seppop .spe{width:34px;height:34px;margin:0 auto 8px;position:relative;transform-style:preserve-3d;animation:spSpin 7s linear infinite;transform:translateZ(30px)}
+#seppop .spe i{position:absolute;inset:0;border-radius:8px;border:2px solid rgba(255,255,255,.9);background:rgba(255,255,255,.12);box-shadow:0 0 18px rgba(var(--c),.9),inset 0 0 14px rgba(255,255,255,.25)}
+#seppop .spe i:nth-child(1){transform:translateZ(12px)}#seppop .spe i:nth-child(2){transform:rotateY(90deg) translateZ(12px)}
+#seppop .spe i:nth-child(3){transform:rotateY(180deg) translateZ(12px)}#seppop .spe i:nth-child(4){transform:rotateY(-90deg) translateZ(12px)}
+#seppop .spe i:nth-child(5){transform:rotateX(90deg) translateZ(12px)}#seppop .spe i:nth-child(6){transform:rotateX(-90deg) translateZ(12px)}
+#seppop .spt{font:700 15px/1.3 system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:.5px;text-shadow:0 3px 14px rgba(0,0,0,.45);transform:translateZ(60px);animation:spFloat 3s ease-in-out infinite}
+#seppop .spx{position:absolute;top:6px;right:8px;width:22px;height:22px;border-radius:50%;border:1px solid rgba(255,255,255,.45);background:rgba(255,255,255,.16);color:#fff;font-size:11px;line-height:1;cursor:pointer;transform:translateZ(70px);transition:background .2s,transform .2s}
 #seppop .spx:hover{background:rgba(255,255,255,.34);transform:translateZ(70px) rotate(90deg)}
 @keyframes spIn{0%{opacity:0;transform:translateY(40px) rotateX(-70deg) rotateY(30deg) scale(.55)}100%{opacity:1;transform:rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg))}}
 @keyframes spOut{0%{opacity:1}100%{opacity:0;transform:translateY(-30px) rotateX(60deg) rotateY(-35deg) scale(.5)}}
-@keyframes spSpin{to{transform:translateZ(40px) rotateX(-18deg) rotateY(360deg)}}
+@keyframes spSpin{to{transform:translateZ(30px) rotateX(-18deg) rotateY(360deg)}}
 @keyframes spFloat{0%,100%{transform:translateZ(60px) translateY(0)}50%{transform:translateZ(60px) translateY(-4px)}}
 @keyframes spSheen{0%{background-position:160% 0}60%,100%{background-position:-60% 0}}
 @media (prefers-reduced-motion:reduce){#seppop .spc,#seppop .spe,#seppop .spt,#seppop .spc::before{animation:none!important}}
@@ -2542,8 +2544,8 @@ p.style.setProperty("--c",p.style.getPropertyValue("--c"));
 var K=function(x){return String(x==null?"":x).replace(/\\s+/g,"").toUpperCase()};
 try{var u=new URL(document.referrer||"about:blank");if(u.origin===location.origin){var pa=K(decodeURIComponent(u.pathname))+"/";
 same=pa.indexOf("/"+e+"/")>-1||(u.pathname==="/admin/summary/check"&&location.pathname==="/admin/summary/check"&&K(u.searchParams.get("emp"))===e)}}catch(x){}
-if(same)return;p.style.display="flex";
-function close(){if(p.classList.contains("out"))return;p.classList.add("out");document.removeEventListener("keydown",kd);document.removeEventListener("pointermove",mv);document.removeEventListener("pointerdown",od,true);setTimeout(function(){p.style.display="none"},380)}
+if(same)return;p.style.display="flex";var tm=setTimeout(function(){close()},2000);
+function close(){clearTimeout(tm);if(p.classList.contains("out"))return;p.classList.add("out");document.removeEventListener("keydown",kd);document.removeEventListener("pointermove",mv);document.removeEventListener("pointerdown",od,true);setTimeout(function(){p.style.display="none"},380)}
 function od(ev){if(!c.contains(ev.target))close()}
 function kd(ev){if(ev.key==="Escape")close()}
 function mv(ev){var r=c.getBoundingClientRect(),x=(ev.clientX-(r.left+r.width/2))/400,y=(ev.clientY-(r.top+r.height/2))/300;
@@ -6094,7 +6096,7 @@ function typeUI(r,keep){      /* Update292: Type = Production (Process + Hours +
   otherUI(r)}
  calc()}
 function addProc(p){p=p||{};const tl=p.typ==='Tool',_r=row(
- '<select name="pt" required title="Type" onchange="typeUI(this.parentNode)"><option value="Production"'+(tl?'':' selected')+'>Production</option><option value="Tool"'+(tl?' selected':'')+'>Tool</option></select>'+
+ '<input type="hidden" name="pt" value="'+(tl?'Tool':'Production')+'">'+
  '<span class="pnw" style="display:contents"></span>'+
  '<input name="ph" type="number" step="0.25" min="0.25" required placeholder="Hour *" value="'+(p.hour||'')+'" oninput="calc()">'+
  '<input name="pc" type="number" min="0" required placeholder="Count *" value="'+(p.count||'')+'" oninput="calc()">'+

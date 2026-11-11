@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update293: FIX Audit Log (Admin, and Associate Manager / Team Lead / Senior Team Lead, and employees with per-process access) showed no / old data. (1) Causes: every Audit Log page used the per-worker cached sheet read, which can be minutes old and differs between server workers (the Admin Productivity Log already reads live since Update168) - all Audit Log pages now read Productivity log / Leave / Permissions / Employees / Settings / Holidays / Processes / Audit Access (and Attendance on the employee page) LIVE. (2) Process names in the log are now matched to the Processes sheet ignoring case and stray spaces (before, \"Data Entry \" or \"data entry\" never matched and the process showed 0 employees). (3) Tool lines (Update292) are never counted as a process. Design, permissions and everything else unchanged.
   * Update292: Employee page - Process Entry lines get a TYPE dropdown (Production / Tool). Production = the existing Process + Hours + Count + Description line. Tool = Tool Name (typed) + Hours (HR) + Description (no Count, no count target; its hours count as productive hours like Training). The selected Type is saved in the existing \"Type\" column of the \"Productivity log\" sheet for every line (\"Production\" / \"Tool\"; notes stay \"Note\"; rows saved earlier as \"Process\" are read as Production, nothing is rewritten). Reports, Excel export, recalculation, CSV import and the entry View / Edit pages understand the new values. Everything else unchanged.
   * Update291: (1) Audit Log for Associate Manager / Team Lead / Senior Team Lead (matched live by Designation, same test as Team Logs): new menu item \"Audit Log\" (/employee/team-audit) = the Admin's By Process Audit Log, READ-ONLY - they pick a process, see the employees who worked on it (productivity, productivity %, attendance), open an employee's Productivity / Attendance details and use the Productivity report (Print / Excel). The Admin-only parts (By Employee / Access tab, Process Audit Access, the Granted / Not granted column) are not shown to them; every route is also checked on the server (403 for everyone else). (2) Process name GROUPING in the Audit Log process list (Admin and these designations): process names that share a common prefix (split at \"_\") are grouped automatically - e.g. CA_Kings_Weekly, CA_Kings_YLB, CA_Kings_NVS -> group \"CA_Kings\" (3 Processes). Only the group name is shown first; clicking it expands the processes, each with Open audit. The same rule applies to every process (group_processes()); a process with no shared prefix stays a normal row. Admin permissions, the Admin Audit Log and the employee-side per-process Audit Log access are unchanged.
   * Update290: LOGIN SPEED + quotes. (1) The login no longer waits for Google Sheets: the Attendance-sheet read that only counted logins (not shown any more) and the live Quotes-sheet read were done INSIDE the login request - both removed from it; the Quotes sheet + the Thanglish conversion are prepared in a background thread. (2) The Employees list is read once per login (was three times). (3) The Employee page no longer reads the Quotes sheet while it is built: the quote popup is a light shell, the page opens first and the popup then asks /employee/quote-data (English shown at once, Thanglish filled in under it when ready). (4) Quotes: English from the Quotes sheet; Thanglish = online English->Tamil translation (Google Translate web endpoint, MyMemory as a second service) transliterated to Latin letters here; the result is cached and saved once into an EMPTY Thanglish cell of the sheet; if the online service fails the English quote still shows. Popup heading \"Today's Thought\". Quotes sheet is found from the already-loaded worksheet list (one API call less), reads are single-flight. Admin and Employee pages, themes and layouts unchanged.
@@ -10069,17 +10070,24 @@ def group_processes(names):
     out.sort(key=lambda g: (g["group"] or g["members"][0]).lower())
     return out
 
+AUDIT_SHEETS = LIVE_REPORT_SHEETS + ("Audit Access",)      # Update293: every Audit Log page reads these sheets live (no stale per-worker cache)
+def _proc_canon():
+    """Update293: {case / space-insensitive key: exact process name of the Processes sheet}."""
+    return {_key(n): n for n in audit_process_names()}
+def _canon(name, cm): return cm.get(_key(name), str(name).strip())
+
 def audit_allowed(acc):
     """Process names Admin ticked for this employee (only those that still exist) - never 'everything'."""
     return [p for p in audit_process_names() if p in acc["procs"]]
 
 def _audit_worked(subs):
     """{EMPLOYEE KEY: {process: [entries, last date]}} - the processes each employee actually logged work on."""
-    out = {}
+    out = {}; cm = _proc_canon()
     for s in subs:                                   # subs are newest-first, so the first date seen is the last one
         d = out.setdefault(_key(s["emp_id"]), {})
         for pr in s["procs"]:
-            w = d.setdefault(pr["name"], [0, s["date"]]); w[0] += 1
+            if pr.get("typ") == "Tool": continue      # Update293: a Tool line is not a process
+            w = d.setdefault(_canon(pr["name"], cm), [0, s["date"]]); w[0] += 1
     return out
 
 def audit_write(emp, enabled, raw):
@@ -10107,11 +10115,12 @@ def _aud_month():
 
 def _aud_proc_rows(subs, start, end):
     """Every process line an employee logged in the period (weekly-off days are not counted)."""
-    out = []
+    out = []; cm = _proc_canon()
     for s in subs:
         if s["off"] or not (str(start) <= str(s["date"]) <= str(end)): continue
         for p in s["procs"]:
-            out.append(dict(date=s["date"], name=p["name"], hour=p["hour"], count=p["count"], target=p["target"],
+            if p.get("typ") == "Tool": continue      # Update293
+            out.append(dict(date=s["date"], name=_canon(p["name"], cm), hour=p["hour"], count=p["count"], target=p["target"],
                             pct=p["pct"], desc=p["desc"]))
     return sorted(out, key=lambda r: (r["date"], r["name"]), reverse=True)
 
@@ -10285,11 +10294,12 @@ def _audit_process_view(base, ro=False):
     T = target_hours()
     subs = [x for x in load_subs() if not is_view_only(x["emp_id"])]          # Update105
     emap = {_key(e["Employee ID"]): e for e in rows("Employees")}
-    agg = {}          # process -> {employee key: totals}
+    agg = {}; cm = _proc_canon()          # process -> {employee key: totals}
     for sub in subs:
         if sub["off"] or not (a <= str(sub["date"]) <= b): continue
         for pr in sub["procs"]:
-            e = agg.setdefault(pr["name"], {}).setdefault(_key(sub["emp_id"]), dict(
+            if pr.get("typ") == "Tool": continue      # Update293: a Tool line is not a process
+            e = agg.setdefault(_canon(pr["name"], cm), {}).setdefault(_key(sub["emp_id"]), dict(
                 id=str(sub["emp_id"]), name=sub["emp_name"], hour=0.0, count=0.0, target=0.0, days=set(), entries=0))
             e["hour"] += pr["hour"]; e["count"] += pr["count"]; e["target"] += pr["target"] or 0
             e["days"].add(sub["date"]); e["entries"] += 1
@@ -10390,13 +10400,13 @@ def _aud_prod_report(process, start, end, emp_id=""):
     """All productivity lines for ONE process in ONE month (optionally one employee). Weekly-off days are not counted."""
     T = target_hours()
     emap = {_key(e["Employee ID"]): e for e in rows("Employees")}
-    lines, per = [], {}
+    lines, per = [], {}; cm = _proc_canon()
     for sub in load_subs():
         if is_view_only(sub["emp_id"]): continue                  # Update105
         if sub["off"] or not (str(start) <= str(sub["date"]) <= str(end)): continue
         if emp_id and _key(sub["emp_id"]) != _key(emp_id): continue
         for pr in sub["procs"]:
-            if pr["name"] != process: continue
+            if pr.get("typ") == "Tool" or _canon(pr["name"], cm) != process: continue      # Update293
             lines.append(dict(date=str(sub["date"]), id=str(sub["emp_id"]), name=sub["emp_name"], desc=pr["desc"],
                               hour=pr["hour"], count=pr["count"], target=pr["target"] or 0))
             e = per.setdefault(_key(sub["emp_id"]), dict(id=str(sub["emp_id"]), name=sub["emp_name"], hour=0.0, count=0.0,
@@ -10465,6 +10475,7 @@ def _aud_prod_page(base):      # Update291: shared by Admin and the read-only le
 
 @app.route("/admin/audit/productivity")
 @need("admin")
+@live_data(*(AUDIT_SHEETS))
 def admin_audit_productivity(): return _aud_prod_page("/admin/audit")
 
 AUD_SUM_HEADS = ["Employee ID", "Employee name", "Designation", "Band", "Days worked", "Entries", "Hours",
@@ -10543,17 +10554,20 @@ def _aud_prod_export(back):      # Update291: shared by Admin and the read-only 
 
 @app.route("/admin/audit/productivity/export")
 @need("admin")
+@live_data(*(AUDIT_SHEETS))
 def admin_audit_productivity_export(): return _aud_prod_export("/admin/audit")
 
 # ---- Admin side
 @app.route("/admin/audit")
 @need("admin")
+@live_data(*(AUDIT_SHEETS))
 def admin_audit():
     if request.args.get("view") == "employee": return _audit_list("/admin/audit", True)
     return _audit_process_view("/admin/audit")
 
 @app.route("/admin/audit/<eid>")
 @need("admin")
+@live_data(*(AUDIT_SHEETS + ("Attendance",)))
 def admin_audit_detail(eid): return _audit_detail("/admin/audit", eid, True)
 
 @app.route("/admin/audit/<eid>/access", methods=["POST"])
@@ -10586,11 +10600,13 @@ def admin_audit_toggle(eid):
 @app.route("/employee/audit")
 @need("employee")
 @audit_need
+@live_data(*(AUDIT_SHEETS + ("Attendance",)))
 def employee_audit(acc): return _audit_detail("/employee/audit", session["emp_id"], False, acc)
 
 @app.route("/employee/audit/<eid>")
 @need("employee")
 @audit_need
+@live_data(*(AUDIT_SHEETS + ("Attendance",)))
 def employee_audit_detail(acc, eid): return _audit_detail("/employee/audit", eid, False, acc)   # 403 unless it is their own ID
 
 # ================================================================ Mahizhchi (Question & Answer)  - Update62
@@ -12199,21 +12215,25 @@ def _team_plog_page():
 @app.route("/employee/team-audit")
 @need("employee")
 @team_need
+@live_data(*(AUDIT_SHEETS))
 def employee_team_audit(): return _audit_process_view("/employee/team-audit", ro=True)
 
 @app.route("/employee/team-audit/productivity")
 @need("employee")
 @team_need
+@live_data(*(AUDIT_SHEETS))
 def employee_team_audit_productivity(): return _aud_prod_page("/employee/team-audit")
 
 @app.route("/employee/team-audit/productivity/export")
 @need("employee")
 @team_need
+@live_data(*(AUDIT_SHEETS))
 def employee_team_audit_productivity_export(): return _aud_prod_export("/employee/team-audit")
 
 @app.route("/employee/team-audit/<eid>")
 @need("employee")
 @team_need
+@live_data(*(AUDIT_SHEETS + ("Attendance",)))
 def employee_team_audit_detail(eid): return _audit_detail("/employee/team-audit", eid, False, ro=True)
 
 @app.route("/employee/team-logs/employee/<eid>")

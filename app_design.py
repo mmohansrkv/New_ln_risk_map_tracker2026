@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update296: Admin pages - colour indicator ONLY (no text, no colour key, no explanation line) on the rows of Resigned (violet), NCNS (red) and Login Locked (amber) employees; one colour per employee. Status text is shown only on the Overview check page opened by clicking the name (Update295). Display only.
   * Update295: Overview - clicking an employee's name opens the existing Overview check page, which now shows that employee's ONE current status next to the name: Resigned, NCNS, or "Login Locked" (only the applicable one; nothing for active employees). Display only - no other page, layout, record or login rule changed (Resigned / NCNS / locked accounts still can never log in).
   * Update293: FIX Audit Log (Admin, and Associate Manager / Team Lead / Senior Team Lead, and employees with per-process access) showed no / old data. (1) Causes: every Audit Log page used the per-worker cached sheet read, which can be minutes old and differs between server workers (the Admin Productivity Log already reads live since Update168) - all Audit Log pages now read Productivity log / Leave / Permissions / Employees / Settings / Holidays / Processes / Audit Access (and Attendance on the employee page) LIVE. (2) Process names in the log are now matched to the Processes sheet ignoring case and stray spaces (before, \"Data Entry \" or \"data entry\" never matched and the process showed 0 employees). (3) Tool lines (Update292) are never counted as a process. Design, permissions and everything else unchanged.
   * Update292: Employee page - Process Entry lines get a TYPE dropdown (Production / Tool). Production = the existing Process + Hours + Count + Description line. Tool = Tool Name (typed) + Hours (HR) + Description (no Count, no count target; its hours count as productive hours like Training). The selected Type is saved in the existing \"Type\" column of the \"Productivity log\" sheet for every line (\"Production\" / \"Tool\"; notes stay \"Note\"; rows saved earlier as \"Process\" are read as Production, nothing is rewritten). Reports, Excel export, recalculation, CSV import and the entry View / Edit pages understand the new values. Everything else unchanged.
@@ -2486,6 +2487,43 @@ def sep_fields(e):
     except ValueError: e["rel_iso"] = ""; e["rel_txt"] = rv
     e["login_on"] = not emp_locked(e)
     return e
+
+# ---- Update296: colour indicator only (no text) for Resigned / NCNS / Login Locked rows on Admin pages; display only ----
+SEP_CSS = """tr.sepr>td,tr.sepr>th{background-image:repeating-linear-gradient(135deg,rgba(var(--sepc),.14) 0,rgba(var(--sepc),.14) 8px,rgba(var(--sepc),.05) 8px,rgba(var(--sepc),.05) 16px)}
+tr.sepr>td:first-child{box-shadow:inset 4px 0 0 rgb(var(--sepc))}
+tr.sepk-res{--sepc:124,58,237}tr.sepk-ncns{--sepc:220,38,38}tr.sepk-lock{--sepc:217,119,6}"""
+SEP_JS = r"""(function(){var el=document.getElementById('sepmap');if(!el)return;var M={};try{M=JSON.parse(el.textContent||'{}')}catch(e){return}
+var K=function(s){return String(s==null?'':s).replace(/[\s\u200b\u200c\u200d\ufeff]+/g,'').toUpperCase()};
+var own=function(n,tr){return n.closest('tr')===tr};
+function idOf(tr){var i,j,v,l,p,c;
+ l=tr.querySelectorAll('input[name=eid],input[name=emp_id],input[name=employee_id]');
+ for(i=0;i<l.length;i++){if(!own(l[i],tr))continue;v=K(l[i].value);if(M[v])return v}
+ l=tr.querySelectorAll('a[href]');
+ for(i=0;i<l.length;i++){if(!own(l[i],tr))continue;p=l[i].getAttribute('href').split('#')[0].split('?')[0].split('/');
+  for(j=p.length-1;j>=0;j--){try{v=K(decodeURIComponent(p[j]))}catch(e){v=K(p[j])}if(M[v])return v}}
+ c=tr.children;for(i=0;i<c.length;i++){v=K(c[i].textContent);if(M[v])return v;
+  var m=v.split('\u00b7')[0];if(m!==v&&M[m])return m}
+ return null}
+function run(){var rows=document.querySelectorAll('tr'),i;
+ for(i=0;i<rows.length;i++){var tr=rows[i];if(tr.hasAttribute('data-sepd'))continue;
+  if(tr.querySelector('th')&&!tr.querySelector('td'))continue;
+  var id=idOf(tr);if(!id)continue;tr.setAttribute('data-sepd',id);tr.classList.add('sepr','sepk-'+M[id])}}
+var t=0;function sched(){if(t)return;t=setTimeout(function(){t=0;try{run()}catch(e){}},120)}
+run();try{new MutationObserver(sched).observe(document.body,{childList:true,subtree:true})}catch(e){}})();"""
+
+def sep_theme_parts():
+    """Update296: Admin pages only - colour class per employee row ('res' / 'ncns' / 'lock'); no text is added anywhere."""
+    if session.get("role") != "admin": return "", ""
+    m = {}
+    for e in rows("Employees"):
+        k = _key(e.get("Employee ID", ""))
+        if not k: continue
+        sp = emp_sep(e)
+        if sp: m[k] = "res" if sp == "Resigned" else "ncns"
+        elif emp_locked(e): m[k] = "lock"
+    if not m: return "", ""
+    return ('<style>' + SEP_CSS + '</style>',
+            '<script type="application/json" id="sepmap">' + json.dumps(m, separators=(",", ":")).replace("</", "<\\/") + '</script><script>' + SEP_JS + '</script>')
 
 def emp_status(emp_id):
     """'ok' | 'locked' | 'deleted' for a signed-in employee (uses the short-lived sheet cache, so it costs no extra Google call)."""
@@ -5225,7 +5263,11 @@ def page(body, title="Productivity Tracker", **ctx):
     elif session.get("role") == "employee" and not ctx.get("bare") and not str(request.path).startswith("/employee/tracking-consent"):      # Update268: tracking notice waiting for the employee's answer
         try: _ntm = consent_banner() + _ntm
         except Exception as ex_: print("Consent banner failed:", repr(ex_))
-    _html = render_fast(BASE, body=_ntm + render_fast(body, **ctx), title=title, nav=nav,
+    _sp, _sq = "", ""
+    if not ctx.get("bare"):      # Update296: colour indicator only
+        try: _sp, _sq = sep_theme_parts()
+        except Exception as ex_: print("Status colour failed:", repr(ex_))
+    _html = render_fast(BASE, body=_ntm + _sp + render_fast(body, **ctx) + _sq, title=title, nav=nav,
                                   side_avatar=side_avatar, side_name=side_name, side_name_html=side_name_html, welcome_html=welcome_html, bare=bool(ctx.get("bare")), att_json=att_json, hol_json=hol_json, prm_json=prm_json, hol_only=bool(ctx["hide_status"]), srv_today=str(today_local()), theme_css=_theme_css(), sbar=bool(session.get("role") in ("admin", "employee") and theme_choice()[1] == "0"))
     return _html
 

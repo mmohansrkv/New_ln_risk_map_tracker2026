@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update291: (1) Audit Log for Associate Manager / Team Lead / Senior Team Lead (matched live by Designation, same test as Team Logs): new menu item \"Audit Log\" (/employee/team-audit) = the Admin's By Process Audit Log, READ-ONLY - they pick a process, see the employees who worked on it (productivity, productivity %, attendance), open an employee's Productivity / Attendance details and use the Productivity report (Print / Excel). The Admin-only parts (By Employee / Access tab, Process Audit Access, the Granted / Not granted column) are not shown to them; every route is also checked on the server (403 for everyone else). (2) Process name GROUPING in the Audit Log process list (Admin and these designations): process names that share a common prefix (split at \"_\") are grouped automatically - e.g. CA_Kings_Weekly, CA_Kings_YLB, CA_Kings_NVS -> group \"CA_Kings\" (3 Processes). Only the group name is shown first; clicking it expands the processes, each with Open audit. The same rule applies to every process (group_processes()); a process with no shared prefix stays a normal row. Admin permissions, the Admin Audit Log and the employee-side per-process Audit Log access are unchanged.
   * Update290: LOGIN SPEED + quotes. (1) The login no longer waits for Google Sheets: the Attendance-sheet read that only counted logins (not shown any more) and the live Quotes-sheet read were done INSIDE the login request - both removed from it; the Quotes sheet + the Thanglish conversion are prepared in a background thread. (2) The Employees list is read once per login (was three times). (3) The Employee page no longer reads the Quotes sheet while it is built: the quote popup is a light shell, the page opens first and the popup then asks /employee/quote-data (English shown at once, Thanglish filled in under it when ready). (4) Quotes: English from the Quotes sheet; Thanglish = online English->Tamil translation (Google Translate web endpoint, MyMemory as a second service) transliterated to Latin letters here; the result is cached and saved once into an EMPTY Thanglish cell of the sheet; if the online service fails the English quote still shows. Popup heading \"Today's Thought\". Quotes sheet is found from the already-loaded worksheet list (one API call less), reads are single-flight. Admin and Employee pages, themes and layouts unchanged.
   * Update289: FIX - quotes never appeared on the Employee page because the variable _QUOTE_DONE was used but never defined (NameError inside quote_overlay_html(), silently swallowed, so no quote screen was ever built). Now defined. Also: the Quotes sheet columns are detected more reliably (an \"English\" / \"English Quote\" column is preferred, Tamil / Thanglish columns are never taken as the English quote), the sheet read reports why rows were skipped, errors in the quote screen are printed with a full traceback, and a new admin check page /admin/quotes/check shows the Google Sheet connection, the worksheets found, the detected columns and the quote an employee will get (add ?emp=<Employee ID>). Existing tracker functionality unchanged.
   * Update288: quote screen = the English quote (Quotes sheet, column Quote) big in the centre + its Thanglish translation (column Thanglish, added to the sheet automatically if missing) smaller right below, over the blurred Productivity Entry page, with the 3D animation and Close button. Shown at every login.
@@ -5093,7 +5094,7 @@ def page(body, title="Productivity Tracker", **ctx):
     try: lead_menu = session.get("role") == "employee" and team_log_access()      # Update263
     except Exception: lead_menu = False
     if lead_menu:      # Update263: Associate Manager / Team Lead / Senior Team Lead - exactly these four menu items, in this order
-        items = [("/employee/team-logs", "Team Logs"), ("/employee/people", "Employee Details"), ("/employee/profile", "Personal Details"), ("/employee/leave", "Leave & Permission")]
+        items = [("/employee/team-logs", "Team Logs"), ("/employee/team-audit", "Audit Log"), ("/employee/people", "Employee Details"), ("/employee/profile", "Personal Details"), ("/employee/leave", "Leave & Permission")]      # Update291: + Audit Log (read-only)
     elif session.get("role") == "employee":
         try:      # Admin-controlled: the menu item exists only while Audit Log access is enabled for this employee
             if audit_active(audit_access(session.get("emp_id", ""))): items.append(("/employee/audit", "Audit Log"))
@@ -10005,6 +10006,34 @@ def audit_access_map():
 def audit_process_names():
     return [str(r["Process name"]).strip() for r in rows("Processes") if str(r.get("Process name", "")).strip()]
 
+def group_processes(names):
+    """Update291: AUTOMATIC grouping of process names by their common prefix (split at "_", token boundaries only, case-insensitive).
+    CA_Kings_Weekly / CA_Kings_YLB / CA_Kings_NVS -> group "CA_Kings". A name is put in the group of its LONGEST prefix that at least one other name also has
+    (a name that other names extend, e.g. TX_Tarrant with TX_Tarrant_Weekly, is the head of that group itself). A group with a single member is dissolved.
+    Returns [dict(group="<label>" or "", members=[names])] sorted by group / process name."""
+    uniq, seen = [], set()
+    for n in names:
+        n = str(n).strip()
+        if n and n.lower() not in seen: seen.add(n.lower()); uniq.append(n)
+    toks = {n: [t for t in n.split("_") if t.strip()] or [n] for n in uniq}
+    kk = lambda parts: "_".join(parts).lower()
+    owners, label = {}, {}
+    for n, p in toks.items():
+        for k in range(1, len(p) + 1):
+            key = kk(p[:k]); owners.setdefault(key, set()).add(n); label.setdefault(key, "_".join(p[:k]))
+    groups = {}
+    for n, p in toks.items():
+        pick = None
+        for k in range(len(p), 0, -1):
+            if len(owners[kk(p[:k])]) >= 2: pick = kk(p[:k]); break
+        groups.setdefault(pick, []).append(n)
+    out = []
+    for key, mem in groups.items():
+        if key is not None and len(mem) >= 2: out.append(dict(group=label[key], members=sorted(mem, key=str.lower)))
+        else: out.extend(dict(group="", members=[m]) for m in mem)
+    out.sort(key=lambda g: (g["group"] or g["members"][0]).lower())
+    return out
+
 def audit_allowed(acc):
     """Process names Admin ticked for this employee (only those that still exist) - never 'everything'."""
     return [p for p in audit_process_names() if p in acc["procs"]]
@@ -10083,7 +10112,7 @@ AUD_LIST = """<div class="head"><div><h1>Audit Log</h1>
 
 AUD_HEAD = """<div class="head"><div><h1>{{'Audit Log' if not admin else emp.Name}}</h1>
 <p class="mut">{{emp.id}} &middot; {{emp.desig or 'No designation'}} &middot; Band {{emp.band}}{% if not admin %} &middot; {{emp.Name}}{% endif %}</p></div>
-{% if admin and process %}<a href="{{base}}?process={{process|urlencode}}&month={{month}}">&larr; {{process}} employees</a>{% elif admin %}<a href="{{base}}?view=employee">&larr; All employees</a>{% endif %}</div>
+{% if admin and process %}<a href="{{base}}?process={{process|urlencode}}&month={{month}}">&larr; {{process}} employees</a>{% elif admin and not ro %}<a href="{{base}}?view=employee">&larr; All employees</a>{% endif %}</div>
 <div class="tabs no-print">{% for k,l in tabs %}<a href="{{base}}/{{emp.id|urlencode}}?tab={{k}}&month={{month}}{% if process %}&process={{process|urlencode}}{% endif %}" class="{{'on' if k==tab else ''}}">{{l}}</a>{% endfor %}</div>
 {% if tab != 'access' %}<form class="grid no-print" method="get"><input type="hidden" name="tab" value="{{tab}}">{% if process %}<input type="hidden" name="process" value="{{process}}">{% endif %}
 <input type="month" name="month" value="{{month}}"><button class="primary">Show</button></form>
@@ -10168,7 +10197,7 @@ def _aud_att_days(eid, subs, sess, start, end):
 
 AUD_PROCESS = """<div class="head"><div><h1>Audit Log</h1>
 <p class="mut">Select a process. The employees who worked on it are found automatically, with their productivity, productivity % and attendance.</p></div></div>
-""" + TABS_CONST + """<form class="grid no-print" method="get"><select name="process" onchange="this.form.submit()">
+""" + "{% if not ro %}" + TABS_CONST + "{% endif %}" + """<form class="grid no-print" method="get"><select name="process" onchange="this.form.submit()">
 <option value="">- Select process -</option>{% for p in procs %}<option value="{{p}}" {{'selected' if p==sel}}>{{p}}</option>{% endfor %}</select>
 <input type="month" name="month" value="{{month}}">
 {% if sel %}<input name="q" value="{{q}}" placeholder="Search employee ID or name">{% endif %}
@@ -10176,29 +10205,41 @@ AUD_PROCESS = """<div class="head"><div><h1>Audit Log</h1>
 <button type="submit" class="primary" formaction="{{base}}/productivity" onclick="if(!this.form.process.value){alert('Please select a Process first.');return false}">Productivity</button><a href="{{base}}">Reset</a></form>
 <p class="mut">Period: <b>{{label}}</b> &middot; Daily target: <b>{{T|g}} hrs</b></p>
 {% if not sel %}
+<style>.pg-btn{all:unset;cursor:pointer;font-weight:700}.pg-btn:focus-visible{outline:2px solid currentColor;outline-offset:2px}.pg-row{cursor:pointer;background:rgba(127,127,127,.09)}.pg-row:hover{background:rgba(127,127,127,.16)}.pg-ch td{background:rgba(127,127,127,.04)}.pg-ch td:first-child{padding-left:34px}.pg-ar{display:inline-block;width:1.2em}</style>
+<noscript><style>tr.pg-ch[hidden]{display:table-row!important}</style></noscript>
 <h2>Available processes</h2>
+<p class="mut">Processes that share a common prefix are grouped automatically &mdash; click a group name to see its processes.</p>
 <table><tr><th>Process</th><th>Employees who worked</th><th>Total hours</th><th>Entries</th><th></th></tr>
-{% for r in overview %}<tr><td><b>{{r.name}}</b></td><td>{{r.emps}}</td><td>{{r.hour|g}}</td><td>{{r.entries}}</td>
-<td class="act"><a href="{{base}}?process={{r.name|urlencode}}&month={{month}}">Open audit</a></td></tr>
+{% for grp in ov_groups %}{% if grp.group %}{% set gi = loop.index %}
+<tr class="pg-row" data-g="{{gi}}"><td><button type="button" class="pg-btn" data-g="{{gi}}" aria-expanded="false"><span class="pg-ar">&#9656;</span>{{grp.group}}</button><br><span class="mut">{{grp.mem|length}} Processes</span></td><td>{{grp.emps}}</td><td>{{grp.hour|g}}</td><td>{{grp.entries}}</td><td></td></tr>
+{% for r in grp.mem %}<tr class="pg-ch" data-g="{{gi}}" hidden><td>{{r.name}}</td><td>{{r.emps}}</td><td>{{r.hour|g}}</td><td>{{r.entries}}</td>
+<td class="act"><a href="{{base}}?process={{r.name|urlencode}}&month={{month}}">Open audit</a></td></tr>{% endfor %}
+{% else %}{% set r = grp.mem[0] %}<tr><td><b>{{r.name}}</b></td><td>{{r.emps}}</td><td>{{r.hour|g}}</td><td>{{r.entries}}</td>
+<td class="act"><a href="{{base}}?process={{r.name|urlencode}}&month={{month}}">Open audit</a></td></tr>{% endif %}
 {% else %}<tr><td colspan="5">No processes exist yet. Add them under Processes.</td></tr>{% endfor %}</table>
+<script>(function(){var DN=String.fromCharCode(9662),RT=String.fromCharCode(9656);
+document.querySelectorAll('tr.pg-row').forEach(function(row){var b=row.querySelector('.pg-btn'),id=row.getAttribute('data-g');
+function flip(){var open=b.getAttribute('aria-expanded')!=='true';b.setAttribute('aria-expanded',open?'true':'false');b.querySelector('.pg-ar').textContent=open?DN:RT;
+document.querySelectorAll('tr.pg-ch[data-g="'+id+'"]').forEach(function(r){r.hidden=!open})}
+row.addEventListener('click',function(e){if(e.target.closest('a'))return;if(e.target.closest('.pg-btn'))return;flip()});b.addEventListener('click',flip)})})();</script>
 {% else %}
 <div class="totals">Process: <b>{{sel}}</b> &middot; Employees: <b>{{rows|length}}</b> &middot; Total hours: <b>{{tot_hour|g}}</b>
 &middot; Total count: <b>{{tot_count|g}}</b></div>
 <table><tr><th>Employee ID</th><th>Employee</th><th>Process</th><th>Productivity (hrs)</th><th>Avg hrs / day</th><th>Productivity %</th>
-<th>Count / Target</th><th>Achievement</th><th>Attendance</th><th>Audit access</th><th></th></tr>
+<th>Count / Target</th><th>Achievement</th><th>Attendance</th>{% if not ro %}<th>Audit access</th>{% endif %}<th></th></tr>
 {% for r in rows %}<tr><td>{{r.id}}</td><td><a href="{{base}}/{{r.id|urlencode}}?process={{sel|urlencode}}&month={{month}}"><b>{{r.name}}</b></a><br><span class="mut">{{r.desig}}</span></td>
 <td>{{sel}}</td><td>{{r.hour|g}} hrs<br><span class="mut">{{r.days}} day{{'' if r.days==1 else 's'}}, {{r.entries}} entr{{'y' if r.entries==1 else 'ies'}}</span></td>
 <td>{{r.avg|g}}</td><td><b>{{r.pct}}%</b></td>
 <td>{{r.count|g}} / {{r.target|g}}</td><td>{{ (r.ach ~ '%') if r.ach is not none else '-' }}</td>
 <td>{{r.status}}<br><span class="mut">Present {{r.present}} &middot; Leave {{r.leave}} &middot; Absent {{r.absent}} &middot; {{r.att}}%</span></td>
-<td><span class="pill {{'in' if r.granted else 'out'}}">{{'Granted' if r.granted else 'Not granted'}}</span></td>
+{% if not ro %}<td><span class="pill {{'in' if r.granted else 'out'}}">{{'Granted' if r.granted else 'Not granted'}}</span></td>{% endif %}
 <td class="act"><a href="{{base}}/{{r.id|urlencode}}?process={{sel|urlencode}}&month={{month}}">Productivity</a>
 <a href="{{base}}/{{r.id|urlencode}}?tab=attendance&process={{sel|urlencode}}&month={{month}}">Attendance</a></td></tr>
-{% else %}<tr><td colspan="11">No employee worked on {{sel}} in this period{% if q %} matching your search{% endif %}.</td></tr>{% endfor %}</table>
+{% else %}<tr><td colspan="{{ 10 if ro else 11 }}">No employee worked on {{sel}} in this period{% if q %} matching your search{% endif %}.</td></tr>{% endfor %}</table>
 <p class="mut">Productivity % = average hours per worked day on this process &divide; the daily target hours. Achievement = count &divide; target count for the hours logged.
-Attendance is for the whole period (a day with an entry is Present). &ldquo;Audit access&rdquo; shows whether this employee may view their own audit data for this process.</p>{% endif %}"""
+Attendance is for the whole period (a day with an entry is Present).{% if not ro %} &ldquo;Audit access&rdquo; shows whether this employee may view their own audit data for this process.{% endif %}</p>{% endif %}"""
 
-def _audit_process_view(base):
+def _audit_process_view(base, ro=False):
     prefetch("Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays", "Audit Access")
     month, start, end = _aud_month()
     a, b = str(start), str(end)
@@ -10218,10 +10259,19 @@ def _audit_process_view(base):
             e["hour"] += pr["hour"]; e["count"] += pr["count"]; e["target"] += pr["target"] or 0
             e["days"].add(sub["date"]); e["entries"] += 1
     ctx = dict(base=base, view="process", procs=procs, sel=sel, q=request.args.get("q", ""), month=month,
-               label=start.strftime("%B %Y"), T=T)
+               label=start.strftime("%B %Y"), T=T, ro=ro)
     if not sel:
-        ctx["overview"] = [dict(name=p, emps=len(agg.get(p, {})), hour=sum(e["hour"] for e in agg.get(p, {}).values()),
-                                entries=sum(e["entries"] for e in agg.get(p, {}).values())) for p in procs]
+        ov = {p: dict(name=p, emps=len(agg.get(p, {})), hour=sum(e["hour"] for e in agg.get(p, {}).values()),
+                      entries=sum(e["entries"] for e in agg.get(p, {}).values())) for p in procs}
+        groups = []      # Update291: processes with a common prefix are grouped (group_processes); totals of a group count each employee once
+        for g in group_processes(procs):
+            items = [ov[m] for m in g["members"] if m in ov]
+            if not items: continue
+            keys = set()
+            for m in g["members"]: keys.update(agg.get(m, {}).keys())
+            groups.append(dict(group=g["group"], mem=items, emps=len(keys), hour=round(sum(i["hour"] for i in items), 2),
+                               entries=sum(i["entries"] for i in items)))
+        ctx["ov_groups"] = groups
         return page(AUD_PROCESS, title="Audit Log", **ctx)
     workers = [e for e in agg.get(sel, {}).values() if not q or q in e["id"].lower() or q in str(e["name"]).lower()]
     people = [emap.get(_key(e["id"])) or dict(**{"Employee ID": e["id"], "Name": e["name"], "Band": ""}) for e in workers]
@@ -10257,19 +10307,21 @@ def _audit_list(base, admin):
     return page(AUD_LIST, title="Audit Log", view="employee", rep=rep, base=base, admin=admin, q=request.args.get("q", ""),
                 month=month, label=start.strftime("%B %Y"))
 
-def _audit_detail(base, eid, admin, acc=None):
+def _audit_detail(base, eid, admin, acc=None, ro=False):
+    """ro=True (Update291): Associate Manager / Team Lead / Senior Team Lead - the Admin's read-only view of ANY employee (no access tab / no access changes)."""
+    adm = admin or ro
     prefetch("Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays", "Attendance")
     emp = emp_or_404(eid); eid = str(emp["Employee ID"])
-    if not admin and _key(eid) != _key(session.get("emp_id", "")): abort(403)   # employees: their OWN data only
+    if not adm and _key(eid) != _key(session.get("emp_id", "")): abort(403)   # employees: their OWN data only (the read-only lead view may open any employee)
     tabs = [("productivity", "Productivity"), ("attendance", "Attendance")]
     if admin: tabs.append(("access", "Process Audit Access"))
     tab = request.args.get("tab", "productivity")
     if tab not in dict(tabs): tab = "productivity"
     month, start, end = _aud_month()
     view = dict(id=eid, Name=emp["Name"], desig=emp.get("Designation", ""), band=emp["Band"])   # never expose the password column
-    process = request.args.get("process", "").strip() if admin else ""
+    process = request.args.get("process", "").strip() if adm else ""
     if process not in audit_process_names(): process = ""
-    ctx = dict(emp=view, base=base, tabs=tabs, tab=tab, month=month, label=start.strftime("%B %Y"), admin=admin, process=process)
+    ctx = dict(emp=view, base=base, tabs=tabs, tab=tab, month=month, label=start.strftime("%B %Y"), admin=adm, ro=ro, process=process)
     if tab == "access":
         subs = [s for s in load_subs(eid) if _key(s["emp_id"]) == _key(eid)]
         body = AUD_ACCESS
@@ -10284,11 +10336,11 @@ def _audit_detail(base, eid, admin, acc=None):
                     and str(start) <= str(r["Date"]) <= str(end)]
             sess.sort(key=lambda r: (str(r["Date"]), str(r["Login time"])), reverse=True)
             ctx.update(k=k, sess=sess, days=_aud_att_days(eid, subs, sess, start, end))
-        elif admin and process:                      # Admin came from a process: only that process's lines
+        elif adm and process:                        # Admin / read-only lead came from a process: only that process's lines
             lines = [l for l in _aud_proc_rows(subs, start, end) if l["name"] == process]
             body = AUD_PROC
             ctx.update(allowed=[process], lines=lines, bd=_aud_breakdown(lines, [process]))
-        elif admin:                                  # Admin sees the employee's complete productivity
+        elif adm:                                    # Admin / read-only lead sees the employee's complete productivity
             body = AUD_PROD
             ctx.update(k=k, subs=[s for s in subs if str(start) <= str(s["date"]) <= str(end)])
         else:                                        # employee: ONLY the processes Admin ticked, nothing else
@@ -10364,33 +10416,33 @@ def _aud_prod_args():
     month, start, end = _aud_month()
     return process, month, start, end, request.args.get("emp", "").strip()
 
-@app.route("/admin/audit/productivity")
-@need("admin")
-def admin_audit_productivity():
+def _aud_prod_page(base):      # Update291: shared by Admin and the read-only lead view
     prefetch("Employees", "Productivity log", "Processes", "Settings", "Holidays")
     a = _aud_prod_args()
     if not a:
         flash("Please select a Process first.", "err")
-        return redirect("/admin/audit")
+        return redirect(base)
     process, month, start, end, emp_id = a
     r = _aud_prod_report(process, start, end, emp_id)
-    return page(AUD_PROD_REPORT, title=f"Productivity - {process}", base="/admin/audit", sel=process, month=month,
+    return page(AUD_PROD_REPORT, title=f"Productivity - {process}", base=base, sel=process, month=month,
                 label=start.strftime("%B %Y"), procs=audit_process_names(), emp_id=emp_id,
                 now=now_local().strftime("%Y-%m-%d %I:%M %p"), autoprint=request.args.get("print") == "1", **r)
+
+@app.route("/admin/audit/productivity")
+@need("admin")
+def admin_audit_productivity(): return _aud_prod_page("/admin/audit")
 
 AUD_SUM_HEADS = ["Employee ID", "Employee name", "Designation", "Band", "Days worked", "Entries", "Hours",
                  "Avg hrs / day", "Productivity %", "Count", "Target count", "Achievement %"]
 AUD_LINE_HEADS = ["Date", "Employee ID", "Employee name", "Process", "Description", "Hours", "Count",
                   "Target count", "Achievement %"]
 
-@app.route("/admin/audit/productivity/export")
-@need("admin")
-def admin_audit_productivity_export():
+def _aud_prod_export(back):      # Update291: shared by Admin and the read-only lead view
     prefetch("Employees", "Productivity log", "Processes", "Settings", "Holidays")
     a = _aud_prod_args()
     if not a:
         flash("Please select a Process first.", "err")
-        return redirect("/admin/audit")
+        return redirect(back)
     process, month, start, end, emp_id = a
     r = _aud_prod_report(process, start, end, emp_id)
     label = start.strftime("%B %Y")
@@ -10453,6 +10505,10 @@ def admin_audit_productivity_export():
     out = io.BytesIO(); wb.save(out)
     return Response(out.getvalue(), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{fname}.xlsx"'})
+
+@app.route("/admin/audit/productivity/export")
+@need("admin")
+def admin_audit_productivity_export(): return _aud_prod_export("/admin/audit")
 
 # ---- Admin side
 @app.route("/admin/audit")
@@ -12103,6 +12159,27 @@ def _team_plog_page():
         sep_fields(e)
         lrows.append(dict(e=e, jd=jd, pstart=pstart, active=(not jd or jd <= m1), r=r, entries=entries, missed=missed, sepst=sepst))
     return page(TEAM_PLOG, title="Team Logs - Productivity Log", tl="prod", month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), emp=emp_q, proc="", lrows=lrows, prows=[], more=False, pemps=0)
+
+# ---------------- Update291: Audit Log for Associate Manager / Team Lead / Senior Team Lead (read-only copy of the Admin's By Process Audit Log)
+@app.route("/employee/team-audit")
+@need("employee")
+@team_need
+def employee_team_audit(): return _audit_process_view("/employee/team-audit", ro=True)
+
+@app.route("/employee/team-audit/productivity")
+@need("employee")
+@team_need
+def employee_team_audit_productivity(): return _aud_prod_page("/employee/team-audit")
+
+@app.route("/employee/team-audit/productivity/export")
+@need("employee")
+@team_need
+def employee_team_audit_productivity_export(): return _aud_prod_export("/employee/team-audit")
+
+@app.route("/employee/team-audit/<eid>")
+@need("employee")
+@team_need
+def employee_team_audit_detail(eid): return _audit_detail("/employee/team-audit", eid, False, ro=True)
 
 @app.route("/employee/team-logs/employee/<eid>")
 @need("employee")

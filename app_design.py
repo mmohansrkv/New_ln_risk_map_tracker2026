@@ -13,7 +13,7 @@
   * Update280: Employee page (Daily entry) - the small "Monthly Productivity Summary" strip now also shows "Permission: N Hrs" = the total hours of this employee's APPROVED permissions in the current month (Pending / Rejected not counted). Read live from the Permissions sheet on every page load, so it follows new / approved / changed records. Display only; same one-line strip, nothing else changed.
   * Update279: Admin > Theme & Layout (menu item "Theme & Layout") now manages the Employee Panel and the Admin Panel SEPARATELY - each has its own Layout (Top bar / Sidebar) and Theme (Employee: or "Same as Admin"), a live preview before applying, and an Apply button; an applied Employee layout / theme is used by every Employee page from its next load. Reset Employee panel returns to Top bar + Admin theme. Only CSS / menu position changes (new Settings keys ui_admin_layout, ui_emp_layout, ui_emp_theme); employee data, routes and features are untouched. The Sidebar layout of Update277 can be chosen again.
   * Update278: Admin AND Employee pages - the left sidebar is REMOVED; every menu item (incl. the Log / Employee Info dropdowns, Calendar, profile avatar + name and Logout) now sits in a compact TOP navigation bar. On phones the bar collapses behind a menu button. Navigation layout only - pages, themes, colours, animations, routes and data are unchanged. The Theme & Layout "Panel layout" choice is now fixed to Top bar.
-  * Update293: Associate Manager / Team Lead / Senior Team Lead (live Designation, active login) get a new sidebar item \"Employee Leave & Permission\" (after their own Leave & Permission) that opens the read-only Leave and Permission requests of ALL employees with status (month / employee / status filters; the same page as the Team Logs > Leave & Permission tab). Resigned / NCNS employees are listed last and highlighted like the other employee lists. Display only; the Admin still approves / rejects.
+  * Update293: Team Logs (Associate Manager / Team Lead / Senior Team Lead, live Designation, active login) - the third tab is now named \"Employee Leave & Permission\" and shows the read-only Leave and Permission requests of ALL employees with status (month / employee / status filters) inside the Team Logs page, next to Productivity Log and Missed Entries Log. Resigned / NCNS employees are listed last and highlighted like the other employee lists. Display only; the Admin still approves / rejects.
   * Update292: Resigned / NCNS employees are always listed at the BOTTOM (active employees first, each group keeps its A-Z order) and their rows are highlighted - Resigned in light red, NCNS in light amber, active rows unchanged - on every employee list the Admin, Associate Manager / Manager, Team Lead and Senior Team Lead see: Admin Overview, Employee Info (Employees, Login Access, Productivity, Managers & Leads), Audit Log > By Employee, Employee Details and Team Logs > Productivity Log. Display order and colour only; no calculation, access rule or data changes.
   * Update271: Employee login - a username whose account is Locked or Resigned / NCNS (Admin > Employee Login Access) now shows "Your account is locked. Please contact your Manager, Team Lead, or Admin." whatever password is typed, the username stays in the field, the male / female / lead picture still appears for it, and these accounts can never sign in. An unknown username still shows "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." (Update270).
   * Update270: Employee login messages - an unknown / invalid username OR a locked account (any password) now shows exactly: "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." The typed username stays in the field. A valid, unlocked username with a wrong password shows "Wrong username or password. Please try again." The male / female / lead picture still appears while typing and, for a locked account, still appears whenever the username matches an employee record (the picture lookup ignores the lock). Admin login unchanged.
@@ -5108,7 +5108,7 @@ def page(body, title="Productivity Tracker", **ctx):
     try: lead_menu = session.get("role") == "employee" and team_log_access()      # Update263
     except Exception: lead_menu = False
     if lead_menu:      # Update263: Associate Manager / Team Lead / Senior Team Lead - exactly these four menu items, in this order
-        items = [("/employee/team-logs", "Team Logs"), ("/employee/team-audit", "Audit Log"), ("/employee/people", "Employee Details"), ("/employee/profile", "Personal Details"), ("/employee/leave", "Leave & Permission"), ("/employee/team-logs/leave", "Employee Leave & Permission")]      # Update291: + Audit Log (read-only). Update293: + Employee Leave & Permission (all employees, read-only)
+        items = [("/employee/team-logs", "Team Logs"), ("/employee/team-audit", "Audit Log"), ("/employee/people", "Employee Details"), ("/employee/profile", "Personal Details"), ("/employee/leave", "Leave & Permission")]      # Update291: + Audit Log (read-only)
     elif session.get("role") == "employee":
         try:      # Admin-controlled: the menu item exists only while Audit Log access is enabled for this employee
             if audit_active(audit_access(session.get("emp_id", ""))): items.append(("/employee/audit", "Audit Log"))
@@ -5130,7 +5130,7 @@ def page(body, title="Productivity Tracker", **ctx):
             if gm_allowed(session.get("emp_id", "")): items.append(("/employee/game", GM_TITLE))
         except Exception as e:
             print("Multiplayer Game menu check failed:", repr(e))
-    nav = [(h, l, (p == h or (h != "/employee" and p.startswith(h + "/"))) and not (h == "/employee/team-logs" and p.startswith("/employee/team-logs/leave")), []) for h, l in items]      # Update293: the Employee Leave & Permission item has its own highlight
+    nav = [(h, l, p == h or (h != "/employee" and p.startswith(h + "/")), []) for h, l in items]
     if session.get("role") == "admin":      # Update66: Employee Info expands to Employees / Notifications / Mahizhchi
         view = request.args.get("view", "")
         kids = [("/admin/employee-info", "Employees", p.startswith("/admin/employee-info") and view != "notifications"),
@@ -12025,7 +12025,7 @@ def admin_leads_overview(emps, q):
     return page(EMP_LIST, title="Employee Info", view="leads", emps=emps, q=request.args.get("q", ""), lrows=out,
                 month=m0.strftime("%Y-%m"), label=m0.strftime("%B %Y"), new_count=sum(1 for r in update_log() if r["new"]))
 
-TEAM_TABS = """<div class="tabs no-print"><a href="/employee/team-logs" class="{{'on' if tl=='prod' else ''}}">Productivity Log</a><a href="/employee/team-logs/missed" class="{{'on' if tl=='missed' else ''}}">Missed Entries Log</a>{% if team_leave_tab() %}<a href="/employee/team-logs/leave" class="{{'on' if tl=='leave' else ''}}">Leave &amp; Permission</a>{% endif %}</div>"""
+TEAM_TABS = """<div class="tabs no-print"><a href="/employee/team-logs" class="{{'on' if tl=='prod' else ''}}">Productivity Log</a><a href="/employee/team-logs/missed" class="{{'on' if tl=='missed' else ''}}">Missed Entries Log</a>{% if team_leave_tab() %}<a href="/employee/team-logs/leave" class="{{'on' if tl=='leave' else ''}}">Employee Leave &amp; Permission</a>{% endif %}</div>"""
 TEAM_PROD = TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all employees</h2>
 <p class="mut">{{label}} &middot; read-only. Weekly-off / holiday entries are shown but not counted.</p>
 <form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><input name="emp" placeholder="Employee ID / name" value="{{emp}}"><button class="primary">Show</button><a href="/employee/team-logs">Reset</a></form>
@@ -12222,7 +12222,7 @@ def employee_team_prod():
 
 app.jinja_env.globals["team_leave_tab"] = lambda: plog_user()      # Update256: the tab is offered only to Associate Manager / Team Lead / Senior Team Lead
 
-TEAM_LEAVE = TEAM_TABS + """<div class="card"><h2>Leave &amp; Permission &mdash; all employees</h2>
+TEAM_LEAVE = TEAM_TABS + """<div class="card"><h2>Employee Leave &amp; Permission &mdash; all employees</h2>
 <p class="mut">{{label}} &middot; read-only. Leave and Permission requests of every employee with their status (the Admin approves / rejects).</p>
 <form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><input name="emp" placeholder="Employee ID / name" value="{{emp}}">
 <select name="status"><option value="">All status</option>{% for x in ['Pending','Approved','Rejected'] %}<option {{'selected' if status==x else ''}}>{{x}}</option>{% endfor %}</select>

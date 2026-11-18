@@ -12239,8 +12239,8 @@ tr.hl-perm>td:first-child{border-left:4px solid #0f766e}
 .hl-key{display:inline-block;padding:2px 10px;border-radius:10px;font-size:12px;margin-right:8px;color:#1b1b1b}
 .hl-key.l{background:#efe4ff;border:1px solid #7c3aed}.hl-key.p{background:#d6f5f0;border:1px solid #0f766e}
 </style>
-<p class="mut"><span class="hl-key l">Leave &gt; {{hl_leave_lim|g}} days this month</span><span class="hl-key p">Permission &gt; {{hl_perm_lim|g}} hrs this month</span>Counted for the CURRENT month ({{cur_label}}) from Pending + Approved records, updated on every page load; only the employee's own records are highlighted.</p>
-{% if hl_list %}<p class="mut"><b>Over the limit now:</b> {% for h in hl_list %}<span class="hl-key {{'l' if h.kind=='Leave' else 'p'}}">{{h.name}} ({{h.id}}) &ndash; {{h.kind}}: {{h.val|g}} {{'day(s)' if h.kind=='Leave' else 'hrs'}}</span>{% endfor %}</p>{% endif %}
+{% if show_hl %}<p class="mut"><span class="hl-key l">Leave &gt; {{hl_leave_lim|g}} days this month</span><span class="hl-key p">Permission &gt; {{hl_perm_lim|g}} hrs this month</span>Counted for the CURRENT month ({{cur_label}}) from Pending + Approved records, updated on every page load; only the employee's own records are highlighted.</p>
+{% if hl_list %}<p class="mut"><b>Over the limit now:</b> {% for h in hl_list %}<span class="hl-key {{'l' if h.kind=='Leave' else 'p'}}">{{h.name}} ({{h.id}}) &ndash; {{h.kind}}: {{h.val|g}} {{'day(s)' if h.kind=='Leave' else 'hrs'}}</span>{% endfor %}</p>{% endif %}{% endif %}
 <h2>Leave</h2><div style="overflow-x:auto"><table><tr><th>Date</th><th>Day</th><th>Employee ID</th><th>Name</th><th>Designation</th><th>Day type</th><th>Reason</th><th>Status</th><th>Applied at</th><th>Reviewed at</th></tr>
 {% for r in lv %}<tr class="{{ r.sep|sepcls }} {{r.hl}}" {% if r.hl %}title="{{r.name}}: {{r.mval|g}} leave day(s) this month"{% endif %}><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}}</td><td><b>{{r.name}}</b></td><td>{{r.desig or '-'}}</td><td>{{r.dtype}}</td><td>{{r.reason or '-'}}</td>
 <td><span class="pill {{r.status|ppill}}">{{r.status}}</span></td><td>{{(r.applied or '-')|t12}}</td><td>{{(r.reviewed or '-')|t12}}</td></tr>
@@ -12302,7 +12302,7 @@ def employee_team_leave():
     lv.sort(key=lambda x: 1 if x["sep"] else 0); pm.sort(key=lambda x: 1 if x["sep"] else 0)      # Update293: stable - newest first inside each group, Resigned / NCNS last
     allr = lv + pm
     return page(TEAM_LEAVE, title="Team Logs - Leave & Permission", tl="leave", month=month, label=label, emp=request.args.get("emp", ""), status=status, lv=lv, pm=pm,
-                hl_list=hl_list, hl_leave_lim=LEAVE_HIGHLIGHT_DAYS, hl_perm_lim=PERMISSION_HIGHLIGHT_HOURS, cur_label=today_local().strftime("%B %Y"),
+                hl_list=hl_list, hl_leave_lim=LEAVE_HIGHLIGHT_DAYS, hl_perm_lim=PERMISSION_HIGHLIGHT_HOURS, cur_label=today_local().strftime("%B %Y"), show_hl=(not month or month == today_local().strftime("%Y-%m")),      # Update294b: legend / over-limit list only when the current month is in view; past months show records with no highlighting
                 n_pend=sum(1 for x in allr if x["status"] == "Pending"), n_appr=sum(1 for x in allr if x["status"] == "Approved"), n_rej=sum(1 for x in allr if x["status"] == "Rejected"))
 
 @app.route("/employee/team-logs/missed")

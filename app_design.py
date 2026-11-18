@@ -13,6 +13,7 @@
   * Update280: Employee page (Daily entry) - the small "Monthly Productivity Summary" strip now also shows "Permission: N Hrs" = the total hours of this employee's APPROVED permissions in the current month (Pending / Rejected not counted). Read live from the Permissions sheet on every page load, so it follows new / approved / changed records. Display only; same one-line strip, nothing else changed.
   * Update279: Admin > Theme & Layout (menu item "Theme & Layout") now manages the Employee Panel and the Admin Panel SEPARATELY - each has its own Layout (Top bar / Sidebar) and Theme (Employee: or "Same as Admin"), a live preview before applying, and an Apply button; an applied Employee layout / theme is used by every Employee page from its next load. Reset Employee panel returns to Top bar + Admin theme. Only CSS / menu position changes (new Settings keys ui_admin_layout, ui_emp_layout, ui_emp_theme); employee data, routes and features are untouched. The Sidebar layout of Update277 can be chosen again.
   * Update278: Admin AND Employee pages - the left sidebar is REMOVED; every menu item (incl. the Log / Employee Info dropdowns, Calendar, profile avatar + name and Logout) now sits in a compact TOP navigation bar. On phones the bar collapses behind a menu button. Navigation layout only - pages, themes, colours, animations, routes and data are unchanged. The Theme & Layout "Panel layout" choice is now fixed to Top bar.
+  * Update292: Resigned / NCNS employees are always listed at the BOTTOM (active employees first, each group keeps its A-Z order) and their rows are highlighted - Resigned in light red, NCNS in light amber, active rows unchanged - on every employee list the Admin, Associate Manager / Manager, Team Lead and Senior Team Lead see: Admin Overview, Employee Info (Employees, Login Access, Productivity, Managers & Leads), Audit Log > By Employee, Employee Details and Team Logs > Productivity Log. Display order and colour only; no calculation, access rule or data changes.
   * Update271: Employee login - a username whose account is Locked or Resigned / NCNS (Admin > Employee Login Access) now shows "Your account is locked. Please contact your Manager, Team Lead, or Admin." whatever password is typed, the username stays in the field, the male / female / lead picture still appears for it, and these accounts can never sign in. An unknown username still shows "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." (Update270).
   * Update270: Employee login messages - an unknown / invalid username OR a locked account (any password) now shows exactly: "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." The typed username stays in the field. A valid, unlocked username with a wrong password shows "Wrong username or password. Please try again." The male / female / lead picture still appears while typing and, for a locked account, still appears whenever the username matches an employee record (the picture lookup ignores the lock). Admin login unchanged.
   * Update269: Employee login - the username stays in the field after a failed sign-in (also for a locked account) and the cursor moves to the password box. Locked or invalid usernames now show: "Wrong username or password, or the account is locked / not valid. Please contact your Manager, Team Lead, or Admin." A locked account with the correct password shows "Your account is locked. Please contact your Manager, Team Lead, or Admin to unlock it." The message is the same for a locked, unknown or wrong-password attempt, so it never reveals which usernames exist. Admin login also keeps the typed username.
@@ -2456,6 +2457,13 @@ def emp_sep(e):
     v = str(e.get("Separation status", "")).strip().lower()
     return "Resigned" if v == "resigned" else ("NCNS" if v == "ncns" else "")
 def emp_locked(e): return str(e.get("Account locked", "")).strip().lower() in ("yes", "y", "true", "locked", "1") or bool(emp_sep(e))      # Update252: Resigned / NCNS => login disabled, even if the flag were edited by hand
+def sep_rank(e):
+    """Update292: 0 = active employee, 1 = Resigned / NCNS. Every employee list sorts on this first, so Resigned / NCNS always sit at the bottom."""
+    return 1 if emp_sep(e) else 0
+def sep_cls(v):
+    """Update292: CSS class for the Resigned / NCNS row highlight ('' for active employees). v = 'Resigned' / 'NCNS' / ''."""
+    return "sep-res" if v == "Resigned" else ("sep-ncns" if v == "NCNS" else "")
+app.jinja_env.filters["sepcls"] = sep_cls
 def sep_fields(e):
     """Update252: adds display fields (sep, rel_iso, rel_txt, login_on) used by the Login Access / Managers & Leads / Employee Details tables."""
     e["sep"] = emp_sep(e); rv = str(e.get("Relieving date", "")).strip()
@@ -2624,6 +2632,11 @@ tbody tr{transition:background .15s ease}
 .ov-head{align-items:flex-start}
 .ov-tools{display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-left:auto}
 .ov-tools .grid{align-items:center;justify-content:flex-end}
+/* Update292: Resigned / NCNS rows - same highlight on every employee list (Admin, Manager, Team Lead, Senior Team Lead) */
+tr.sep-res>td{background:#fde8e8 !important;box-shadow:inset 0 0 0 9999px #fde8e8}
+tr.sep-ncns>td{background:#fff1db !important;box-shadow:inset 0 0 0 9999px #fff1db}
+tr.sep-res>td:first-child{border-left:4px solid #b42318}
+tr.sep-ncns>td:first-child{border-left:4px solid #b45309}
 /* Overview: compact, animated Print / Show buttons */
 .ov-tools .pbtn{height:30px;padding:0 13px;font-size:13px;gap:5px;margin:2px;border-radius:7px;overflow:hidden;box-shadow:0 3px 0 #3730a3,0 6px 10px -4px #4f46e566,inset 0 1px 0 #ffffff45;animation:btnPop .45s cubic-bezier(.34,1.56,.64,1) backwards}
 .ov-tools .grid .pbtn{animation-delay:.08s}
@@ -5890,7 +5903,7 @@ TABLE = """<div class="card"><h2>{{title}}</h2>
 {% if missing %}<p class="mut">&#9888; {{missing}} employee(s) have no Designation yet. Use Edit to set it; it then fills in automatically on their daily entry page.</p>{% endif %}
 {% if locked %}<p class="mut">Personal details are managed on the Personal details page. Office Email ID follows the login Email.</p>{% endif %}</div>
 <table><tr>{% for h in heads %}<th>{{h}}</th>{% endfor %}{% if kind=='employees' %}<th>Joining date</th><th>Status</th>{% endif %}<th></th></tr>
-{% for r in data %}<tr>{% for h in heads %}<td>{{r[h]}}{% if h=='Target count / hour' and r[h] %} / 1{% endif %}</td>{% endfor %}
+{% for r in data %}<tr class="{{ (r['Separation status']|string|lower|capitalize if r['Separation status'] else '')|replace('Ncns','NCNS')|sepcls }}">{% for h in heads %}<td>{{r[h]}}{% if h=='Target count / hour' and r[h] %} / 1{% endif %}</td>{% endfor %}
 {% if kind=='employees' %}{% set lk = (r['Account locked']|string|lower) in ['yes','y','true','locked','1'] %}<td>{{ r.get('Joining date') or '-' }}</td><td>{% if lk %}<span class="pill" style="background:#fde8e8;color:#b42318">Locked</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td>{% endif %}
 <td class="act"><a href="/admin/{{kind}}/{{r['_row']}}">Edit</a>
 {% if kind=='employees' %}<form method="post" action="/admin/employees/{{r['_row']}}/lock"><input type="hidden" name="eid" value="{{r['Employee ID']}}"><input type="hidden" name="do" value="{{'unlock' if lk else 'lock'}}"><button class="back sm" type="submit">{{'Unlock' if lk else 'Lock'}}</button></form>
@@ -6197,6 +6210,7 @@ def admin_list(kind):
             flash("Added." + (f" Productivity tracking starts from {max(PROD_TRACKING_START, dt.date.fromisoformat(full['Joining date'])).strftime('%d %b %Y')}." if sheet == "Employees" else ""))
         return redirect(request.path)
     data = rows(sheet)
+    if sheet == "Employees": data = sorted(data, key=sep_rank)      # Update292: Resigned / NCNS at the bottom (stable - existing order kept)
     if sheet == "Processes":                      # show the hourly figure for processes saved with only the 8-hour column
         tg = process_targets()
         for r in data:
@@ -6696,7 +6710,7 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <button class="primary" type="submit">Save login credentials</button></form></div>
 <p class="mut">Login enabled: <b>{{n_on}}</b> &middot; Login disabled: <b>{{n_off}}</b> &middot; Resigned: <b>{{n_res}}</b> &middot; NCNS: <b>{{n_ncns}}</b></p>
 <table><tr><th>Employee ID</th><th>Employee Name</th><th>Designation</th><th>Office Email ID</th><th>Login Access Status</th><th>Status (Resigned / NCNS)</th><th>Relieving Date</th><th class="no-print">Action (Admin only)</th></tr>
-{% for e in emps %}{% set off = e.login_off %}<tr><td>{{e['Employee ID']}}</td><td><b>{{e['Name']}}</b></td><td>{{e['Designation'] or '-'}}</td><td>{{e['Email'] or '-'}}</td>
+{% for e in emps %}{% set off = e.login_off %}<tr class="{{ e.sep|sepcls }}"><td>{{e['Employee ID']}}</td><td><b>{{e['Name']}}</b></td><td>{{e['Designation'] or '-'}}</td><td>{{e['Email'] or '-'}}</td>
 <td>{% if off %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% endif %}</td>
 <td>{% if e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% elif is_plog_desig(e['Designation']) %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% else %}-{% endif %}</td><td>{{ e.rel_txt or '-' }}</td>
 <td class="act no-print">
@@ -6712,7 +6726,7 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <form class="grid no-print" method="get"><input type="hidden" name="view" value="productivity"><input type="month" name="month" value="{{month}}"><button class="primary">Show</button><a href="/admin/employee-info?view=productivity">This month</a></form>
 <p class="mut">{{label}} &middot; working days are counted from each employee's joining date (a new joiner is counted only from that day; existing employees are unchanged). Weekly offs and holidays are excluded.</p>
 <table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Joining date</th><th>Tracking from</th><th>Working days</th><th>Entries</th><th>Missed</th><th>Attendance</th><th>Productivity</th></tr>
-{% for p in prows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
+{% for p in prows %}<tr class="{{ p.e.sep|sepcls }}"><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}?tab=productivity&amp;month={{month}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
 <td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}} <span class="pill act">New joiner</span>{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td>
 <td>{{p.pstart.strftime('%d %b %Y')}}</td>
 {% if p.sepst %}<td><span class="pill" style="{{ 'background:#fde8e8;color:#b42318' if p.sepst=='Resigned' else 'background:#fff1db;color:#b45309' }}">{{p.sepst}}</span></td><td colspan="4" class="mut">{% if p.e.rel_txt %}Relieving date: {{p.e.rel_txt}} &mdash; {% endif %}not counted in working days, pending entries or reminders</td>
@@ -6724,7 +6738,7 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <form class="grid no-print" method="get"><input type="hidden" name="view" value="leads"><input type="month" name="month" value="{{month}}"><button class="primary">Show</button><a href="/admin/employee-info?view=leads">This month</a></form>
 <p class="mut">{{label}} &middot; Associate Managers, Managers, Team Leads and Senior Team Leads: their own Productivity Log and Missed Entries Log. These employees also see the read-only <b>Team Logs</b> (Productivity Log + Missed Entries Log of all employees) in their own panel when they log in. Access follows the Designation automatically.</p>
 <table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Login Access</th><th>Status</th><th>Relieving Date</th><th>Entries</th><th>Productivity</th><th>Missed entries</th><th>Missed dates</th><th>Logs</th></tr>
-{% for p in lrows %}<tr><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
+{% for p in lrows %}<tr class="{{ p.e.sep|sepcls }}"><td>{{p.e['Employee ID']}}</td><td><a href="{% if is_plog_desig(p.e['Designation']) %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}/productivity-log?month={{month}}{% else %}/admin/employee-info/{{p.e['Employee ID']|urlencode}}{% endif %}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
 <td>{% if p.e.login_on %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% else %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% endif %}</td><td>{% if p.e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif p.e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td><td>{{ p.e.rel_txt or '-' }}</td>
 {% if not p.active %}<td colspan="3" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>{% elif p.vo %}<td colspan="3" class="mut">View only</td>{% else %}<td>{{p.entries}}</td><td><b>{{p.pct}}%</b></td><td>{{p.missed|length}}</td>{% endif %}
 <td>{{p.missed|join(', ') or '-'}}</td>
@@ -6738,7 +6752,7 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 {% else %}<tr><td colspan="6">No employee updates yet.</td></tr>{% endfor %}</table>
 {% else %}
 <table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Band</th><th>Status</th><th class="no-print">Account management (Admin only)</th></tr>
-{% for e in emps %}{% set lk = (e['Account locked']|string|lower) in ['yes','y','true','locked','1'] %}<tr><td>{{e['Employee ID']}}</td>
+{% for e in emps %}{% set lk = (e['Account locked']|string|lower) in ['yes','y','true','locked','1'] %}<tr class="{{ e.sep|sepcls }}"><td>{{e['Employee ID']}}</td>
 <td><a href="/admin/employee-info/{{e['Employee ID']|urlencode}}"><b{% if e.flag %} class="emp-flag" title="Red means this employee has unseen login/logout notifications"{% endif %}>{{e['Name']}}</b></a></td>
 <td>{{e['Designation']}}</td><td>{{e['Band']}}</td>
 <td>{% if lk %}<span class="pill" style="background:#fde8e8;color:#b42318">Locked</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td>
@@ -6847,7 +6861,7 @@ def admin_employee_info():
                     new_count=sum(1 for r in log if r["new"]), emps=[], q="")
     q = request.args.get("q", "").strip().lower()
     emps = [e for e in rows("Employees") if not q or q in str(e["Employee ID"]).lower() or q in str(e["Name"]).lower()]
-    emps.sort(key=lambda e: str(e["Name"]).lower())
+    emps.sort(key=lambda e: (sep_rank(e), str(e["Name"]).lower()))      # Update292: active first, Resigned / NCNS at the bottom
     for e in emps: sep_fields(e)                                  # Update252
     if request.args.get("view") == "access":            # Update117: Employee Login Access tab (Admin only)
         for e in emps: e["login_off"] = emp_locked(e)
@@ -9007,6 +9021,7 @@ def report(employees, subs, leaves, start, end):
                         att=min(round(credit / wd_e * 100), 100) if wd_e else 0,
                         pct=min(round(earned_ / base * 100), 100) if base else (100 if prod_hrs > 0 else 0),
                         prod=round(prod_hrs, 2), non=round(non_hrs, 2), perm=perm_hrs, perm_n=perm_n))
+    for r_, e_ in zip(out, employees): r_["sep"] = emp_sep(e_)      # Update292: Resigned / NCNS (drives the bottom-of-list order + row highlight)
     for r_, e_ in zip(out, employees):      # Update105: Senior Team Lead / Team Lead / Associate Manager -> View Only, no Productivity %
         if desig_vo_eff(e_) or is_view_only(r_["id"]):
             r_.update(vo=True, pct=None, att=None, present="-", absent="-", prod=0, non=0, perm_n="-")
@@ -9378,7 +9393,7 @@ setInterval(poll,5000);document.addEventListener('visibilitychange',function(){i
 <p class="mut no-print" style="margin:4px 0">&#9679; Live from the Google Sheet &middot; checked <span id="ov_at">just now</span> &middot; updates automatically when the sheet changes.</p>
 <table id="ovt" data-sig="{{sig}}"><tr><th>Employee</th><th>Designation</th><th>Band</th><th>Present</th><th>Leave</th><th>Absent</th><th>Permission</th><th>Attendance</th>
 <th>Productive Hours</th><th>Non-productive Hours</th><th>Productivity (%)</th><th class="no-print"></th></tr>
-{% for r in rep %}<tr><td>{{r.id}} &middot; {{r.name}}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td><td>{{r.perm_n}}</td>
+{% for r in rep %}<tr class="{{ r.sep|sepcls }}"><td>{{r.id}} &middot; {{r.name}}{% if r.sep %} <span class="pill" style="{{ 'background:#fde8e8;color:#b42318' if r.sep=='Resigned' else 'background:#fff1db;color:#b45309' }}">{{r.sep}}</span>{% endif %}</td><td>{{r.designation}}</td><td>{{r.band}}</td><td>{{r.present}}</td><td>{{r.leave}}</td><td>{{r.absent}}</td><td>{{r.perm_n}}</td>
 {% if r.vo %}<td>-</td><td>-</td><td>-</td><td><span class="pill act">View Only</span></td>{% else %}<td>{{r.att}}%<i class="bar {{r.att|tone}}"><u style="width:{{r.att}}%"></u></i></td>
 <td>{{r.prod|g}}</td><td>{{r.non|g}}</td>
 <td>{{r.pct}}%<i class="bar {{r.pct|tone}}"><u style="width:{{[r.pct,100]|min}}%"></u></i></td>{% endif %}<td class="no-print"><a href="/admin/summary/check?emp={{r.id|urlencode}}&month={{month}}">Check</a></td></tr>
@@ -9508,7 +9523,7 @@ def _overview_ctx(month):
     else:
         start, end = month_range(month); label = start.strftime("%B %Y")
     emps = rows("Employees")
-    rep = sorted(report(emps, subs, leaves, start, end), key=lambda r: str(r["name"]))
+    rep = sorted(report(emps, subs, leaves, start, end), key=lambda r: (1 if r.get("sep") else 0, str(r["name"])))      # Update292: Resigned / NCNS last
     std = [r for r in rep if not r.get("vo")]          # Update105: View-Only designations are excluded from the averages
     n = len(std) or 1
     a1, a2 = round(sum(r["att"] for r in std) / n), round(sum(r["pct"] for r in std) / n)
@@ -10100,7 +10115,7 @@ AUD_LIST = """<div class="head"><div><h1>Audit Log</h1>
 <p class="mut">Period: <b>{{label}}</b></p>
 <table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Attendance</th><th>Productivity</th>
 {% if admin %}<th>Processes worked</th><th>Audit Log access</th><th>Processes allowed</th>{% endif %}<th></th></tr>
-{% for r in rep %}<tr><td>{{r.id}}</td><td><a href="{{base}}/{{r.id|urlencode}}"><b>{{r.name}}</b></a></td><td>{{r.designation}}</td>
+{% for r in rep %}<tr class="{{ r.sep|sepcls }}"><td>{{r.id}}</td><td><a href="{{base}}/{{r.id|urlencode}}"><b>{{r.name}}</b></a></td><td>{{r.designation}}</td>
 {% if r.vo %}<td>-</td><td><span class="pill act">View Only</span></td>{% else %}<td>{{r.att}}%</td><td>{{r.pct}}%</td>{% endif %}
 {% if admin %}<td>{% if r.worked %}{{r.worked|join(', ')}}{% else %}<span class="mut">No entries yet</span>{% endif %}</td>
 <td><span class="pill {{'in' if r.active else 'out'}}">{{'Enabled' if r.active else 'Disabled'}}</span></td>
@@ -10298,7 +10313,7 @@ def _audit_list(base, admin):
     month, start, end = _aud_month()
     q = request.args.get("q", "").strip().lower()
     emps = [e for e in rows("Employees") if not q or q in str(e["Employee ID"]).lower() or q in str(e["Name"]).lower()]
-    rep = sorted(report(emps, load_subs(), rows("Leave"), start, end), key=lambda r: str(r["name"]).lower())
+    rep = sorted(report(emps, load_subs(), rows("Leave"), start, end), key=lambda r: (1 if r.get("sep") else 0, str(r["name"]).lower()))      # Update292
     amap = audit_access_map(); worked = _audit_worked(load_subs())
     for r in rep:
         r["acc"] = amap.get(_key(r["id"]), dict(enabled=False, procs=[], raw="", legacy=False, updated=""))
@@ -12045,7 +12060,7 @@ def pd_need(f):
 PEOPLE_LIST = """<div class="head"><div><h1>Employee Details</h1><p class="mut">Personal Details of all employees &mdash; click a name to view / edit. The <b>Login Access Status</b> of every employee (and Resigned / NCNS with the relieving date) is shown read-only; only the Admin can change it. &middot; Login enabled: <b>{{n_on}}</b> &middot; disabled: <b>{{n_off}}</b></p></div></div>
 <form class="grid no-print" method="get"><input name="q" placeholder="Search ID / name" value="{{q}}"><button class="primary">Search</button><a href="/employee/people">Reset</a></form>
 <div style="overflow-x:auto"><table><tr><th>Emp ID</th><th>Name</th><th>Designation</th><th>Gender</th><th>Address Line_1</th><th>Address Line_2</th><th>City</th><th>PIN</th><th>Phone</th><th>Emergency no</th><th>Personal Email ID</th><th>Office Email ID</th><th>Profile Name</th><th>Login Access Status</th><th>Status (Resigned / NCNS)</th><th>Relieving Date</th><th>Last updated</th><th></th></tr>
-{% for e in emps %}<tr><td>{{e['Employee ID']}}</td><td><a href="/employee/people/{{e['_row']}}"><b>{{e['Name']}}</b></a></td><td>{{e['Designation'] or '-'}}</td><td>{{e['Gender'] or '-'}}</td><td>{{e['Address Line_1'] or '-'}}</td><td>{{e['Address Line_2'] or '-'}}</td>
+{% for e in emps %}<tr class="{{ e.sep|sepcls }}"><td>{{e['Employee ID']}}</td><td><a href="/employee/people/{{e['_row']}}"><b>{{e['Name']}}</b></a></td><td>{{e['Designation'] or '-'}}</td><td>{{e['Gender'] or '-'}}</td><td>{{e['Address Line_1'] or '-'}}</td><td>{{e['Address Line_2'] or '-'}}</td>
 <td>{{e['City'] or '-'}}</td><td>{{e['PIN'] or '-'}}</td><td>{{e['Phone Number'] or '-'}}</td><td>{{e['Emergency no'] or '-'}}</td><td>{{e['Personal Email ID'] or '-'}}</td><td>{{e['Email'] or '-'}}</td><td>{{e['Profile Name'] or '-'}}</td>
 <td>{% if e.login_on %}<span class="pill" style="background:#e6f6ec;color:#15803d">Enabled</span>{% else %}<span class="pill" style="background:#fde8e8;color:#b42318">Disabled</span>{% endif %}</td><td>{% if e.sep=='Resigned' %}<span class="pill" style="background:#fde8e8;color:#b42318">Resigned</span>{% elif e.sep=='NCNS' %}<span class="pill" style="background:#fff1db;color:#b45309">NCNS</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td><td>{{ e.rel_txt or '-' }}</td>
 <td>{{(e['Profile updated at'] or '-')|t12}}</td><td class="act"><a href="/employee/people/{{e['_row']}}">Edit</a></td></tr>
@@ -12067,7 +12082,7 @@ PEOPLE_EDIT = """<div class="card"><h2>Personal details &mdash; {{emp['Name']}}<
 def employee_people():
     prefetch("Employees")
     q = request.args.get("q", "").strip(); ql = q.lower()
-    emps = sorted((e for e in rows("Employees") if not ql or ql in str(e["Employee ID"]).lower() or ql in str(e["Name"]).lower()), key=lambda e: str(e["Name"]).lower())
+    emps = sorted((e for e in rows("Employees") if not ql or ql in str(e["Employee ID"]).lower() or ql in str(e["Name"]).lower()), key=lambda e: (sep_rank(e), str(e["Name"]).lower()))      # Update292: Resigned / NCNS last
     for e in emps: sep_fields(e)                                  # Update252: Login Access Status (Enabled / Disabled) + Resigned / NCNS + relieving date - read only
     return page(PEOPLE_LIST, title="Employee Details", emps=emps, q=q, n_on=sum(1 for e in emps if e["login_on"]), n_off=sum(1 for e in emps if not e["login_on"]))
 
@@ -12106,7 +12121,7 @@ TEAM_PLOG = TEAM_TABS + """<div class="card"><h2>Productivity Log &mdash; all em
 <td>{{ (r.pct ~ '%') if (r.pct is not none and not r.off) else '-' }}</td></tr>
 {% else %}<tr><td colspan="9">No productivity records match this process.</td></tr>{% endfor %}</table></div>
 {% else %}<div style="overflow-x:auto"><table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Joining Date</th><th>Tracking From</th><th>Working Days</th><th>Entries</th><th>Missed</th>{% if not hide_status %}<th>Attendance</th>{% endif %}<th>Productivity</th></tr>
-{% for p in lrows %}<tr><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}">{{p.e['Employee ID']}}</a></td><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
+{% for p in lrows %}<tr class="{{ p.e.sep|sepcls }}"><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}">{{p.e['Employee ID']}}</a></td><td><a href="/employee/team-logs/employee/{{p.e['Employee ID']|urlencode}}"><b>{{p.e['Name']}}</b></a></td><td>{{p.e['Designation'] or '-'}}</td>
 <td>{% if p.jd %}{{p.jd.strftime('%d %b %Y')}}{% else %}-  <span class="pill" style="background:#eef2ff;color:#4338ca">Existing</span>{% endif %}</td><td>{{p.pstart.strftime('%d %b %Y')}}</td>
 {% if p.sepst %}<td><span class="pill" style="{{ 'background:#fde8e8;color:#b42318' if p.sepst=='Resigned' else 'background:#fff1db;color:#b45309' }}">{{p.sepst}}</span></td><td colspan="{{ 3 if hide_status else 4 }}" class="mut">{% if p.e.rel_txt %}Relieving date: {{p.e.rel_txt}} &mdash; {% endif %}not counted in working days, pending entries or reminders</td>
 {% elif not p.active %}<td colspan="{{ 4 if hide_status else 5 }}" class="mut">Not started &mdash; joins on {{p.jd.strftime('%d %b %Y')}}</td>
@@ -12118,7 +12133,7 @@ def _team_plog_page():
     today = today_local()
     emp_q = request.args.get("emp", "").strip(); proc_q = request.args.get("proc", "").strip()
     month_arg = request.args.get("month", "").strip()
-    emps = sorted(rows("Employees"), key=lambda e: str(e.get("Name", "")).lower())
+    emps = sorted(rows("Employees"), key=lambda e: (sep_rank(e), str(e.get("Name", "")).lower()))      # Update292: Resigned / NCNS last
     if emp_q:
         ql = emp_q.lower(); emps = [e for e in emps if ql in str(e["Employee ID"]).lower() or ql in str(e["Name"]).lower()]
     subs, leaves = load_subs(), rows("Leave")

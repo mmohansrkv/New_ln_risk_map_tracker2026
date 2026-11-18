@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update294: (1) The 2-day monthly LEAVE limit is removed - employees can apply for any number of leave days (the Permission hours limit is unchanged). (2) Team Logs > Employee Leave & Permission (Associate Manager / Team Lead / Senior Team Lead): an employee with MORE than 2 leave days (Pending + Approved, half day = 0.5, weekly offs / holidays excluded) in the CURRENT month gets only their own leave rows highlighted (violet); MORE than 2 permission hrs in the current month highlights only their permission rows (teal). Counted fresh on every page load, so new / approved records update it automatically; employees within the limits show normally; a legend + \"over the limit now\" list is shown.
   * Update291: (1) Audit Log for Associate Manager / Team Lead / Senior Team Lead (matched live by Designation, same test as Team Logs): new menu item \"Audit Log\" (/employee/team-audit) = the Admin's By Process Audit Log, READ-ONLY - they pick a process, see the employees who worked on it (productivity, productivity %, attendance), open an employee's Productivity / Attendance details and use the Productivity report (Print / Excel). The Admin-only parts (By Employee / Access tab, Process Audit Access, the Granted / Not granted column) are not shown to them; every route is also checked on the server (403 for everyone else). (2) Process name GROUPING in the Audit Log process list (Admin and these designations): process names that share a common prefix (split at \"_\") are grouped automatically - e.g. CA_Kings_Weekly, CA_Kings_YLB, CA_Kings_NVS -> group \"CA_Kings\" (3 Processes). Only the group name is shown first; clicking it expands the processes, each with Open audit. The same rule applies to every process (group_processes()); a process with no shared prefix stays a normal row. Admin permissions, the Admin Audit Log and the employee-side per-process Audit Log access are unchanged.
   * Update290: LOGIN SPEED + quotes. (1) The login no longer waits for Google Sheets: the Attendance-sheet read that only counted logins (not shown any more) and the live Quotes-sheet read were done INSIDE the login request - both removed from it; the Quotes sheet + the Thanglish conversion are prepared in a background thread. (2) The Employees list is read once per login (was three times). (3) The Employee page no longer reads the Quotes sheet while it is built: the quote popup is a light shell, the page opens first and the popup then asks /employee/quote-data (English shown at once, Thanglish filled in under it when ready). (4) Quotes: English from the Quotes sheet; Thanglish = online English->Tamil translation (Google Translate web endpoint, MyMemory as a second service) transliterated to Latin letters here; the result is cached and saved once into an EMPTY Thanglish cell of the sheet; if the online service fails the English quote still shows. Popup heading \"Today's Thought\". Quotes sheet is found from the already-loaded worksheet list (one API call less), reads are single-flight. Admin and Employee pages, themes and layouts unchanged.
   * Update289: FIX - quotes never appeared on the Employee page because the variable _QUOTE_DONE was used but never defined (NameError inside quote_overlay_html(), silently swallowed, so no quote screen was ever built). Now defined. Also: the Quotes sheet columns are detected more reliably (an \"English\" / \"English Quote\" column is preferred, Tamil / Thanglish columns are never taken as the English quote), the sheet read reports why rows were skipped, errors in the quote screen are printed with a full traceback, and a new admin check page /admin/quotes/check shows the Google Sheet connection, the worksheets found, the detected columns and the quote an employee will get (add ?emp=<Employee ID>). Existing tracker functionality unchanged.
@@ -494,7 +495,9 @@ ADMIN_USER = os.getenv("ADMIN_USER", "Admin_Mobius")
 # to source control.
 ADMIN_PASS = os.getenv("ADMIN_PASS", "H*&hjuiAsi5")
 DAY_HOURS = 8
-LEAVE_MONTHLY_LIMIT = 2        # days of leave an employee may apply for per calendar month
+LEAVE_MONTHLY_LIMIT = 2        # Update294: NO LONGER a block - leave may be applied for in any number of days; this is only the HIGHLIGHT threshold (more than this in the current month is highlighted)
+LEAVE_HIGHLIGHT_DAYS = LEAVE_MONTHLY_LIMIT           # Update294: > 2 leave days this month -> that employee's leave rows are highlighted (Team Logs)
+PERMISSION_HIGHLIGHT_HOURS = 2                      # Update294: > 2 permission hrs this month -> that employee's permission rows are highlighted (Team Logs)
 PERMISSION_MONTHLY_LIMIT = 2   # hrs of permission an employee may apply for per calendar month
 WEEKOFF = (5, 6)   # weekly off days: 5 = Saturday, 6 = Sunday - working week is Monday-Friday.
 # Idle minutes of no activity before the system automatically logs someone out (recorded as "Auto (Inactivity)").
@@ -6814,8 +6817,7 @@ T_MISSED = """<form class="grid no-print" method="get"><input type="hidden" name
 {% else %}<tr><td colspan="2">No missed entries.</td></tr>{% endfor %}</table>"""
 
 T_LEAVE = """<p class="mut">This month's balance (working days / hours used against the monthly allowance; leave added here by admin does not count against the employee's limit).</p>
-<div class="kpis"><div class="kpi"><span>Leave used / limit</span><b>{{leave_used|g}} / {{LEAVE_MONTHLY_LIMIT|g}} day(s)</b></div>
-<div class="kpi"><span>Leave remaining</span><b>{{leave_remaining|g}} day(s)</b></div>
+<div class="kpis"><div class="kpi"><span>Leave this month (highlighted above {{LEAVE_MONTHLY_LIMIT|g}})</span><b>{{leave_used|g}} day(s)</b></div>
 <div class="kpi"><span>Permission used / limit</span><b>{{perm_used|g}} / {{PERMISSION_MONTHLY_LIMIT|g}} hrs</b></div>
 <div class="kpi"><span>Permission remaining</span><b>{{perm_remaining|g}} hrs</b></div></div>
 <div class="card no-print"><h2>Add leave</h2><form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/leave" class="grid">
@@ -9049,8 +9051,8 @@ def leave_days_used(eid, month):
 
 def add_leave(emp, d1, d2, reason, status="Pending", enforce_limit=None, day_type="Full day"):
     """Employees' leave starts as Pending (admin approves/rejects); leave added by admin is Approved.
-    Self-service (Pending) requests are capped at LEAVE_MONTHLY_LIMIT working days per calendar month
-    (Pending + Approved count against the limit); admin-added leave is not capped unless requested."""
+    Update294: there is NO monthly cap any more (enforce_limit=True is only honoured if a caller asks for it explicitly).
+    More than LEAVE_HIGHLIGHT_DAYS days in the current month is highlighted on the Team Logs page instead."""
     a, b = dt.date.fromisoformat(d1), dt.date.fromisoformat(d2)
     if b < a or (b - a).days > 31:
         raise ValueError("Choose a valid date range (max 31 days).")
@@ -9058,7 +9060,7 @@ def add_leave(emp, d1, d2, reason, status="Pending", enforce_limit=None, day_typ
     if day_type == "Half day" and a != b:
         raise ValueError("A half-day leave is for ONE date - choose the same From and To date.")
     if enforce_limit is None:
-        enforce_limit = (status == "Pending")
+        enforce_limit = False      # Update294: the monthly leave limit is removed - any number of leave days may be applied for (highlighting only, see Team Logs)
     eid = str(emp["Employee ID"])
     have = {l["Date"] for l in live_leaves(rows("Leave")) if str(l["Employee ID"]) == eid}
     now = now_local().strftime("%Y-%m-%d %H:%M:%S")
@@ -9431,8 +9433,8 @@ LEAVE_EMP = """<style>
 .lpsum li{margin:0;line-height:1.4}.lpsum b{color:var(--ink);font-size:12px;font-weight:600}
 </style><div class="lp"><div class="head"><h1>Leave &amp; Permission</h1><a href="/employee">Back to daily entry</a></div>
 
-<div class="card"><h2>Apply leave</h2><p class="mut">Up to {{leave_limit|g}} working day(s) of leave per calendar month (weekly-offs and holidays don't count against the limit). A <b>half-day leave</b> counts as 0.5 day, is for one date only, and leaves you 4 working hours that day.</p>
-<ul class="lpsum"><li>Monthly Limit: <b>{{leave_limit|g}} day(s)</b></li><li>Used This Month: <b>{{leave_used|g}} day(s)</b></li><li>Remaining: <b>{{leave_remaining|g}} day(s)</b></li></ul>
+<div class="card"><h2>Apply leave</h2><p class="mut">You may apply for any number of leave days (weekly-offs and holidays are not counted). More than {{leave_limit|g}} working day(s) in a month is highlighted for your Team Lead / Manager. A <b>half-day leave</b> counts as 0.5 day, is for one date only, and leaves you 4 working hours that day.</p>
+<ul class="lpsum"><li>Leave This Month: <b>{{leave_used|g}} day(s)</b></li></ul>
 <form method="post" action="/employee/leave" class="grid">
 <label>From date<input type="date" name="d1" value="{{today}}" required></label>
 <label>To date<input type="date" name="d2" value="{{today}}" required></label>
@@ -12229,12 +12231,22 @@ TEAM_LEAVE = TEAM_TABS + """<div class="card"><h2>Employee Leave &amp; Permissio
 <button class="primary">Show</button><a href="/employee/team-logs/leave">This month</a><a href="/employee/team-logs/leave?month=all">All time</a></form>
 <div class="kpis"><div class="kpi"><span>Leave requests</span><b>{{lv|length}}</b></div><div class="kpi"><span>Permission requests</span><b>{{pm|length}}</b></div>
 <div class="kpi"><span>Pending</span><b>{{n_pend}}</b></div><div class="kpi"><span>Approved</span><b>{{n_appr}}</b></div><div class="kpi"><span>Rejected</span><b>{{n_rej}}</b></div></div>
+<style>
+tr.hl-leave>td{background:#efe4ff !important;box-shadow:inset 0 0 0 9999px #efe4ff}
+tr.hl-leave>td:first-child{border-left:4px solid #7c3aed}
+tr.hl-perm>td{background:#d6f5f0 !important;box-shadow:inset 0 0 0 9999px #d6f5f0}
+tr.hl-perm>td:first-child{border-left:4px solid #0f766e}
+.hl-key{display:inline-block;padding:2px 10px;border-radius:10px;font-size:12px;margin-right:8px;color:#1b1b1b}
+.hl-key.l{background:#efe4ff;border:1px solid #7c3aed}.hl-key.p{background:#d6f5f0;border:1px solid #0f766e}
+</style>
+<p class="mut"><span class="hl-key l">Leave &gt; {{hl_leave_lim|g}} days this month</span><span class="hl-key p">Permission &gt; {{hl_perm_lim|g}} hrs this month</span>Counted for the CURRENT month ({{cur_label}}) from Pending + Approved records, updated on every page load; only the employee's own records are highlighted.</p>
+{% if hl_list %}<p class="mut"><b>Over the limit now:</b> {% for h in hl_list %}<span class="hl-key {{'l' if h.kind=='Leave' else 'p'}}">{{h.name}} ({{h.id}}) &ndash; {{h.kind}}: {{h.val|g}} {{'day(s)' if h.kind=='Leave' else 'hrs'}}</span>{% endfor %}</p>{% endif %}
 <h2>Leave</h2><div style="overflow-x:auto"><table><tr><th>Date</th><th>Day</th><th>Employee ID</th><th>Name</th><th>Designation</th><th>Day type</th><th>Reason</th><th>Status</th><th>Applied at</th><th>Reviewed at</th></tr>
-{% for r in lv %}<tr class="{{ r.sep|sepcls }}"><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}}</td><td><b>{{r.name}}</b></td><td>{{r.desig or '-'}}</td><td>{{r.dtype}}</td><td>{{r.reason or '-'}}</td>
+{% for r in lv %}<tr class="{{ r.sep|sepcls }} {{r.hl}}" {% if r.hl %}title="{{r.name}}: {{r.mval|g}} leave day(s) this month"{% endif %}><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}}</td><td><b>{{r.name}}</b></td><td>{{r.desig or '-'}}</td><td>{{r.dtype}}</td><td>{{r.reason or '-'}}</td>
 <td><span class="pill {{r.status|ppill}}">{{r.status}}</span></td><td>{{(r.applied or '-')|t12}}</td><td>{{(r.reviewed or '-')|t12}}</td></tr>
 {% else %}<tr><td colspan="10">No leave requests for this selection.</td></tr>{% endfor %}</table></div>
 <h2>Permission</h2><div style="overflow-x:auto"><table><tr><th>Date</th><th>Day</th><th>Employee ID</th><th>Name</th><th>Designation</th><th>Hours</th><th>Reason</th><th>Status</th><th>Applied at</th><th>Reviewed at</th></tr>
-{% for r in pm %}<tr class="{{ r.sep|sepcls }}"><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}}</td><td><b>{{r.name}}</b></td><td>{{r.desig or '-'}}</td><td>{{r.hours|g}}</td><td>{{r.reason or '-'}}</td>
+{% for r in pm %}<tr class="{{ r.sep|sepcls }} {{r.hl}}" {% if r.hl %}title="{{r.name}}: {{r.mval|g}} permission hr(s) this month"{% endif %}><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}}</td><td><b>{{r.name}}</b></td><td>{{r.desig or '-'}}</td><td>{{r.hours|g}}</td><td>{{r.reason or '-'}}</td>
 <td><span class="pill {{r.status|ppill}}">{{r.status}}</span></td><td>{{(r.applied or '-')|t12}}</td><td>{{(r.reviewed or '-')|t12}}</td></tr>
 {% else %}<tr><td colspan="10">No permission requests for this selection.</td></tr>{% endfor %}</table></div></div>"""
 
@@ -12257,21 +12269,40 @@ def employee_team_leave():
     def dayname(d):
         try: return dt.date.fromisoformat(norm_date(d)).strftime("%a")
         except ValueError: return ""
+    # Update294: CURRENT month usage per employee (Pending + Approved, Rejected ignored; weekly offs / holidays not counted; half day = 0.5) - recomputed on every load
+    cur_m = today_local().strftime("%Y-%m"); mlv, mpm = {}, {}
+    for r in rows("Leave"):
+        d_ = norm_date(r.get("Date", ""))
+        if str(d_).startswith(cur_m) and leave_status(r) != "Rejected" and not is_off(d_):
+            mlv[_key(r["Employee ID"])] = mlv.get(_key(r["Employee ID"]), 0) + (0.5 if leave_is_half(r) else 1)
+    for r in rows("Permissions"):
+        if str(norm_date(r.get("Date", "")) or "").startswith(cur_m) and str(r.get("Status", "")).strip() != "Rejected":
+            mpm[_key(r["Employee ID"])] = mpm.get(_key(r["Employee ID"]), 0) + num(r.get("Hours"))
+    def hl_of(eid, kind, d):
+        if sepm.get(_key(eid)) or not str(norm_date(d) or "").startswith(cur_m): return "", 0      # Resigned / NCNS keep their own colour; only this month's rows
+        if kind == "L": v = mlv.get(_key(eid), 0); return ("hl-leave" if v > LEAVE_HIGHLIGHT_DAYS + 1e-9 else ""), v
+        v = round(mpm.get(_key(eid), 0), 2); return ("hl-perm" if v > PERMISSION_HIGHLIGHT_HOURS + 1e-9 else ""), v
+    names = {_key(e["Employee ID"]): e.get("Name", "") for e in rows("Employees")}
+    hl_list = [dict(id=e_, name=names.get(_key(e_), e_), kind="Leave", val=v) for e_, v in mlv.items() if v > LEAVE_HIGHLIGHT_DAYS + 1e-9 and not sepm.get(_key(e_))]
+    hl_list += [dict(id=e_, name=names.get(_key(e_), e_), kind="Permission", val=round(v, 2)) for e_, v in mpm.items() if v > PERMISSION_HIGHLIGHT_HOURS + 1e-9 and not sepm.get(_key(e_))]
     lv, pm = [], []
     for r in rows("Leave"):
         st = leave_status(r)
         if (status and st != status) or not keep(r["Employee ID"], r.get("Employee name", ""), r.get("Date", "")): continue
         lv.append(dict(date=norm_date(r.get("Date", "")), day=dayname(r.get("Date", "")), id=r["Employee ID"], name=r.get("Employee name", ""), desig=desig.get(_key(r["Employee ID"]), ""), sep=sepm.get(_key(r["Employee ID"]), ""),
                        dtype="Half day" if leave_is_half(r) else "Full day", reason=r.get("Reason", ""), status=st, applied=r.get("Applied at", ""), reviewed=r.get("Reviewed at", "")))
+        lv[-1]["hl"], lv[-1]["mval"] = hl_of(r["Employee ID"], "L", r.get("Date", ""))      # Update294
     for r in rows("Permissions"):
         st = str(r.get("Status", "")).strip() or "Pending"
         if (status and st != status) or not keep(r["Employee ID"], r.get("Employee name", ""), r.get("Date", "")): continue
         pm.append(dict(date=norm_date(r.get("Date", "")), day=dayname(r.get("Date", "")), id=r["Employee ID"], name=r.get("Employee name", ""), desig=desig.get(_key(r["Employee ID"]), ""), sep=sepm.get(_key(r["Employee ID"]), ""),
                        hours=num(r.get("Hours")), reason=r.get("Reason", ""), status=st, applied=r.get("Applied at", ""), reviewed=r.get("Decided at", "")))
+        pm[-1]["hl"], pm[-1]["mval"] = hl_of(r["Employee ID"], "P", r.get("Date", ""))      # Update294
     lv.sort(key=lambda x: (x["date"], x["name"]), reverse=True); pm.sort(key=lambda x: (x["date"], x["name"]), reverse=True)
     lv.sort(key=lambda x: 1 if x["sep"] else 0); pm.sort(key=lambda x: 1 if x["sep"] else 0)      # Update293: stable - newest first inside each group, Resigned / NCNS last
     allr = lv + pm
     return page(TEAM_LEAVE, title="Team Logs - Leave & Permission", tl="leave", month=month, label=label, emp=request.args.get("emp", ""), status=status, lv=lv, pm=pm,
+                hl_list=hl_list, hl_leave_lim=LEAVE_HIGHLIGHT_DAYS, hl_perm_lim=PERMISSION_HIGHLIGHT_HOURS, cur_label=today_local().strftime("%B %Y"),
                 n_pend=sum(1 for x in allr if x["status"] == "Pending"), n_appr=sum(1 for x in allr if x["status"] == "Approved"), n_rej=sum(1 for x in allr if x["status"] == "Rejected"))
 
 @app.route("/employee/team-logs/missed")

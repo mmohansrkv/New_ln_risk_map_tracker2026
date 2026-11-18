@@ -13,6 +13,7 @@
   * Update280: Employee page (Daily entry) - the small "Monthly Productivity Summary" strip now also shows "Permission: N Hrs" = the total hours of this employee's APPROVED permissions in the current month (Pending / Rejected not counted). Read live from the Permissions sheet on every page load, so it follows new / approved / changed records. Display only; same one-line strip, nothing else changed.
   * Update279: Admin > Theme & Layout (menu item "Theme & Layout") now manages the Employee Panel and the Admin Panel SEPARATELY - each has its own Layout (Top bar / Sidebar) and Theme (Employee: or "Same as Admin"), a live preview before applying, and an Apply button; an applied Employee layout / theme is used by every Employee page from its next load. Reset Employee panel returns to Top bar + Admin theme. Only CSS / menu position changes (new Settings keys ui_admin_layout, ui_emp_layout, ui_emp_theme); employee data, routes and features are untouched. The Sidebar layout of Update277 can be chosen again.
   * Update278: Admin AND Employee pages - the left sidebar is REMOVED; every menu item (incl. the Log / Employee Info dropdowns, Calendar, profile avatar + name and Logout) now sits in a compact TOP navigation bar. On phones the bar collapses behind a menu button. Navigation layout only - pages, themes, colours, animations, routes and data are unchanged. The Theme & Layout "Panel layout" choice is now fixed to Top bar.
+  * Update293: Associate Manager / Team Lead / Senior Team Lead (live Designation, active login) get a new sidebar item \"Employee Leave & Permission\" (after their own Leave & Permission) that opens the read-only Leave and Permission requests of ALL employees with status (month / employee / status filters; the same page as the Team Logs > Leave & Permission tab). Resigned / NCNS employees are listed last and highlighted like the other employee lists. Display only; the Admin still approves / rejects.
   * Update292: Resigned / NCNS employees are always listed at the BOTTOM (active employees first, each group keeps its A-Z order) and their rows are highlighted - Resigned in light red, NCNS in light amber, active rows unchanged - on every employee list the Admin, Associate Manager / Manager, Team Lead and Senior Team Lead see: Admin Overview, Employee Info (Employees, Login Access, Productivity, Managers & Leads), Audit Log > By Employee, Employee Details and Team Logs > Productivity Log. Display order and colour only; no calculation, access rule or data changes.
   * Update271: Employee login - a username whose account is Locked or Resigned / NCNS (Admin > Employee Login Access) now shows "Your account is locked. Please contact your Manager, Team Lead, or Admin." whatever password is typed, the username stays in the field, the male / female / lead picture still appears for it, and these accounts can never sign in. An unknown username still shows "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." (Update270).
   * Update270: Employee login messages - an unknown / invalid username OR a locked account (any password) now shows exactly: "Username not found or account locked. Please contact your Manager, Team Lead, or Admin." The typed username stays in the field. A valid, unlocked username with a wrong password shows "Wrong username or password. Please try again." The male / female / lead picture still appears while typing and, for a locked account, still appears whenever the username matches an employee record (the picture lookup ignores the lock). Admin login unchanged.
@@ -5107,7 +5108,7 @@ def page(body, title="Productivity Tracker", **ctx):
     try: lead_menu = session.get("role") == "employee" and team_log_access()      # Update263
     except Exception: lead_menu = False
     if lead_menu:      # Update263: Associate Manager / Team Lead / Senior Team Lead - exactly these four menu items, in this order
-        items = [("/employee/team-logs", "Team Logs"), ("/employee/team-audit", "Audit Log"), ("/employee/people", "Employee Details"), ("/employee/profile", "Personal Details"), ("/employee/leave", "Leave & Permission")]      # Update291: + Audit Log (read-only)
+        items = [("/employee/team-logs", "Team Logs"), ("/employee/team-audit", "Audit Log"), ("/employee/people", "Employee Details"), ("/employee/profile", "Personal Details"), ("/employee/leave", "Leave & Permission"), ("/employee/team-logs/leave", "Employee Leave & Permission")]      # Update291: + Audit Log (read-only). Update293: + Employee Leave & Permission (all employees, read-only)
     elif session.get("role") == "employee":
         try:      # Admin-controlled: the menu item exists only while Audit Log access is enabled for this employee
             if audit_active(audit_access(session.get("emp_id", ""))): items.append(("/employee/audit", "Audit Log"))
@@ -5129,7 +5130,7 @@ def page(body, title="Productivity Tracker", **ctx):
             if gm_allowed(session.get("emp_id", "")): items.append(("/employee/game", GM_TITLE))
         except Exception as e:
             print("Multiplayer Game menu check failed:", repr(e))
-    nav = [(h, l, p == h or (h != "/employee" and p.startswith(h + "/")), []) for h, l in items]
+    nav = [(h, l, (p == h or (h != "/employee" and p.startswith(h + "/"))) and not (h == "/employee/team-logs" and p.startswith("/employee/team-logs/leave")), []) for h, l in items]      # Update293: the Employee Leave & Permission item has its own highlight
     if session.get("role") == "admin":      # Update66: Employee Info expands to Employees / Notifications / Mahizhchi
         view = request.args.get("view", "")
         kids = [("/admin/employee-info", "Employees", p.startswith("/admin/employee-info") and view != "notifications"),
@@ -12229,11 +12230,11 @@ TEAM_LEAVE = TEAM_TABS + """<div class="card"><h2>Leave &amp; Permission &mdash;
 <div class="kpis"><div class="kpi"><span>Leave requests</span><b>{{lv|length}}</b></div><div class="kpi"><span>Permission requests</span><b>{{pm|length}}</b></div>
 <div class="kpi"><span>Pending</span><b>{{n_pend}}</b></div><div class="kpi"><span>Approved</span><b>{{n_appr}}</b></div><div class="kpi"><span>Rejected</span><b>{{n_rej}}</b></div></div>
 <h2>Leave</h2><div style="overflow-x:auto"><table><tr><th>Date</th><th>Day</th><th>Employee ID</th><th>Name</th><th>Designation</th><th>Day type</th><th>Reason</th><th>Status</th><th>Applied at</th><th>Reviewed at</th></tr>
-{% for r in lv %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}}</td><td><b>{{r.name}}</b></td><td>{{r.desig or '-'}}</td><td>{{r.dtype}}</td><td>{{r.reason or '-'}}</td>
+{% for r in lv %}<tr class="{{ r.sep|sepcls }}"><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}}</td><td><b>{{r.name}}</b></td><td>{{r.desig or '-'}}</td><td>{{r.dtype}}</td><td>{{r.reason or '-'}}</td>
 <td><span class="pill {{r.status|ppill}}">{{r.status}}</span></td><td>{{(r.applied or '-')|t12}}</td><td>{{(r.reviewed or '-')|t12}}</td></tr>
 {% else %}<tr><td colspan="10">No leave requests for this selection.</td></tr>{% endfor %}</table></div>
 <h2>Permission</h2><div style="overflow-x:auto"><table><tr><th>Date</th><th>Day</th><th>Employee ID</th><th>Name</th><th>Designation</th><th>Hours</th><th>Reason</th><th>Status</th><th>Applied at</th><th>Reviewed at</th></tr>
-{% for r in pm %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}}</td><td><b>{{r.name}}</b></td><td>{{r.desig or '-'}}</td><td>{{r.hours|g}}</td><td>{{r.reason or '-'}}</td>
+{% for r in pm %}<tr class="{{ r.sep|sepcls }}"><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.id}}</td><td><b>{{r.name}}</b></td><td>{{r.desig or '-'}}</td><td>{{r.hours|g}}</td><td>{{r.reason or '-'}}</td>
 <td><span class="pill {{r.status|ppill}}">{{r.status}}</span></td><td>{{(r.applied or '-')|t12}}</td><td>{{(r.reviewed or '-')|t12}}</td></tr>
 {% else %}<tr><td colspan="10">No permission requests for this selection.</td></tr>{% endfor %}</table></div></div>"""
 
@@ -12249,6 +12250,7 @@ def employee_team_leave():
     else:
         m0, m1 = month_range(month_arg or today_local().strftime("%Y-%m")); month = m0.strftime("%Y-%m"); label = m0.strftime("%B %Y")
     desig = {_key(e["Employee ID"]): e.get("Designation", "") for e in rows("Employees")}
+    sepm = {_key(e["Employee ID"]): emp_sep(e) for e in rows("Employees")}      # Update293: Resigned / NCNS -> bottom + highlight, same as every other employee list
     def keep(eid, name, d):
         if q and q not in str(eid).lower() and q not in str(name).lower(): return False
         return not m0 or str(m0) <= norm_date(d) <= str(m1)
@@ -12259,14 +12261,15 @@ def employee_team_leave():
     for r in rows("Leave"):
         st = leave_status(r)
         if (status and st != status) or not keep(r["Employee ID"], r.get("Employee name", ""), r.get("Date", "")): continue
-        lv.append(dict(date=norm_date(r.get("Date", "")), day=dayname(r.get("Date", "")), id=r["Employee ID"], name=r.get("Employee name", ""), desig=desig.get(_key(r["Employee ID"]), ""),
+        lv.append(dict(date=norm_date(r.get("Date", "")), day=dayname(r.get("Date", "")), id=r["Employee ID"], name=r.get("Employee name", ""), desig=desig.get(_key(r["Employee ID"]), ""), sep=sepm.get(_key(r["Employee ID"]), ""),
                        dtype="Half day" if leave_is_half(r) else "Full day", reason=r.get("Reason", ""), status=st, applied=r.get("Applied at", ""), reviewed=r.get("Reviewed at", "")))
     for r in rows("Permissions"):
         st = str(r.get("Status", "")).strip() or "Pending"
         if (status and st != status) or not keep(r["Employee ID"], r.get("Employee name", ""), r.get("Date", "")): continue
-        pm.append(dict(date=norm_date(r.get("Date", "")), day=dayname(r.get("Date", "")), id=r["Employee ID"], name=r.get("Employee name", ""), desig=desig.get(_key(r["Employee ID"]), ""),
+        pm.append(dict(date=norm_date(r.get("Date", "")), day=dayname(r.get("Date", "")), id=r["Employee ID"], name=r.get("Employee name", ""), desig=desig.get(_key(r["Employee ID"]), ""), sep=sepm.get(_key(r["Employee ID"]), ""),
                        hours=num(r.get("Hours")), reason=r.get("Reason", ""), status=st, applied=r.get("Applied at", ""), reviewed=r.get("Decided at", "")))
     lv.sort(key=lambda x: (x["date"], x["name"]), reverse=True); pm.sort(key=lambda x: (x["date"], x["name"]), reverse=True)
+    lv.sort(key=lambda x: 1 if x["sep"] else 0); pm.sort(key=lambda x: 1 if x["sep"] else 0)      # Update293: stable - newest first inside each group, Resigned / NCNS last
     allr = lv + pm
     return page(TEAM_LEAVE, title="Team Logs - Leave & Permission", tl="leave", month=month, label=label, emp=request.args.get("emp", ""), status=status, lv=lv, pm=pm,
                 n_pend=sum(1 for x in allr if x["status"] == "Pending"), n_appr=sum(1 for x in allr if x["status"] == "Approved"), n_rej=sum(1 for x in allr if x["status"] == "Rejected"))

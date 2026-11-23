@@ -1,6 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
-  * Update296: MOBILE-FRIENDLY for everyone. (1) The Employee panel now WORKS on phones (the Update295 \"please use a computer\" block is OFF by default; MOBILE_EMPLOYEE_BLOCK=1 turns it back on). (2) New phone layer <style id=\"mob296\"> (touch-sized buttons, 16px inputs so iPhones do not zoom, single-column cards / forms, tables scroll sideways inside their card, heavy 3D decoration hidden). (3) The Admin keeps its SEPARATE login at /admin/login with its own credentials (ADMIN_USER / ADMIN_PASS environment variables); the home page shows only the Employee link. Nothing else changed.
-  * Update295: MOBILE RULES. (1) The Employee panel (login + every /employee page + /entry pages) does NOT open on a phone: an employee on a mobile browser sees a short "please use a computer" page. (2) The Admin panel WORKS on phones with its own separate login at /admin/login (Admin sessions are never blocked). (3) The home page "/" no longer shows an Admin link - the Admin opens it by adding /admin/login to the site link. (4) Small phone-only CSS so Admin tables / cards scroll sideways instead of breaking the page. Set the environment variable MOBILE_EMPLOYEE_BLOCK=0 to let employees use phones again. Nothing else changed.
+  * Update295: RESPONSIVE layout for phones / tablets / desktop on EVERY Admin, Employee and login page. One stylesheet (<style id="resp295">, appended last in <head>) + one small script: viewport-fit=cover and safe-area padding, no sideways page scroll, wide tables scroll inside their card, touch-size buttons / inputs (16px fields so iOS does not zoom), stacked headings / forms / KPI cards, scrollable tabs, full-width mobile menu (closes after choosing a link, tapping outside or Esc), the fixed-height 'fit to screen' mode is disabled on phones so pages scroll normally, chat / toast / popup boxes fit the screen, login pages stack and fit small screens. Layout only - no route, sheet, e-mail or calculation changed.
   * Update294: (1) The 2-day monthly LEAVE limit is removed - employees can apply for any number of leave days (the Permission hours limit is unchanged). (2) Team Logs > Employee Leave & Permission (Associate Manager / Team Lead / Senior Team Lead): an employee with MORE than 2 leave days (Pending + Approved, half day = 0.5, weekly offs / holidays excluded) in the CURRENT month gets only their own leave rows highlighted (violet); MORE than 2 permission hrs in the current month highlights only their permission rows (teal). Counted fresh on every page load, so new / approved records update it automatically; employees within the limits show normally; a legend + \"over the limit now\" list is shown.
   * Update291: (1) Audit Log for Associate Manager / Team Lead / Senior Team Lead (matched live by Designation, same test as Team Logs): new menu item \"Audit Log\" (/employee/team-audit) = the Admin's By Process Audit Log, READ-ONLY - they pick a process, see the employees who worked on it (productivity, productivity %, attendance), open an employee's Productivity / Attendance details and use the Productivity report (Print / Excel). The Admin-only parts (By Employee / Access tab, Process Audit Access, the Granted / Not granted column) are not shown to them; every route is also checked on the server (403 for everyone else). (2) Process name GROUPING in the Audit Log process list (Admin and these designations): process names that share a common prefix (split at \"_\") are grouped automatically - e.g. CA_Kings_Weekly, CA_Kings_YLB, CA_Kings_NVS -> group \"CA_Kings\" (3 Processes). Only the group name is shown first; clicking it expands the processes, each with Open audit. The same rule applies to every process (group_processes()); a process with no shared prefix stays a normal row. Admin permissions, the Admin Audit Log and the employee-side per-process Audit Log access are unchanged.
   * Update290: LOGIN SPEED + quotes. (1) The login no longer waits for Google Sheets: the Attendance-sheet read that only counted logins (not shown any more) and the live Quotes-sheet read were done INSIDE the login request - both removed from it; the Quotes sheet + the Thanglish conversion are prepared in a background thread. (2) The Employees list is read once per login (was three times). (3) The Employee page no longer reads the Quotes sheet while it is built: the quote popup is a light shell, the page opens first and the popup then asks /employee/quote-data (English shown at once, Thanglish filled in under it when ready). (4) Quotes: English from the Quotes sheet; Thanglish = online English->Tamil translation (Google Translate web endpoint, MyMemory as a second service) transliterated to Latin letters here; the result is cached and saved once into an EMPTY Thanglish cell of the sheet; if the online service fails the English quote still shows. Popup heading \"Today's Thought\". Quotes sheet is found from the already-loaded worksheet list (one API call less), reads are single-flight. Admin and Employee pages, themes and layouts unchanged.
@@ -837,43 +836,6 @@ def _no_store_private(resp):
     cannot show an Admin or Employee page."""
     if session.get("role") and request.endpoint not in ("static", "photo"):
         resp.headers["Cache-Control"] = "no-store"
-    return resp
-
-# ---------------------------------------------------------------- Update295: Employee panel is NOT available on phones; the Admin panel works on phones
-MOBILE_EMPLOYEE_BLOCK = os.getenv("MOBILE_EMPLOYEE_BLOCK", "0") == "1"      # MOBILE_EMPLOYEE_BLOCK=0 -> employees may use phones again
-_MOBILE_UA = re.compile(r"android|iphone|ipod|ipad|mobile|windows phone|iemobile|webos|blackberry|opera mini|silk|kindle", re.I)
-_MOBILE_OPEN = ("/static", "/app-version", "/logo.png", "/char/", "/photo/", "/logout", "/agent/")      # harmless helpers - never blocked
-
-def _is_mobile():
-    """True for a phone / tablet browser (User-Agent, or the Sec-CH-UA-Mobile client hint)."""
-    try:
-        if (request.headers.get("Sec-CH-UA-Mobile", "") or "").strip() == "?1": return True
-        return bool(_MOBILE_UA.search(request.headers.get("User-Agent", "") or ""))
-    except Exception:
-        return False
-
-_MOBILE_BLOCK_HTML = ("<!doctype html><html><head><meta charset='utf-8'>"
-    "<meta name='viewport' content='width=device-width,initial-scale=1'><title>Use a computer</title></head>"
-    "<body style='margin:0;font-family:system-ui,Segoe UI,Roboto,sans-serif;background:#f4f6fb;color:#1c2340;"
-    "min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box'>"
-    "<div style='max-width:380px;background:#fff;border-radius:16px;padding:28px 24px;text-align:center;"
-    "box-shadow:0 12px 36px -14px rgba(28,35,64,.35)'>"
-    "<div style='font-size:42px;line-height:1'>&#128187;</div>"
-    "<h2 style='margin:14px 0 8px;font-size:20px'>Please use a computer</h2>"
-    "<p style='margin:0;color:#6b7390;font-size:14px;line-height:1.5'>The Productivity Tracker employee panel does not work on a mobile phone. "
-    "Open this link on your office laptop / desktop and sign in there.</p></div></body></html>")
-
-@app.before_request
-def _mobile_gate():
-    if not MOBILE_EMPLOYEE_BLOCK or session.get("role") == "admin" or not _is_mobile():
-        return
-    p = request.path
-    if p == "/admin" or p.startswith("/admin/"):      # the Admin login and Admin pages always open on a phone
-        return
-    if any(p.startswith(x) for x in _MOBILE_OPEN):
-        return
-    resp = Response(_MOBILE_BLOCK_HTML, status=403, mimetype="text/html")
-    resp.headers["Cache-Control"] = "no-store"
     return resp
 
 # ---------------------------------------------------------------- Google Sheets
@@ -2547,7 +2509,7 @@ def temp_password():
 
 # ---------------------------------------------------------------- templates
 BASE = """<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#1c2340"><title>{{title}}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>{{title}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{--ink:#1c2340;--mut:#6b7390;--pri:#4f46e5;--line:#e6e9f2}
@@ -2633,7 +2595,6 @@ tbody tr{transition:background .15s ease}
 @media print{aside,.me,.flash,.warn,form,.btnl,.no-print{display:none!important}main{padding:0;animation:none}body{background:#fff}
 .card{border:0;padding:0}table{border:1px solid #000}th,td{border-color:#000}.kpi{border:1px solid #000}}
 @media(max-width:800px){.app{flex-direction:column}aside{width:auto;flex-direction:row;flex-wrap:wrap;align-items:center}.me{order:99;margin:0 0 0 auto;border:0;padding:0}main{padding:16px}}
-@media(max-width:800px){main .card{overflow-x:auto;-webkit-overflow-scrolling:touch}main img{max-width:100%;height:auto}html{-webkit-text-size-adjust:100%}}      /* Update295 */
 .lg{position:relative;overflow:hidden;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:linear-gradient(135deg,#c9b8f6 0%,#fbd3e2 45%,#b9d2f8 100%);animation:fadeInUp .5s cubic-bezier(.22,1,.36,1)}
 .blob{position:absolute;border-radius:50%;filter:blur(2px);opacity:.55;pointer-events:none;will-change:transform;z-index:0}
 .blob.b1{width:340px;height:340px;left:-90px;top:-70px;background:radial-gradient(circle at 35% 35%,#fff9,#8b6fe8 70%);animation:blobFloat1 13s ease-in-out infinite}
@@ -3584,45 +3545,7 @@ html body .app.emp3d table th{background:linear-gradient(180deg,#f3f5ff,#eaeefc)
 html body .app.emp3d table td{border-bottom:1px solid #eef1fb}
 html body .app.emp3d table tbody tr:hover td{background:#f4f3ff}
 @media(prefers-reduced-motion:reduce){html body .app.emp3d .kpi{transition:none}}
-</style>{% endif %}<style id="mob296">
-@media(max-width:800px){
-html,body{max-width:100%;overflow-x:hidden}
-body{padding-bottom:env(safe-area-inset-bottom,0)}
-/* no zoom-on-focus on iOS, comfortable touch targets */
-input,select,textarea{font-size:16px!important;max-width:100%}
-button,input[type=submit],input[type=button],.primary,.btnl,.back,.pbtn,.danger{min-height:40px}
-html body .app aside.emp>a,html body .app aside.emp .ng>a.ng-h,html body .app aside.emp .kids a{min-height:42px;padding:10px 12px!important;font-size:14px!important}
-html body .app aside.emp .tb-toggle{width:42px;height:40px}
-html body .app aside.emp .prof .prof-out{min-height:36px}
-/* page content */
-html body .app main{padding:12px 10px!important;min-width:0}
-html body .app .card{padding:12px!important;max-width:100%}
-.kpis{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}
-main :is(.grid,.r){flex-direction:column;align-items:stretch}
-main :is(.grid,.r) :is(label,input,select,textarea,button){width:100%}
-main form :is(input,select,textarea):not([type=checkbox]):not([type=radio]){width:100%}
-main [style*="grid-template-columns"]{grid-template-columns:1fr!important}
-main [style*="display:flex"]{flex-wrap:wrap}
-main [style*="width:"][style*="px"]:not(img):not(svg){max-width:100%}
-/* wide tables scroll sideways inside their own box */
-main table{display:block;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap}
-main table th,main table td{padding:8px 9px}
-main pre,main code{white-space:pre-wrap;word-break:break-word}
-.tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
-.tabs a{flex:none}
-/* pop-ups, toasts, banners stay inside the screen */
-#toasts,#cmwrap,.cmroot{max-width:100vw}
-.cmroot .cm{max-width:calc(100vw - 20px)}
-/* heavy decoration off on phones (speed + battery) */
-#fly3d,.orb{display:none!important}
-.win,.lcard{max-width:100%}
-.center{margin:6vh auto}
-}
-@media(max-width:480px){
-.kpis{grid-template-columns:1fr!important}
-h1{font-size:20px}h2{font-size:18px}h3{font-size:16px}
-}
-</style></head><body>
+</style>{% endif %}</head><body>
 {% if bare %}{{body|safe}}
 {% elif session.role %}<div class="app{{' emp3d' if session.role=='employee' else ''}}{{' sbar' if sbar else ''}}">{% if session.role=='employee' %}<script>document.documentElement.classList.add('fit188')</script><div id="fly3d" aria-hidden="true"><div class="fo" style="--s:64px;--x0:-12vw;--y0:78vh;--x1:112vw;--y1:-14vh;--z0:-380px;--z1:160px;--d:46s;--dl:0s;--c1:#6366f1;--c2:#a78bfa;--t:24s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:44px;--x0:110vw;--y0:64vh;--x1:-14vw;--y1:20vh;--z0:-120px;--z1:220px;--d:38s;--dl:-9s;--c1:#ec4899;--c2:#f9a8d4;--t:21s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:86px;--x0:-10vw;--y0:22vh;--x1:112vw;--y1:88vh;--z0:-420px;--z1:-60px;--d:58s;--dl:-21s;--c1:#06b6d4;--c2:#67e8f9;--t:28s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:52px;--x0:30vw;--y0:112vh;--x1:70vw;--y1:-16vh;--z0:-200px;--z1:240px;--d:34s;--dl:-14s;--c1:#f59e0b;--c2:#fcd34d;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:72px;--x0:112vw;--y0:92vh;--x1:-12vw;--y1:40vh;--z0:-340px;--z1:120px;--d:52s;--dl:-30s;--c1:#8b5cf6;--c2:#c4b5fd;--t:26s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:38px;--x0:-10vw;--y0:48vh;--x1:110vw;--y1:6vh;--z0:-60px;--z1:260px;--d:30s;--dl:-4s;--c1:#10b981;--c2:#6ee7b7;--t:20s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:58px;--x0:60vw;--y0:-14vh;--x1:16vw;--y1:114vh;--z0:-260px;--z1:180px;--d:44s;--dl:-26s;--c1:#3b82f6;--c2:#93c5fd;--t:23s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:48px;--x0:88vw;--y0:112vh;--x1:40vw;--y1:-14vh;--z0:-160px;--z1:200px;--d:36s;--dl:-17s;--c1:#f43f5e;--c2:#fda4af;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:90px;--x0:-14vw;--y0:60vh;--x1:112vw;--y1:20vh;--z0:-300px;--z1:140px;--d:50s;--dl:-6s;--c1:#6366f1;--c2:#6366f1;--t:29s"><div class="fr"></div></div><div class="fo" style="--s:64px;--x0:112vw;--y0:18vh;--x1:-14vw;--y1:80vh;--z0:-180px;--z1:200px;--d:42s;--dl:-19s;--c1:#ec4899;--c2:#ec4899;--t:24s"><div class="fr"></div></div><div class="fo" style="--s:110px;--x0:20vw;--y0:114vh;--x1:84vw;--y1:-18vh;--z0:-400px;--z1:60px;--d:60s;--dl:-33s;--c1:#06b6d4;--c2:#06b6d4;--t:32s"><div class="fr"></div></div><div class="fo" style="--s:56px;--x0:80vw;--y0:-14vh;--x1:6vw;--y1:100vh;--z0:-100px;--z1:240px;--d:40s;--dl:-12s;--c1:#f59e0b;--c2:#f59e0b;--t:23s"><div class="fr"></div></div><div class="fo" style="--s:54px;--x0:-12vw;--y0:34vh;--x1:112vw;--y1:70vh;--z0:-240px;--z1:180px;--d:48s;--dl:-2s;--c1:#6366f1;--c2:#22d3ee;--t:23s"><div class="ft"></div></div><div class="fo" style="--s:40px;--x0:112vw;--y0:50vh;--x1:-12vw;--y1:8vh;--z0:-80px;--z1:240px;--d:34s;--dl:-23s;--c1:#ec4899;--c2:#f59e0b;--t:20s"><div class="ft"></div></div><div class="fo" style="--s:70px;--x0:46vw;--y0:-14vh;--x1:92vw;--y1:114vh;--z0:-320px;--z1:100px;--d:54s;--dl:-36s;--c1:#8b5cf6;--c2:#06b6d4;--t:25s"><div class="ft"></div></div><div class="fo" style="--s:46px;--x0:-12vw;--y0:104vh;--x1:114vw;--y1:30vh;--z0:-140px;--z1:220px;--d:40s;--dl:-28s;--c1:#10b981;--c2:#3b82f6;--t:21s"><div class="ft"></div></div></div>{% endif %}<aside class="emp{{' tlside' if hol_only else ''}}">
 <button type="button" class="tb-toggle" aria-label="Menu" aria-expanded="false" onclick="var a=this.closest('aside');var o=a.classList.toggle('tb-open');this.setAttribute('aria-expanded',o?'true':'false')">&#9776;</button>
@@ -4176,6 +4099,145 @@ setInterval(function(){location.reload()},120000);
 </script>{% endif %}
 {% if welcome_html %}{{welcome_html|safe}}{% endif %}
 </body></html>"""
+
+# ---------------------------------------------------------------- Update295: RESPONSIVE layout (phones / tablets / desktop)
+# One stylesheet + one small script appended LAST in <head> / before </body> of BASE, so it applies to every Admin, Employee and login page.
+# Layout only: no route, sheet, e-mail, calculation or feature is changed.
+RESP_CSS = r"""
+/* Update295: responsive layer */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+html,body{max-width:100%}
+body{overflow-x:hidden;overflow-wrap:break-word}
+img,video,canvas,svg,iframe{max-width:100%}
+img,video{height:auto}
+.app,main,.mbody,.fitin,.card,.head,.kpis,.grid,.tabs{min-width:0}
+.rsp-tw{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;border-radius:12px}
+.rsp-tw>table{margin:0;min-width:100%;width:max-content;max-width:none}
+.rsp-tw>table th,.rsp-tw>table td{white-space:normal}
+pre,code,.mono{max-width:100%;overflow-x:auto}
+@media(max-width:1100px){
+ body .app main{padding:18px 18px}
+ .kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+}
+@media(max-width:800px){
+ html,body{height:auto!important;min-height:100%;overflow-x:hidden}
+ html.fit188,html.fit188 body{height:auto!important;overflow-x:hidden!important;overflow-y:auto!important}
+ html.fit188 .app.emp3d,html.fit188 .app.emp3d main,html.fit188 .app.emp3d .mbody{height:auto!important;min-height:0!important;overflow:visible!important}
+ html.fit188 .app.emp3d main{flex:1 1 auto!important}
+ .sbin,.fitin{zoom:1!important;width:auto!important;height:auto!important}
+ body .app{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column!important}
+ body .app main{width:100%;padding:14px 12px calc(16px + env(safe-area-inset-bottom,0px))!important}
+ body .app main,body .app .mbody{overflow-x:hidden}
+ /* top bar */
+ html body .app aside.emp{padding:6px 10px!important;padding-top:calc(6px + env(safe-area-inset-top,0px))!important;max-height:100vh!important;max-height:100dvh!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch}
+ html body .app aside.emp .tb-toggle{width:42px;height:40px;font-size:20px;flex:none}
+ html body .app aside.emp .panel-ttl{flex:1 1 auto;font-size:14px!important;min-width:0;overflow:hidden;text-overflow:ellipsis}
+ html body .app aside.emp.tb-open>a,html body .app aside.emp.tb-open .ng>a.ng-h{display:flex!important;width:100%!important;flex:0 0 100%;padding:11px 12px!important;font-size:14.5px!important;border-radius:10px!important;min-height:44px}
+ html body .app aside.emp.tb-open .ng,html body .app aside.emp.tb-open details.cal{flex:0 0 100%;width:100%}
+ html body .app aside.emp .ng .kids a{display:flex;align-items:center;min-height:42px;padding:9px 12px;font-size:14px}
+ html body .app aside.emp details.cal>summary{min-height:44px;font-size:14.5px;padding:10px 12px}
+ html body .app aside.emp details.cal .cal-pop{width:100%!important;max-width:100%}
+ html body .app aside.emp .prof{gap:6px!important}
+ html body .app aside.emp .prof .prof-out{padding:8px 14px!important;min-height:36px}
+ /* page content */
+ h1{font-size:20px;line-height:1.25}h2{font-size:16px}
+ .head{flex-direction:column;align-items:stretch;gap:8px}
+ .head>*{max-width:100%}
+ .card{padding:14px!important;border-radius:12px}
+ .card:hover,.kpi:hover{transform:none}
+ .kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .kpi{padding:12px}.kpi b{font-size:22px}
+ .grid,.r{gap:8px;align-items:stretch}
+ .grid>label,.grid>div,.grid>input,.grid>select,.grid>textarea{flex:1 1 150px;min-width:0}
+ .grid label{width:auto}
+ input,select,textarea{font-size:16px!important;max-width:100%;min-height:40px}
+ input[type=checkbox],input[type=radio]{min-height:0;width:18px;height:18px}
+ input:not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]):not([type=file]),select,textarea{width:100%;margin-left:0;margin-right:0}
+ textarea{min-height:90px}
+ button,.primary,.btnl,.pbtn,.back{min-height:40px;font-size:14px}
+ .act{flex-wrap:wrap}
+ .tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;gap:6px;padding-bottom:4px;scrollbar-width:thin}
+ .tabs a{flex:0 0 auto;white-space:nowrap}
+ th,td{padding:7px 8px;font-size:12.5px}
+ .rep-tools,.ov-tools,.loghead{flex-wrap:wrap;gap:8px}
+ .totals{overflow-wrap:anywhere}
+ .flash,.warn{font-size:13.5px}
+ .site-foot{padding-left:8px;padding-right:8px}
+ #toasts{left:10px;right:10px;top:calc(10px + env(safe-area-inset-top,0px));max-width:none}
+ #cmwrap{padding:calc(10px + env(safe-area-inset-top,0px)) 10px 0}
+ #cmwrap .cm{max-width:100%}
+ #gcb{right:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px));width:54px;height:54px}
+ #gcp{right:10px;left:10px;width:auto;bottom:calc(80px + env(safe-area-inset-bottom,0px));height:min(520px,calc(100dvh - 110px))}
+ #bgm{right:12px;bottom:calc(76px + env(safe-area-inset-bottom,0px))}
+ .dq-card,.wlc-card{max-width:calc(100vw - 24px)}
+ .ntm-i{font-size:13px}
+ /* login pages */
+ .lg{padding:12px 10px calc(48px + env(safe-area-inset-bottom,0px));min-height:100vh;min-height:100dvh;justify-content:flex-start}
+ .lg .win.admin,.lg .win.employee,.win{width:100%!important;max-width:100%!important}
+ .lcard{max-width:100%}
+ .lcard input,.lcard button{width:100%;margin-left:0;margin-right:0}
+ .win.employee .lcard{max-width:420px;margin:0 auto}
+ .center{margin:6vh auto;max-width:100%}
+}
+@media(max-width:480px){
+ body .app main{padding:12px 10px calc(14px + env(safe-area-inset-bottom,0px))!important}
+ .kpis{grid-template-columns:1fr}
+ .grid>label,.grid>div,.grid>input,.grid>select,.grid>textarea{flex:1 1 100%}
+ h1{font-size:18px}
+ .card{padding:12px!important}
+ th,td{font-size:12px;padding:6px 7px}
+ .site-foot{font-size:10px}
+}
+@media(max-height:480px) and (orientation:landscape){
+ html body .app aside.emp{max-height:none!important;position:static!important}
+ .lg{justify-content:flex-start}
+}
+@media(hover:none){
+ .card:hover,.kpi:hover,button:hover,.primary:hover,.btnl:hover,aside a:hover{transform:none}
+}
+@media print{.rsp-tw{overflow:visible}.rsp-tw>table{width:100%}}
+"""
+
+RESP_JS = r"""<script>(function(){
+ /* Update295: wrap wide tables so they scroll sideways inside the card instead of widening the page (phones / tablets) */
+ function wrapTables(root){
+  var ts=(root||document).querySelectorAll('table');
+  for(var i=0;i<ts.length;i++){
+   var t=ts[i],p=t.parentNode;
+   if(!p||t.closest('.rsp-tw')||t.closest('.no-wrap')||t.closest('[role=dialog]')||t.closest('.tmpl'))continue;
+   if(p.classList&&(p.classList.contains('rsp-tw')))continue;
+   var cs=window.getComputedStyle(p);
+   if(/(auto|scroll)/.test(cs.overflowX))continue;
+   var w=document.createElement('div');w.className='rsp-tw';
+   p.insertBefore(w,t);w.appendChild(t)
+  }
+ }
+ function init(){wrapTables(document)}
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+ /* tables added later (live refresh, filters, AJAX) */
+ if(window.MutationObserver){
+  var busy=false,mo=new MutationObserver(function(){if(busy)return;busy=true;setTimeout(function(){busy=false;wrapTables(document)},250)});
+  document.addEventListener('DOMContentLoaded',function(){mo.observe(document.body,{childList:true,subtree:true})});
+ }
+ /* mobile menu: close when a link is chosen, when tapping outside, or on Esc; keep the button state correct after resize */
+ function closeMenu(a){if(!a)return;a.classList.remove('tb-open');var b=a.querySelector('.tb-toggle');if(b)b.setAttribute('aria-expanded','false')}
+ document.addEventListener('click',function(e){
+  var a=document.querySelector('aside.emp.tb-open');if(!a)return;
+  var l=e.target.closest&&e.target.closest('a[href]');
+  if(l&&a.contains(l)&&!l.classList.contains('ng-h')&&l.getAttribute('href')&&l.getAttribute('href').charAt(0)!=='#'){closeMenu(a);return}
+  if(!a.contains(e.target))closeMenu(a)
+ });
+ document.addEventListener('keydown',function(e){if(e.key==='Escape')closeMenu(document.querySelector('aside.emp.tb-open'))});
+ window.addEventListener('resize',function(){if(window.innerWidth>800)closeMenu(document.querySelector('aside.emp.tb-open'))});
+ /* iOS: 100vh is taller than the visible area - expose the real height as --vh100 */
+ function vh(){document.documentElement.style.setProperty('--vh100',(window.innerHeight)+'px')}
+ vh();window.addEventListener('resize',vh);window.addEventListener('orientationchange',vh);
+})();</script>"""
+
+BASE = BASE.replace('<meta name="viewport" content="width=device-width,initial-scale=1">',
+                    '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#1c2340"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">', 1)
+BASE = BASE.replace('{% endif %}</head><body>', '{% endif %}<style id="resp295">' + RESP_CSS + '</style></head><body>', 1)
+BASE = BASE[:BASE.rfind('</body></html>')] + RESP_JS + '</body></html>'
 
 # ---------------------------------------------------------------- Update209: Theme & Layout (Admin controls the look of every login page and panel)
 # Colours: pri/pri2 = accent pair, s1-s3 = sidebar / top bar gradient, t1/t2/base = page background, l1-l3 = login background.
@@ -6184,7 +6246,8 @@ def login_char(g):
 @app.route("/")
 def index():
     return page('<div class="card login"><h2>Productivity Tracker</h2>'
-                '<p><a href="/employee/login">Employee login</a></p></div>')      # Update295: the Admin login is opened by typing /admin/login after the site link
+                '<p><a href="/employee/login">Employee login</a></p>'
+                '<p><a href="/admin/login">Admin login</a></p></div>')
 
 @app.route("/logout")
 def logout():

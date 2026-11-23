@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update295: MOBILE RULES. (1) The Employee panel (login + every /employee page + /entry pages) does NOT open on a phone: an employee on a mobile browser sees a short "please use a computer" page. (2) The Admin panel WORKS on phones with its own separate login at /admin/login (Admin sessions are never blocked). (3) The home page "/" no longer shows an Admin link - the Admin opens it by adding /admin/login to the site link. (4) Small phone-only CSS so Admin tables / cards scroll sideways instead of breaking the page. Set the environment variable MOBILE_EMPLOYEE_BLOCK=0 to let employees use phones again. Nothing else changed.
   * Update294: (1) The 2-day monthly LEAVE limit is removed - employees can apply for any number of leave days (the Permission hours limit is unchanged). (2) Team Logs > Employee Leave & Permission (Associate Manager / Team Lead / Senior Team Lead): an employee with MORE than 2 leave days (Pending + Approved, half day = 0.5, weekly offs / holidays excluded) in the CURRENT month gets only their own leave rows highlighted (violet); MORE than 2 permission hrs in the current month highlights only their permission rows (teal). Counted fresh on every page load, so new / approved records update it automatically; employees within the limits show normally; a legend + \"over the limit now\" list is shown.
   * Update291: (1) Audit Log for Associate Manager / Team Lead / Senior Team Lead (matched live by Designation, same test as Team Logs): new menu item \"Audit Log\" (/employee/team-audit) = the Admin's By Process Audit Log, READ-ONLY - they pick a process, see the employees who worked on it (productivity, productivity %, attendance), open an employee's Productivity / Attendance details and use the Productivity report (Print / Excel). The Admin-only parts (By Employee / Access tab, Process Audit Access, the Granted / Not granted column) are not shown to them; every route is also checked on the server (403 for everyone else). (2) Process name GROUPING in the Audit Log process list (Admin and these designations): process names that share a common prefix (split at \"_\") are grouped automatically - e.g. CA_Kings_Weekly, CA_Kings_YLB, CA_Kings_NVS -> group \"CA_Kings\" (3 Processes). Only the group name is shown first; clicking it expands the processes, each with Open audit. The same rule applies to every process (group_processes()); a process with no shared prefix stays a normal row. Admin permissions, the Admin Audit Log and the employee-side per-process Audit Log access are unchanged.
   * Update290: LOGIN SPEED + quotes. (1) The login no longer waits for Google Sheets: the Attendance-sheet read that only counted logins (not shown any more) and the live Quotes-sheet read were done INSIDE the login request - both removed from it; the Quotes sheet + the Thanglish conversion are prepared in a background thread. (2) The Employees list is read once per login (was three times). (3) The Employee page no longer reads the Quotes sheet while it is built: the quote popup is a light shell, the page opens first and the popup then asks /employee/quote-data (English shown at once, Thanglish filled in under it when ready). (4) Quotes: English from the Quotes sheet; Thanglish = online English->Tamil translation (Google Translate web endpoint, MyMemory as a second service) transliterated to Latin letters here; the result is cached and saved once into an EMPTY Thanglish cell of the sheet; if the online service fails the English quote still shows. Popup heading \"Today's Thought\". Quotes sheet is found from the already-loaded worksheet list (one API call less), reads are single-flight. Admin and Employee pages, themes and layouts unchanged.
@@ -835,6 +836,43 @@ def _no_store_private(resp):
     cannot show an Admin or Employee page."""
     if session.get("role") and request.endpoint not in ("static", "photo"):
         resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+# ---------------------------------------------------------------- Update295: Employee panel is NOT available on phones; the Admin panel works on phones
+MOBILE_EMPLOYEE_BLOCK = os.getenv("MOBILE_EMPLOYEE_BLOCK", "1") == "1"      # MOBILE_EMPLOYEE_BLOCK=0 -> employees may use phones again
+_MOBILE_UA = re.compile(r"android|iphone|ipod|ipad|mobile|windows phone|iemobile|webos|blackberry|opera mini|silk|kindle", re.I)
+_MOBILE_OPEN = ("/static", "/app-version", "/logo.png", "/char/", "/photo/", "/logout", "/agent/")      # harmless helpers - never blocked
+
+def _is_mobile():
+    """True for a phone / tablet browser (User-Agent, or the Sec-CH-UA-Mobile client hint)."""
+    try:
+        if (request.headers.get("Sec-CH-UA-Mobile", "") or "").strip() == "?1": return True
+        return bool(_MOBILE_UA.search(request.headers.get("User-Agent", "") or ""))
+    except Exception:
+        return False
+
+_MOBILE_BLOCK_HTML = ("<!doctype html><html><head><meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'><title>Use a computer</title></head>"
+    "<body style='margin:0;font-family:system-ui,Segoe UI,Roboto,sans-serif;background:#f4f6fb;color:#1c2340;"
+    "min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box'>"
+    "<div style='max-width:380px;background:#fff;border-radius:16px;padding:28px 24px;text-align:center;"
+    "box-shadow:0 12px 36px -14px rgba(28,35,64,.35)'>"
+    "<div style='font-size:42px;line-height:1'>&#128187;</div>"
+    "<h2 style='margin:14px 0 8px;font-size:20px'>Please use a computer</h2>"
+    "<p style='margin:0;color:#6b7390;font-size:14px;line-height:1.5'>The Productivity Tracker employee panel does not work on a mobile phone. "
+    "Open this link on your office laptop / desktop and sign in there.</p></div></body></html>")
+
+@app.before_request
+def _mobile_gate():
+    if not MOBILE_EMPLOYEE_BLOCK or session.get("role") == "admin" or not _is_mobile():
+        return
+    p = request.path
+    if p == "/admin" or p.startswith("/admin/"):      # the Admin login and Admin pages always open on a phone
+        return
+    if any(p.startswith(x) for x in _MOBILE_OPEN):
+        return
+    resp = Response(_MOBILE_BLOCK_HTML, status=403, mimetype="text/html")
+    resp.headers["Cache-Control"] = "no-store"
     return resp
 
 # ---------------------------------------------------------------- Google Sheets
@@ -2594,6 +2632,7 @@ tbody tr{transition:background .15s ease}
 @media print{aside,.me,.flash,.warn,form,.btnl,.no-print{display:none!important}main{padding:0;animation:none}body{background:#fff}
 .card{border:0;padding:0}table{border:1px solid #000}th,td{border-color:#000}.kpi{border:1px solid #000}}
 @media(max-width:800px){.app{flex-direction:column}aside{width:auto;flex-direction:row;flex-wrap:wrap;align-items:center}.me{order:99;margin:0 0 0 auto;border:0;padding:0}main{padding:16px}}
+@media(max-width:800px){main .card{overflow-x:auto;-webkit-overflow-scrolling:touch}main img{max-width:100%;height:auto}html{-webkit-text-size-adjust:100%}}      /* Update295 */
 .lg{position:relative;overflow:hidden;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:linear-gradient(135deg,#c9b8f6 0%,#fbd3e2 45%,#b9d2f8 100%);animation:fadeInUp .5s cubic-bezier(.22,1,.36,1)}
 .blob{position:absolute;border-radius:50%;filter:blur(2px);opacity:.55;pointer-events:none;will-change:transform;z-index:0}
 .blob.b1{width:340px;height:340px;left:-90px;top:-70px;background:radial-gradient(circle at 35% 35%,#fff9,#8b6fe8 70%);animation:blobFloat1 13s ease-in-out infinite}
@@ -6106,8 +6145,7 @@ def login_char(g):
 @app.route("/")
 def index():
     return page('<div class="card login"><h2>Productivity Tracker</h2>'
-                '<p><a href="/employee/login">Employee login</a></p>'
-                '<p><a href="/admin/login">Admin login</a></p></div>')
+                '<p><a href="/employee/login">Employee login</a></p></div>')      # Update295: the Admin login is opened by typing /admin/login after the site link
 
 @app.route("/logout")
 def logout():

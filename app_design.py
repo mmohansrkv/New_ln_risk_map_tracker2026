@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update296: MOBILE-FRIENDLY for everyone. (1) The Employee panel now WORKS on phones (the Update295 \"please use a computer\" block is OFF by default; MOBILE_EMPLOYEE_BLOCK=1 turns it back on). (2) New phone layer <style id=\"mob296\"> (touch-sized buttons, 16px inputs so iPhones do not zoom, single-column cards / forms, tables scroll sideways inside their card, heavy 3D decoration hidden). (3) The Admin keeps its SEPARATE login at /admin/login with its own credentials (ADMIN_USER / ADMIN_PASS environment variables); the home page shows only the Employee link. Nothing else changed.
   * Update295: MOBILE RULES. (1) The Employee panel (login + every /employee page + /entry pages) does NOT open on a phone: an employee on a mobile browser sees a short "please use a computer" page. (2) The Admin panel WORKS on phones with its own separate login at /admin/login (Admin sessions are never blocked). (3) The home page "/" no longer shows an Admin link - the Admin opens it by adding /admin/login to the site link. (4) Small phone-only CSS so Admin tables / cards scroll sideways instead of breaking the page. Set the environment variable MOBILE_EMPLOYEE_BLOCK=0 to let employees use phones again. Nothing else changed.
   * Update294: (1) The 2-day monthly LEAVE limit is removed - employees can apply for any number of leave days (the Permission hours limit is unchanged). (2) Team Logs > Employee Leave & Permission (Associate Manager / Team Lead / Senior Team Lead): an employee with MORE than 2 leave days (Pending + Approved, half day = 0.5, weekly offs / holidays excluded) in the CURRENT month gets only their own leave rows highlighted (violet); MORE than 2 permission hrs in the current month highlights only their permission rows (teal). Counted fresh on every page load, so new / approved records update it automatically; employees within the limits show normally; a legend + \"over the limit now\" list is shown.
   * Update291: (1) Audit Log for Associate Manager / Team Lead / Senior Team Lead (matched live by Designation, same test as Team Logs): new menu item \"Audit Log\" (/employee/team-audit) = the Admin's By Process Audit Log, READ-ONLY - they pick a process, see the employees who worked on it (productivity, productivity %, attendance), open an employee's Productivity / Attendance details and use the Productivity report (Print / Excel). The Admin-only parts (By Employee / Access tab, Process Audit Access, the Granted / Not granted column) are not shown to them; every route is also checked on the server (403 for everyone else). (2) Process name GROUPING in the Audit Log process list (Admin and these designations): process names that share a common prefix (split at \"_\") are grouped automatically - e.g. CA_Kings_Weekly, CA_Kings_YLB, CA_Kings_NVS -> group \"CA_Kings\" (3 Processes). Only the group name is shown first; clicking it expands the processes, each with Open audit. The same rule applies to every process (group_processes()); a process with no shared prefix stays a normal row. Admin permissions, the Admin Audit Log and the employee-side per-process Audit Log access are unchanged.
@@ -839,7 +840,7 @@ def _no_store_private(resp):
     return resp
 
 # ---------------------------------------------------------------- Update295: Employee panel is NOT available on phones; the Admin panel works on phones
-MOBILE_EMPLOYEE_BLOCK = os.getenv("MOBILE_EMPLOYEE_BLOCK", "1") == "1"      # MOBILE_EMPLOYEE_BLOCK=0 -> employees may use phones again
+MOBILE_EMPLOYEE_BLOCK = os.getenv("MOBILE_EMPLOYEE_BLOCK", "0") == "1"      # MOBILE_EMPLOYEE_BLOCK=0 -> employees may use phones again
 _MOBILE_UA = re.compile(r"android|iphone|ipod|ipad|mobile|windows phone|iemobile|webos|blackberry|opera mini|silk|kindle", re.I)
 _MOBILE_OPEN = ("/static", "/app-version", "/logo.png", "/char/", "/photo/", "/logout", "/agent/")      # harmless helpers - never blocked
 
@@ -2546,7 +2547,7 @@ def temp_password():
 
 # ---------------------------------------------------------------- templates
 BASE = """<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>{{title}}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#1c2340"><title>{{title}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{--ink:#1c2340;--mut:#6b7390;--pri:#4f46e5;--line:#e6e9f2}
@@ -3583,7 +3584,45 @@ html body .app.emp3d table th{background:linear-gradient(180deg,#f3f5ff,#eaeefc)
 html body .app.emp3d table td{border-bottom:1px solid #eef1fb}
 html body .app.emp3d table tbody tr:hover td{background:#f4f3ff}
 @media(prefers-reduced-motion:reduce){html body .app.emp3d .kpi{transition:none}}
-</style>{% endif %}</head><body>
+</style>{% endif %}<style id="mob296">
+@media(max-width:800px){
+html,body{max-width:100%;overflow-x:hidden}
+body{padding-bottom:env(safe-area-inset-bottom,0)}
+/* no zoom-on-focus on iOS, comfortable touch targets */
+input,select,textarea{font-size:16px!important;max-width:100%}
+button,input[type=submit],input[type=button],.primary,.btnl,.back,.pbtn,.danger{min-height:40px}
+html body .app aside.emp>a,html body .app aside.emp .ng>a.ng-h,html body .app aside.emp .kids a{min-height:42px;padding:10px 12px!important;font-size:14px!important}
+html body .app aside.emp .tb-toggle{width:42px;height:40px}
+html body .app aside.emp .prof .prof-out{min-height:36px}
+/* page content */
+html body .app main{padding:12px 10px!important;min-width:0}
+html body .app .card{padding:12px!important;max-width:100%}
+.kpis{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}
+main :is(.grid,.r){flex-direction:column;align-items:stretch}
+main :is(.grid,.r) :is(label,input,select,textarea,button){width:100%}
+main form :is(input,select,textarea):not([type=checkbox]):not([type=radio]){width:100%}
+main [style*="grid-template-columns"]{grid-template-columns:1fr!important}
+main [style*="display:flex"]{flex-wrap:wrap}
+main [style*="width:"][style*="px"]:not(img):not(svg){max-width:100%}
+/* wide tables scroll sideways inside their own box */
+main table{display:block;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap}
+main table th,main table td{padding:8px 9px}
+main pre,main code{white-space:pre-wrap;word-break:break-word}
+.tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tabs a{flex:none}
+/* pop-ups, toasts, banners stay inside the screen */
+#toasts,#cmwrap,.cmroot{max-width:100vw}
+.cmroot .cm{max-width:calc(100vw - 20px)}
+/* heavy decoration off on phones (speed + battery) */
+#fly3d,.orb{display:none!important}
+.win,.lcard{max-width:100%}
+.center{margin:6vh auto}
+}
+@media(max-width:480px){
+.kpis{grid-template-columns:1fr!important}
+h1{font-size:20px}h2{font-size:18px}h3{font-size:16px}
+}
+</style></head><body>
 {% if bare %}{{body|safe}}
 {% elif session.role %}<div class="app{{' emp3d' if session.role=='employee' else ''}}{{' sbar' if sbar else ''}}">{% if session.role=='employee' %}<script>document.documentElement.classList.add('fit188')</script><div id="fly3d" aria-hidden="true"><div class="fo" style="--s:64px;--x0:-12vw;--y0:78vh;--x1:112vw;--y1:-14vh;--z0:-380px;--z1:160px;--d:46s;--dl:0s;--c1:#6366f1;--c2:#a78bfa;--t:24s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:44px;--x0:110vw;--y0:64vh;--x1:-14vw;--y1:20vh;--z0:-120px;--z1:220px;--d:38s;--dl:-9s;--c1:#ec4899;--c2:#f9a8d4;--t:21s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:86px;--x0:-10vw;--y0:22vh;--x1:112vw;--y1:88vh;--z0:-420px;--z1:-60px;--d:58s;--dl:-21s;--c1:#06b6d4;--c2:#67e8f9;--t:28s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:52px;--x0:30vw;--y0:112vh;--x1:70vw;--y1:-16vh;--z0:-200px;--z1:240px;--d:34s;--dl:-14s;--c1:#f59e0b;--c2:#fcd34d;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:72px;--x0:112vw;--y0:92vh;--x1:-12vw;--y1:40vh;--z0:-340px;--z1:120px;--d:52s;--dl:-30s;--c1:#8b5cf6;--c2:#c4b5fd;--t:26s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:38px;--x0:-10vw;--y0:48vh;--x1:110vw;--y1:6vh;--z0:-60px;--z1:260px;--d:30s;--dl:-4s;--c1:#10b981;--c2:#6ee7b7;--t:20s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:58px;--x0:60vw;--y0:-14vh;--x1:16vw;--y1:114vh;--z0:-260px;--z1:180px;--d:44s;--dl:-26s;--c1:#3b82f6;--c2:#93c5fd;--t:23s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:48px;--x0:88vw;--y0:112vh;--x1:40vw;--y1:-14vh;--z0:-160px;--z1:200px;--d:36s;--dl:-17s;--c1:#f43f5e;--c2:#fda4af;--t:22s"><div class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="fo" style="--s:90px;--x0:-14vw;--y0:60vh;--x1:112vw;--y1:20vh;--z0:-300px;--z1:140px;--d:50s;--dl:-6s;--c1:#6366f1;--c2:#6366f1;--t:29s"><div class="fr"></div></div><div class="fo" style="--s:64px;--x0:112vw;--y0:18vh;--x1:-14vw;--y1:80vh;--z0:-180px;--z1:200px;--d:42s;--dl:-19s;--c1:#ec4899;--c2:#ec4899;--t:24s"><div class="fr"></div></div><div class="fo" style="--s:110px;--x0:20vw;--y0:114vh;--x1:84vw;--y1:-18vh;--z0:-400px;--z1:60px;--d:60s;--dl:-33s;--c1:#06b6d4;--c2:#06b6d4;--t:32s"><div class="fr"></div></div><div class="fo" style="--s:56px;--x0:80vw;--y0:-14vh;--x1:6vw;--y1:100vh;--z0:-100px;--z1:240px;--d:40s;--dl:-12s;--c1:#f59e0b;--c2:#f59e0b;--t:23s"><div class="fr"></div></div><div class="fo" style="--s:54px;--x0:-12vw;--y0:34vh;--x1:112vw;--y1:70vh;--z0:-240px;--z1:180px;--d:48s;--dl:-2s;--c1:#6366f1;--c2:#22d3ee;--t:23s"><div class="ft"></div></div><div class="fo" style="--s:40px;--x0:112vw;--y0:50vh;--x1:-12vw;--y1:8vh;--z0:-80px;--z1:240px;--d:34s;--dl:-23s;--c1:#ec4899;--c2:#f59e0b;--t:20s"><div class="ft"></div></div><div class="fo" style="--s:70px;--x0:46vw;--y0:-14vh;--x1:92vw;--y1:114vh;--z0:-320px;--z1:100px;--d:54s;--dl:-36s;--c1:#8b5cf6;--c2:#06b6d4;--t:25s"><div class="ft"></div></div><div class="fo" style="--s:46px;--x0:-12vw;--y0:104vh;--x1:114vw;--y1:30vh;--z0:-140px;--z1:220px;--d:40s;--dl:-28s;--c1:#10b981;--c2:#3b82f6;--t:21s"><div class="ft"></div></div></div>{% endif %}<aside class="emp{{' tlside' if hol_only else ''}}">
 <button type="button" class="tb-toggle" aria-label="Menu" aria-expanded="false" onclick="var a=this.closest('aside');var o=a.classList.toggle('tb-open');this.setAttribute('aria-expanded',o?'true':'false')">&#9776;</button>

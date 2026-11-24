@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update299: NEW Admin > Employee Info > Login Themes (/admin/login-themes): 5 new modern 3D login designs (Aurora Glass, Neon Grid, Deep Orbit, Light Prism, Ember Depth) for the Admin and Employee login pages, with live Desktop / Mobile previews and Use for Admin / Employee / Both. Default stays the existing design until chosen. Login logic unchanged.
   * Update298: Mobile Access tightened - the mobile LINK is closed without the Admin's approval. A signed-out visitor on a phone / tablet can no longer open the Employee login, home page or any Employee page: they are sent to /mobile-access, where the employee enters Employee ID / e-mail; only if the Admin has enabled Mobile access for that employee does the device receive a signed 'mgate' cookie and the login page opens (unknown, locked and not-approved give the same message). The cookie is re-checked against the Admin's list on every request, so Disable Access closes the link again at once; the per-employee check at login and the sign-out of a signed-in employee (Update297) stay. Admin pages are never gated.
   * Update297: NEW Admin > Mobile Access (/admin/mobile_access, also under Employee Info > Mobile Access): every employee is listed with Enable Access / Disable Access (one employee at a time, search + Enabled / Disabled filter, saved in the new sheet 'Mobile Access'). The application opens on every mobile device, but an EMPLOYEE can sign in and use it on a phone / tablet only while the Admin has enabled that employee (default = disabled): the login shows 'Mobile access is not enabled for your account. Please contact your Admin.' and an employee already signed in on a mobile device is signed out on the next click when access is off. Computers and the Admin are not affected. Mobile = phone / tablet User-Agent, the Sec-CH-UA-Mobile hint or the touch-screen cookie 'mdev'.
   * Update296: NEW "Employee Report" page (/employee/emp-report, detail /employee/emp-report/<id>) for Manager, Team Lead and Senior Team Lead (live Designation, active login; read-only; menu item added). Shows Employee ID, Name, Attendance, Productivity, Leave and Permission per employee (month filter, search, Print) and, per employee, every date and record: day-by-day attendance with login / logout, date-wise and process-wise productivity, all leave rows and all permission rows with status, applied / reviewed times. Access rule (checked on the list AND on every detail URL, 403 otherwise): Managers see Team Leads, Senior Team Leads and the other employees; Team Leads / Senior Team Leads see the same list but NEVER a Manager-level employee (Manager / Associate Manager / Senior Manager); Manager-level rows are not shown to anyone here. Attendance / Productivity use the same report() figures as the Admin Overview; Team Leads / Senior Team Leads (View Only, no Productivity entry) get attendance counted from their logins. No existing page, route or calculation changed.
@@ -5290,7 +5291,8 @@ def page(body, title="Productivity Tracker", **ctx):
         kids = [("/admin/employee-info", "Employees", p.startswith("/admin/employee-info") and view != "notifications"),
                 ("/admin/employee-info?view=notifications", "Notifications", p == "/admin/employee-info" and view == "notifications"),
                 ("/admin/mahizhchi", "Mahizhchi", p.startswith("/admin/mahizhchi")),
-                ("/admin/mobile_access", "Mobile Access", p.startswith("/admin/mobile_access") or p.startswith("/admin/mobile-access"))]      # Update297      # Update211: Multiplayer Game / Game Log is link-only (/admin/game)
+                ("/admin/mobile_access", "Mobile Access", p.startswith("/admin/mobile_access") or p.startswith("/admin/mobile-access")),
+                ("/admin/login-themes", "Login Themes", p.startswith("/admin/login-themes"))]      # Update297      # Update211: Multiplayer Game / Game Log is link-only (/admin/game)
         nav = [(h, l, on or any(k[2] for k in kids), kids) if h == "/admin/employee-info" else (h, l, on, [])
                for h, l, on, _k in nav]
         # Update103: Productivity Log / Leave & Permission Log / Audit Log / Email Controls are grouped under one expandable "Log" menu.
@@ -6052,6 +6054,132 @@ LOGIN_MAIL_FX = r"""<style>
 """
 LOGIN = LOGIN_NEW_HEAD + _LOGIN_FORM + LOGIN_NEW_MID + _LOGIN_WT + _LOGIN_MAIN + LOGIN_NEW_JS + LOGIN_CHR_JS + LOGIN_CHR_PICK + LOGIN_ANIM_JS + LOGIN_MAIL_FX
 
+# ---------------------------------------------------------------- Update299: NEW login themes (Admin + Employee) with live preview / selection
+# Admin > Employee Info > Login Themes (/admin/login-themes): 5 new 3D login designs, live previews (Admin | Employee, Desktop | Mobile),
+# then "Use for Admin / Employee / Both". Settings keys ui_login_theme_admin / ui_login_theme_emp ("classic" = the existing login design).
+# The form, password toggle, screen-lock prompt, routes and every login check are the SAME code as before - only the look changed.
+LOGINX_THEMES = [("aurora", "Aurora Glass", "Frosted glass card over a drifting aurora"), ("neon", "Neon Grid", "Cyber grid floor with a glowing wireframe cube"),
+                 ("orbit", "Deep Orbit", "Orbiting 3D rings around a glossy planet"), ("prism", "Light Prism", "Bright, clean and airy with soft 3D prisms"),
+                 ("ember", "Ember Depth", "Warm sunset gradient with floating glass tiles")]
+LOGINX_IDS = [t[0] for t in LOGINX_THEMES]
+LOGINX_CSS = r"""<style id="lx299">
+.lg{display:block!important;padding:0!important;min-height:0!important;background:none!important;animation:none!important;perspective:none!important;overflow:visible!important}.lg>.blob{display:none!important}
+.lg .site-foot{position:fixed;left:0;right:0;bottom:8px;z-index:6;color:#8a94c0;opacity:.8;pointer-events:none;text-shadow:none}
+.lg .flash{position:fixed!important;top:14px;left:50%;transform:translateX(-50%);z-index:60;width:min(440px,92vw);margin:0;background:#fff1f2!important;color:#9f1239;border:1px solid #fecdd3!important;border-radius:14px;padding:12px 16px;font:500 13.5px/1.4 Poppins,system-ui,sans-serif;text-align:center;box-shadow:0 18px 40px -14px #0008}
+.lx{--bg:#070b1f;--o1:#6d5dfc;--o2:#22d3ee;--o3:#f472b6;--ink:#eef1ff;--mut:#9aa6d6;--card:rgba(18,24,58,.55);--cb:rgba(255,255,255,.14);--acc:#7c6cff;--acc2:#22d3ee;--in:rgba(255,255,255,.07);--sh:0 40px 80px -30px #000c;--mx:0;--my:0;position:relative;min-height:100vh;overflow:hidden;background:var(--bg);color:var(--ink);font-family:Poppins,system-ui,-apple-system,"Segoe UI",sans-serif;isolation:isolate}
+.lx[data-th=neon]{--bg:#05060d;--o1:#00e5ff;--o2:#ff2bd6;--o3:#7c3aed;--acc:#00e5ff;--acc2:#ff2bd6;--card:rgba(8,10,24,.72);--cb:rgba(0,229,255,.35)}
+.lx[data-th=orbit]{--bg:#04101c;--o1:#14b8a6;--o2:#3b82f6;--o3:#a78bfa;--acc:#2dd4bf;--acc2:#60a5fa;--card:rgba(6,24,40,.6)}
+.lx[data-th=prism]{--bg:#eef3ff;--o1:#93c5fd;--o2:#c4b5fd;--o3:#fbcfe8;--ink:#12204a;--mut:#5a6894;--card:rgba(255,255,255,.74);--cb:rgba(255,255,255,.95);--acc:#3b6cf6;--acc2:#8b5cf6;--in:#fff;--sh:0 40px 70px -30px #3b5bdb77}
+.lx[data-th=ember]{--bg:#1a0b12;--o1:#fb7185;--o2:#f59e0b;--o3:#c026d3;--acc:#fb923c;--acc2:#f43f5e;--card:rgba(40,14,24,.6)}
+.lx,.lx *{box-sizing:border-box}
+.lx-bg,.lx-stage{position:absolute;inset:0;pointer-events:none;z-index:0}
+.lx .o{position:absolute;border-radius:50%;filter:blur(70px);opacity:.5;animation:lxo 16s ease-in-out infinite alternate}
+.lx[data-th=prism] .o{opacity:.85}
+.lx .o1{width:46vmax;height:46vmax;left:-12vmax;top:-14vmax;background:var(--o1)}.lx .o2{width:40vmax;height:40vmax;right:-10vmax;top:18%;background:var(--o2);animation-delay:-5s}.lx .o3{width:36vmax;height:36vmax;left:25%;bottom:-18vmax;background:var(--o3);animation-delay:-9s}
+.lx .grid{display:none;position:absolute;left:-50%;right:-50%;bottom:-8%;height:60%;transform:perspective(520px) rotateX(62deg);background-image:linear-gradient(var(--acc) 1px,transparent 1px),linear-gradient(90deg,var(--acc) 1px,transparent 1px);background-size:56px 56px;opacity:.32;animation:lxg 3s linear infinite;-webkit-mask-image:linear-gradient(transparent,#000 60%);mask-image:linear-gradient(transparent,#000 60%)}
+.lx[data-th=neon] .grid{display:block}
+.lx-stage{perspective:900px;transform:translate3d(calc(var(--mx)*-16px),calc(var(--my)*-10px),0);transition:transform .2s ease-out}
+.lx-stage>*{position:absolute;animation:lxf 7s ease-in-out infinite alternate}
+.cube{width:var(--s);height:var(--s);transform-style:preserve-3d;animation:lxr 20s linear infinite,lxf 7s ease-in-out infinite alternate!important}
+.cube i{position:absolute;inset:0;border:1.5px solid var(--acc);background:color-mix(in srgb,var(--acc) 14%,transparent);box-shadow:inset 0 0 26px color-mix(in srgb,var(--acc) 40%,transparent)}
+.cube i:nth-child(1){transform:translateZ(calc(var(--s)/2))}.cube i:nth-child(2){transform:rotateY(180deg) translateZ(calc(var(--s)/2))}.cube i:nth-child(3){transform:rotateY(90deg) translateZ(calc(var(--s)/2))}.cube i:nth-child(4){transform:rotateY(-90deg) translateZ(calc(var(--s)/2))}.cube i:nth-child(5){transform:rotateX(90deg) translateZ(calc(var(--s)/2))}.cube i:nth-child(6){transform:rotateX(-90deg) translateZ(calc(var(--s)/2))}
+.ring{width:var(--s);height:var(--s);border-radius:50%;border:3px solid var(--acc2);box-shadow:0 0 28px color-mix(in srgb,var(--acc2) 55%,transparent),inset 0 0 22px color-mix(in srgb,var(--acc2) 35%,transparent);animation:lxs 12s linear infinite!important}
+.sph{width:var(--s);height:var(--s);border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff 0,var(--acc2) 30%,var(--acc) 70%,#0006 100%);box-shadow:0 18px 40px -10px color-mix(in srgb,var(--acc) 70%,transparent)}
+.tile{width:var(--s);height:calc(var(--s)*.62);border-radius:14px;background:linear-gradient(135deg,color-mix(in srgb,var(--acc) 38%,transparent),color-mix(in srgb,var(--acc2) 18%,transparent));border:1px solid var(--cb);backdrop-filter:blur(6px);animation:lxt 9s ease-in-out infinite alternate!important}
+.lx[data-th=orbit] .s1{--s:120px!important;left:6%!important;top:18%!important}.lx[data-th=orbit] .r1{--s:230px!important;left:calc(6% - 55px)!important;top:calc(18% - 55px)!important}
+.lx-wrap{position:relative;z-index:2;min-height:100vh;max-width:1180px;margin:0 auto;padding:clamp(20px,4vw,56px);display:grid;grid-template-columns:1.1fr minmax(320px,430px);gap:clamp(24px,6vw,90px);align-items:center}
+.hero h2{font-size:clamp(34px,5.2vw,60px);line-height:1.05;margin:14px 0 14px;font-weight:700;letter-spacing:-.02em;background:linear-gradient(120deg,var(--ink) 20%,var(--acc) 60%,var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p{color:var(--mut);font-size:clamp(14px,1.5vw,17px);max-width:460px;margin:0 0 22px;line-height:1.6}
+.hero .tag{display:inline-block;padding:6px 14px;border-radius:99px;border:1px solid var(--cb);background:var(--in);color:var(--mut);font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase}
+.lx-feat{display:flex;flex-wrap:wrap;gap:10px}.lx-feat span{padding:8px 14px;border-radius:12px;background:var(--card);border:1px solid var(--cb);font-size:13px;font-weight:500;backdrop-filter:blur(8px)}
+.lx-card{position:relative;padding:34px 30px 28px;border-radius:26px;background:var(--card);border:1px solid var(--cb);backdrop-filter:blur(22px) saturate(140%);-webkit-backdrop-filter:blur(22px) saturate(140%);box-shadow:var(--sh);transform:perspective(1100px) rotateY(calc(var(--mx)*7deg)) rotateX(calc(var(--my)*-6deg));transition:transform .18s ease-out;animation:lxin .8s cubic-bezier(.22,1,.36,1) both}
+.lx-card::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1.5px;background:linear-gradient(135deg,var(--acc),transparent 42%,var(--acc2));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:.75;pointer-events:none}
+.lx-badge{width:58px;height:58px;border-radius:18px;display:grid;place-items:center;color:#fff;margin-bottom:16px;background:linear-gradient(135deg,var(--acc),var(--acc2));box-shadow:0 6px 0 color-mix(in srgb,var(--acc) 50%,#000),0 18px 30px -10px var(--acc);transform:translateZ(30px)}
+.lx-badge svg{width:28px;height:28px}.lx-card h1{margin:0 0 4px;font-size:26px;font-weight:700;letter-spacing:-.01em}.lx-card .sub{margin:0 0 22px;color:var(--mut);font-size:14px}
+.lx .field{position:relative;margin:0 0 14px}
+.lx .field input{width:100%;padding:14px 16px;border-radius:14px;border:1px solid var(--cb);background:var(--in);color:var(--ink);font:500 16px Poppins,system-ui,sans-serif;outline:0;transition:border-color .2s,box-shadow .2s}
+.lx .field input::placeholder{color:var(--mut);font-weight:400}.lx .field input:focus{border-color:var(--acc);box-shadow:0 0 0 4px color-mix(in srgb,var(--acc) 25%,transparent)}
+.lx .field.pw input{padding-right:92px}
+.lx .pw-toggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;align-items:center;gap:5px;border:0;background:transparent;color:var(--mut);font:600 12px Poppins,system-ui,sans-serif;padding:8px;cursor:pointer;border-radius:10px}.lx .pw-toggle:hover{color:var(--ink)}
+.lx .pw-toggle svg{width:18px;height:18px}.lx .pw-toggle .eye-off,.lx .pw-toggle[aria-pressed=true] .eye{display:none}.lx .pw-toggle[aria-pressed=true] .eye-off{display:block}
+.lx form>button:not(.pw-toggle){width:100%;margin-top:6px;padding:15px;border:0;border-radius:14px;color:#fff;font:600 16px Poppins,system-ui,sans-serif;cursor:pointer;background:linear-gradient(135deg,var(--acc),var(--acc2));box-shadow:0 5px 0 color-mix(in srgb,var(--acc) 50%,#000),0 16px 26px -10px var(--acc);transition:transform .15s,box-shadow .15s}
+.lx form>button:not(.pw-toggle):hover{transform:translateY(-2px)}.lx form>button:not(.pw-toggle):active{transform:translateY(4px);box-shadow:0 1px 0 color-mix(in srgb,var(--acc) 50%,#000)}.lx form>button:disabled{opacity:.65;cursor:wait}
+.lx .fgt{display:block;margin-top:16px;text-align:center;color:var(--mut);font-size:13px}
+@keyframes lxo{to{transform:translate3d(6vmax,4vmax,0) scale(1.12)}}@keyframes lxg{to{background-position:0 56px}}@keyframes lxf{to{translate:0 -18px}}
+@keyframes lxr{from{transform:rotateX(-20deg) rotateY(0)}to{transform:rotateX(340deg) rotateY(360deg)}}@keyframes lxs{from{transform:rotateX(70deg) rotateZ(0)}to{transform:rotateX(70deg) rotateZ(360deg)}}
+@keyframes lxt{from{transform:rotateY(-28deg) rotateX(8deg)}to{transform:rotateY(28deg) rotateX(-8deg)}}@keyframes lxin{from{opacity:0;transform:perspective(1100px) rotateX(14deg) translateY(30px)}}
+@media(max-width:860px){.lx-wrap{grid-template-columns:1fr;gap:18px;align-content:center;padding:22px 16px 60px}.hero{text-align:center}.hero p,.lx-feat{display:none}.hero h2{font-size:32px;margin:10px 0 0}.lx-card{padding:26px 20px 22px;transform:none}.lx .hm{display:none}.lx .o{filter:blur(50px)}.lx-stage{opacity:.45}.lx .tile,.lx[data-th=orbit] .s1,.lx[data-th=orbit] .r1{display:none}.lx .cube{--s:60px!important}.lx-stage{transform:none}}
+@media(prefers-reduced-motion:reduce){.lx *{animation:none!important;transition:none!important}}
+</style>"""
+LOGINX_HTML = r"""<div class="lx" data-th="@TH@" data-role="{{role}}"><div class="lx-bg" aria-hidden="true"><i class="o o1"></i><i class="o o2"></i><i class="o o3"></i><div class="grid"></div></div>
+<div class="lx-stage" aria-hidden="true"><div class="cube" style="--s:86px;left:8%;top:16%"><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="cube hm" style="--s:54px;right:12%;bottom:14%;animation-delay:-4s"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+<div class="ring r1" style="--s:150px;right:6%;top:10%"></div><div class="ring hm r2" style="--s:110px;left:14%;bottom:9%"></div><div class="sph s1" style="--s:38px;left:32%;top:9%"></div><div class="sph hm s2" style="--s:54px;right:30%;bottom:8%"></div>
+<div class="tile" style="--s:120px;left:3%;bottom:30%"></div><div class="tile hm" style="--s:150px;right:3%;top:42%"></div></div>
+<main class="lx-wrap"><section class="hero"><span class="tag">{{ 'Admin Console' if role=='admin' else 'Employee Portal' }}</span><h2>{{ 'Manage everything,<br>beautifully.'|safe if role=='admin' else 'Your day,<br>perfectly tracked.'|safe }}</h2>
+<p>{{ 'Monitor attendance, productivity and team performance in one secure place.' if role=='admin' else 'Log your daily work, leave and productivity in one simple place.' }}</p><div class="lx-feat"><span>Secure sign-in</span><span>Live dashboards</span><span>Works on any device</span></div></section>
+<section class="lx-card"><div class="lx-badge">{% if role=='admin' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></svg>{% else %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>{% endif %}</div>
+<h1>Welcome back</h1><p class="sub">{{ 'Sign in to the Admin Panel' if role=='admin' else 'Sign in to your Employee Panel' }}</p>
+"""
+LOGINX_JS = r"""</section></main></div><script>(function(){var r=document.querySelector('.lx');if(!r||!matchMedia('(hover:hover) and (pointer:fine)').matches||matchMedia('(prefers-reduced-motion:reduce)').matches)return;var raf=0,x=0,y=0;addEventListener('mousemove',function(e){x=e.clientX/innerWidth-.5;y=e.clientY/innerHeight-.5;if(!raf)raf=requestAnimationFrame(function(){raf=0;r.style.setProperty('--mx',(x*2).toFixed(3));r.style.setProperty('--my',(y*2).toFixed(3))})},{passive:true})})();</script>"""
+LOGINX_PV = r"""<script>document.addEventListener('submit',function(e){e.preventDefault();e.stopImmediatePropagation()},true)</script>"""
+LOGINX = "{% raw %}" + LOGINX_CSS + "{% endraw %}" + LOGINX_HTML + _LOGIN_FORM + LOGINX_JS + _LOGIN_MAIN + "@TAIL@"
+
+def login_tpl(role, th=None, pv=False):
+    """Update299: the login template for this role - the chosen new theme, else the existing LOGIN design."""
+    if th is None:
+        try: th = _setting("ui_login_theme_" + ("admin" if role == "admin" else "emp")) or "classic"
+        except Exception as ex: print("login theme read error:", repr(ex)); th = "classic"
+    if th not in LOGINX_IDS: return LOGIN
+    return LOGINX.replace("@TH@", th).replace("@TAIL@", LOGINX_PV if pv else _LOGIN_WT)
+
+def _lx_cur(k):
+    try: v = _setting("ui_login_theme_" + k) or "classic"
+    except Exception: v = "classic"
+    return v if v in LOGINX_IDS else "classic"
+
+@app.route("/admin/login-themes/preview/<tid>")
+@need("admin")
+def admin_login_theme_preview(tid):
+    if tid not in LOGINX_IDS: abort(404)
+    role = "employee" if request.args.get("role") == "employee" else "admin"
+    return page(login_tpl(role, tid, pv=True), title="Preview", ph=("Employee ID or Email" if role == "employee" else "Admin username"), role=role, u="", bare=True)
+
+LOGINX_PAGE = r"""<style>.lxp .tb{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:14px 0 20px}.lxp .sg{display:inline-flex;border:1px solid #d6d9ff;border-radius:12px;overflow:hidden;background:#fff}.lxp .sg button{border:0;background:none;padding:9px 16px;font:600 13px system-ui;cursor:pointer;color:#4b5280}.lxp .sg button.on{background:#4f46e5;color:#fff}
+.lxp .gr{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:18px}.lxp .cd{background:#fff;border:1px solid #e6e9f2;border-radius:18px;padding:12px;box-shadow:0 14px 30px -18px #1c234055}.lxp .pvb{position:relative;overflow:hidden;border-radius:12px;background:#0b1020;margin:0 auto}.lxp .pvb iframe{border:0;position:absolute;left:0;top:0;transform-origin:0 0}
+.lxp .cd b{display:block;margin:10px 4px 2px;font-size:15px}.lxp .cd small{display:block;margin:0 4px 10px;color:#6b7390}.lxp .ac{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.lxp .ac form{display:contents}.lxp .ac button,.lxp .ac a{border:1px solid #c7cbff;background:#eef0ff;color:#3730a3;border-radius:9px;padding:7px 11px;font:600 12px system-ui;cursor:pointer;text-decoration:none}.lxp .ac button:hover,.lxp .ac a:hover{background:#4f46e5;color:#fff}.lxp .ac .cur{background:#dcfce7;border-color:#86efac;color:#166534;border-radius:9px;padding:7px 11px;font:700 12px system-ui}</style>
+<div class="lxp"><div class="head"><div><h1>Login Themes</h1><p class="mut">Review each design live, switch between the <b>Admin</b> and <b>Employee</b> login pages and between <b>Desktop</b> and <b>Mobile</b>, then choose where to use it. Nothing changes until you click a button.</p></div></div>
+<div class="tb"><div class="sg" id="rs"><button class="on" data-v="admin">Admin login</button><button data-v="employee">Employee login</button></div><div class="sg" id="ds"><button class="on" data-v="desktop">Desktop</button><button data-v="mobile">Mobile</button></div>
+<form method="post" action="/admin/login-themes/apply" style="margin-left:auto"><input type="hidden" name="theme" value="classic"><button class="btnl" name="target" value="both" title="Go back to the original login design">Reset both to original design</button></form></div><div class="gr" id="gr"></div></div>
+<script>(function(){var T=@DATA@,C=@CUR@,role='admin',dev='desktop',gr=document.getElementById('gr');
+function tag(t,k,l){return C[k]===t?'<span class="cur">'+l+' &#10003;</span>':''}
+function build(){gr.innerHTML=T.map(function(t){return '<div class="cd"><div class="pvb" data-id="'+t[0]+'"><iframe loading="lazy" title="'+t[1]+'" src="/admin/login-themes/preview/'+t[0]+'?role='+role+'"></iframe></div><b>'+t[1]+'</b><small>'+t[2]+'</small><div class="ac"><a target="_blank" href="/admin/login-themes/preview/'+t[0]+'?role='+role+'">Full size</a><form method="post" action="/admin/login-themes/apply"><input type="hidden" name="theme" value="'+t[0]+'"><button name="target" value="admin">Use for Admin</button><button name="target" value="employee">Use for Employee</button><button name="target" value="both">Use for Both</button></form>'+tag(t[0],'a','Admin')+tag(t[0],'e','Employee')+'</div></div>'}).join('');fit()}
+function fit(){document.querySelectorAll('.pvb').forEach(function(b){var m=dev==='mobile',fw=m?390:1280,fh=m?780:800,w=b.parentNode.clientWidth-24,s=m?Math.min(.5,w/fw):w/fw,f=b.firstChild;b.style.width=fw*s+'px';b.style.height=fh*s+'px';f.style.width=fw+'px';f.style.height=fh+'px';f.style.transform='scale('+s+')'})}
+function sw(id,fn){document.getElementById(id).addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;this.querySelectorAll('button').forEach(function(x){x.classList.toggle('on',x===b)});fn(b.dataset.v)})}
+sw('rs',function(v){role=v;build()});sw('ds',function(v){dev=v;fit()});addEventListener('resize',fit);build()})();</script>"""
+
+@app.route("/admin/login-themes")
+@need("admin")
+def admin_login_themes():
+    import json as _j
+    body = LOGINX_PAGE.replace("@DATA@", _j.dumps([list(t) for t in LOGINX_THEMES])).replace("@CUR@", _j.dumps({"a": _lx_cur("admin"), "e": _lx_cur("emp")}))
+    return page(body, title="Login Themes")
+
+@app.route("/admin/login-themes/apply", methods=["POST"])
+@need("admin")
+def admin_login_themes_apply():
+    t, tg = request.form.get("theme", ""), request.form.get("target", "")
+    if (t not in LOGINX_IDS and t != "classic") or tg not in ("admin", "employee", "both"):
+        flash("Please pick a theme.", "error"); return redirect("/admin/login-themes")
+    try:
+        if tg in ("admin", "both"): _set_setting("ui_login_theme_admin", t)
+        if tg in ("employee", "both"): _set_setting("ui_login_theme_emp", t)
+    except Exception as ex:
+        print("login theme save error:", repr(ex)); flash("Could not save the login theme. Please try again.", "error"); return redirect("/admin/login-themes")
+    nm = dict((x[0], x[1]) for x in LOGINX_THEMES).get(t, "the original design")
+    flash(f"{nm} is now used for the {'Admin and Employee' if tg == 'both' else tg.capitalize()} login page{'s' if tg == 'both' else ''}.")
+    return redirect("/admin/login-themes")
+
+
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}{% if h=='Target count / hour' %} (count in 1 hr, e.g. 1000){% endif %}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}
 {% if kind=='employees' %}<label title="Productivity entries are required only from this date">Joining date<input type="date" name="joining" value="{{today}}" required></label>{% endif %}<button class="primary">Add</button></form>
@@ -6281,7 +6409,7 @@ def admin_login():
             _bg(prefetch, "Employees", "Productivity log", "Processes", "Leave", "Permissions", "Settings", "Holidays")   # Update114: dashboard data loads while the welcome animation plays
             return redirect("/admin/summary")             # Update202: straight to the Admin Panel (no welcome page)
         flash("Wrong username or password.")
-    return page(LOGIN, title="Admin login", ph="Admin username", role="admin", u=(request.form.get("u", "").strip()[:120] if request.method == "POST" else ""),
+    return page(login_tpl("admin"), title="Admin login", ph="Admin username", role="admin", u=(request.form.get("u", "").strip()[:120] if request.method == "POST" else ""),
                 admin_avatar=render_fast(ADMIN3D))
 
 @app.route("/admin")
@@ -7408,17 +7536,17 @@ def employee_login():
         _hit0 = next((x for x in _emps_ if u in (str(x["Employee ID"]).lower(), str(x["Email"]).lower())), None)      # Update271
         if _hit0 is not None and emp_locked(_hit0):      # Locked or Resigned / NCNS: never signs in, whatever the password
             flash("Your account is locked. Please contact your Manager, Team Lead, or Admin.", "error")
-            return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee", lxg="", u=u_typed,
+            return page(login_tpl("employee"), title="Employee login", ph="Employee ID or Email", role="employee", lxg="", u=u_typed,
                         admin_avatar=render_fast(AVATAR3D, gender="male", initials="E"))
         for e in _emps_:
             if u in (str(e["Employee ID"]).lower(), str(e["Email"]).lower()) and eq(request.form["p"], e["Password"]):
                 if emp_locked(e):                                   # Update96: locked accounts cannot log in
                     flash("Your account is locked. Please contact your Manager, Team Lead, or Admin.", "error")
-                    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee", lxg="", u=u_typed,
+                    return page(login_tpl("employee"), title="Employee login", ph="Employee ID or Email", role="employee", lxg="", u=u_typed,
                 admin_avatar=render_fast(AVATAR3D, gender="male", initials="E"))
                 if is_mobile_request() and not mobile_ok(e["Employee ID"]):      # Update297: mobile device without the Admin's approval - the app opens, but this employee cannot sign in here
                     flash(MOBILE_BLOCK_MSG, "error")
-                    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee", lxg="", u=u_typed,
+                    return page(login_tpl("employee"), title="Employee login", ph="Employee ID or Email", role="employee", lxg="", u=u_typed,
                                 admin_avatar=render_fast(AVATAR3D, gender="male", initials="E"))
                 track_logout(auto=True, reason="New login")      # closes a previous session in this browser, if any
                 session.clear()
@@ -7438,7 +7566,7 @@ def employee_login():
         _hit = next((x for x in _emps_ if u in (str(x["Employee ID"]).lower(), str(x["Email"]).lower())), None)      # Update270
         if _hit is None: flash("Username not found or account locked. Please contact your Manager, Team Lead, or Admin.", "error")      # unknown / invalid username, or locked account (whatever the password)
         else: flash("Wrong username or password. Please try again.", "error")
-    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee", lxg="", u=(u_typed if request.method == "POST" else ""),
+    return page(login_tpl("employee"), title="Employee login", ph="Employee ID or Email", role="employee", lxg="", u=(u_typed if request.method == "POST" else ""),
                 admin_avatar=render_fast(AVATAR3D, gender="male", initials="E"))
 
 def form_page(sub, action, heading):

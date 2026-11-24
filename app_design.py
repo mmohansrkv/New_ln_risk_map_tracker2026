@@ -1,4 +1,6 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update297: NEW Admin > Mobile Access (/admin/mobile_access, also under Employee Info > Mobile Access): every employee is listed with Enable Access / Disable Access (one employee at a time, search + Enabled / Disabled filter, saved in the new sheet 'Mobile Access'). The application opens on every mobile device, but an EMPLOYEE can sign in and use it on a phone / tablet only while the Admin has enabled that employee (default = disabled): the login shows 'Mobile access is not enabled for your account. Please contact your Admin.' and an employee already signed in on a mobile device is signed out on the next click when access is off. Computers and the Admin are not affected. Mobile = phone / tablet User-Agent, the Sec-CH-UA-Mobile hint or the touch-screen cookie 'mdev'.
+  * Update296: NEW "Employee Report" page (/employee/emp-report, detail /employee/emp-report/<id>) for Manager, Team Lead and Senior Team Lead (live Designation, active login; read-only; menu item added). Shows Employee ID, Name, Attendance, Productivity, Leave and Permission per employee (month filter, search, Print) and, per employee, every date and record: day-by-day attendance with login / logout, date-wise and process-wise productivity, all leave rows and all permission rows with status, applied / reviewed times. Access rule (checked on the list AND on every detail URL, 403 otherwise): Managers see Team Leads, Senior Team Leads and the other employees; Team Leads / Senior Team Leads see the same list but NEVER a Manager-level employee (Manager / Associate Manager / Senior Manager); Manager-level rows are not shown to anyone here. Attendance / Productivity use the same report() figures as the Admin Overview; Team Leads / Senior Team Leads (View Only, no Productivity entry) get attendance counted from their logins. No existing page, route or calculation changed.
   * Update295: RESPONSIVE layout for phones / tablets / desktop on EVERY Admin, Employee and login page. One stylesheet (<style id="resp295">, appended last in <head>) + one small script: viewport-fit=cover and safe-area padding, no sideways page scroll, wide tables scroll inside their card, touch-size buttons / inputs (16px fields so iOS does not zoom), stacked headings / forms / KPI cards, scrollable tabs, full-width mobile menu (closes after choosing a link, tapping outside or Esc), the fixed-height 'fit to screen' mode is disabled on phones so pages scroll normally, chat / toast / popup boxes fit the screen, login pages stack and fit small screens. Layout only - no route, sheet, e-mail or calculation changed.
   * Update294: (1) The 2-day monthly LEAVE limit is removed - employees can apply for any number of leave days (the Permission hours limit is unchanged). (2) Team Logs > Employee Leave & Permission (Associate Manager / Team Lead / Senior Team Lead): an employee with MORE than 2 leave days (Pending + Approved, half day = 0.5, weekly offs / holidays excluded) in the CURRENT month gets only their own leave rows highlighted (violet); MORE than 2 permission hrs in the current month highlights only their permission rows (teal). Counted fresh on every page load, so new / approved records update it automatically; employees within the limits show normally; a legend + \"over the limit now\" list is shown.
   * Update291: (1) Audit Log for Associate Manager / Team Lead / Senior Team Lead (matched live by Designation, same test as Team Logs): new menu item \"Audit Log\" (/employee/team-audit) = the Admin's By Process Audit Log, READ-ONLY - they pick a process, see the employees who worked on it (productivity, productivity %, attendance), open an employee's Productivity / Attendance details and use the Productivity report (Print / Excel). The Admin-only parts (By Employee / Access tab, Process Audit Access, the Granted / Not granted column) are not shown to them; every route is also checked on the server (403 for everyone else). (2) Process name GROUPING in the Audit Log process list (Admin and these designations): process names that share a common prefix (split at \"_\") are grouped automatically - e.g. CA_Kings_Weekly, CA_Kings_YLB, CA_Kings_NVS -> group \"CA_Kings\" (3 Processes). Only the group name is shown first; clicking it expands the processes, each with Open audit. The same rule applies to every process (group_processes()); a process with no shared prefix stays a normal row. Admin permissions, the Admin Audit Log and the employee-side per-process Audit Log access are unchanged.
@@ -604,6 +606,7 @@ HEADERS = {
     "Agent Consent": ["Employee ID", "Employee name", "Status", "Requested at", "Requested by", "Decided at", "Notice version", "Decided from IP"],      # Update268
     "Admin Alerts": ["Alert ID", "Type", "Employee ID", "Employee name", "Details", "Created at", "Status", "Cleared at"],      # Update265
     "Lead Productivity Access": ["Employee ID", "Employee name", "Granted", "Updated at", "Updated by"],      # Update262
+    "Mobile Access": ["Employee ID", "Employee name", "Allowed", "Updated at", "Updated by"],      # Update297
     "Productivity Access": ["Employee ID", "Employee name", "Enabled", "Updated at", "Updated by"],
     # Update90: one row per reminder e-mail (and one \"__RUN__\" row per day = the worker that sends that day's batch, so workers never double-send)
     "Email Log": ["Date", "Employee ID", "Employee name", "Email", "Sent at", "Status"],
@@ -4229,6 +4232,8 @@ RESP_JS = r"""<script>(function(){
  });
  document.addEventListener('keydown',function(e){if(e.key==='Escape')closeMenu(document.querySelector('aside.emp.tb-open'))});
  window.addEventListener('resize',function(){if(window.innerWidth>800)closeMenu(document.querySelector('aside.emp.tb-open'))});
+ /* Update297: touch-only screens (e.g. an iPad asking for the desktop site) are flagged so the server can apply Mobile Access */
+ try{if(matchMedia('(pointer:coarse)').matches&&matchMedia('(hover:none)').matches&&Math.min(screen.width,screen.height)<1100){document.cookie='mdev=1;path=/;max-age=31536000;SameSite=Lax'}else if(document.cookie.indexOf('mdev=1')>-1){document.cookie='mdev=;path=/;max-age=0'}}catch(e){}
  /* iOS: 100vh is taller than the visible area - expose the real height as --vh100 */
  function vh(){document.documentElement.style.setProperty('--vh100',(window.innerHeight)+'px')}
  vh();window.addEventListener('resize',vh);window.addEventListener('orientationchange',vh);
@@ -5252,6 +5257,7 @@ def page(body, title="Productivity Tracker", **ctx):
     except Exception: lead_menu = False
     if lead_menu:      # Update263: Associate Manager / Team Lead / Senior Team Lead - exactly these four menu items, in this order
         items = [("/employee/team-logs", "Team Logs"), ("/employee/team-audit", "Audit Log"), ("/employee/people", "Employee Details"), ("/employee/profile", "Personal Details"), ("/employee/leave", "Leave & Permission")]      # Update291: + Audit Log (read-only)
+        if _rep_level(): items.insert(2, ("/employee/emp-report", "Employee Report"))      # Update296: Team Lead / Senior Team Lead
     elif session.get("role") == "employee":
         try:      # Admin-controlled: the menu item exists only while Audit Log access is enabled for this employee
             if audit_active(audit_access(session.get("emp_id", ""))): items.append(("/employee/audit", "Audit Log"))
@@ -5265,6 +5271,10 @@ def page(body, title="Productivity Tracker", **ctx):
             if team_log_access(): items.append(("/employee/team-logs", "Team Logs"))
         except Exception as ex_:
             print("Team Logs menu check failed:", repr(ex_))
+        try:      # Update296: Manager - Employee Report (Team Lead / Senior Team Lead get it in their fixed menu above)
+            if _rep_level(): items.append(("/employee/emp-report", "Employee Report"))
+        except Exception as ex_:
+            print("Employee Report menu check failed:", repr(ex_))
         try:      # Admin-controlled: Mahizhchi appears only while it is published AND shared with this employee
             if mz_active(session.get("emp_id", "")): items.append(("/employee/mahizhchi", MZ_TITLE))
         except Exception as e:
@@ -5278,7 +5288,8 @@ def page(body, title="Productivity Tracker", **ctx):
         view = request.args.get("view", "")
         kids = [("/admin/employee-info", "Employees", p.startswith("/admin/employee-info") and view != "notifications"),
                 ("/admin/employee-info?view=notifications", "Notifications", p == "/admin/employee-info" and view == "notifications"),
-                ("/admin/mahizhchi", "Mahizhchi", p.startswith("/admin/mahizhchi"))]      # Update211: Multiplayer Game / Game Log is link-only (/admin/game)
+                ("/admin/mahizhchi", "Mahizhchi", p.startswith("/admin/mahizhchi")),
+                ("/admin/mobile_access", "Mobile Access", p.startswith("/admin/mobile_access") or p.startswith("/admin/mobile-access"))]      # Update297      # Update211: Multiplayer Game / Game Log is link-only (/admin/game)
         nav = [(h, l, on or any(k[2] for k in kids), kids) if h == "/admin/employee-info" else (h, l, on, [])
                for h, l, on, _k in nav]
         # Update103: Productivity Log / Leave & Permission Log / Audit Log / Email Controls are grouped under one expandable "Log" menu.
@@ -7404,6 +7415,10 @@ def employee_login():
                     flash("Your account is locked. Please contact your Manager, Team Lead, or Admin.", "error")
                     return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee", lxg="", u=u_typed,
                 admin_avatar=render_fast(AVATAR3D, gender="male", initials="E"))
+                if is_mobile_request() and not mobile_ok(e["Employee ID"]):      # Update297: mobile device without the Admin's approval - the app opens, but this employee cannot sign in here
+                    flash(MOBILE_BLOCK_MSG, "error")
+                    return page(LOGIN, title="Employee login", ph="Employee ID or Email", role="employee", lxg="", u=u_typed,
+                                admin_avatar=render_fast(AVATAR3D, gender="male", initials="E"))
                 track_logout(auto=True, reason="New login")      # closes a previous session in this browser, if any
                 session.clear()
                 session.update(role="employee", emp_id=str(e["Employee ID"]), name=e["Name"], band=e["Band"],
@@ -9687,6 +9702,93 @@ def admin_summary():
     month = request.args.get("month") or today_local().strftime("%Y-%m")
     ctx = _overview_ctx(month)
     return page(SUMMARY, title="Overview", online=online_list(), **ctx)
+
+# ---------------------------------------------------------------- Update297: Mobile Access Management (Admin > /admin/mobile_access)
+# Everybody can OPEN the application on a phone / tablet (the login page loads), but an EMPLOYEE can sign in and use it on a mobile device only
+# after the Admin has enabled Mobile access for that employee. Default = not enabled. Desktop / laptop use and the Admin are not affected.
+# Device test (server side): User-Agent of phones / tablets, the Sec-CH-UA-Mobile client hint, or the "mdev" cookie that the page script sets on touch-only
+# screens (catches an iPad that asks for the desktop site). Like every browser-sent signal it is a policy control, not a security boundary.
+MOBILE_SHEET = "Mobile Access"
+_MOB_UA = re.compile(r"Android|iPhone|iPad|iPod|Mobile|Windows Phone|IEMobile|BlackBerry|Opera Mini|Opera Mobi|Silk/|Kindle|webOS|PlayBook|Tablet", re.I)
+MOBILE_BLOCK_MSG = "Mobile access is not enabled for your account. Please contact your Admin."
+
+def is_mobile_request():
+    try:
+        if request.headers.get("Sec-CH-UA-Mobile", "").strip() == "?1": return True
+        if request.cookies.get("mdev") == "1": return True
+        return bool(_MOB_UA.search(request.headers.get("User-Agent", "") or ""))
+    except Exception:
+        return False
+
+def mobile_allowed_ids():
+    try:
+        return frozenset(_key(r.get("Employee ID", "")) for r in rows(MOBILE_SHEET) if str(r.get("Allowed", "")).strip().lower() in ("yes", "y", "true", "1", "enabled"))
+    except Exception as ex:
+        print("Mobile Access read failed:", repr(ex)); return frozenset()      # when in doubt on a mobile device: no access
+
+def mobile_ok(eid):
+    return _key(eid) in mobile_allowed_ids()
+
+@app.before_request
+def _mobile_wall():
+    """An employee on a mobile device without Admin approval is signed out and sent to the login page (also when the Admin switches access off while they are signed in)."""
+    if session.get("role") != "employee": return
+    if request.endpoint in (None, "static", "logout", "app_version", "employee_login", "photo"): return
+    if not is_mobile_request() or mobile_ok(session.get("emp_id", "")): return
+    try: track_logout(auto=True, reason="Mobile access not enabled")
+    except Exception: pass
+    session.clear(); flash(MOBILE_BLOCK_MSG, "error")
+    return redirect("/employee/login")
+
+MOB_PAGE = """<div class="head"><div><h1>Mobile Access</h1>
+<p class="mut">Every employee can open the application on a mobile device, but can sign in and use it there only after you enable access. Access is off by default, is changed one employee at a time and takes effect at once (an employee already signed in on a phone is signed out on the next click). Computers and the Admin are not affected.</p></div></div>
+<form method="get" class="grid no-print"><input name="q" placeholder="Employee ID / name" value="{{q}}"><select name="f"><option value="">All employees</option><option value="on" {{'selected' if f=='on'}}>Enabled</option><option value="off" {{'selected' if f=='off'}}>Disabled</option></select><button class="primary">Show</button><a href="/admin/mobile_access">Reset</a></form>
+<div class="kpis"><div class="kpi"><span>Employees</span><b>{{n_all}}</b></div><div class="kpi"><span>Mobile access enabled</span><b>{{n_on}}</b></div><div class="kpi"><span>Mobile access disabled</span><b>{{n_all - n_on}}</b></div></div>
+<div class="card"><table><tr><th>Employee ID</th><th>Employee Name</th><th>Designation</th><th>Mobile access</th><th>Last changed</th><th class="no-print">Action</th></tr>
+{% for r in rws %}<tr class="{{ r.sep|sepcls }}"><td>{{r.id}}</td><td><b>{{r.name}}</b>{% if r.sep %} <small class="mut">({{r.sep}})</small>{% endif %}</td><td>{{r.desig or '-'}}</td>
+<td>{% if r.on %}<b style="color:#15803d">&#9679; Enabled</b>{% else %}<span style="color:#b91c1c">&#9679; Disabled</span>{% endif %}</td><td>{% if r.at %}{{r.at}}{% if r.by %}<br><small class="mut">by {{r.by}}</small>{% endif %}{% else %}<span class="mut">-</span>{% endif %}</td>
+<td class="no-print"><form method="post" action="/admin/mobile_access/set" style="margin:0"><input type="hidden" name="emp" value="{{r.id}}"><input type="hidden" name="to" value="{{ 'disable' if r.on else 'enable' }}"><input type="hidden" name="q" value="{{q}}"><input type="hidden" name="f" value="{{f}}">
+{% if r.on %}<button class="danger" type="submit">Disable Access</button>{% else %}<button class="primary" type="submit">Enable Access</button>{% endif %}</form></td></tr>
+{% else %}<tr><td colspan="6">No employees found.</td></tr>{% endfor %}</table></div>"""
+
+@app.route("/admin/mobile_access")
+@app.route("/admin/mobile-access")
+@need("admin")
+def admin_mobile_access():
+    prefetch("Employees", MOBILE_SHEET)
+    q = request.args.get("q", "").strip(); f = request.args.get("f", "").strip(); ql = q.lower()
+    info = {_key(r.get("Employee ID", "")): r for r in rows(MOBILE_SHEET)}
+    on_ids = mobile_allowed_ids(); out = []
+    emps = sorted(rows("Employees"), key=lambda e: (sep_rank(e), str(e.get("Name", "")).lower()))
+    for e in emps:
+        eid = str(e.get("Employee ID", "")).strip(); k = _key(eid); on = k in on_ids
+        if ql and ql not in eid.lower() and ql not in str(e.get("Name", "")).lower(): continue
+        if f == "on" and not on: continue
+        if f == "off" and on: continue
+        i = info.get(k, {}); sep_fields(e)
+        out.append(dict(id=eid, name=e.get("Name", ""), desig=e.get("Designation", ""), sep=emp_sep(e), on=on, at=str(i.get("Updated at", "")), by=str(i.get("Updated by", ""))))
+    allk = [_key(e.get("Employee ID", "")) for e in emps]
+    return page(MOB_PAGE, title="Mobile Access", q=q, f=f if f in ("on", "off") else "", rws=out, n_all=len(allk), n_on=sum(1 for k in allk if k in on_ids))
+
+@app.route("/admin/mobile_access/set", methods=["POST"])
+@app.route("/admin/mobile-access/set", methods=["POST"])
+@need("admin")
+def admin_mobile_access_set():
+    eid = request.form.get("emp", "").strip(); act = request.form.get("to", ""); q = request.form.get("q", "").strip()[:80]; f = request.form.get("f", "")
+    back = "/admin/mobile_access?" + urllib.parse.urlencode({k: v for k, v in (("q", q), ("f", f if f in ("on", "off") else "")) if v})
+    e = next((x for x in rows("Employees") if _key(x.get("Employee ID", "")) == _key(eid)), None)
+    if e is None or act not in ("enable", "disable"):
+        flash("Nothing changed - choose an employee and Enable or Disable.", "error"); return redirect(back)
+    val = "Yes" if act == "enable" else "No"; now = now_local().strftime("%Y-%m-%d %H:%M:%S"); ws = ws_of(MOBILE_SHEET)
+    try:
+        cur = next((r for r in _fetch_rows(MOBILE_SHEET) if _key(r.get("Employee ID", "")) == _key(eid)), None)
+        if cur: ws.update(range_name="C%d:E%d" % (cur["_row"], cur["_row"]), values=[[val, now, "Admin"]], value_input_option="RAW")
+        else: ws.append_row([str(e.get("Employee ID", "")).strip(), str(e.get("Name", "")), val, now, "Admin"], value_input_option="RAW")
+    except Exception as ex:
+        print("Mobile access save failed:", repr(ex)); flash("Could not save - please try again.", "error"); return redirect(back)
+    invalidate_cache(MOBILE_SHEET)
+    flash("%s - mobile access %s." % (e.get("Name", eid), "enabled" if act == "enable" else "disabled"))
+    return redirect(back)
 
 @app.route("/admin/summary/lead-access", methods=["POST"])
 @need("admin")
@@ -12347,6 +12449,225 @@ def employee_team_plog(eid):
     prefetch("Employees", "Productivity log", "Leave", "Holidays", "Processes", "Permissions")
     ctx = plog_ctx(eid, request.args.get("month", "").strip())
     return page(T_PLOG, title=ctx["emp"]["Name"] + " - Productivity Log", back_url="/employee/team-logs", back_label="Team Logs", base_url=request.path, show_personal=False, **ctx)
+
+# ---------------------------------------------------------------- Update296: Employee Report (Manager / Team Lead / Senior Team Lead)
+# Menu item "Employee Report" -> /employee/emp-report (list) and /employee/emp-report/<id> (all dates and records). Read-only.
+# WHO MAY OPEN IT (live Designation, active login):  Manager  |  Team Lead  |  Senior Team Lead   (Team Leader / Senior Team Leader spellings are accepted too).
+# WHAT EACH VIEWER MAY SEE (one rule, enforced on the list AND on every detail URL - a hidden employee returns 403 even if the URL is typed):
+#   Manager                    -> Team Leads, Senior Team Leads and the other (non-manager) employees.
+#   Team Lead / Senior Team Lead -> the same list, but NEVER a Manager-level employee (Manager / Associate Manager / Senior Manager ...).
+#   Manager-level rows are not shown to anyone on this page.
+_REP_VIEWERS = {"manager", "team lead", "team leader", "senior team lead", "senior team leader"}
+_REP_LEADS = {"team lead", "team leader", "senior team lead", "senior team leader"}
+
+def _rep_kind(desig):
+    """'manager' (any designation containing 'manager'), 'lead' (Team Lead / Senior Team Lead) or 'staff'."""
+    n = _norm_desig(desig)
+    if "manager" in n: return "manager"
+    if n in _REP_LEADS: return "lead"
+    return "staff"
+
+def _rep_level():
+    """'manager' / 'lead' for a signed-in employee who may open the report, else None. Decided live from the Employees sheet."""
+    try:
+        if session.get("role") != "employee": return None
+        me = my_emp_row()
+        if not me or emp_locked(me): return None
+        n = _norm_desig(me.get("Designation", ""))
+        if n not in _REP_VIEWERS: return None
+        return "manager" if n == "manager" else "lead"
+    except Exception:
+        return None
+
+def _rep_can_view(level, target_emp):
+    """The access rule. Manager-level rows are hidden from everybody on this page (so Team Leads / Senior Team Leads never see Manager data)."""
+    if level not in ("manager", "lead"): return False
+    return _rep_kind(target_emp.get("Designation", "")) != "manager"
+
+def rep_need(f):
+    @wraps(f)
+    def w(*a, **k):
+        if not _rep_level(): abort(403)
+        return f(*a, **k)
+    return w
+
+def _rep_visible_emps(level):
+    return [e for e in rows("Employees") if _rep_can_view(level, e)]
+
+def _rep_leave_perm(eid, m0, m1):
+    """(leave rows, permission rows) of one employee for m0..m1 (m0 None = all time); every status, newest first."""
+    k = _key(eid)
+    def inr(d):
+        d = norm_date(d)
+        return bool(d) and (m0 is None or str(m0) <= str(d) <= str(m1))
+    def dn(d):
+        try: return dt.date.fromisoformat(norm_date(d)).strftime("%a")
+        except ValueError: return ""
+    lv = [dict(date=norm_date(r.get("Date", "")), day=dn(r.get("Date", "")), dtype="Half day" if leave_is_half(r) else "Full day", reason=r.get("Reason", ""),
+               status=leave_status(r), applied=r.get("Applied at", ""), reviewed=r.get("Reviewed at", ""), by=r.get("Reviewed by", ""), off=is_off(norm_date(r.get("Date", ""))))
+          for r in rows("Leave") if _key(r.get("Employee ID", "")) == k and inr(r.get("Date", ""))]
+    pm = [dict(date=norm_date(r.get("Date", "")), day=dn(r.get("Date", "")), hours=num(r.get("Hours")), reason=r.get("Reason", ""),
+               status=str(r.get("Status", "")).strip() or "Pending", applied=r.get("Applied at", ""), reviewed=r.get("Reviewed at", ""), by=r.get("Reviewed by", ""))
+          for r in rows("Permissions") if _key(r.get("Employee ID", "")) == k and inr(r.get("Date", ""))]
+    lv.sort(key=lambda x: x["date"], reverse=True); pm.sort(key=lambda x: x["date"], reverse=True)
+    return lv, pm
+
+def _rep_totals(lv, pm):
+    def days(st): return sum((0.5 if x["dtype"] == "Half day" else 1) for x in lv if x["status"] == st and not x["off"])
+    def hrs(st): return round(sum(x["hours"] for x in pm if x["status"] == st), 2)
+    def cnt(st): return sum(1 for x in pm if x["status"] == st)
+    return dict(lv_a=days("Approved"), lv_p=days("Pending"), lv_r=days("Rejected"), pm_a=cnt("Approved"), pm_ah=hrs("Approved"), pm_p=cnt("Pending"), pm_ph=hrs("Pending"), pm_r=cnt("Rejected"))
+
+def _rep_login_days(eid_key, start, end, att_rows):
+    return {d for d in (_iso_date(r.get("Date")) for r in att_rows if _key(r.get("Employee ID", "")) == eid_key) if d and str(start) <= d <= str(end) and not is_off(d)}
+
+def _rep_attendance(e, r, login_days, leaves_live, start, end):
+    """View-Only designations (Team Lead / Senior Team Lead ...) have no Productivity entry, so report() gives them no attendance; for them a day counts as
+    Present when the employee logged in that day (Attendance sheet). Everybody else keeps exactly the figures of report() (same as the Admin Overview)."""
+    if not r.get("vo"): return r
+    k = _key(e["Employee ID"]); jd_ = join_date(str(e["Employee ID"]).strip())
+    ea = str(jd_) if (jd_ and str(jd_) > str(start)) else str(start)
+    lvs = [l for l in leaves_live if _key(l["Employee ID"]) == k and ea <= l["Date"] <= str(end) and not is_off(l["Date"])]
+    half = {l["Date"] for l in lvs if leave_is_half(l)}
+    days = {d for d in login_days if ea <= d <= str(end)}
+    lv = {l["Date"] for l in lvs if not leave_is_half(l)} - days
+    full = days - half; credit = len(full) + 0.5 * len(half); counted = r.get("counted", 0) or 0
+    _n = lambda v: int(v) if v == int(v) else v
+    return dict(r, present=_n(credit), leave=_n(len(lv) + 0.5 * len(half)), absent=_n(max(counted - len(full | lv | half), 0)), att=min(round(credit / counted * 100), 100) if counted else 0, login_based=True)
+
+def _rep_month_arg():
+    m = request.args.get("month", "").strip()
+    return m
+
+REP_LIST = """<div class="head"><div><h1>Employee Report</h1>
+<p class="mut">{{label}} &middot; read-only &middot; {{scope}}</p></div></div>
+<form class="grid no-print" method="get"><input type="month" name="month" value="{{month}}"><input name="q" placeholder="Employee ID / name" value="{{q}}"><button class="primary">Show</button><a href="/employee/emp-report">This month</a><button type="button" class="btnl pbtn" onclick="window.print()">&#128438; Print</button></form>
+<div class="kpis"><div class="kpi"><span>Employees</span><b>{{rows|length}}</b></div><div class="kpi"><span>Leave days (approved / pending)</span><b>{{tot_la|g}} / {{tot_lp|g}}</b></div><div class="kpi"><span>Permissions (approved / pending)</span><b>{{tot_pa}} / {{tot_pp}}</b></div></div>
+<div class="card"><table><tr><th>Employee ID</th><th>Employee Name</th><th>Designation</th><th>Attendance</th><th>Productivity</th><th>Leave</th><th>Permission</th><th class="no-print">Records</th></tr>
+{% for x in rows %}<tr class="{{ x.sep|sepcls }}"><td><a href="/employee/emp-report/{{x.id|urlencode}}?month={{month}}">{{x.id}}</a></td><td><a href="/employee/emp-report/{{x.id|urlencode}}?month={{month}}"><b>{{x.name}}</b></a>{% if x.sep %} <small class="mut">({{x.sep}})</small>{% endif %}</td><td>{{x.desig or '-'}}</td>
+<td>{% if x.not_started %}<span class="mut">Not started</span>{% else %}<b>{{x.att}}%</b><br><small class="mut">Present {{x.present|g}} &middot; Leave {{x.leave|g}} &middot; Absent {{x.absent|g}}{% if x.login_based %} &middot; by login{% endif %}</small>{% endif %}</td>
+<td>{% if x.vo %}<span class="mut">View only</span>{% elif x.not_started %}<span class="mut">-</span>{% else %}<b>{{x.pct}}%</b><br><small class="mut">{{x.prod|g}} hrs productive &middot; {{x.entries}} entr{{ 'y' if x.entries==1 else 'ies' }}{% if x.missed %} &middot; <span style="color:#c62828">{{x.missed}} missed</span>{% endif %}</small>{% endif %}</td>
+<td>{{x.t.lv_a|g}} approved{% if x.t.lv_p %}<br><small class="mut">{{x.t.lv_p|g}} pending</small>{% endif %}{% if x.t.lv_r %}<br><small class="mut">{{x.t.lv_r|g}} rejected</small>{% endif %}</td>
+<td>{{x.t.pm_a}} approved ({{x.t.pm_ah|g}} hrs){% if x.t.pm_p %}<br><small class="mut">{{x.t.pm_p}} pending ({{x.t.pm_ph|g}} hrs)</small>{% endif %}{% if x.t.pm_r %}<br><small class="mut">{{x.t.pm_r}} rejected</small>{% endif %}</td>
+<td class="no-print"><a href="/employee/emp-report/{{x.id|urlencode}}?month={{month}}">All dates &amp; records</a></td></tr>
+{% else %}<tr><td colspan="8">No employees to show.</td></tr>{% endfor %}</table></div>
+<p class="mut">Attendance and Productivity use the same rules as the Admin Overview (working days from each joining date; weekly offs and holidays excluded; Pending leave counts as leave, Rejected does not). Team Leads / Senior Team Leads have no Productivity entry, so their attendance is counted from their logins.</p>"""
+
+REP_DETAIL = """<div class="head"><div><h1>{{e.name}} &mdash; Employee Report</h1>
+<p class="mut">{{e.id}} &middot; {{e.desig or 'No designation'}} &middot; {{label}} &middot; read-only</p></div><a href="/employee/emp-report?month={{month if month!='all' else ''}}">&larr; Employee Report</a></div>
+<form class="grid no-print" method="get"><input type="month" name="month" value="{{month if month!='all' else ''}}"><button class="primary">Show month</button><a href="?month=all">All time</a><button type="button" class="btnl pbtn" onclick="window.print()">&#128438; Print</button></form>
+<div class="kpis">
+<div class="kpi"><span>Employee ID</span><b style="font-size:18px">{{e.id}}</b></div><div class="kpi"><span>Employee Name</span><b style="font-size:18px">{{e.name}}</b></div>
+<div class="kpi"><span>Attendance</span><b>{% if k.att is none %}-{% else %}{{k.att}}%{% endif %}</b><small class="mut">Present {{k.present|g}} &middot; Leave {{k.leave|g}} &middot; Absent {{k.absent|g}}{% if k.login_based %} &middot; by login{% endif %}</small></div>
+<div class="kpi"><span>Productivity</span><b>{% if k.vo %}View only{% else %}{{k.pct}}%{% endif %}</b><small class="mut">{% if k.vo %}no Productivity entry for this designation{% else %}{{k.prod|g}} productive &middot; {{k.non|g}} non-productive hrs{% endif %}</small></div>
+<div class="kpi"><span>Leave (days)</span><b>{{t.lv_a|g}}</b><small class="mut">approved &middot; {{t.lv_p|g}} pending &middot; {{t.lv_r|g}} rejected</small></div>
+<div class="kpi"><span>Permission</span><b>{{t.pm_a}}</b><small class="mut">approved ({{t.pm_ah|g}} hrs) &middot; {{t.pm_p}} pending &middot; {{t.pm_r}} rejected</small></div></div>
+<div class="card"><h2>Attendance &mdash; date-wise</h2>
+<table><tr><th>Date</th><th>Day</th><th>Status</th><th>First login</th><th>Last logout</th><th>Duration</th><th>Note</th></tr>
+{% for d in days %}<tr><td>{{d.date}}</td><td>{{d.day}}</td><td><b>{{d.status}}</b></td><td>{{d.login or '-'}}</td><td>{{d.logout or '-'}}</td><td>{{d.dur or '-'}}</td><td>{{d.note}}</td></tr>
+{% else %}<tr><td colspan="7">No dates in this period.</td></tr>{% endfor %}</table></div>
+<div class="card"><h2>Productivity &mdash; date-wise</h2>
+{% if k.vo %}<p class="mut">This designation has View Only access - no Productivity entries are made.</p>{% endif %}
+<table><tr><th>Date</th><th>Day</th><th>Processes worked</th><th>Productive hrs</th><th>Non-productive hrs</th><th>Total hrs</th><th>Target count</th><th>Completed count</th><th>Target status</th><th>Productivity %</th><th>Submitted at</th></tr>
+{% for d in pdates %}<tr><td>{{d.date}}</td><td>{{d.day}}</td><td>{{d.procs or '-'}}</td><td>{{d.prod|g}}</td><td>{{d.non|g}}</td><td>{{d.total|g}}</td><td>{{d.tgt|cnt}}</td><td>{{d.cnt|cnt}}</td><td>{{d.state or '-'}}</td><td>{{ (d.pct ~ '%') if d.pct is not none else 'not counted' }}</td><td>{{d.subat or '-'}}</td></tr>
+{% else %}<tr><td colspan="11">No Productivity entries in this period.</td></tr>{% endfor %}</table>
+{% if plines %}<h2>Process-wise records</h2><table><tr><th>Date</th><th>Process</th><th>Description</th><th>Hours</th><th>Target count</th><th>Completed count</th><th>Result</th><th>Productivity %</th></tr>
+{% for l in plines %}<tr><td>{{l.date}}</td><td>{{l.name}}</td><td>{{l.desc or '-'}}</td><td>{{l.hour|g}}</td><td>{{l.target|cnt}}</td><td>{{l.count|cnt}}</td><td>{{ 'Achieved' if l.met else 'Not achieved' }}</td><td>{{ (l.pct ~ '%') if l.pct is not none else '-' }}</td></tr>{% endfor %}</table>{% endif %}</div>
+<div class="card"><h2>Leave records</h2>
+<table><tr><th>Date</th><th>Day</th><th>Type</th><th>Reason</th><th>Status</th><th>Applied at</th><th>Reviewed at</th><th>Reviewed by</th></tr>
+{% for r in lv %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.dtype}}</td><td>{{r.reason or '-'}}</td><td><b>{{r.status}}</b></td><td>{{r.applied or '-'}}</td><td>{{r.reviewed or '-'}}</td><td>{{r.by or '-'}}</td></tr>
+{% else %}<tr><td colspan="8">No leave records in this period.</td></tr>{% endfor %}</table></div>
+<div class="card"><h2>Permission records</h2>
+<table><tr><th>Date</th><th>Day</th><th>Hours</th><th>Reason</th><th>Status</th><th>Applied at</th><th>Reviewed at</th><th>Reviewed by</th></tr>
+{% for r in pm %}<tr><td>{{r.date}}</td><td>{{r.day}}</td><td>{{r.hours|g}}</td><td>{{r.reason or '-'}}</td><td><b>{{r.status}}</b></td><td>{{r.applied or '-'}}</td><td>{{r.reviewed or '-'}}</td><td>{{r.by or '-'}}</td></tr>
+{% else %}<tr><td colspan="8">No permission records in this period.</td></tr>{% endfor %}</table></div>"""
+
+@app.route("/employee/emp-report")
+@need("employee")
+@rep_need
+def employee_report_list():
+    level = _rep_level()
+    prefetch("Employees", "Productivity log", "Leave", "Permissions", "Holidays", "Processes", "Attendance")
+    today = today_local(); month_arg = _rep_month_arg()
+    m0, m1 = month_range(month_arg or today.strftime("%Y-%m")); month = m0.strftime("%Y-%m")
+    q = request.args.get("q", "").strip().lower()
+    emps = _rep_visible_emps(level)      # access rule applied BEFORE anything else is read or shown
+    if q: emps = [e for e in emps if q in str(e["Employee ID"]).lower() or q in str(e["Name"]).lower()]
+    emps.sort(key=lambda e: (sep_rank(e), str(e.get("Name", "")).lower()))
+    subs, leaves = load_subs(), rows("Leave"); live = live_leaves(leaves)
+    reps = {_key(r["id"]): r for r in report(emps, subs, leaves, m0, m1)} if emps else {}
+    by_emp = {}
+    for s in subs: by_emp.setdefault(_key(s["emp_id"]), []).append(s)
+    lv_by = {}
+    for l in leaves: lv_by.setdefault(_key(l["Employee ID"]), []).append(l)
+    att_rows = rows("Attendance"); end_m = min(m1, today - dt.timedelta(days=1))
+    out = []; tla = tlp = tpa = tpp = 0
+    for e in emps:
+        eid = str(e["Employee ID"]).strip(); k = _key(eid)
+        r = reps.get(k, {}); jd = join_date(eid)
+        if r.get("vo"): r = _rep_attendance(e, r, _rep_login_days(k, m0, m1, att_rows), live, m0, m1)
+        lv, pm = _rep_leave_perm(eid, m0, m1); t = _rep_totals(lv, pm)
+        mine = by_emp.get(k, [])
+        ea = max(m0, jd) if jd else m0
+        entries = len({x["date"] for x in mine if not x["off"] and str(ea) <= x["date"] <= str(m1)})
+        missed = len(missing_dates(eid, mine, lv_by.get(k, []), m0, end_m)) if (end_m >= m0 and not r.get("vo")) else 0
+        sep_fields(e)
+        out.append(dict(id=eid, name=e.get("Name", ""), desig=e.get("Designation", ""), sep=emp_sep(e), vo=bool(r.get("vo")), login_based=bool(r.get("login_based")),
+                        not_started=bool(jd and jd > m1), att=r.get("att", 0), present=r.get("present", 0), leave=r.get("leave", 0), absent=r.get("absent", 0),
+                        pct=r.get("pct", 0), prod=r.get("prod", 0), entries=entries, missed=missed, t=t))
+        tla += t["lv_a"]; tlp += t["lv_p"]; tpa += t["pm_a"]; tpp += t["pm_p"]
+    scope = "Managers see Team Leads, Senior Team Leads and employees" if level == "manager" else "Team Leads / Senior Team Leads see employees (Manager data is not shown here)"
+    return page(REP_LIST, title="Employee Report", month=month, label=m0.strftime("%B %Y"), q=request.args.get("q", ""), rows=out, scope=scope,
+                tot_la=tla, tot_lp=tlp, tot_pa=tpa, tot_pp=tpp)
+
+@app.route("/employee/emp-report/<eid>")
+@need("employee")
+@rep_need
+def employee_report_detail(eid):
+    level = _rep_level()
+    prefetch("Employees", "Productivity log", "Leave", "Permissions", "Holidays", "Processes", "Attendance")
+    emp = emp_or_404(eid)
+    if not _rep_can_view(level, emp): abort(403)      # e.g. a Team Lead typing a Manager's URL
+    eid = str(emp["Employee ID"]).strip(); k = _key(eid); today = today_local()
+    month_arg = _rep_month_arg()
+    if month_arg == "all":
+        month, label = "all", "All time"; pstart, jd, _b = prod_start_info(eid); m0, m1 = pstart, today; rm0 = None
+    else:
+        m0, m1 = month_range(month_arg or today.strftime("%Y-%m")); month = m0.strftime("%Y-%m"); label = m0.strftime("%B %Y"); rm0 = m0
+    subs = [s for s in load_subs(eid) if _key(s["emp_id"]) == k]; leaves = rows("Leave"); live = live_leaves(leaves)
+    r = report([emp], subs, leaves, m0, m1)[0]
+    att_rows = [a for a in rows("Attendance") if _key(a.get("Employee ID", "")) == k]
+    if r.get("vo"): r = _rep_attendance(emp, r, _rep_login_days(k, m0, m1, att_rows), live, m0, m1)
+    sess = [a for a in att_rows if (_iso_date(a.get("Date")) or "") and str(m0) <= _iso_date(a.get("Date")) <= str(m1)]
+    sess.sort(key=lambda a: (_iso_date(a.get("Date")), str(a.get("Login time", ""))))
+    lv, pm = _rep_leave_perm(eid, rm0, m1); t = _rep_totals(lv, pm)
+    # day-by-day attendance
+    jd_ = join_date(eid); present = {s["date"] for s in subs if not s["off"] and str(m0) <= s["date"] <= str(m1)}
+    if r.get("vo"): present |= _rep_login_days(k, m0, m1, att_rows)
+    lvl = [l for l in live if _key(l["Employee ID"]) == k]
+    leave_map = {str(l["Date"]): leave_status(l) for l in lvl if not leave_is_half(l)}; half_days = {str(l["Date"]) for l in lvl if leave_is_half(l)}
+    by = {}
+    for a in sess: by.setdefault(_iso_date(a.get("Date")), []).append(a)
+    days, d = [], m0
+    while d <= m1:
+        ds = str(d); ss = sorted(by.get(ds, []), key=lambda a: str(a.get("Login time", ""))); note = ""
+        if jd_ and d < jd_: st, note = "-", "Before joining date"
+        elif ds in half_days and not is_off(d): st = "Half day"
+        elif ds in present: st = "Present"
+        elif ds in leave_map: st, note = "Leave", leave_map[ds] + " leave"
+        elif ds in holiday_map(): st, note = "Holiday", holiday_name(ds)
+        elif is_off(d): st = "Weekly off"
+        elif d < today: st = "Absent"
+        else: st = "-"
+        if ds in half_days: note = (note + " - " if note else "") + "Half-day leave (4 hrs)"
+        if ss: note = (note + " - " if note else "") + f"{len(ss)} login{'s' if len(ss) > 1 else ''}"
+        days.append(dict(date=ds, day=d.strftime("%a"), status=st, note=note, login=ss[0].get("Login time", "") if ss else "", logout=ss[-1].get("Logout time", "") if ss else "",
+                         dur=", ".join(str(a.get("Duration")) for a in ss if a.get("Duration"))))
+        d += dt.timedelta(days=1)
+    days.reverse()
+    pc = plog_ctx(eid, "" if month == "all" else month)
+    e = dict(id=eid, name=emp.get("Name", ""), desig=emp.get("Designation", ""))      # never pass the whole Employees row (it holds the password column)
+    return page(REP_DETAIL, title=e["name"] + " - Employee Report", e=e, month=month, label=label, k=dict(r, vo=bool(r.get("vo"))), t=t, days=days, pdates=pc["dates"], plines=pc["lines"], lv=lv, pm=pm)
 
 @app.route("/employee/team-logs")
 @need("employee")

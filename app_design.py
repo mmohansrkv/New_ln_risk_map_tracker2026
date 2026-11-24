@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update300: Login themes now sit INSIDE the existing login page layout. The five themes (Aurora Glass, Split Studio, Neon Horizon, Orbit Core, Soft Clay) no longer replace the page with their own full-screen design: the current login window (data-flow art, characters, sign-in card, caption) stays exactly where it is and each theme only re-skins it (background, colours, card surface, glow, 3D accents). Classic = no skin. Employee and Admin are still chosen separately; /admin/layoutlogin previews show the real layout in each skin. Credentials, routes, messages, lock / mobile rules and scripts untouched.
   * Update299: NEW Admin > /admin/layoutlogin "Login Layout" (separate link, not in the menu): five modern responsive 3D login themes (Aurora Glass, Split Studio, Neon Horizon, Orbit Core, Soft Clay) with live Desktop / Mobile previews, chosen and applied SEPARATELY for the Employee login and the Admin login (settings ui_login_theme_employee / ui_login_theme_admin; "Classic" = the existing design, the default, unchanged). Only the look of the sign-in page changes - credentials, routes, messages, lock / mobile rules and the screen-lock script are untouched.
   * Update298: Mobile Access tightened - the mobile LINK is closed without the Admin's approval. A signed-out visitor on a phone / tablet can no longer open the Employee login, home page or any Employee page: they are sent to /mobile-access, where the employee enters Employee ID / e-mail; only if the Admin has enabled Mobile access for that employee does the device receive a signed 'mgate' cookie and the login page opens (unknown, locked and not-approved give the same message). The cookie is re-checked against the Admin's list on every request, so Disable Access closes the link again at once; the per-employee check at login and the sign-out of a signed-in employee (Update297) stay. Admin pages are never gated.
   * Update297: NEW Admin > Mobile Access (/admin/mobile_access, also under Employee Info > Mobile Access): every employee is listed with Enable Access / Disable Access (one employee at a time, search + Enabled / Disabled filter, saved in the new sheet 'Mobile Access'). The application opens on every mobile device, but an EMPLOYEE can sign in and use it on a phone / tablet only while the Admin has enabled that employee (default = disabled): the login shows 'Mobile access is not enabled for your account. Please contact your Admin.' and an employee already signed in on a mobile device is signed out on the next click when access is off. Computers and the Admin are not affected. Mobile = phone / tablet User-Agent, the Sec-CH-UA-Mobile hint or the touch-screen cookie 'mdev'.
@@ -6059,120 +6060,96 @@ LOGIN = LOGIN_NEW_HEAD + _LOGIN_FORM + LOGIN_NEW_MID + _LOGIN_WT + _LOGIN_MAIN +
 # design, which stays the default and is NOT changed. Only the look of the sign-in page changes: the form fields (ids login_u / login_p / pw_toggle),
 # every route, the credentials check, flash messages, lock / mobile-access rules and the screen-lock script are the same as before.
 LT_THEMES = [
-    dict(id="aurora", name="Aurora Glass", note="Frosted-glass card, drifting aurora light, spinning 3D cubes"),
-    dict(id="split",  name="Split Studio", note="Gradient showcase panel with a 3D cube beside a clean white sign-in"),
-    dict(id="neon",   name="Neon Horizon", note="Retro sunset, moving perspective grid, neon-edged card"),
-    dict(id="orbit",  name="Orbit Core",   note="Glowing core with tilted 3D rings and orbiting satellites"),
-    dict(id="clay",   name="Soft Clay",    note="Light, friendly 3D clay shapes around a soft raised card"),
+    dict(id="aurora", name="Aurora Glass", note="Drifting aurora light, frosted-glass card, spinning 3D cubes - on the current login layout"),
+    dict(id="split",  name="Split Studio", note="Two-tone gradient split behind the current layout, 3D cubes, clean white card"),
+    dict(id="neon",   name="Neon Horizon", note="Retro sunset glow, neon perspective grid, neon-edged card"),
+    dict(id="orbit",  name="Orbit Core",   note="Deep-space glow with tilted 3D orbit rings behind the card"),
+    dict(id="clay",   name="Soft Clay",    note="Light pastel scene with soft 3D clay spheres and a raised card"),
 ]
 _LT_IDS = [t["id"] for t in LT_THEMES]
 _LT_KEYS = {"employee": "ui_login_theme_employee", "admin": "ui_login_theme_admin"}
 _LT_CACHE = {"t": 0.0, "v": {}}
 _LT_TPL = {}
 
-_LT_BASE = r"""
-.ltw{--a:#6366f1;--b:#06b6d4;--c:#f472b6;--ad:#3730a3;--lt:#fff;--ib:#ffffff30;--ibg:#ffffff12;position:fixed;inset:0;z-index:50;overflow-x:hidden;overflow-y:auto;display:flex;padding:16px;font-family:Poppins,system-ui,"Segoe UI",sans-serif;color:#fff;box-sizing:border-box}
-.ltw *{box-sizing:border-box}.ltw.adm{--a:#0d9488;--b:#2563eb;--c:#fbbf24;--ad:#0f4f4a}
-.flash{position:fixed!important;top:14px;left:50%;transform:translateX(-50%);z-index:60;max-width:92vw}.site-foot{display:none!important}
-.ltw .fl{position:absolute;perspective:700px;animation:ltfy 7s ease-in-out infinite alternate;animation-delay:var(--d,0s)}
-@keyframes ltfy{to{transform:translateY(-24px) translateX(8px)}}
-.ltw .cube{width:var(--s);height:var(--s);position:relative;transform-style:preserve-3d;animation:ltsp var(--t,16s) linear infinite}
-@keyframes ltsp{from{transform:rotateX(-22deg) rotateY(0)}to{transform:rotateX(-22deg) rotateY(360deg)}}
-.ltw .cube i{position:absolute;inset:0;border:1px solid #fff7;background:linear-gradient(135deg,var(--a),var(--b));opacity:.6}
-.ltw .cube i:nth-child(1){transform:translateZ(calc(var(--s)/2))}.ltw .cube i:nth-child(2){transform:rotateY(90deg) translateZ(calc(var(--s)/2))}
-.ltw .cube i:nth-child(3){transform:rotateY(180deg) translateZ(calc(var(--s)/2))}.ltw .cube i:nth-child(4){transform:rotateY(-90deg) translateZ(calc(var(--s)/2))}
-.ltw .cube i:nth-child(5){transform:rotateX(90deg) translateZ(calc(var(--s)/2))}.ltw .cube i:nth-child(6){transform:rotateX(-90deg) translateZ(calc(var(--s)/2))}
-.ltw .cd{position:relative;z-index:2;margin:auto;width:min(380px,100%);padding:28px 28px 24px;border-radius:22px;transition:transform .15s;animation:ltrise .8s cubic-bezier(.2,.8,.2,1) both}
-@keyframes ltrise{from{opacity:0;transform:translateY(24px) scale(.96)}}
-.ltw .lgo{font-weight:600;font-size:34px;letter-spacing:-1px;color:var(--lt);line-height:1}.ltw .lgo b{color:#ef4a2d;font-weight:700}
-.ltw .lgo small{display:block;font-size:9px;letter-spacing:.3px;opacity:.7;font-weight:400;margin-top:3px}
-.ltw h2{font-size:22px;font-weight:600;margin:16px 0 0;color:inherit}.ltw .sub{font-size:13px;opacity:.7;margin:2px 0 16px}
-.ltw .f{position:relative;margin-bottom:12px}
-.ltw .f input{width:100%;padding:13px 14px;border-radius:12px;border:1px solid var(--ib);background:var(--ibg);color:inherit;font:400 16px Poppins,system-ui,sans-serif;outline:0;transition:.2s}
-.ltw .f input::placeholder{color:inherit;opacity:.55}
-.ltw .f input:focus{border-color:var(--a);box-shadow:0 0 0 4px color-mix(in srgb,var(--a) 28%,transparent)}
-.ltw .sh{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:0;border:0;color:var(--a);font:600 12px Poppins,system-ui,sans-serif;cursor:pointer;padding:6px}
-.ltw .go{width:100%;padding:13px;border:0;border-radius:12px;font:600 15px Poppins,system-ui,sans-serif;color:#fff;background:linear-gradient(135deg,var(--a),var(--b));box-shadow:0 5px 0 var(--ad),0 16px 26px -10px var(--a);cursor:pointer;transition:transform .1s,box-shadow .1s}
-.ltw .go:active{transform:translateY(4px);box-shadow:0 1px 0 var(--ad)}.ltw .go:disabled{opacity:.7}
-.ltw .fg{display:block;text-align:center;font-size:12px;margin-top:14px;opacity:.7}
-.ltw .ft{position:absolute;bottom:8px;left:0;right:0;text-align:center;font-size:10px;opacity:.5;z-index:1;pointer-events:none}
-@media(max-width:720px){.ltw .cd{padding:22px 20px}.ltw .lgo{font-size:30px}.ltw .fl.hm{display:none}}
-@media(prefers-reduced-motion:reduce){.ltw *{animation:none!important}}
-"""
+# Update300: the themes are SKINS of the existing login layout (.lx window, art, characters, card, form, scripts) - nothing is moved,
+# resized or replaced; only colours, surfaces, glow and a few decorative 3D accents change. "Classic" = no skin.
 _LT_CSS = {
 "aurora": r"""
-.t-aurora{background:#060a1d}.t-aurora .bl{position:absolute;width:55vmax;height:55vmax;border-radius:50%;filter:blur(70px);opacity:.55;animation:ltdr 14s ease-in-out infinite alternate}
-.t-aurora .bl:nth-child(1){background:var(--a);left:-10%;top:-20%}.t-aurora .bl:nth-child(2){background:var(--b);right:-12%;bottom:-25%;animation-delay:-5s}.t-aurora .bl:nth-child(3){background:var(--c);left:35%;top:30%;width:30vmax;height:30vmax;opacity:.35;animation-delay:-9s}
-@keyframes ltdr{to{transform:translate(12%,10%) scale(1.15)}}
-.t-aurora .cd{background:#ffffff14;backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border:1px solid #ffffff33;box-shadow:0 40px 80px -30px #000c,inset 0 1px 0 #fff4}""",
+.lx.lts-aurora{--c1:#67e8f9;--c2:#c4b5fd;--c3:#f9a8d4;--c4:#5eead4;--c5:#fde68a;--b1:#8b5cf6;--b2:#6366f1;--bd:#4338ca;--ac:#6366f1;background:#060a1d}
+.lx.lts-aurora.adm{--c1:#5eead4;--c2:#93c5fd;--c3:#fde68a;--c4:#67e8f9;--c5:#f9a8d4;--b1:#2dd4bf;--b2:#0891b2;--bd:#0e7490;--ac:#0891b2}
+.lx.lts-aurora .lx-bar{background:#ffffff10;border-color:#ffffff22}
+.lx.lts-aurora .lx-body{background:radial-gradient(60% 70% at 15% 20%,#22d3ee55,transparent 70%),radial-gradient(55% 70% at 85% 80%,#a855f766,transparent 70%),radial-gradient(40% 50% at 55% 45%,#f472b633,transparent 70%),#060a1d;background-size:150% 150%;animation:ltAu 14s ease-in-out infinite alternate}
+.lx.lts-aurora.adm .lx-body{background:radial-gradient(60% 70% at 15% 20%,#2dd4bf55,transparent 70%),radial-gradient(55% 70% at 85% 80%,#3b82f666,transparent 70%),radial-gradient(40% 50% at 55% 45%,#fbbf2433,transparent 70%),#04132a;background-size:150% 150%}
+@keyframes ltAu{to{background-position:25% 20%}}
+.lx.lts-aurora .lx-body:before,.lx.lts-aurora .lx-body:after{content:"";position:absolute;z-index:0;pointer-events:none;border:1px solid #ffffff88;background:linear-gradient(135deg,#22d3ee99,#a855f799);animation:ltCb 14s linear infinite}
+.lx.lts-aurora .lx-body:before{left:4%;bottom:12%;width:46px;height:46px}.lx.lts-aurora .lx-body:after{right:4%;top:10%;width:34px;height:34px;animation-duration:10s}
+@keyframes ltCb{from{transform:perspective(500px) rotateX(-22deg) rotateY(0)}to{transform:perspective(500px) rotateX(-22deg) rotateY(360deg)}}
+.lx.lts-aurora .lx-card{background:#ffffffd6;-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);box-shadow:0 1px 0 #fff inset,0 0 0 1px #ffffff77,0 40px 70px -26px #000c}
+.lx.lts-aurora .lx-floor{background:repeating-linear-gradient(90deg,#67e8f922 0 1px,transparent 1px 48px),repeating-linear-gradient(0deg,#67e8f922 0 1px,transparent 1px 38px)}
+.lg:has(.lts-aurora){background:radial-gradient(1100px 520px at 50% -12%,#2a1f6b 0,transparent 70%),#060a1d!important}""",
 "split": r"""
-.t-split{display:grid;grid-template-columns:1.1fr 1fr;padding:0;background:#fff;color:#171c3a;overflow:hidden}
-.t-split .pn{position:relative;overflow:hidden;display:grid;align-content:center;padding:40px 48px;color:#fff;background:linear-gradient(150deg,var(--a),var(--b) 70%,#0b1030)}
-.t-split .pn h1{font-size:36px;line-height:1.15;position:relative;z-index:2;margin:0}.t-split .pn p{font-size:14px;opacity:.85;margin-top:12px;max-width:320px;position:relative;z-index:2}
-.t-split .rt{display:flex;padding:20px;overflow-y:auto;--lt:#171c3a;--ib:#d9ddf0;--ibg:#f6f7fd}.t-split .cd{padding:10px 8px;color:#171c3a}
-@media(max-width:720px){.t-split{grid-template-columns:1fr;grid-template-rows:170px 1fr}.t-split .pn{padding:18px 22px}.t-split .pn h1{font-size:22px}.t-split .pn p{display:none}}""",
+.lx.lts-split{--c1:#67e8f9;--c2:#fda4af;--c3:#fde68a;--c4:#a7f3d0;--c5:#ddd6fe;--b1:#6d70f5;--b2:#4f46e5;--bd:#3730a3;--ac:#4f46e5}
+.lx.lts-split.adm{--c1:#a7f3d0;--c2:#bae6fd;--c3:#fde68a;--c4:#67e8f9;--c5:#ddd6fe;--b1:#2dd4bf;--b2:#0d9488;--bd:#0f766e;--ac:#0d9488}
+.lx.lts-split .lx-body,.lx.lts-split.adm .lx-body{background:linear-gradient(104deg,#4f46e5 0,#06b6d4 53%,#0b1030 53.2%,#12183f 100%)}
+.lx.lts-split.adm .lx-body{background:linear-gradient(104deg,#0d9488 0,#2563eb 53%,#0b1030 53.2%,#10224a 100%)}
+.lx.lts-split .lx-body:before{content:"";position:absolute;z-index:0;pointer-events:none;left:7%;top:14%;width:74px;height:74px;border:1px solid #ffffffaa;background:linear-gradient(135deg,#ffffff55,#ffffff11);animation:ltCb 18s linear infinite}
+.lx.lts-split .lx-body:after{content:"";position:absolute;z-index:0;pointer-events:none;right:6%;bottom:16%;width:44px;height:44px;border:1px solid #67e8f9aa;background:linear-gradient(135deg,#67e8f966,#4f46e544);animation:ltCb 12s linear infinite}
+.lx.lts-split .lx-card{background:#fff;box-shadow:0 1px 0 #fff inset,0 6px 0 #dfe3f7,0 40px 60px -20px #000c}
+.lx.lts-split .lx-floor{opacity:.5}
+.lg:has(.lts-split){background:linear-gradient(104deg,#2b2a8f 0,#0a6f86 53%,#050a1e 53.2%)!important}""",
 "neon": r"""
-.t-neon{--a:#d946ef;--b:#22d3ee;--ad:#86198f;background:linear-gradient(#0a0518,#1c0b3a 60%,#3b0a52)}.t-neon.adm{--a:#22d3ee;--b:#34d399;--ad:#0e6f80;background:linear-gradient(#030d18,#082640 60%,#0b4a52)}
-.t-neon .sun{position:absolute;left:50%;top:12%;width:min(34vw,340px);aspect-ratio:1;transform:translateX(-50%);border-radius:50%;background:linear-gradient(var(--c),var(--a));-webkit-mask:repeating-linear-gradient(#000 0 9%,transparent 9% 12%);mask:repeating-linear-gradient(#000 0 9%,transparent 9% 12%);opacity:.8;filter:drop-shadow(0 0 40px var(--a))}
-.t-neon .gr{position:absolute;left:-50%;right:-50%;bottom:-8%;height:52%;background:linear-gradient(var(--a) 1.5px,transparent 1.5px) 0 0/100% 46px,linear-gradient(90deg,var(--a) 1.5px,transparent 1.5px) 0 0/70px 100%;transform:perspective(380px) rotateX(64deg);animation:ltgm 1.6s linear infinite;opacity:.7;-webkit-mask:linear-gradient(transparent,#000 55%);mask:linear-gradient(transparent,#000 55%)}
-@keyframes ltgm{to{background-position:0 46px,0 0}}
-.t-neon .cd{background:#0c0820e6;border:1.5px solid var(--a);box-shadow:0 0 0 1px #fff1,0 0 34px -4px var(--a),inset 0 0 30px -14px var(--b)}
-.t-neon .go{background:transparent;border:1.5px solid var(--b);color:var(--b);box-shadow:0 0 18px -4px var(--b),inset 0 0 14px -8px var(--b)}
-@media(max-width:720px){.t-neon .sun{width:48vw}}""",
+.lx.lts-neon{--c1:#22d3ee;--c2:#f0abfc;--c3:#fde047;--c4:#34d399;--c5:#fb7185;--b1:#e879f9;--b2:#c026d3;--bd:#86198f;--ac:#c026d3;background:#0a0518;box-shadow:0 0 40px -8px #d946ef88,0 44px 80px -26px #000d,0 0 0 1px #d946ef66}
+.lx.lts-neon.adm{--c1:#34d399;--c2:#22d3ee;--c3:#fde047;--c4:#60a5fa;--c5:#f0abfc;--b1:#22d3ee;--b2:#0891b2;--bd:#0e6f80;--ac:#0891b2;box-shadow:0 0 40px -8px #22d3ee88,0 44px 80px -26px #000d,0 0 0 1px #22d3ee66}
+.lx.lts-neon .lx-bar{background:linear-gradient(#1c0b3a,#12062a);border-color:#d946ef55}
+.lx.lts-neon .lx-body{background:radial-gradient(60% 40% at 50% 8%,#fb923c55,transparent 70%),linear-gradient(#0a0518,#1c0b3a 58%,#3b0a52)}
+.lx.lts-neon.adm .lx-body{background:radial-gradient(60% 40% at 50% 8%,#22d3ee44,transparent 70%),linear-gradient(#030d18,#082640 58%,#0b4a52)}
+.lx.lts-neon .lx-body:before{content:"";position:absolute;z-index:0;pointer-events:none;left:50%;top:8%;width:170px;height:170px;margin-left:-85px;border-radius:50%;background:linear-gradient(#fde047,#f0abfc 55%,#d946ef);-webkit-mask:repeating-linear-gradient(#000 0 10%,transparent 10% 14%);mask:repeating-linear-gradient(#000 0 10%,transparent 10% 14%);opacity:.8;filter:blur(.4px)}
+.lx.lts-neon.adm .lx-body:before{background:linear-gradient(#a7f3d0,#22d3ee 55%,#2563eb)}
+.lx.lts-neon .lx-floor{background:repeating-linear-gradient(90deg,#e879f9aa 0 1.5px,transparent 1.5px 48px),repeating-linear-gradient(0deg,#e879f9aa 0 1.5px,transparent 1.5px 38px)}
+.lx.lts-neon.adm .lx-floor{background:repeating-linear-gradient(90deg,#22d3eeaa 0 1.5px,transparent 1.5px 48px),repeating-linear-gradient(0deg,#22d3eeaa 0 1.5px,transparent 1.5px 38px)}
+.lx.lts-neon .lx-card{box-shadow:0 0 0 2px var(--b1),0 0 34px -2px var(--b1),0 36px 50px -16px #000d}
+.lx.lts-neon .lx-card form>button:not(.pw-toggle){box-shadow:0 5px 0 var(--bd),0 0 22px -2px var(--b1),inset 0 1px 0 #ffffff66}
+.lg:has(.lts-neon){background:radial-gradient(1100px 520px at 50% -12%,#4a0d63 0,transparent 70%),#0a0518!important}""",
 "orbit": r"""
-.t-orbit{background:radial-gradient(800px 500px at 50% 45%,#12306b,#050b1f 70%)}
-.t-orbit .sc{position:absolute;inset:0;display:grid;place-items:center;perspective:900px;overflow:hidden}
-.t-orbit .rg{position:absolute;width:var(--w);aspect-ratio:1;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--a) 65%,transparent);animation:ltrz var(--t) linear infinite}
-.t-orbit .rg:after{content:"";position:absolute;top:-6px;left:50%;width:12px;height:12px;border-radius:50%;background:var(--c);box-shadow:0 0 16px var(--c)}
-@keyframes ltrz{from{transform:rotateX(var(--x)) rotateY(var(--y,0deg)) rotateZ(0)}to{transform:rotateX(var(--x)) rotateY(var(--y,0deg)) rotateZ(360deg)}}
-.t-orbit .core{position:absolute;width:150px;aspect-ratio:1;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff,var(--b) 35%,var(--a) 75%);box-shadow:0 0 90px 10px var(--a);animation:ltfy 5s ease-in-out infinite alternate}
-.t-orbit .cd{background:#fffffff2;color:#171c3a;--lt:#171c3a;--ib:#d9ddf0;--ibg:#f6f7fd;box-shadow:0 40px 80px -20px #000b}
-@media(max-width:720px){.t-orbit .rg{--w:150vw!important}.t-orbit .core{width:110px}}""",
+.lx.lts-orbit{--c1:#7dd3fc;--c2:#f0abfc;--c3:#fde68a;--c4:#86efac;--c5:#a5b4fc;--b1:#38bdf8;--b2:#2563eb;--bd:#1e3a8a;--ac:#2563eb;background:#050b1f}
+.lx.lts-orbit.adm{--b1:#2dd4bf;--b2:#0d9488;--bd:#0f766e;--ac:#0d9488}
+.lx.lts-orbit .lx-bar{background:linear-gradient(#0f1b44,#0a1233);border-color:#243a7a}
+.lx.lts-orbit .lx-body{background:radial-gradient(520px 340px at 50% 46%,#1f4fb8aa,transparent 70%),radial-gradient(800px 500px at 50% 45%,#12306b,#050b1f 70%)}
+.lx.lts-orbit .lx-body:before,.lx.lts-orbit .lx-body:after{content:"";position:absolute;z-index:0;pointer-events:none;left:50%;top:50%;border-radius:50%;border:1.5px solid #38bdf855;border-top-color:#f0abfc;border-right-color:#38bdf8aa}
+.lx.lts-orbit .lx-body:before{width:520px;height:520px;margin:-260px 0 0 -260px;animation:ltOb1 18s linear infinite}
+.lx.lts-orbit .lx-body:after{width:400px;height:400px;margin:-200px 0 0 -200px;animation:ltOb2 12s linear infinite}
+@keyframes ltOb1{from{transform:perspective(900px) rotateX(68deg) rotateZ(0)}to{transform:perspective(900px) rotateX(68deg) rotateZ(360deg)}}
+@keyframes ltOb2{from{transform:perspective(900px) rotateX(70deg) rotateY(38deg) rotateZ(360deg)}to{transform:perspective(900px) rotateX(70deg) rotateY(38deg) rotateZ(0)}}
+.lx.lts-orbit .lx-card{box-shadow:0 1px 0 #fff inset,0 6px 0 #c3d4f7,0 0 60px -8px #38bdf8aa,0 36px 50px -16px #000d}
+.lx.lts-orbit .lx-floor{opacity:.45}
+.lg:has(.lts-orbit){background:radial-gradient(1100px 520px at 50% -12%,#12306b 0,transparent 70%),#050b1f!important}
+@media(max-width:860px){.lx.lts-orbit .lx-body:before,.lx.lts-orbit .lx-body:after{top:62%}}""",
 "clay": r"""
-.t-clay{background:linear-gradient(135deg,#e9ecff,#fde8f3 60%,#e3f6ff);color:#1d2140;--lt:#1d2140;--ib:#dfe2f6;--ibg:#f4f5fd}.t-clay.adm{background:linear-gradient(135deg,#dcf7f1,#e3edff 60%,#fff4d6)}
-.t-clay .sp3{position:absolute;border-radius:50%;width:var(--s);aspect-ratio:1;background:radial-gradient(circle at 30% 28%,#fff9,transparent 45%),var(--k);box-shadow:inset -10px -14px 24px #0002,0 26px 30px -14px #0003;animation:ltfy 6s ease-in-out infinite alternate;animation-delay:var(--d,0s)}
-.t-clay .tor{background:none!important;border:calc(var(--s)/4.5) solid var(--k);box-shadow:inset -5px -6px 10px #0002,0 20px 24px -12px #0003}
-.t-clay .cd{background:#fff;box-shadow:0 34px 60px -24px #6366f180,inset 0 -7px 0 #e7e9fa}.t-clay .go{box-shadow:0 6px 0 var(--ad),0 18px 24px -10px var(--a)}
-@media(max-width:720px){.t-clay .sp3{--s:60px!important}}""",
+.lx.lts-clay{--c1:#0ea5e9;--c2:#ec4899;--c3:#f59e0b;--c4:#65a30d;--c5:#7c3aed;--b1:#818cf8;--b2:#6366f1;--bd:#4338ca;--ac:#6366f1;background:#eef0ff;color:#1d2140;box-shadow:0 34px 60px -26px #6366f1aa,0 0 0 1px #d9ddf5}
+.lx.lts-clay.adm{--c1:#0d9488;--c2:#2563eb;--c3:#d97706;--c4:#0ea5e9;--c5:#7c3aed;--b1:#2dd4bf;--b2:#0d9488;--bd:#0f766e;--ac:#0d9488}
+.lx.lts-clay .lx-bar{background:linear-gradient(#fff,#f1f3ff);border-color:#e0e3f7}.lx.lts-clay .lx-chip{color:#4b5280}
+.lx.lts-clay .lx-body,.lx.lts-clay.emp .lx-body{background:linear-gradient(135deg,#e9ecff,#fde8f3 60%,#e3f6ff)}
+.lx.lts-clay.adm .lx-body{background:linear-gradient(135deg,#dcf7f1,#e3edff 60%,#fff4d6)}
+.lx.lts-clay .lx-body:before,.lx.lts-clay .lx-body:after{content:"";position:absolute;z-index:0;pointer-events:none;border-radius:50%;animation:ltFy 6s ease-in-out infinite alternate}
+.lx.lts-clay .lx-body:before{left:5%;bottom:10%;width:92px;height:92px;background:radial-gradient(circle at 30% 28%,#fff9,transparent 45%),#a5b4fc;box-shadow:inset -10px -14px 24px #0002,0 26px 30px -14px #0003}
+.lx.lts-clay .lx-body:after{right:5%;top:9%;width:60px;height:60px;background:radial-gradient(circle at 30% 28%,#fff9,transparent 45%),#f9a8d4;box-shadow:inset -8px -10px 18px #0002,0 20px 24px -12px #0003;animation-delay:-2s}
+@keyframes ltFy{to{transform:translateY(-18px) translateX(6px)}}
+.lx.lts-clay .lx-floor{background:repeating-linear-gradient(90deg,#6366f122 0 1px,transparent 1px 48px),repeating-linear-gradient(0deg,#6366f122 0 1px,transparent 1px 38px)}
+.lx.lts-clay .lx-cap{color:#4b5280}.lx.lts-clay .lx-cap span{background:#ffffffaa;border-color:#d9ddf5}
+.lx.lts-clay .lx-card{background:#fff;box-shadow:0 34px 60px -24px #6366f180,inset 0 -7px 0 #e7e9fa}
+.lg:has(.lts-clay){background:linear-gradient(135deg,#e9ecff,#fde8f3 60%,#e3f6ff)!important}.lg:has(.lts-clay) .site-foot{color:#6b7390!important}
+@media(max-width:860px){.lx.lts-clay .lx-body:before,.lx.lts-clay .lx-body:after{display:none}}""",
 }
-
-def _lt_cube(s, x, y, d, t, hm=False):
-    return ('<div class="fl%s" style="%s;%s;--d:%ss"><div class="cube" style="--s:%spx;--t:%ss"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>'
-            % (" hm" if hm else "", x, y, d, s, t))
-
-_LT_CARD = (r"""<div class="cd"><div class="lgo">m<b>o</b>bius<small>Technologies and Services</small></div><h2>Welcome back</h2><p class="sub">{{ 'Admin login' if role=='admin' else 'Employee login' }}</p>
-<form method="post"{% if preview %} onsubmit="return false"{% endif %}>
-<div class="f"><input id="login_u" name="u" placeholder="{{ph}}" required {{ '' if (u or preview) else 'autofocus' }} autocomplete="off" value="{{ u or '' }}"></div>
-<div class="f"><input id="login_p" name="p" type="password" placeholder="Password" required {{ 'autofocus' if (u and not preview) else '' }} autocomplete="off">
-<button type="button" class="sh" id="pw_toggle" aria-pressed="false" aria-label="Show password" title="Show password"><span class="pw-t">Show</span></button></div>
-<button class="go">Log in</button></form>{% if role!='admin' %}<span class="fg" title="Please contact your admin to reset your password">Forgot password?</span>{% endif %}</div>""")
-
-_LT_TILT = r"""<script>(function(){var w=document.querySelector('.ltw'),c=w&&w.querySelector('.cd');if(!c||!matchMedia('(hover:hover) and (pointer:fine)').matches||matchMedia('(prefers-reduced-motion:reduce)').matches)return;
-w.addEventListener('mousemove',function(e){var x=e.clientX/innerWidth-.5,y=e.clientY/innerHeight-.5;c.style.transform='perspective(900px) rotateY('+(x*9)+'deg) rotateX('+(-y*9)+'deg)'});
-w.addEventListener('mouseleave',function(){c.style.transform=''})})();</script>"""
+_LT_MARK = "<div class=\"lx {{ 'adm' if role=='admin' else 'emp' }}\" data-role=\"{{role}}\">"
 
 def _lt_template(tid):
-    """Jinja template (body fragment) of one theme; the form, scripts and ids are those of the existing login page."""
+    """Jinja template of the EXISTING login page (LOGIN) with one theme skin added: same markup, form, ids, scripts and messages."""
     if tid in _LT_TPL: return _LT_TPL[tid]
-    c = _LT_CARD
-    if tid == "aurora":
-        inner = ('<div class="bl"></div><div class="bl"></div><div class="bl"></div>' + _lt_cube(60, "left:8%", "top:14%", 0, 18) + _lt_cube(40, "right:9%", "top:12%", -2, 13, True)
-                 + _lt_cube(80, "right:12%", "bottom:12%", -4, 22, True) + _lt_cube(34, "left:14%", "bottom:16%", -1, 11) + c)
-    elif tid == "split":
-        inner = ('<div class="pn">' + _lt_cube(110, "right:12%", "top:14%", 0, 20) + _lt_cube(56, "right:34%", "bottom:12%", -3, 14, True)
-                 + '<h1>Track. Grow.<br>Deliver.</h1><p>Your daily work, leave and productivity in one place.</p></div><div class="rt">' + c + '</div>')
-    elif tid == "neon":
-        inner = '<div class="sun"></div><div class="gr"></div>' + _lt_cube(46, "left:10%", "top:20%", 0, 12, True) + _lt_cube(32, "right:11%", "top:26%", -2, 9, True) + c
-    elif tid == "orbit":
-        inner = ('<div class="sc"><div class="core"></div><div class="rg" style="--w:560px;--x:70deg;--t:18s"></div><div class="rg" style="--w:430px;--x:70deg;--y:40deg;--t:13s"></div>'
-                 '<div class="rg" style="--w:700px;--x:62deg;--y:-25deg;--t:26s"></div></div>' + c)
-    else:
-        inner = ('<div class="sp3" style="--s:120px;--k:#a5b4fc;left:7%;top:12%"></div><div class="sp3" style="--s:70px;--k:#f9a8d4;right:10%;top:10%;--d:-2s"></div>'
-                 '<div class="sp3 tor" style="--s:110px;--k:#6ee7b7;right:8%;bottom:12%;--d:-3s"></div><div class="sp3" style="--s:54px;--k:#fcd34d;left:15%;bottom:14%;--d:-1s"></div>'
-                 + _lt_cube(44, "left:30%", "top:7%", -2, 15, True) + c)
-    tpl = ('<style>' + _LT_BASE + _LT_CSS[tid] + '</style><div class="ltw t-' + tid + '{{ \' adm\' if role==\'admin\' else \'\' }}">' + inner
-           + '<div class="ft">@2026_Mobius365 | LN_Map_AI</div></div>' + _LT_TILT
-           + '{% if not preview %}' + _LOGIN_WT + _LOGIN_MAIN + '{% endif %}')
+    if _LT_MARK not in LOGIN: return LOGIN      # layout markup changed -> keep the existing design untouched
+    tpl = LOGIN.replace(_LT_MARK, '<style id="lt300">' + _LT_CSS[tid] + '</style>' + _LT_MARK.replace('class="lx ', 'class="lx lts-' + tid + ' '), 1)
+    tpl = tpl.replace('<form method="post">', '<form method="post"{% if preview %} onsubmit="return false"{% endif %}>', 1)
+    for blk in (_LOGIN_WT, _LOGIN_MAIN):      # screen-lock prompt / sign-in script are not run inside the preview frames
+        tpl = tpl.replace(blk, '{% if not preview %}' + blk + '{% endif %}', 1)
     _LT_TPL[tid] = tpl
     return tpl
 
@@ -6196,9 +6173,14 @@ def login_tpl(role):
 def admin_layoutlogin_preview():
     role = "admin" if request.args.get("role") == "admin" else "employee"; tid = request.args.get("theme", "")
     if tid not in _LT_IDS: abort(404)
-    body = render_fast(_lt_template(tid), role=role, ph=("Admin username" if role == "admin" else "Employee ID or Email"), u="", preview=True)
-    resp = Response('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Preview</title></head><body style="margin:0;background:#050a1e">' + body + '</body></html>', mimetype="text/html")
-    resp.headers["Cache-Control"] = "no-store"; return resp
+    ttl = "Admin login" if role == "admin" else "Employee login"
+    body = render_fast(_lt_template(tid), role=role, title=ttl, ph=("Admin username" if role == "admin" else "Employee ID or Email"), u="", lxg="", preview=True)
+    try:      # same page shell as the real login (an Admin session would otherwise draw the Admin menu around it)
+        html = render_fast(BASE, body=body, title=ttl, session={}, preview=True)
+    except Exception as ex:
+        print("login theme preview shell failed:", repr(ex))
+        html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Preview</title></head><body style="margin:0;background:#050a1e"><div class="lg">' + body + '</div></body></html>'
+    resp = Response(html, mimetype="text/html"); resp.headers["Cache-Control"] = "no-store"; return resp
 
 LT_PAGE = r"""<style>
 .lt-bar{display:flex;flex-wrap:wrap;gap:10px;margin:6px 0 12px}.lt-seg{display:inline-flex;border:1px solid #c9cdea;border-radius:12px;padding:3px;background:#fff}
@@ -6211,7 +6193,7 @@ LT_PAGE = r"""<style>
 .lt-apply{border:0;border-radius:12px;background:#4f46e5;color:#fff;font:600 14px inherit;padding:11px 20px;cursor:pointer}
 .lt-stg{width:100%;height:640px;border-radius:14px;overflow:hidden;margin:0 auto;box-shadow:0 24px 50px -28px #000a;background:#0b1030;transition:width .35s,height .35s}.lt-stg.m{width:380px;max-width:100%;height:700px}.lt-stg iframe{width:100%;height:100%;border:0;display:block}
 </style>
-<div class="head"><div><h1>Login Layout</h1><p class="mut">Choose a look for the <b>Employee login</b> and the <b>Admin login</b> page - each one separately. Previews are live. Only the design of the sign-in page changes: credentials, sign-in rules and the Admin dashboard stay exactly as they are. <b>Classic</b> is the current design.</p></div></div>
+<div class="head"><div><h1>Login Layout</h1><p class="mut">Choose a theme for the <b>Employee login</b> and the <b>Admin login</b> page - each one separately. Each theme is applied INSIDE the current login layout (same window, animation, characters and sign-in card in the same places); only colours, surfaces and 3D accents change. Previews are live. Only the look of the sign-in page changes: credentials, sign-in rules and the Admin dashboard stay exactly as they are. <b>Classic</b> is the current design.</p></div></div>
 <div class="card">
 <p class="mut" style="margin:0 0 6px">Applied now - Employee login: <b>{{cur_name.employee}}</b> &nbsp;|&nbsp; Admin login: <b>{{cur_name.admin}}</b></p>
 <div class="lt-bar"><div class="lt-seg" id="lt-r"><button type="button" data-v="employee" class="on">Employee login</button><button type="button" data-v="admin">Admin login</button></div>

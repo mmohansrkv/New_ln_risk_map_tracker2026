@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update298: Mobile Access tightened - the mobile LINK is closed without the Admin's approval. A signed-out visitor on a phone / tablet can no longer open the Employee login, home page or any Employee page: they are sent to /mobile-access, where the employee enters Employee ID / e-mail; only if the Admin has enabled Mobile access for that employee does the device receive a signed 'mgate' cookie and the login page opens (unknown, locked and not-approved give the same message). The cookie is re-checked against the Admin's list on every request, so Disable Access closes the link again at once; the per-employee check at login and the sign-out of a signed-in employee (Update297) stay. Admin pages are never gated.
   * Update297: NEW Admin > Mobile Access (/admin/mobile_access, also under Employee Info > Mobile Access): every employee is listed with Enable Access / Disable Access (one employee at a time, search + Enabled / Disabled filter, saved in the new sheet 'Mobile Access'). The application opens on every mobile device, but an EMPLOYEE can sign in and use it on a phone / tablet only while the Admin has enabled that employee (default = disabled): the login shows 'Mobile access is not enabled for your account. Please contact your Admin.' and an employee already signed in on a mobile device is signed out on the next click when access is off. Computers and the Admin are not affected. Mobile = phone / tablet User-Agent, the Sec-CH-UA-Mobile hint or the touch-screen cookie 'mdev'.
   * Update296: NEW "Employee Report" page (/employee/emp-report, detail /employee/emp-report/<id>) for Manager, Team Lead and Senior Team Lead (live Designation, active login; read-only; menu item added). Shows Employee ID, Name, Attendance, Productivity, Leave and Permission per employee (month filter, search, Print) and, per employee, every date and record: day-by-day attendance with login / logout, date-wise and process-wise productivity, all leave rows and all permission rows with status, applied / reviewed times. Access rule (checked on the list AND on every detail URL, 403 otherwise): Managers see Team Leads, Senior Team Leads and the other employees; Team Leads / Senior Team Leads see the same list but NEVER a Manager-level employee (Manager / Associate Manager / Senior Manager); Manager-level rows are not shown to anyone here. Attendance / Productivity use the same report() figures as the Admin Overview; Team Leads / Senior Team Leads (View Only, no Productivity entry) get attendance counted from their logins. No existing page, route or calculation changed.
   * Update295: RESPONSIVE layout for phones / tablets / desktop on EVERY Admin, Employee and login page. One stylesheet (<style id="resp295">, appended last in <head>) + one small script: viewport-fit=cover and safe-area padding, no sideways page scroll, wide tables scroll inside their card, touch-size buttons / inputs (16px fields so iOS does not zoom), stacked headings / forms / KPI cards, scrollable tabs, full-width mobile menu (closes after choosing a link, tapping outside or Esc), the fixed-height 'fit to screen' mode is disabled on phones so pages scroll normally, chat / toast / popup boxes fit the screen, login pages stack and fit small screens. Layout only - no route, sheet, e-mail or calculation changed.
@@ -9740,8 +9741,61 @@ def _mobile_wall():
     session.clear(); flash(MOBILE_BLOCK_MSG, "error")
     return redirect("/employee/login")
 
+# Update298: the mobile LINK itself is closed until the Admin approves. A signed-out visitor on a mobile device can open NOTHING of the Employee area (login page, home page,
+# employee pages) - only the access-check page /mobile-access. There the employee types the Employee ID / e-mail; if the Admin has enabled Mobile access for that employee, this
+# device gets a signed "mgate" cookie and the login page opens. The cookie is re-checked against the Admin's list on every request, so Disable Access closes the link again at once.
+# The login itself (and every later request) is still checked per employee (Update297). Admin pages (/admin/...) are never gated, so the Admin can always sign in on a phone.
+from itsdangerous import URLSafeTimedSerializer as _UTS, BadSignature as _BadSig, SignatureExpired as _SigExp
+_MGATE_DAYS = 30
+_mgate_hits = {}      # ip -> [timestamps]  (small in-memory limiter for the check form)
+
+def _mgate_ser(): return _UTS(app.secret_key, salt="mobile-gate")
+
+def mobile_gate_ok():
+    """True when this device holds a valid gate cookie of an employee whose Mobile access is CURRENTLY enabled."""
+    try:
+        v = request.cookies.get("mgate")
+        if not v: return False
+        eid = _mgate_ser().loads(v, max_age=_MGATE_DAYS * 86400)
+        return mobile_ok(eid)
+    except (_BadSig, _SigExp, Exception):
+        return False
+
+@app.before_request
+def _mobile_gate():
+    if session.get("role"): return      # signed-in users: Admin is never gated; employees are checked by _mobile_wall
+    p = request.path.rstrip("/") or "/"
+    if not (p == "/" or p == "/login-char" or p.startswith("/entry/") or _area_of(p) == "employee"): return
+    if not is_mobile_request() or mobile_gate_ok(): return
+    return redirect("/mobile-access")
+
+MOB_GATE = """<div class="card" style="max-width:460px;margin:8vh auto">
+<h2 style="margin-top:0">Mobile access</h2>
+<p class="mut">This application can be opened on a mobile device only after the Admin has granted mobile access to your account. Enter your Employee ID or e-mail to check.</p>
+{% if err %}<p class="flash err">{{err}}</p>{% endif %}
+<form method="post" action="/mobile-access" class="grid" style="display:block"><input name="u" value="{{u}}" placeholder="Employee ID or Email" autocomplete="username" autocapitalize="none" required style="width:100%;margin:0 0 10px"><button class="primary" type="submit" style="width:100%;margin:0">Check access</button></form>
+<p class="mut" style="margin-top:14px"><a href="/admin/login">Admin sign-in</a></p></div>"""
+
+@app.route("/mobile-access", methods=["GET", "POST"])
+def mobile_access_gate():
+    if session.get("role") == "admin": return redirect("/admin/log")
+    if session.get("role") == "employee": return redirect("/employee")
+    if not is_mobile_request(): return redirect("/employee/login")      # computers do not need this page
+    if request.method == "GET": return page(MOB_GATE, title="Mobile access", err="", u="")
+    ip = (request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0]).strip(); now = time.time()
+    hits = [t for t in _mgate_hits.get(ip, []) if now - t < 60]; hits.append(now); _mgate_hits[ip] = hits
+    if len(_mgate_hits) > 2000: _mgate_hits.clear()
+    if len(hits) > 10: return page(MOB_GATE, title="Mobile access", err="Too many attempts. Please wait a minute and try again.", u=""), 429
+    u_typed = request.form.get("u", "").strip()[:120]; u = u_typed.lower()
+    e = next((x for x in rows("Employees") if u and u in (str(x["Employee ID"]).lower(), str(x.get("Email", "")).lower())), None)
+    if e is None or emp_locked(e) or not mobile_ok(e["Employee ID"]):      # same answer for unknown / locked / not approved - nothing is revealed
+        return page(MOB_GATE, title="Mobile access", err=MOBILE_BLOCK_MSG, u=u_typed), 403
+    resp = redirect("/employee/login")
+    resp.set_cookie("mgate", _mgate_ser().dumps(str(e["Employee ID"])), max_age=_MGATE_DAYS * 86400, samesite="Lax", httponly=True, secure=request.is_secure)
+    return resp
+
 MOB_PAGE = """<div class="head"><div><h1>Mobile Access</h1>
-<p class="mut">Every employee can open the application on a mobile device, but can sign in and use it there only after you enable access. Access is off by default, is changed one employee at a time and takes effect at once (an employee already signed in on a phone is signed out on the next click). Computers and the Admin are not affected.</p></div></div>
+<p class="mut">On a mobile device the Employee side of the application stays closed - only an access-check page opens - until you enable access for that employee. Access is off by default, is changed one employee at a time and takes effect at once (the link closes again for a device whose employee is disabled, and an employee already signed in on a phone is signed out on the next click). Computers and the Admin are not affected.</p></div></div>
 <form method="get" class="grid no-print"><input name="q" placeholder="Employee ID / name" value="{{q}}"><select name="f"><option value="">All employees</option><option value="on" {{'selected' if f=='on'}}>Enabled</option><option value="off" {{'selected' if f=='off'}}>Disabled</option></select><button class="primary">Show</button><a href="/admin/mobile_access">Reset</a></form>
 <div class="kpis"><div class="kpi"><span>Employees</span><b>{{n_all}}</b></div><div class="kpi"><span>Mobile access enabled</span><b>{{n_on}}</b></div><div class="kpi"><span>Mobile access disabled</span><b>{{n_all - n_on}}</b></div></div>
 <div class="card"><table><tr><th>Employee ID</th><th>Employee Name</th><th>Designation</th><th>Mobile access</th><th>Last changed</th><th class="no-print">Action</th></tr>

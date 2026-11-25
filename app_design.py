@@ -7148,9 +7148,10 @@ def login_char(g):
 
 @app.route("/")
 def index():
+    # Update304: the Admin login link is not shown on mobile devices (the /admin/login URL itself is unchanged)
     return page('<div class="card login"><h2>Productivity Tracker</h2>'
                 '<p><a href="/employee/login">Employee login</a></p>'
-                '<p><a href="/admin/login">Admin login</a></p></div>')
+                + ('' if is_mobile_request() else '<p><a href="/admin/login">Admin login</a></p>') + '</div>')
 
 @app.route("/logout")
 def logout():
@@ -10665,7 +10666,7 @@ MOB_GATE = """<div class="card" style="max-width:460px;margin:8vh auto">
 <p class="mut">This application can be opened on a mobile device only after the Admin has granted mobile access to your account. Enter your Employee ID or e-mail to check.</p>
 {% if err %}<p class="flash err">{{err}}</p>{% endif %}
 <form method="post" action="/mobile-access" class="grid" style="display:block"><input name="u" value="{{u}}" placeholder="Employee ID or Email" autocomplete="username" autocapitalize="none" required style="width:100%;margin:0 0 10px"><button class="primary" type="submit" style="width:100%;margin:0">Check access</button></form>
-<p class="mut" style="margin-top:14px"><a href="/admin/login">Admin sign-in</a></p></div>"""
+</div>"""      # Update304: no Admin sign-in link on the mobile Employee access page (Admin still signs in at /admin/login directly)
 
 @app.route("/mobile-access", methods=["GET", "POST"])
 def mobile_access_gate():

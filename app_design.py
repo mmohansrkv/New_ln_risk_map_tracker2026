@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update302: FIX - the chosen theme / design / layout now shows on EVERY Admin and Employee page, including Daily Quotes, Theme & Layout, Celebrations Log, Theme Studio and Login Layout. Those pages have their own built-in indigo styles that the shared theme CSS could not reach; the active palette now replaces them on all pages (one place, so new pages follow automatically). Theme Studio also re-reads the saved settings after Apply and reports a lost save. Classic / Indigo Night unchanged.
   * Update301: Theme Studio now applies the chosen design to EVERY Admin and Employee page: a new all-pages layer (headings, links, tabs, Back / small buttons, totals, notices, pills, borders, focus rings, details, check boxes, text selection) carries each non-Classic design's colours into every shared component, not only cards / KPIs / tables / main buttons. Studio also sets the page LAYOUT (Left sidebar / Top bar) for Admin and Employee together with the theme (same settings as Theme & Layout), and its page previews show the chosen layout. Classic is untouched.
   * Update300: NEW Admin > /admin/studio \"Theme Studio\" (also linked from Login Layout and Design Studio): preview a look LIVE on the Employee login, Admin login, Admin pages and Employee pages side by side (Desktop / Mobile), pick a ready pack or choose each of the four parts, and apply it to Employee and Admin together (or Reset all to Classic). Four NEW themes - Glacier Light, Emerald Night / Ledger, Lavender Cloud, Coral Sunset / Pop - each as a login skin INSIDE the current login layout (same window, art, characters and sign-in card; only colours, surfaces and 3D accents change) and as an Admin / Employee page design. Nothing existing is changed: Classic stays the current look and default, the Update299 login themes and the Update274 designs are still listed and work as before; credentials, routes, messages, lock / mobile rules and scripts are untouched.
   * Update299: NEW Admin > /admin/layoutlogin "Login Layout" (separate link, not in the menu): five modern responsive 3D login themes (Aurora Glass, Split Studio, Neon Horizon, Orbit Core, Soft Clay) with live Desktop / Mobile previews, chosen and applied SEPARATELY for the Employee login and the Admin login (settings ui_login_theme_employee / ui_login_theme_admin; "Classic" = the existing design, the default, unchanged). Only the look of the sign-in page changes - credentials, routes, messages, lock / mobile rules and the screen-lock script are untouched.
@@ -6265,6 +6266,72 @@ def admin_layoutlogin_apply():
     flash("Login theme applied - %s: %s." % ("Employee and Admin login" if tgt == "both" else ("Employee login" if tgt == "employee" else "Admin login"), nm.get(tid, "Classic")))
     return redirect("/admin/layoutlogin")
 
+
+# ---------------------------------------------------------------- Update302: the active theme / design now reaches EVERY Admin + Employee page
+# Cause of "not displaying the theme": pages such as Daily Quotes, Theme & Layout, Celebrations Log, Theme Studio and Login Layout carry their OWN <style> block with the
+# original indigo colours written in (#4f46e5, #4338ca, #eef0ff, ...) and page-specific class names, which the shared-class theme / design CSS can never reach.
+# Fix (one place, covers every current and future page): after a page is built, the indigo palette inside the page's own styles (content, sidebar calendar and shared widgets) is swapped for the active palette -
+# the chosen design (Admin / Employee), else the chosen colour theme. Classic + Indigo Night = no change at all. Menu, scripts, data and semantic colours
+# (green / amber / red status, Danger) are not touched; theme-preview swatches are left as drawn.
+_PAL_MAP = ("4f46e5", "6366f1", "8b5cf6", "4338ca", "3730a3")
+_PAL_TINT = ("eef0ff", "eef0fb", "eceffa", "f0f1ff", "e3e7f7", "dfe4f5", "e6e9f2")
+_PAL_SOFT = ("c7d2fe", "c7c4fb", "cfd4ff", "d6d9ff", "c9cdea", "d5d8f0")
+_PAL_DARK = ("0f1535", "1a2050", "2a2a73")      # the Indigo sidebar shades (Today button, calendar header, ...)
+_PAL_RE = re.compile(r"#(" + "|".join(_PAL_MAP + _PAL_TINT + _PAL_SOFT + _PAL_DARK + ("f8f9ff",)) + r")([0-9a-fA-F]{2})?(?![0-9a-zA-Z])", re.I)
+_PAL_NOATTR = ("/admin/theme", "/admin/designs", "/admin/studio", "/admin/layoutlogin")      # these pages draw colour swatches / previews in inline styles
+
+def _pal_now():
+    """-> (accent, accent2, dark accent, light tint, base) of the active design (else colour theme) for the signed-in role, or None for Classic / Indigo Night."""
+    try:
+        role = session.get("role")
+        if role not in ("admin", "employee"): return None
+        did = (session.get("dz_try") or "") if role == "admin" else ""
+        if not did: did = design_choice(role)
+        d = _design_of(role, did)
+        if d and d["k"] != "classic": return (d["a1"], d["a2"], d["edge"], d["bg1"], d["base"], d["s1"], d["s2"], d["s3"])
+        tid = theme_choice()[0]
+        if tid != "indigo":
+            t = next((x for x in THEMES if x["id"] == tid), None)
+            if t: return (t["pri"], t["pri2"], t["s3"], t["t1"], t["base"], t["s1"], t["s2"], t["s3"])
+    except Exception as ex:
+        print("palette read error:", repr(ex))
+    return None
+
+@lru_cache(maxsize=64)
+def _pal_fn(pal):
+    a1, a2, ed, bg1, base, s1, s2, s3 = pal
+    def f(m):
+        k, al = m.group(1).lower(), (m.group(2) or "")
+        if k in ("4f46e5", "6366f1"): c = a1
+        elif k == "8b5cf6": c = a2
+        elif k in ("4338ca", "3730a3"): c = ed
+        elif k in _PAL_TINT: c = bg1
+        elif k == "f8f9ff": c = base
+        elif k == "0f1535": c = s1
+        elif k == "1a2050": c = s2
+        elif k == "2a2a73": c = s3
+        else: c = a1 + ("" if al else "66")      # soft borders: a light tint of the accent
+        return c + al
+    return f
+
+def _pal_style_blocks(html, fn, attrs):
+    out = re.sub(r"(<style\b[^>]*>)(.*?)(</style>)", lambda m: m.group(1) + (m.group(2) if 'id="uitheme"' in m.group(1) else _PAL_RE.sub(fn, m.group(2))) + m.group(3), html, flags=re.S | re.I)      # the theme / design CSS itself is never rewritten
+    if attrs: out = re.sub(r'(\sstyle=")([^"]*)(")', lambda m: m.group(1) + _PAL_RE.sub(fn, m.group(2)) + m.group(3), out)
+    return out
+
+_page_u301 = page
+def page(body, title="Productivity Tracker", **ctx):
+    html = _page_u301(body, title=title, **ctx)
+    try:
+        pal = _pal_now()
+        if not pal or not isinstance(html, str): return html
+        i = html.find("<main")
+        if i < 0: return html
+        fn = _pal_fn(pal); attrs = not any(str(request.path).startswith(x) for x in _PAL_NOATTR)
+        return _pal_style_blocks(html[:i], fn, False) + _pal_style_blocks(html[i:], fn, attrs)      # page head (sidebar calendar, shared widgets) + page content
+    except Exception as ex:
+        print("page palette error:", repr(ex)); return html
+
 # ---------------------------------------------------------------- Update300: Theme Studio (/admin/studio)
 # ONE place to preview and apply a look to BOTH logins and BOTH panels. Nothing existing is changed or removed: "Classic" (the current look) stays the
 # default and the first option; the Update299 login themes and the Update274 designs stay selectable; this adds FOUR new themes (Glacier, Emerald,
@@ -6588,6 +6655,15 @@ def admin_studio_apply():
     except Exception as ex:
         print("theme studio save error:", repr(ex)); flash("Could not save the theme. Please try again.", "error"); return redirect("/admin/studio")
     _LT_CACHE["t"] = 0.0; session.pop("dz_try", None)
+    try:      # read the saved values back from the sheet (not the cache) so a lost save is reported
+        want = {_LT_KEYS["employee"]: el, _LT_KEYS["admin"]: al, "ui_admin_design": ad, "ui_emp_design": ed}
+        if not f.get("reset"):
+            if ay in ("side", "top"): want["ui_admin_layout"] = ay
+            if ey in ("side", "top"): want["ui_emp_layout"] = ey
+        bad = [k for k, v in want.items() if _setting(k, fresh=True) != v]
+        if bad: flash("Saved, but these settings could not be confirmed yet: " + ", ".join(bad) + ". Please press Apply again.", "error"); return redirect("/admin/studio")
+    except Exception as ex:
+        print("theme studio verify error:", repr(ex))
     flash("Theme applied - Employee login, Admin login, Admin pages and Employee pages updated." if not f.get("reset") else "Everything is back to the Classic look.")
     return redirect("/admin/studio")
 

@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update301: Theme Studio now applies the chosen design to EVERY Admin and Employee page: a new all-pages layer (headings, links, tabs, Back / small buttons, totals, notices, pills, borders, focus rings, details, check boxes, text selection) carries each non-Classic design's colours into every shared component, not only cards / KPIs / tables / main buttons. Studio also sets the page LAYOUT (Left sidebar / Top bar) for Admin and Employee together with the theme (same settings as Theme & Layout), and its page previews show the chosen layout. Classic is untouched.
   * Update300: NEW Admin > /admin/studio \"Theme Studio\" (also linked from Login Layout and Design Studio): preview a look LIVE on the Employee login, Admin login, Admin pages and Employee pages side by side (Desktop / Mobile), pick a ready pack or choose each of the four parts, and apply it to Employee and Admin together (or Reset all to Classic). Four NEW themes - Glacier Light, Emerald Night / Ledger, Lavender Cloud, Coral Sunset / Pop - each as a login skin INSIDE the current login layout (same window, art, characters and sign-in card; only colours, surfaces and 3D accents change) and as an Admin / Employee page design. Nothing existing is changed: Classic stays the current look and default, the Update299 login themes and the Update274 designs are still listed and work as before; credentials, routes, messages, lock / mobile rules and scripts are untouched.
   * Update299: NEW Admin > /admin/layoutlogin "Login Layout" (separate link, not in the menu): five modern responsive 3D login themes (Aurora Glass, Split Studio, Neon Horizon, Orbit Core, Soft Clay) with live Desktop / Mobile previews, chosen and applied SEPARATELY for the Employee login and the Admin login (settings ui_login_theme_employee / ui_login_theme_admin; "Classic" = the existing design, the default, unchanged). Only the look of the sign-in page changes - credentials, routes, messages, lock / mobile rules and the screen-lock script are untouched.
   * Update298: Mobile Access tightened - the mobile LINK is closed without the Admin's approval. A signed-out visitor on a phone / tablet can no longer open the Employee login, home page or any Employee page: they are sent to /mobile-access, where the employee enters Employee ID / e-mail; only if the Admin has enabled Mobile access for that employee does the device receive a signed 'mgate' cookie and the login page opens (unknown, locked and not-approved give the same message). The cookie is re-checked against the Admin's list on every request, so Disable Access closes the link again at once; the per-employee check at login and the sign-out of a signed-in employee (Update297) stay. Admin pages are never gated.
@@ -6409,6 +6410,40 @@ body @S@ .card:hover,body @S@ .kpi:hover{transform:translate(-2px,-2px);box-shad
 for _css in list(_LTS_CSS.values()) + list(DZ_EXTRA.values()):
     assert "{#" not in _css and "{{" not in _css and "{%" not in _css      # the CSS is placed inside Jinja templates
 
+
+# ---- Update301: one "all pages" layer for every non-Classic design. The per-design CSS above only restyled cards, KPIs, tables, welcome banner and main buttons; this layer
+# carries the design colours into every other shared component used on all Admin and Employee pages (headings, links, tabs, back / small buttons, totals, notices,
+# pills, borders, focus rings, details, check boxes, selection). Classic (no design) is returned untouched. Semantic colours (green / amber / red status, Danger) are kept.
+DZ_ALL = """
+@S@{--line:@BG1@;accent-color:@A1@}
+@S@ h1,@S@ .head h1{color:@S2@}
+@S@ main h2,@S@ main h3,@S@ .card>h2{color:@S2@}
+@S@ main a:not([class]),@S@ .act a{color:@A1@}@S@ main a:not([class]):hover,@S@ .act a:hover{color:@S3@}
+@S@ .tabs a{border-color:@BG1@}@S@ .tabs a:hover{background:@BG1@88}
+@S@ .tabs a.on{background:linear-gradient(135deg,@A1@,@A2@);border-color:@A1@;color:#fff}
+@S@ .totals{background:@BG1@88;border:1px solid @BG1@;color:@S2@}
+@S@ .flash:not(.err){background:@BG1@88;border-color:@A1@55;color:@S2@}
+@S@ .pill:not(.in):not(.out):not(.act):not(.warn):not(.err){background:@BG1@;color:@S2@}
+body @S@ main :is(.primary,.btnl,.pbtn){--bedge:@EDGE@}
+body @S@ main .back{color:@S2@;border-color:@A1@66;--bedge:@BG1@}body @S@ main .back:hover{background:@BG1@88;border-color:@A1@;color:@S2@}
+@S@ .primary.sm{box-shadow:0 2px 0 @EDGE@,0 4px 8px -4px @A1@66}
+@S@ input:focus,@S@ select:focus,@S@ textarea:focus{outline-color:@A1@66}
+@S@ table{border-color:@BG1@}@S@ td{border-bottom-color:@BG1@}
+@S@ details>summary{color:@S2@}
+@S@ ::selection{background:@A1@33}
+"""
+_design_css_for_u274 = _design_css_for
+@lru_cache(maxsize=64)
+def _design_css_for(role, did, panel_b):
+    """Update301: the per-design CSS (unchanged, above) + the all-pages layer. Classic -> "" exactly as before."""
+    css = _design_css_for_u274(role, did, panel_b)
+    if not css: return css
+    d = _design_of(role, did); a = DZ_ALL
+    for k_, v_ in (("@S@", ".app.emp3d" if role == "employee" else ".app:not(.emp3d)"), ("@A1@", d["a1"]), ("@A2@", d["a2"]), ("@S1@", d["s1"]), ("@S2@", d["s2"]), ("@S3@", d["s3"]),
+                   ("@EDGE@", d["edge"]), ("@BG1@", d["bg1"]), ("@BG2@", d["bg2"]), ("@BASE@", d["base"])):
+        a = a.replace(k_, v_)
+    return css + re.sub(r"\s*\n\s*", "", a)
+
 # ---- small links between the existing pages and the studio (text only)
 DZ_PAGE = DZ_PAGE.replace('<a href="/admin/theme">Classic theme &amp; layout options</a>', '<a href="/admin/theme">Classic theme &amp; layout options</a> &middot; <a href="/admin/studio"><b>Theme Studio</b> (logins + panels together)</a>', 1)
 LT_PAGE = LT_PAGE.replace('<b>Classic</b> is the current design.</p>', '<b>Classic</b> is the current design. <a href="/admin/studio"><b>Theme Studio</b></a> applies a look to the logins and the panels together.</p>', 1)
@@ -6439,11 +6474,11 @@ table{width:100%;border-collapse:collapse;overflow:hidden}th{background:#1c2340;
 .fr{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}input{width:100%;padding:7px 9px;border:1px solid #cfd5ee;border-radius:8px;font:inherit;background:#fff}
 @media(max-width:800px){.app{flex-direction:column}aside{width:auto}.kg{grid-template-columns:1fr 1fr}.fr{grid-template-columns:1fr}}
 """
-_ST_PV_ADMIN = """<aside><div class="panel-ttl">Admin Panel</div><a class="on">Overview</a><a>Processes</a><a>Log</a><a>Employee Info</a><a>Notes &amp; Messages</a></aside>
+_ST_PV_ADMIN = """<aside class="emp"><div class="panel-ttl">Admin Panel</div><a class="on">Overview</a><a>Processes</a><a>Log</a><a>Employee Info</a><a>Notes &amp; Messages</a></aside>
 <main><h1>Overview</h1><p class="mut">Sample preview - attendance and productivity summary.</p>
 <div class="kg"><div class="kpi"><small>Average attendance</small><b>82%</b><div class="bar"><u style="width:82%"></u></div></div><div class="kpi"><small>Average productivity</small><b>88%</b><div class="bar"><u style="width:88%"></u></div></div><div class="kpi"><small>Employees</small><b>13</b></div><div class="kpi"><small>Total leave days</small><b>9.5</b></div></div>
 <div class="card"><table><thead><tr><th>Employee</th><th>Present</th><th>Leave</th><th>Attendance</th></tr></thead><tbody><tr><td>Employee A</td><td>15</td><td>1</td><td>94%</td></tr><tr><td>Employee B</td><td>14</td><td>1</td><td>88%</td></tr><tr><td>Employee C</td><td>15</td><td>1</td><td>94%</td></tr><tr><td>Employee D</td><td>12.5</td><td>3.5</td><td>78%</td></tr></tbody></table><a class="primary">Print</a></div></main>"""
-_ST_PV_EMP = """<aside><div class="panel-ttl">Employee Panel</div><a class="on">Daily entry</a><a>Leave &amp; Permission</a><a>Personal details</a><a>Productivity Info</a></aside>
+_ST_PV_EMP = """<aside class="emp"><div class="panel-ttl">Employee Panel</div><a class="on">Daily entry</a><a>Leave &amp; Permission</a><a>Personal details</a><a>Productivity Info</a></aside>
 <main><div class="welcome"><h1>Good Morning, Employee!</h1><p class="mut" style="margin:0">Sample preview - November summary</p></div>
 <div class="kg"><div class="kpi"><small>Attendance</small><b>94%</b><div class="bar"><u style="width:94%"></u></div></div><div class="kpi"><small>Productivity</small><b>100%</b><div class="bar"><u style="width:100%"></u></div></div><div class="kpi"><small>Present days</small><b>15</b></div><div class="kpi"><small>Leave days</small><b>1</b></div></div>
 <div class="card"><b>Daily productivity entry</b><div class="fr" style="margin-top:10px"><input placeholder="Process"><input placeholder="Hour"><input placeholder="Count"></div><a class="primary">Save</a></div></main>"""
@@ -6457,7 +6492,8 @@ def admin_studio_pv():
     """Live design preview of the Admin or Employee PAGES (a sample page built from the real class names; only the chosen design's CSS is applied)."""
     role = "employee" if request.args.get("role") == "employee" else "admin"; did = request.args.get("design", "classic")
     if not _st_design_ok(role, did): did = "classic"
-    css = _design_css_for(role, did, False)
+    top = request.args.get("layout") == "top"; css = _design_css_for(role, did, top)
+    if top: d_ = _design_of(role, did); css += _topbar_css_for(d_["s1"], d_["s2"]) if d_ and d_["k"] != "classic" else _topbar_css_for("#0f1535", "#1a2050")
     html = ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Preview</title><style>' + _ST_PV_CSS + '</style><style>' + css
             + '</style></head><body><div class="app' + (' emp3d' if role == "employee" else '') + '">' + (_ST_PV_EMP if role == "employee" else _ST_PV_ADMIN) + '</div></body></html>')
     resp = Response(html, mimetype="text/html"); resp.headers["Cache-Control"] = "no-store"; return resp
@@ -6488,7 +6524,7 @@ ST_PAGE = r"""<style>
 </style>
 <div class="head"><div><h1>Theme Studio</h1><p class="mut">Preview a look on the <b>Employee login</b>, <b>Admin login</b>, <b>Admin pages</b> and <b>Employee pages</b> at once, then apply it to all of them - or mix them with the four lists. <b>Classic</b> is the current look and stays the default; the existing themes and designs are still listed and unchanged. Only colours, backgrounds and 3D accents change - no menu, form, data or sign-in rule is touched.</p></div></div>
 <form method="post" action="/admin/studio/apply" id="stf" class="card">
-<p class="mut" style="margin:0 0 6px">Applied now - Employee login: <b>{{cur_names.el}}</b> | Admin login: <b>{{cur_names.al}}</b> | Admin pages: <b>{{cur_names.ad}}</b> | Employee pages: <b>{{cur_names.ed}}</b></p>
+<p class="mut" style="margin:0 0 6px">Applied now - Employee login: <b>{{cur_names.el}}</b> | Admin login: <b>{{cur_names.al}}</b> | Admin pages: <b>{{cur_names.ad}}</b> ({{'Left sidebar' if cur.ay=='side' else 'Top bar'}}) | Employee pages: <b>{{cur_names.ed}}</b> ({{'Left sidebar' if cur.ey=='side' else 'Top bar'}})</p>
 <h2 style="margin:6px 0 0">1. Pick a theme pack</h2>
 <div class="st-packs">{% for p in packs %}<button type="button" class="st-pk" data-id="{{p.id}}" data-l="{{p.login}}" data-a="{{p.admin}}" data-e="{{p.employee}}"><i style="background:linear-gradient(135deg,{{p.c[0]}},{{p.c[1]}} 60%,{{p.c[2]}})"></i><b>{{p.name}}</b><small>{{p.note}}</small></button>{% endfor %}</div>
 <h2 style="margin:6px 0 0">2. Or choose each part</h2>
@@ -6496,7 +6532,9 @@ ST_PAGE = r"""<style>
 <label>Employee login<select name="employee_login" id="s-el">{% for t in logins %}<option value="{{t.id}}" {{'selected' if t.id==cur.el else ''}}>{{t.name}}</option>{% endfor %}</select></label>
 <label>Admin login<select name="admin_login" id="s-al">{% for t in logins %}<option value="{{t.id}}" {{'selected' if t.id==cur.al else ''}}>{{t.name}}</option>{% endfor %}</select></label>
 <label>Admin pages<select name="admin_design" id="s-ad">{% for d in designs.admin %}<option value="{{d.id}}" {{'selected' if d.id==cur.ad else ''}}>{{d.name}}</option>{% endfor %}</select></label>
-<label>Employee pages<select name="employee_design" id="s-ed">{% for d in designs.employee %}<option value="{{d.id}}" {{'selected' if d.id==cur.ed else ''}}>{{d.name}}</option>{% endfor %}</select></label></div>
+<label>Employee pages<select name="employee_design" id="s-ed">{% for d in designs.employee %}<option value="{{d.id}}" {{'selected' if d.id==cur.ed else ''}}>{{d.name}}</option>{% endfor %}</select></label>
+<label>Admin layout<select name="admin_layout" id="s-ay"><option value="side" {{'selected' if cur.ay=='side' else ''}}>Left sidebar</option><option value="top" {{'selected' if cur.ay=='top' else ''}}>Top bar</option></select></label>
+<label>Employee layout<select name="employee_layout" id="s-ey"><option value="side" {{'selected' if cur.ey=='side' else ''}}>Left sidebar</option><option value="top" {{'selected' if cur.ey=='top' else ''}}>Top bar</option></select></label></div>
 <h2 style="margin:10px 0 0">3. Live preview <span class="mut" style="font-size:12px;font-weight:400">(updates as you choose)</span></h2>
 <div class="st-seg" id="st-d"><button type="button" data-v="d" class="on">Desktop</button><button type="button" data-v="m">Mobile</button></div>
 <div class="st-grid">
@@ -6505,15 +6543,15 @@ ST_PAGE = r"""<style>
 <div><h3>Admin pages</h3><div class="st-fr" data-k="p"><iframe id="f-ad" title="Admin pages preview"></iframe></div></div>
 <div><h3>Employee pages</h3><div class="st-fr" data-k="p"><iframe id="f-ed" title="Employee pages preview"></iframe></div></div></div>
 <div class="st-bar"><button class="primary" type="submit">Apply to Employee &amp; Admin</button><button class="back" type="submit" name="reset" value="1" onclick="return confirm('Reset both logins and both panels to the Classic look?')">Reset all to Classic</button></div>
-<p class="mut">Page previews are sample pages drawn with the real page styles. Classic shows the default colours; your current Theme &amp; Layout colours still apply when Classic is kept. Admin pages can also be tried on the real pages from <a href="/admin/designs">Design Studio</a>.</p>
+<p class="mut">The chosen design and layout apply to <b>every</b> Admin and Employee page (menu, forms, tables, tabs, buttons, notices). Page previews are sample pages drawn with the real page styles. Classic shows the default colours; your current Theme &amp; Layout colours still apply when Classic is kept. Admin pages can also be tried on the real pages from <a href="/admin/designs">Design Studio</a>.</p>
 </form>
 <script>(function(){
-var $=function(i){return document.getElementById(i)},dev='d',ids={el:'s-el',al:'s-al',ad:'s-ad',ed:'s-ed'};
-function U(k){var v=$(ids[k]).value;return k==='el'?'/admin/studio/lp?role=employee&theme='+encodeURIComponent(v):k==='al'?'/admin/studio/lp?role=admin&theme='+encodeURIComponent(v):'/admin/studio/pv?role='+(k==='ad'?'admin':'employee')+'&design='+encodeURIComponent(v)}
+var $=function(i){return document.getElementById(i)},dev='d',ids={el:'s-el',al:'s-al',ad:'s-ad',ed:'s-ed'},lay={ad:'s-ay',ed:'s-ey'};
+function U(k){var v=$(ids[k]).value;return k==='el'?'/admin/studio/lp?role=employee&theme='+encodeURIComponent(v):k==='al'?'/admin/studio/lp?role=admin&theme='+encodeURIComponent(v):'/admin/studio/pv?role='+(k==='ad'?'admin':'employee')+'&design='+encodeURIComponent(v)+'&layout='+$(lay[k]).value}
 function fit(){document.querySelectorAll('.st-fr').forEach(function(f){var lg=f.dataset.k==='l',w=dev==='m'?390:1000,h=dev==='m'?(lg?800:760):(lg?620:620);f.className='st-fr'+(dev==='m'?' m':'');f.style.setProperty('--ar',w+'/'+h);var i=f.querySelector('iframe');i.style.setProperty('--w',w+'px');i.style.setProperty('--h',h+'px');i.style.transform='scale('+(f.clientWidth/w)+')'})}
 function load(k){$('f-'+k).src=U(k)}
 function packs(){var cur={l:$('s-el').value===$('s-al').value?$('s-el').value:'',a:$('s-ad').value,e:$('s-ed').value};document.querySelectorAll('.st-pk').forEach(function(b){b.classList.toggle('on',b.dataset.l===cur.l&&b.dataset.a===cur.a&&b.dataset.e===cur.e)})}
-Object.keys(ids).forEach(function(k){$(ids[k]).addEventListener('change',function(){load(k);packs()})});
+Object.keys(ids).forEach(function(k){$(ids[k]).addEventListener('change',function(){load(k);packs()})});Object.keys(lay).forEach(function(k){$(lay[k]).addEventListener('change',function(){load(k)})});
 document.querySelectorAll('.st-pk').forEach(function(b){b.addEventListener('click',function(){$('s-el').value=b.dataset.l;$('s-al').value=b.dataset.l;$('s-ad').value=b.dataset.a;$('s-ed').value=b.dataset.e;Object.keys(ids).forEach(load);packs()})});
 $('st-d').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;dev=b.dataset.v;this.querySelectorAll('button').forEach(function(x){x.classList.toggle('on',x===b)});fit()});
 addEventListener('resize',fit);fit();Object.keys(ids).forEach(load);packs();
@@ -6522,7 +6560,8 @@ addEventListener('resize',fit);fit();Object.keys(ids).forEach(load);packs();
 def _st_cur():
     prefetch("Settings"); _LT_CACHE["t"] = 0.0
     el, al = lt_choice("employee") or "classic", lt_choice("admin") or "classic"
-    return dict(el=el, al=al, ad=design_choice("admin"), ed=design_choice("employee"))
+    ay, ey = (_setting("ui_admin_layout") or "top"), (_setting("ui_emp_layout") or "top")
+    return dict(el=el, al=al, ad=design_choice("admin"), ed=design_choice("employee"), ay=("side" if ay == "side" else "top"), ey=("side" if ey == "side" else "top"))
 
 @app.route("/admin/studio")
 @need("admin")
@@ -6538,11 +6577,14 @@ def admin_studio():
 @need("admin")
 def admin_studio_apply():
     f = request.form; el, al, ad, ed = f.get("employee_login", "classic"), f.get("admin_login", "classic"), f.get("admin_design", "classic"), f.get("employee_design", "classic")
+    ay, ey = f.get("admin_layout", ""), f.get("employee_layout", "")
     if f.get("reset"): el = al = ad = ed = "classic"
     if el not in _LT_IDS + ["classic"] or al not in _LT_IDS + ["classic"] or not _st_design_ok("admin", ad) or not _st_design_ok("employee", ed):
         flash("Please pick a valid option for each part.", "error"); return redirect("/admin/studio")
     try:
         _set_setting(_LT_KEYS["employee"], el); _set_setting(_LT_KEYS["admin"], al); _set_setting("ui_admin_design", ad); _set_setting("ui_emp_design", ed)
+        if ay in ("side", "top") and not f.get("reset"): _set_setting("ui_admin_layout", ay)      # same keys as Theme & Layout (/admin/theme)
+        if ey in ("side", "top") and not f.get("reset"): _set_setting("ui_emp_layout", ey)
     except Exception as ex:
         print("theme studio save error:", repr(ex)); flash("Could not save the theme. Please try again.", "error"); return redirect("/admin/studio")
     _LT_CACHE["t"] = 0.0; session.pop("dz_try", None)

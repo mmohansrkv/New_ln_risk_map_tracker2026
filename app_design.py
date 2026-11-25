@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update303: NEW Admin > /admin/loginbg \"Employee Login Background\" (linked from Theme Studio and Login Layout): an animated 3D TEAM group background for the Employee login page. Six designs (Team Spotlight, Skyline Squad, Team Carousel, Hex Network, Winners' Podium, and Your Team Photo from an https link) with a live preview of the real Employee login (Desktop / Mobile) and a small still preview of each; the Admin applies one, or removes it to return to the current page. Decorative layer only, behind the existing login window - login form, checks, routes and messages unchanged. GPU-only animation, tiny inline artwork, paused when the tab is hidden, off for reduce-motion, lighter on phones. Works with the Classic login and the new Glacier / Emerald / Lavender / Coral login themes.
   * Update302: FIX - the chosen theme / design / layout now shows on EVERY Admin and Employee page, including Daily Quotes, Theme & Layout, Celebrations Log, Theme Studio and Login Layout. Those pages have their own built-in indigo styles that the shared theme CSS could not reach; the active palette now replaces them on all pages (one place, so new pages follow automatically). Theme Studio also re-reads the saved settings after Apply and reports a lost save. Classic / Indigo Night unchanged.
   * Update301: Theme Studio now applies the chosen design to EVERY Admin and Employee page: a new all-pages layer (headings, links, tabs, Back / small buttons, totals, notices, pills, borders, focus rings, details, check boxes, text selection) carries each non-Classic design's colours into every shared component, not only cards / KPIs / tables / main buttons. Studio also sets the page LAYOUT (Left sidebar / Top bar) for Admin and Employee together with the theme (same settings as Theme & Layout), and its page previews show the chosen layout. Classic is untouched.
   * Update300: NEW Admin > /admin/studio \"Theme Studio\" (also linked from Login Layout and Design Studio): preview a look LIVE on the Employee login, Admin login, Admin pages and Employee pages side by side (Desktop / Mobile), pick a ready pack or choose each of the four parts, and apply it to Employee and Admin together (or Reset all to Classic). Four NEW themes - Glacier Light, Emerald Night / Ledger, Lavender Cloud, Coral Sunset / Pop - each as a login skin INSIDE the current login layout (same window, art, characters and sign-in card; only colours, surfaces and 3D accents change) and as an Admin / Employee page design. Nothing existing is changed: Classic stays the current look and default, the Update299 login themes and the Update274 designs are still listed and work as before; credentials, routes, messages, lock / mobile rules and scripts are untouched.
@@ -6666,6 +6667,281 @@ def admin_studio_apply():
         print("theme studio verify error:", repr(ex))
     flash("Theme applied - Employee login, Admin login, Admin pages and Employee pages updated." if not f.get("reset") else "Everything is back to the Classic look.")
     return redirect("/admin/studio")
+
+# ---------------------------------------------------------------- Update303: animated 3D TEAM background for the Employee Login page (/admin/loginbg)
+# Admin picks one of six team backgrounds (live preview of each), or uses an own https team photo with the same cinematic 3D motion, and applies it to the Employee login page.
+# The login form, sign-in route, checks, messages and scripts are NOT touched: a decorative layer (aria-hidden, pointer-events:none) is added BEHIND the existing login window.
+# Performance: pure CSS transform / opacity animation (GPU-composited), small inline SVG (no image download, no extra request), one tiny optional mouse-parallax script (desktop with a
+# mouse only), animation paused while the tab is hidden and switched off for "reduce motion"; fewer effects on phones. Settings: ui_emp_login_bg (+ ui_emp_login_bg_url).
+_TB_SKIN = ["#f1c9a5", "#e2ac80", "#c98a5b", "#9a6238", "#f6d7bd", "#d49a6a"]
+_TB_HAIR = ["#2a1d14", "#4b2e1a", "#15110f", "#6d4326", "#b4692a", "#3a3a3a"]
+_TB_CLOTH = ["#2563eb", "#0ea5e9", "#7c3aed", "#10b981", "#f59e0b", "#ef4444", "#334155", "#ec4899", "#14b8a6"]
+_TB_DEFS = ('<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>'
+            '<linearGradient id="tbSh" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="#fff" stop-opacity=".24"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".34"/></linearGradient>'
+            '<radialGradient id="tbHl" cx=".35" cy=".3" r=".85"><stop offset="0" stop-color="#fff" stop-opacity=".38"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs></svg>')
+
+def _tb_person(i, cloth=None):
+    """One friendly team member (vector, ~1 KB): head, hair style, shoulders / blazer, soft 3D shading."""
+    sk, ha, cl = _TB_SKIN[i % 6], _TB_HAIR[(i * 5 + 1) % 6], cloth or _TB_CLOTH[(i * 7 + 2) % 9]; st = (i * 3 + i // 2) % 4
+    back = ('<path d="M26 44Q26 12 50 12Q74 12 74 44L77 80Q50 70 23 80Z" fill="%s"/>' % ha) if st == 1 else ""
+    top = {0: '<path d="M31 42Q29 18 50 18Q71 18 69 42Q62 28 50 29Q38 28 31 42Z" fill="%s"/>' % ha,
+           1: '<path d="M31 40Q32 20 50 19Q68 20 69 40Q60 27 50 28Q40 27 31 40Z" fill="%s"/>' % ha,
+           2: '<circle cx="50" cy="13" r="8" fill="%s"/><path d="M31 42Q30 19 50 19Q70 19 69 42Q62 29 50 30Q38 29 31 42Z" fill="%s"/>' % (ha, ha),
+           3: '<path d="M31 43Q27 17 52 17Q73 19 69 43Q66 30 56 28Q44 31 31 43Z" fill="%s"/>' % ha}[st]
+    suit = (i % 2 == 0)
+    body = ('<path d="M8 150V114Q8 84 38 80H62Q92 84 92 114V150Z" fill="%s"/>' % cl
+            + ('<path d="M40 80L50 100L60 80Z" fill="#f8fafc"/><path d="M47 88H53L55 112L50 118L45 112Z" fill="#1e293b" opacity=".85"/>' if suit else '<path d="M40 80Q50 92 60 80Z" fill="#fff" opacity=".9"/>')
+            + '<path d="M8 150V114Q8 84 38 80H62Q92 84 92 114V150Z" fill="url(#tbSh)"/>')
+    face = ('<rect x="44" y="64" width="12" height="18" rx="5" fill="%s"/><ellipse cx="50" cy="46" rx="18" ry="21" fill="%s"/>' % (sk, sk)
+            + '<ellipse cx="50" cy="46" rx="18" ry="21" fill="url(#tbHl)"/><circle cx="43" cy="47" r="2" fill="#2b2118"/><circle cx="57" cy="47" r="2" fill="#2b2118"/>'
+            + '<path d="M44 56Q50 62 56 56" fill="none" stroke="#7a3b2e" stroke-width="2" stroke-linecap="round"/>')
+    return '<svg class="tbp" viewBox="0 0 100 150" aria-hidden="true">' + back + body + face + top + '</svg>'
+
+def _tb_w(i, x, y, w, z=0, d=None, cloth=None):
+    d = (-(i * 0.7) % 4.8) if d is None else d
+    return '<div class="tbw" style="--x:%s%%;--y:%s%%;--w:%svmin;--z:%spx"><span style="--d:%.1fs">%s</span></div>' % (x, y, w, z, d, _tb_person(i, cloth))
+
+def _tb_dots(n, seed=7, dx=4):
+    out, r = [], seed
+    for k in range(n):
+        r = (r * 1103515245 + 12345) & 0x7fffffff
+        out.append('<i class="tbd" style="--x:%d%%;--s:%.1fvmin;--t:%ds;--d:-%ds;--dx:%dvmin"></i>' % (r % 96 + 2, 0.5 + (r >> 8) % 8 / 8, 12 + (r >> 4) % 10, (r >> 12) % 14, ((r >> 6) % (dx * 2 + 1)) - dx))
+    return "".join(out)
+
+_TB_COMMON = """
+.tbg{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none;perspective:1000px;perspective-origin:50% 55%;contain:paint;background:#0b1030}
+.tbg *{box-sizing:border-box}.tb-par{position:absolute;inset:0;transform-style:preserve-3d;transition:transform .35s ease-out}
+.tb-st{position:absolute;inset:-6%;transform-style:preserve-3d;animation:tbSway 22s ease-in-out infinite alternate;will-change:transform}
+@keyframes tbSway{from{transform:rotateY(-5deg) rotateX(2deg)}to{transform:rotateY(5deg) rotateX(-1.5deg)}}
+.tbw{position:absolute;left:var(--x);bottom:var(--y);width:var(--w);transform:translateZ(var(--z,0px))}
+.tbw:after{content:"";position:absolute;left:6%;right:6%;bottom:-2%;height:7%;border-radius:50%;background:#0007}
+.tbw span{display:block;animation:tbBob 4.8s ease-in-out infinite alternate;animation-delay:var(--d,0s);will-change:transform}.tbp{display:block;width:100%;height:auto}
+@keyframes tbBob{to{transform:translateY(-1.3vmin) rotate(.7deg)}}
+.tbd{position:absolute;left:var(--x);bottom:-3%;width:var(--s);height:var(--s);border-radius:50%;background:#fff;box-shadow:0 0 1.2vmin #93c5fd;opacity:0;animation:tbRise var(--t) linear infinite;animation-delay:var(--d)}
+@keyframes tbRise{0%{transform:translate3d(0,0,0);opacity:0}15%{opacity:.85}100%{transform:translate3d(var(--dx),-112vh,0);opacity:0}}
+.tb-sw{position:absolute;inset:0;background:linear-gradient(105deg,transparent 40%,#ffffff1c 50%,transparent 60%);transform:translateX(-100%);animation:tbSweep 10s ease-in-out infinite}
+@keyframes tbSweep{to{transform:translateX(100%)}}
+.tb-vg{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 52%,transparent 38%,#000b 100%)}
+.tbg.tb-off *,.tbg.tb-still *{animation-play-state:paused!important}
+.lx.lx-tb{position:relative;z-index:1;background:transparent!important;box-shadow:0 34px 80px -30px #000d,0 0 0 1px #ffffff26!important}
+.lx.lx-tb .lx-bar{background:rgba(8,12,40,.55)!important;border-color:#ffffff22!important}
+.lx.lx-tb .lx-body{background:linear-gradient(160deg,rgba(8,12,40,.30),rgba(24,12,56,.16))!important}
+.lx.lx-tb .lx-cap,.lx.lx-tb .lx-chip{color:#e6ebff!important}.lx.lx-tb .lx-cap span{background:#0b1030a6!important;border-color:#ffffff30!important}
+@media(max-width:700px){.tbw{width:calc(var(--w)*1.55)}.tbd:nth-child(even){display:none}.tb-sw{display:none}.tb-st{animation-duration:30s}}
+@media(prefers-reduced-motion:reduce){.tbg *{animation:none!important}}
+"""
+_TB_JS = ("<script>(function(){var g=document.querySelector('.tbg'),p=g&&g.querySelector('.tb-par');if(!p)return;document.addEventListener('visibilitychange',function(){g.classList.toggle('tb-off',document.hidden)});"
+          "if(!matchMedia('(hover:hover) and (pointer:fine)').matches||matchMedia('(prefers-reduced-motion:reduce)').matches||g.classList.contains('tb-still'))return;var r=0,x=0,y=0;"
+          "addEventListener('pointermove',function(e){x=e.clientX/innerWidth-.5;y=e.clientY/innerHeight-.5;if(!r)r=requestAnimationFrame(function(){r=0;p.style.transform='rotateY('+(x*5).toFixed(2)+'deg) rotateX('+(-y*3).toFixed(2)+'deg) translate3d('+(-x*14).toFixed(1)+'px,'+(-y*10).toFixed(1)+'px,0)'})},{passive:true})})();</script>")
+
+def _tb_skyline(seed, n, hmin, hmax, fill):
+    r, x, rects = seed, 0.0, []
+    while x < 100:
+        r = (r * 1103515245 + 12345) & 0x7fffffff; w = 3 + (r % 40) / 10; h = hmin + (r >> 8) % (hmax - hmin)
+        rects.append('<rect x="%.1f" y="%d" width="%.1f" height="%d"/>' % (x, 100 - h, w - .3, h)); x += w
+    return '<svg viewBox="0 0 100 100" preserveAspectRatio="none" fill="%s" aria-hidden="true">%s</svg>' % (fill, "".join(rects))
+
+_TB_SCENES = {
+ "spotlight": ("Team Spotlight", "Whole team on a 3D stage with sweeping light beams",
+  """.tbg-spotlight{background:radial-gradient(80% 70% at 50% 35%,#1e3a8a 0,#0b1030 72%)}
+.tbg-spotlight .tb-bm{position:absolute;left:50%;top:-12%;width:64vmin;height:125%;margin-left:-32vmin;transform-origin:50% 0;background:linear-gradient(#bfdbfe88,transparent 82%);clip-path:polygon(44% 0,56% 0,100% 100%,0 100%);animation:tbBeam 9s ease-in-out infinite alternate}
+.tbg-spotlight .tb-bm.b2{animation-direction:alternate-reverse;opacity:.7;background:linear-gradient(#fde68a77,transparent 80%)}
+@keyframes tbBeam{from{transform:rotate(-20deg)}to{transform:rotate(20deg)}}
+.tbg-spotlight .tb-fl{position:absolute;left:4%;right:4%;bottom:2%;height:28%;border-radius:50%;background:radial-gradient(ellipse,#60a5fa66,transparent 70%);transform:translateZ(-30px)}""",
+  lambda: '<i class="tb-bm"></i><i class="tb-bm b2"></i><i class="tb-fl"></i>' + "".join(_tb_w(i, x, 20, 17, -70) for i, x in enumerate((1, 14.5, 28, 41.5, 55, 68.5, 82)))
+          + "".join(_tb_w(i + 7, x, 0, 24, 80) for i, x in enumerate((3, 22, 41, 60, 79))) + _tb_dots(14)),
+ "skyline": ("Skyline Squad", "Sunset city skyline with parallax depth behind the team",
+  """.tbg-skyline{background:linear-gradient(#1e1b4b 0%,#7e22ce 38%,#f43f5e 70%,#fdba74 100%)}
+.tbg-skyline .tb-sun{position:absolute;left:62%;top:30%;width:34vmin;height:34vmin;border-radius:50%;background:radial-gradient(circle,#fef9c3 0,#fde047 40%,#fb923c 70%,transparent 72%);transform:translateZ(-200px);animation:tbPulse 6s ease-in-out infinite alternate}
+@keyframes tbPulse{to{transform:translateZ(-200px) scale(1.08)}}
+.tbg-skyline .tb-sk{position:absolute;left:-8%;width:116%;bottom:12%;animation:tbDrift 26s ease-in-out infinite alternate}.tbg-skyline .tb-sk svg{display:block;width:100%;height:100%}
+.tbg-skyline .tb-sk.f{height:34%;opacity:.55;transform:translateZ(-160px)}.tbg-skyline .tb-sk.n{height:26%;bottom:6%;transform:translateZ(-60px);animation-duration:20s;animation-direction:alternate-reverse}
+@keyframes tbDrift{to{margin-left:4%}}""",
+  lambda: ('<i class="tb-sun"></i><div class="tb-sk f">' + _tb_skyline(11, 0, 30, 90, "#4c1d95") + '</div><div class="tb-sk n">' + _tb_skyline(29, 0, 25, 80, "#1e1b4b") + '</div>'
+           + "".join(_tb_w(i + 2, x, 1, 19, 70) for i, x in enumerate((1, 13, 25, 37, 49, 61, 73, 85))) + _tb_dots(10, 3))),
+ "carousel": ("Team Carousel", "A rotating 3D ring of team members on a glowing stage",
+  """.tbg-carousel{background:radial-gradient(70% 70% at 50% 45%,#4c1d95 0,#1e1b4b 55%,#0b0820 100%)}
+.tbg-carousel .tb-rg{position:absolute;left:50%;top:50%;width:0;height:0;transform-style:preserve-3d;transform:translateY(8%) rotateX(-12deg)}
+.tbg-carousel .tb-rs{transform-style:preserve-3d;animation:tbSpin 32s linear infinite;will-change:transform}@keyframes tbSpin{to{transform:rotateY(360deg)}}
+.tbg-carousel .tbc{position:absolute;width:17vmin;left:-8.5vmin;top:-13vmin;transform:rotateY(calc(var(--i)*45deg)) translateZ(min(46vmin,38vw))}
+.tbg-carousel .tbu{animation:tbUn 32s linear infinite;will-change:transform}@keyframes tbUn{from{transform:rotateY(calc(var(--i)*-45deg))}to{transform:rotateY(calc(var(--i)*-45deg - 360deg))}}
+.tbg-carousel .tb-dc{position:absolute;left:50%;top:70%;width:118vmin;height:118vmin;margin:-59vmin 0 0 -59vmin;border-radius:50%;background:conic-gradient(#a78bfa44,#22d3ee22,#f472b644,#a78bfa44);box-shadow:inset 0 0 0 .5vmin #c4b5fd55;animation:tbDisc 24s linear infinite}
+@keyframes tbDisc{from{transform:rotateX(74deg) rotateZ(0)}to{transform:rotateX(74deg) rotateZ(360deg)}}
+@media(max-width:700px){.tbg-carousel .tb-rg{top:88%;transform:rotateX(-10deg)}.tbg-carousel .tbc{width:25vmin;left:-12.5vmin;top:-19vmin;transform:rotateY(calc(var(--i)*45deg)) translateZ(min(40vmin,38vw))}.tbg-carousel .tb-dc{top:90%}}""",
+  lambda: '<i class="tb-dc"></i><div class="tb-rg"><div class="tb-rs">' + "".join('<div class="tbc" style="--i:%d"><div class="tbu" style="--i:%d"><span style="--d:%.1fs">%s</span></div></div>' % (i, i, -i * 0.6, _tb_person(i + 3)) for i in range(8)) + '</div></div>' + _tb_dots(12, 5)),
+ "hex": ("Hex Network", "Floating hexagon avatars - a connected, collaborating team",
+  """.tbg-hex{background:radial-gradient(90% 80% at 50% 40%,#134e4a 0,#042f2e 62%,#021615 100%)}
+.tbg-hex .tb-hx{position:absolute;left:50%;top:48%;width:0;height:0;transform-style:preserve-3d;transform:rotateX(50deg) rotateZ(-20deg);animation:tbHx 26s ease-in-out infinite alternate;will-change:transform}
+@keyframes tbHx{from{transform:rotateX(48deg) rotateZ(-30deg)}to{transform:rotateX(58deg) rotateZ(-10deg)}}
+.tbg-hex .tbh{position:absolute;left:calc(var(--x)*1vmin);top:calc(var(--y)*1vmin);width:27vmin;height:31vmin;margin:-15.5vmin 0 0 -13.5vmin;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:linear-gradient(135deg,var(--c1),var(--c2));animation:tbHp 4.5s ease-in-out infinite;animation-delay:var(--d)}
+@keyframes tbHp{50%{transform:translateZ(6vmin)}}
+.tbg-hex .tbh i{position:absolute;inset:.45vmin;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:#06201f}
+.tbg-hex .tbh span{position:absolute;left:14%;right:14%;bottom:2%;display:block}
+@media(max-width:700px){.tbg-hex .tb-hx{top:90%;transform:rotateX(52deg) rotateZ(-20deg) scale(.7)}@keyframes tbHx{from{transform:rotateX(48deg) rotateZ(-30deg) scale(.7)}to{transform:rotateX(58deg) rotateZ(-10deg) scale(.7)}}}""",
+  lambda: '<div class="tb-hx">' + "".join('<div class="tbh" style="--x:%s;--y:%s;--c1:%s;--c2:%s;--d:%.1fs"><i></i><span>%s</span></div>' % (x, y, c1, c2, -k * 0.7, _tb_person(k + 1))
+          for k, (x, y, c1, c2) in enumerate(((-14, -24.2, "#2dd4bf", "#22d3ee"), (14, -24.2, "#a3e635", "#2dd4bf"), (-42, -24.2, "#fde047", "#fb923c"), (42, -24.2, "#60a5fa", "#2dd4bf"),
+          (-28, 0, "#22d3ee", "#60a5fa"), (0, 0, "#fde047", "#fb923c"), (28, 0, "#2dd4bf", "#a3e635"), (-56, 0, "#a3e635", "#22d3ee"), (56, 0, "#f472b6", "#a78bfa"),
+          (-14, 24.2, "#60a5fa", "#2dd4bf"), (14, 24.2, "#22d3ee", "#a3e635"), (-42, 24.2, "#2dd4bf", "#fde047"), (42, 24.2, "#fb923c", "#f472b6")))) + '</div>' + _tb_dots(12, 9)),
+ "podium": ("Winners' Podium", "The team celebrating on a golden podium with confetti",
+  """.tbg-podium{background:radial-gradient(80% 70% at 50% 30%,#312e81,#0b1030 76%)}
+.tbg-podium .tb-bm{position:absolute;top:-10%;width:40vmin;height:120%;margin-left:-20vmin;transform-origin:50% 0;background:linear-gradient(#fde68a77,transparent 80%);clip-path:polygon(42% 0,58% 0,100% 100%,0 100%);animation:tbBm2 8s ease-in-out infinite alternate}
+@keyframes tbBm2{from{transform:rotate(-14deg)}to{transform:rotate(14deg)}}
+.tbg-podium .tb-pd{position:absolute;bottom:0;width:21%;border-radius:.8vmin .8vmin 0 0;background:linear-gradient(#fbbf24,#b45309);box-shadow:inset 0 1vmin 0 #fde68a;transform:translateZ(20px)}
+.tbg-podium .tbk{position:absolute;top:-6%;left:var(--x);width:1.2vmin;height:2.4vmin;background:var(--c);opacity:.9;animation:tbFall var(--t) linear infinite;animation-delay:var(--d)}
+@keyframes tbFall{from{transform:translate3d(0,0,0) rotate(0)}to{transform:translate3d(var(--dx),115vh,0) rotate(540deg)}}""",
+  lambda: ('<i class="tb-bm" style="left:25%"></i><i class="tb-bm" style="left:75%;animation-direction:alternate-reverse"></i>'
+           '<div class="tb-pd" style="left:6%;height:22%"></div><div class="tb-pd" style="left:39.5%;height:32%"></div><div class="tb-pd" style="left:73%;height:17%"></div>'
+           + _tb_w(1, 9, 22, 19, 40) + _tb_w(4, 42.5, 32, 19, 40) + _tb_w(7, 76, 17, 19, 40)
+           + "".join(_tb_w(i + 2, x, 0, 17, 90) for i, x in enumerate((-2, 30, 64, 90)))
+           + "".join('<i class="tbk" style="--x:%d%%;--c:%s;--t:%ds;--d:-%ds;--dx:%dvmin"></i>' % ((k * 37) % 98, ("#fbbf24", "#f472b6", "#22d3ee", "#a3e635", "#fff")[k % 5], 7 + k % 5, k % 9, (k % 7) - 3) for k in range(22)))),
+}
+_TB_PHOTO = ("Your Team Photo", "Use your own team photo (https link) with the same cinematic 3D motion",
+  """.tbg-photo{background:radial-gradient(80% 70% at 50% 35%,#1e3a8a 0,#0b1030 72%)}
+.tbg-photo .tb-ph{position:absolute;inset:-6%;background:var(--img) center/cover no-repeat;animation:tbKen 28s ease-in-out infinite alternate;transform-origin:50% 40%;will-change:transform}
+@keyframes tbKen{from{transform:scale(1.04) translate3d(-1.5%,0,0)}to{transform:scale(1.16) translate3d(1.5%,-1.5%,0)}}
+.tbg-photo .tb-tn{position:absolute;inset:0;background:linear-gradient(160deg,#1d4ed855,#7c3aed44 55%,#0b103099)}
+.tbg-photo .tb-gl{position:absolute;width:20vmin;height:23vmin;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:linear-gradient(135deg,#ffffff44,#ffffff10);animation:tbBob 6s ease-in-out infinite alternate;transform:translateZ(120px)}""")
+_TB_IDS = list(_TB_SCENES) + ["photo"]
+_TB_NAMES = {k: (v[0], v[1]) for k, v in _TB_SCENES.items()}; _TB_NAMES["photo"] = (_TB_PHOTO[0], _TB_PHOTO[1])
+_TB_URL_RE = re.compile(r"https://[A-Za-z0-9._~:/?#\[\]@!$&*+,;=%-]{4,480}")
+
+def _tb_url_ok(u): return bool(u) and bool(_TB_URL_RE.fullmatch(u))
+
+def _tb_layer(bg, url="", still=False, js=True):
+    """-> (css, html) of the decorative background layer; safe to place inside a Jinja template."""
+    if bg == "photo":
+        css = _TB_COMMON + _TB_PHOTO[2]
+        inner = '<i class="tb-ph" style="--img:url(&quot;%s&quot;)"></i><i class="tb-tn"></i><i class="tb-gl" style="left:6%%;top:14%%"></i><i class="tb-gl" style="right:7%%;bottom:12%%;width:14vmin;height:16vmin;animation-delay:-2s"></i>' % (url.replace("&", "&amp;") if _tb_url_ok(url) else "") + _tb_dots(12, 4)
+        if not _tb_url_ok(url): inner = _tb_dots(12, 4)
+    else:
+        name, note, scss, fn = _TB_SCENES[bg]; css = _TB_COMMON + scss; inner = fn()
+    html = '<div class="tbg tbg-%s%s" aria-hidden="true">%s<div class="tb-par"><div class="tb-st">%s</div></div><i class="tb-sw"></i><i class="tb-vg"></i></div>%s' % (bg, " tb-still" if still else "", _TB_DEFS, inner, _TB_JS if js else "")
+    css = re.sub(r"\s*\n\s*", "", css)
+    for x in (css, html): assert "{{" not in x and "{%" not in x and "{#" not in x
+    return css, html
+
+_TB_CACHE = {"t": 0.0, "v": ("", "")}
+_TB_TPL = {}
+def _tb_choice():
+    """-> (background id, photo url) for the Employee login page; ('', '') = no team background (the existing page, unchanged; also on any error)."""
+    try:
+        now = time.time()
+        if now - _TB_CACHE["t"] > 30:
+            _TB_CACHE["v"] = ((_setting("ui_emp_login_bg") or "").strip(), (_setting("ui_emp_login_bg_url") or "").strip()); _TB_CACHE["t"] = now
+        bg, url = _TB_CACHE["v"]
+        return (bg, url) if bg in _TB_IDS else ("", "")
+    except Exception as ex:
+        print("login background lookup failed (existing page used):", repr(ex)); return ("", "")
+
+def _tb_apply(tpl, bg, url=""):
+    if not bg or bg not in _TB_IDS or '<div class="lx ' not in tpl: return tpl      # themes that are their own full-screen page (Update299) keep their own look
+    k = (hash(tpl), bg, url if bg == "photo" else "")
+    if k not in _TB_TPL:
+        css, html = _tb_layer(bg, url)
+        _TB_TPL[k] = tpl.replace('<div class="lx ', '<style id="tb303">' + css + '</style>' + html + '<div class="lx lx-tb ', 1)
+    return _TB_TPL[k]
+
+_login_tpl_u302 = login_tpl
+def login_tpl(role):
+    tpl = _login_tpl_u302(role)
+    if role != "employee": return tpl
+    bg, url = _tb_choice()
+    return _tb_apply(tpl, bg, url) if bg else tpl
+
+def _tb_base_tpl():
+    tid = lt_choice("employee")
+    if tid in _LTS_CSS: return _lts_template(tid)
+    if "classic" not in _LTS_TPL: _LTS_TPL["classic"] = _lts_prep(LOGIN)
+    return _LTS_TPL["classic"]
+
+@app.route("/admin/loginbg/preview")
+@need("admin")
+def admin_loginbg_preview():
+    """Live preview: the REAL Employee login page (same form, current Employee login theme) with the chosen team background."""
+    bg = request.args.get("bg", ""); url = request.args.get("url", "").strip()
+    tpl = _tb_apply(_tb_base_tpl(), bg, url) if bg in _TB_IDS else _tb_base_tpl()
+    body = render_fast(tpl, role="employee", title="Employee login", ph="Employee ID or Email", u="", lxg="", preview=True)
+    html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Preview</title></head><body style="margin:0;background:#050a1e">' + body + '</body></html>'
+    resp = Response(html, mimetype="text/html"); resp.headers["Cache-Control"] = "no-store"; return resp
+
+@app.route("/admin/loginbg/thumb")
+@need("admin")
+def admin_loginbg_thumb():
+    bg = request.args.get("bg", ""); url = request.args.get("url", "").strip()
+    if bg not in _TB_IDS: abort(404)
+    css, html = _tb_layer(bg, url, still=(request.args.get("still") == "1"), js=False)
+    doc = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;height:100%;overflow:hidden;background:#050a1e}.tbg{position:fixed}' + css + '</style></head><body>' + html + '</body></html>'
+    resp = Response(doc, mimetype="text/html"); resp.headers["Cache-Control"] = "no-store"; return resp
+
+TB_PAGE = r"""<style>
+.tb-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin:10px 0}
+.tb-c{border:2px solid #d5d8f0;background:#fff;border-radius:14px;padding:8px;cursor:pointer;text-align:left;font:inherit;color:inherit;display:block;width:100%}.tb-c.on{border-color:#4f46e5;box-shadow:0 10px 22px -12px #4f46e5}
+.tb-c b{display:block;font-size:13px;margin:8px 4px 0}.tb-c small{display:block;font-size:11px;color:#6a7194;margin:0 4px 2px}
+.tb-t{position:relative;overflow:hidden;border-radius:9px;height:118px;background:#0b1030}.tb-t iframe{position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none}
+.tb-n{display:grid;place-items:center;height:100%;color:#cfd4ff;font-size:12px;text-align:center;padding:8px;background:linear-gradient(135deg,#312e81,#0b1030)}
+.tb-seg{display:inline-flex;border:1px solid #c9cdea;border-radius:12px;padding:3px;background:#fff;margin:6px 0}.tb-seg button{border:0;background:0;font:500 13px inherit;padding:8px 16px;border-radius:9px;cursor:pointer;color:#555b85}.tb-seg button.on{background:#4f46e5;color:#fff}
+.tb-stg{margin:0 auto;border-radius:14px;overflow:hidden;box-shadow:0 24px 50px -28px #000a;background:#0b1030;position:relative;width:100%;max-width:100%}.tb-stg iframe{border:0;display:block;background:#0b1030;transform-origin:0 0;position:absolute;left:0;top:0}
+.tb-url{display:none;margin:8px 0}.tb-url.on{display:block}.tb-url input{width:100%;max-width:640px}.tb-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0}
+.tb-warn{background:#fff4e5;border:1px solid #ffd59a;color:#7a4b00;border-radius:10px;padding:10px 14px;margin:8px 0}
+</style>
+<div class="head"><div><h1>Employee Login Background</h1><p class="mut">Add an animated <b>3D team group</b> behind the <b>Employee login</b> window. Pick a background, watch it live, then apply. The login form, sign-in checks and messages are not touched - the picture is a decorative layer behind the existing window. <a href="/admin/studio">Theme Studio</a> &middot; <a href="/admin/layoutlogin">Login Layout</a></p></div></div>
+{% if unsupported %}<div class="tb-warn">The Employee login currently uses <b>{{cur_login}}</b>, a full-screen theme with its own scene, so a team background cannot show behind it. Choose <b>Classic</b> or one of the new themes (Glacier, Emerald, Lavender, Coral) in <a href="/admin/studio">Theme Studio</a> to use a team background. The preview below shows it on the Classic login.</div>{% endif %}
+<form method="post" action="/admin/loginbg/apply" id="tbf" class="card">
+<p class="mut" style="margin:0 0 6px">Applied now: <b>{{cur_name}}</b></p>
+<h2 style="margin:6px 0 0">1. Pick a team background</h2>
+<div class="tb-g">
+<label class="tb-c" data-id=""><input type="radio" name="bg" value="" hidden {{'checked' if not cur else ''}}><div class="tb-t"><div class="tb-n">Current login page<br>(no team background)</div></div><b>None (current)</b><small>Exactly as it is today</small></label>
+{% for o in options %}<label class="tb-c" data-id="{{o.id}}"><input type="radio" name="bg" value="{{o.id}}" hidden {{'checked' if o.id==cur else ''}}><div class="tb-t">{% if o.id!='photo' %}<iframe loading="lazy" title="{{o.name}}" src="/admin/loginbg/thumb?bg={{o.id}}&still=1"></iframe>{% else %}<div class="tb-n">Your own team photo<br>+ 3D motion</div>{% endif %}</div><b>{{o.name}}{% if o.id==cur %} <span class="pill in">Applied</span>{% endif %}</b><small>{{o.note}}</small></label>{% endfor %}
+</div>
+<div class="tb-url" id="tb-url"><label style="font-size:12px;font-weight:600;color:#555b85">Team photo link (https://...) - a wide, high-resolution group photo works best</label><br><input type="url" name="url" id="tb-u" value="{{cur_url}}" placeholder="https://example.com/our-team.jpg" maxlength="480"></div>
+<h2 style="margin:10px 0 0">2. Live preview <span class="mut" style="font-size:12px;font-weight:400">(the real Employee login page, animated)</span></h2>
+<div class="tb-seg" id="tb-d"><button type="button" data-v="d" class="on">Desktop</button><button type="button" data-v="m">Mobile</button></div>
+<div class="tb-stg" id="tb-s"><iframe id="tb-f" title="Employee login preview"></iframe></div>
+<div class="tb-bar"><button class="primary" type="submit">Apply to Employee login</button><button class="back" type="submit" name="clear" value="1">Remove background (back to current)</button></div>
+<p class="mut">Smooth by design: only GPU transform / opacity animation, tiny inline artwork (no image download unless you use your own photo), paused while the tab is hidden, switched off for "reduce motion", and lighter on phones. Employees see the change on their next page load (within about 30 seconds).</p>
+</form>
+<script>(function(){var f=document.getElementById('tbf'),fr=document.getElementById('tb-f'),st=document.getElementById('tb-s'),dev='d',tm=0;
+function cur(){var r=f.querySelector('input[name=bg]:checked');return r?r.value:''}
+function src(){var b=cur();if(!b)return '/admin/loginbg/preview';return '/admin/loginbg/preview?bg='+encodeURIComponent(b)+(b==='photo'?'&url='+encodeURIComponent(document.getElementById('tb-u').value):'')}
+function fit(){var w=dev==='m'?390:1000,h=dev==='m'?800:620,k=Math.min(1,st.clientWidth/w);if(dev==='m'){st.style.maxWidth='300px';k=st.clientWidth/w}else st.style.maxWidth='100%';k=st.clientWidth/w;st.style.height=(h*k)+'px';fr.style.width=w+'px';fr.style.height=h+'px';fr.style.transform='scale('+k+')'}
+function mark(){f.querySelectorAll('.tb-c').forEach(function(c){c.classList.toggle('on',c.dataset.id===cur())});document.getElementById('tb-url').classList.toggle('on',cur()==='photo')}
+function load(){fr.src=src()}
+f.addEventListener('change',function(e){if(e.target.name==='bg'){mark();load()}});
+document.getElementById('tb-u').addEventListener('input',function(){clearTimeout(tm);tm=setTimeout(function(){if(cur()==='photo')load()},600)});
+document.getElementById('tb-d').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;dev=b.dataset.v;this.querySelectorAll('button').forEach(function(x){x.classList.toggle('on',x===b)});fit()});
+addEventListener('resize',fit);mark();fit();load();})();</script>"""
+
+@app.route("/admin/loginbg")
+@need("admin")
+def admin_loginbg():
+    prefetch("Settings"); _TB_CACHE["t"] = 0.0; _LT_CACHE["t"] = 0.0
+    cur, url = _tb_choice(); tid = lt_choice("employee")
+    nm = {t["id"]: t["name"] for t in LT_THEMES}
+    options = [dict(id=k, name=v[0], note=v[1]) for k, v in _TB_NAMES.items()]
+    return page(TB_PAGE, title="Employee Login Background", options=options, cur=cur, cur_url=url, cur_name=(_TB_NAMES[cur][0] if cur in _TB_NAMES else "None (current login page)"),
+                unsupported=bool(tid and tid not in _LTS_CSS), cur_login=nm.get(tid, "the current theme"))
+
+@app.route("/admin/loginbg/apply", methods=["POST"])
+@need("admin")
+def admin_loginbg_apply():
+    bg = request.form.get("bg", "").strip(); url = request.form.get("url", "").strip()
+    if request.form.get("clear"): bg, url = "", ""
+    if bg and bg not in _TB_IDS: flash("Please pick one of the backgrounds.", "error"); return redirect("/admin/loginbg")
+    if bg == "photo" and not _tb_url_ok(url): flash("Enter the team photo link, starting with https:// (no spaces or quotes).", "error"); return redirect("/admin/loginbg")
+    try:
+        _set_setting("ui_emp_login_bg", bg); _set_setting("ui_emp_login_bg_url", url if bg == "photo" else "")
+    except Exception as ex:
+        print("login background save error:", repr(ex)); flash("Could not save. Please try again.", "error"); return redirect("/admin/loginbg")
+    _TB_CACHE["t"] = 0.0
+    try:
+        if _setting("ui_emp_login_bg", fresh=True) != bg: flash("Saved, but it could not be confirmed yet. Please press Apply again.", "error"); return redirect("/admin/loginbg")
+    except Exception as ex:
+        print("login background verify error:", repr(ex))
+    flash("Employee login background applied: %s." % (_TB_NAMES[bg][0] if bg else "none - the current login page") )
+    return redirect("/admin/loginbg")
+
+LT_PAGE = LT_PAGE.replace('<a href="/admin/studio"><b>Theme Studio</b></a> applies', '<a href="/admin/loginbg"><b>Employee Login Background</b></a> adds an animated 3D team picture. <a href="/admin/studio"><b>Theme Studio</b></a> applies', 1)
+ST_PAGE = ST_PAGE.replace('<p class="mut">Page previews are sample pages', '<p class="mut">An animated 3D team picture for the Employee login: <a href="/admin/loginbg"><b>Employee Login Background</b></a>. Page previews are sample pages', 1)
 
 TABLE = """<div class="card"><h2>{{title}}</h2>
 <form method="post" class="grid">{% for h in heads %}{% if h not in locked %}<input name="f{{loop.index0}}" placeholder="{{h}}{% if h=='Target count / hour' %} (count in 1 hr, e.g. 1000){% endif %}"{% if h not in optional %} required{% endif %}>{% endif %}{% endfor %}

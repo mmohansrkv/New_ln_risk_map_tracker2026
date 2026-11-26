@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update307: Employee profile pictures are now ALSO stored in the Google Sheet (new sheets Employee Photo Index / Employee Photo Data, created automatically) and restored to PHOTO_DIR automatically, so they no longer disappear when the server disk is wiped by a restart / redeploy (pictures already on disk are backed up at start-up). Meet The Team: Employee ID shown on every card and in the details panel; optional Instagram / Facebook / LinkedIn / Twitter (X) / Website fields (Personal details, Employee + Admin; new Employees columns added automatically) shown as icons ONLY when filled; empty details are not shown at all; Resigned / NCNS employees are now listed too (last, with a status badge). Nothing else changed.
   * Update305: Render deployment - start command is gunicorn <this file name without .py>:app (Flask variable \"app\"); optional GOOGLE_CREDS_JSON env variable (service-account JSON) when no credentials file is present; local run honours PORT. requirements.txt added. No other change.
   * Update306: NEW \"Meet The Team\" tab on the Employee page (menu item for every signed-in employee, /employee/team): the same Meet The Team layout - profile pictures with name and designation under each, click a picture for Name, Office Email ID, Phone Number and Designation; photos served to signed-in employees at /employee/team/photo/<id>; locked / Resigned / NCNS employees are hidden from it. /admin/team is unchanged and still Admin only.
   * Update304: NEW employee profile pictures (Admin uploads them on Employee Info or an employee's Personal Details tab; saved as real files in the PHOTO_DIR folder, default \"employee_photos\" next to this file) shown with Name and Designation on All Employees, and a new Admin-only Team page (/admin/team, last item of the Log menu) in the \"Meet The Team\" layout: clicking a picture shows Profile Picture, Name, Office Email ID, Phone Number and Designation. Logins and every other page are unchanged.
@@ -567,7 +568,8 @@ HEADERS = {
     "Employees": ["Employee ID", "Name", "Band", "Email", "Password",
                   "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                   "Emergency no", "Personal Email ID", "Office Email ID", "Designation", "Profile updated at", "Gender",
-                  "Account locked", "Joining date", "Profile Name", "Separation status", "Relieving date"],      # Update252: "Separation status" = Resigned / NCNS and "Relieving date" are set by the Admin only (setting either also sets "Account locked" = Yes).      # Update225: "Profile Name" = nickname shown under the 3D character on the Employee login page. Update96: "Account locked" = Yes / blank; Update97: "Joining date" (YYYY-MM-DD, set by Admin in Employee Info)
+                  "Account locked", "Joining date", "Profile Name", "Separation status", "Relieving date",
+                  "Instagram", "Facebook", "LinkedIn", "Twitter (X)", "Website"],      # Update307: optional social links (Meet The Team).      # Update252: "Separation status" = Resigned / NCNS and "Relieving date" are set by the Admin only (setting either also sets "Account locked" = Yes).      # Update225: "Profile Name" = nickname shown under the 3D character on the Employee login page. Update96: "Account locked" = Yes / blank; Update97: "Joining date" (YYYY-MM-DD, set by Admin in Employee Info)
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour", "Target count / 8 hrs"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Target Count", "Productivity %",
@@ -609,6 +611,9 @@ HEADERS = {
     # Update275: attachments of Notes & Messages (index = one row per file; data = the file cut into base64 pieces, one piece per row)
     "Note Attachment Index": ["Attachment ID", "Note ID", "Name", "Kind", "Mime", "Size", "Parts", "Uploaded at", "Status"],
     "Note Attachment Data": ["Attachment ID", "Part", "Data"],
+    # Update307: permanent copy of the employee profile pictures (index = newest row per employee wins; data = base64 pieces)
+    "Employee Photo Index": ["Employee ID", "Version", "Ext", "Parts", "Size", "Updated at", "Status"],
+    "Employee Photo Data": ["Employee ID", "Version", "Part", "Data"],
     # Update260: Admin > Notes & Messages > Celebrations (animations on the Employee page)
     "Celebrations": ["Celebration ID", "Created at", "Occasion", "Title", "Message", "Effect", "Intensity", "Duration sec", "Frequency", "Audience", "Recipients", "Display from", "Stop at", "Status", "Created by", "Updated at"],
     "Celebration Seen": ["Celebration ID", "Employee ID", "Employee name", "Seen at"],
@@ -639,12 +644,14 @@ HEADERS = {
     "Mahizhchi Connection Attempts": ["Employee ID", "Employee name", "Game", "Started at", "Closed at", "Solved", "Mistakes", "Result", "Extra seconds"],
 }
 PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
-                    "Emergency no", "Personal Email ID", "Office Email ID", "Profile Name"]
+                    "Emergency no", "Personal Email ID", "Office Email ID", "Profile Name",
+                    "Instagram", "Facebook", "LinkedIn", "Twitter (X)", "Website"]      # Update307: last five are optional social links
 # Office Email ID is not typed by anyone: it always mirrors the employee's login Email.
 EDITABLE_PERSONAL = [f for f in PERSONAL_FIELDS if f != "Office Email ID"]
 # Address Line_2 (flat / landmark / area) is genuinely optional, so a blank one must not make a profile
 # "incomplete". Everything else the employee can edit is required.
-OPTIONAL_PERSONAL = {"Address Line_2", "Profile Name"}
+SOCIAL_FIELDS = ["Instagram", "Facebook", "LinkedIn", "Twitter (X)", "Website"]      # Update307
+OPTIONAL_PERSONAL = {"Address Line_2", "Profile Name"} | set(SOCIAL_FIELDS)
 REQUIRED_PERSONAL = [f for f in EDITABLE_PERSONAL if f not in OPTIONAL_PERSONAL]
 # Gender is admin-only: employees never see or submit it on their own Personal details page,
 # so it must not appear as an editable/required field there.
@@ -10863,6 +10870,11 @@ PROFILE = """<div class="card"><h2>Personal details</h2>
 <label>Personal Email ID<input type="email" name="Personal Email ID" value="{{emp['Personal Email ID']}}"></label>
 <label>Office Email ID<input value="{{emp['Email']}}" readonly></label>
 <label title="Shown below the 3D character on the login page. Leave blank to show your full name.">Profile Name<input name="Profile Name" maxlength="40" value="{{emp['Profile Name']}}" placeholder="Your nickname"></label>
+<label title="Optional - shown on Meet The Team only when filled">Instagram<input name="Instagram" maxlength="200" value="{{emp['Instagram']}}" placeholder="@name or link (optional)"></label>
+<label title="Optional - shown on Meet The Team only when filled">Facebook<input name="Facebook" maxlength="200" value="{{emp['Facebook']}}" placeholder="name or link (optional)"></label>
+<label title="Optional - shown on Meet The Team only when filled">LinkedIn<input name="LinkedIn" maxlength="200" value="{{emp['LinkedIn']}}" placeholder="name or link (optional)"></label>
+<label title="Optional - shown on Meet The Team only when filled">Twitter (X)<input name="Twitter (X)" maxlength="200" value="{{emp['Twitter (X)']}}" placeholder="@name or link (optional)"></label>
+<label title="Optional - shown on Meet The Team only when filled">Website<input name="Website" maxlength="200" value="{{emp['Website']}}" placeholder="https://... (optional)"></label>
 <button class="primary sm">Save</button> <button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='/employee'">Back</button></form>
 <p class="mut" style="margin-top:10px">Last updated: {{(emp['Profile updated at'] or '-')|t12}}</p></div>
 <div class="card"><h2>Change password</h2>
@@ -10936,6 +10948,19 @@ def my_emp_row_uncached():
     if not r: abort(404)
     return r
 
+_SOCIAL_BASE = {"Instagram": "https://www.instagram.com/", "Facebook": "https://www.facebook.com/", "LinkedIn": "https://www.linkedin.com/in/", "Twitter (X)": "https://x.com/"}
+def social_clean(field, v):
+    """Update307: turn what was typed into a safe https link ('' when empty / not usable). Handles (@name) become the network's profile link; javascript: / data: etc. are refused."""
+    v = re.sub(r"[\x00-\x1f\x7f<>\"'\s]", "", str(v or ""))[:200]
+    if not v: return ""
+    if re.match(r"^https?://", v, re.I): return v
+    if re.match(r"^[a-z][a-z0-9+.\-]*:(?!\d)", v, re.I): return ""
+    base = _SOCIAL_BASE.get(field)
+    is_url = bool(re.search(r"(^www\.|instagram\.com|facebook\.com|fb\.com|fb\.me|linkedin\.com|lnkd\.in|twitter\.com|x\.com)", v, re.I)) or "/" in v
+    if base and not is_url: return base + v.lstrip("@")
+    if "." not in v: return ""
+    return "https://" + v.lstrip("/")
+
 def save_employee_row(row, emp_id, changes):
     """Write changes to one Employees row. Re-reads the row fresh from the sheet (so nothing another
     person just changed is overwritten), writes RAW (so IDs, passwords, phone numbers and PINs are
@@ -10948,6 +10973,7 @@ def save_employee_row(row, emp_id, changes):
         invalidate_cache("Employees"); return False
     for k, v in changes.items():
         if k == "Profile Name": v = re.sub(r"\s+", " ", re.sub(r"[\x00-\x1f\x7f<>]", " ", str(v))).strip()[:40]      # Update225: plain short nickname only
+        if k in SOCIAL_FIELDS: v = social_clean(k, v)      # Update307
         cur[heads.index(k)] = v
     cur[heads.index("Office Email ID")] = cur[heads.index("Email")]      # always mirrors the login email
     cur[heads.index("Profile updated at")] = now_local().strftime("%Y-%m-%d %H:%M:%S")
@@ -16990,10 +17016,98 @@ def _ph_find(eid):
         if os.path.isfile(f): return f
     return ""
 
+PH_INDEX, PH_DATA, PH_SHEET_MAX, PH_CHUNK = "Employee Photo Index", "Employee Photo Data", 1536 * 1024, 45000
+_ph_memo = [0.0, {}]
+def _ph_index():
+    """Update307: {normalised Employee ID: newest index row} of the pictures backed up in the Google Sheet (Deleted rows remove the entry)."""
+    if time.time() - _ph_memo[0] < 5 and _ph_memo[1] is not None: return _ph_memo[1]
+    out = {}
+    try:
+        for r in rows(PH_INDEX):
+            k = _key(r.get("Employee ID", ""))
+            if not k: continue
+            if str(r.get("Status", "")).strip() == "Deleted": out.pop(k, None)
+            else: out[k] = r
+        _ph_memo[0], _ph_memo[1] = time.time(), out
+    except Exception as ex:
+        print("photo index read failed:", repr(ex)); return _ph_memo[1] or {}
+    return out
+
+def _ph_ver(v):
+    try: return str(int(float(v)))
+    except (TypeError, ValueError): return str(v or "")
+
+def _ph_backup(eid, data, ext):
+    """Store the picture in the Google Sheet (data rows first, index row last). Returns True on success."""
+    import base64
+    try:
+        if len(data) > PH_SHEET_MAX: return False
+        ver = str(int(time.time())); b64 = base64.b64encode(data).decode("ascii")
+        parts = [b64[i:i + PH_CHUNK] for i in range(0, len(b64), PH_CHUNK)] or [""]
+        drows = [[str(eid), ver, i, c] for i, c in enumerate(parts)]
+        wd = ws_of(PH_DATA)
+        for i in range(0, len(drows), 40): _with_retry(wd.append_rows, drows[i:i + 40], value_input_option="RAW")
+        _with_retry(ws_of(PH_INDEX).append_row, [str(eid), ver, ext, len(parts), len(data), now_local().strftime("%Y-%m-%d %H:%M:%S"), "Active"], value_input_option="RAW")
+        invalidate_cache(PH_INDEX); invalidate_cache(PH_DATA); _ph_memo[0] = 0.0
+        return True
+    except Exception as ex:
+        print("photo backup failed:", repr(ex)); return False
+
+def _ph_write_disk(eid, data, ext):
+    os.makedirs(PHOTO_DIR, exist_ok=True)
+    b = _ph_base(eid); tmp = os.path.join(PHOTO_DIR, b + ".tmp" + uuid.uuid4().hex[:6])
+    with open(tmp, "wb") as fh:
+        fh.write(data); fh.flush()
+        try: os.fsync(fh.fileno())
+        except Exception: pass
+    os.replace(tmp, os.path.join(PHOTO_DIR, b + "." + ext))
+    for x in _PH_EXT:
+        if x != ext:
+            try: os.remove(os.path.join(PHOTO_DIR, b + "." + x))
+            except OSError: pass
+
+def _ph_restore(eid):
+    """Copy a backed-up picture from the Google Sheet back to PHOTO_DIR. Returns the file path or ''."""
+    import base64
+    try:
+        r = _ph_index().get(_key(eid))
+        if not r: return ""
+        ver, ext = _ph_ver(r.get("Version")), str(r.get("Ext", "") or "jpg").strip().lower()
+        if ext not in _PH_EXT: return ""
+        ws = ws_of(PH_DATA); ids = _with_retry(ws.col_values, 1); vers = _with_retry(ws.col_values, 2)
+        hit = [i + 1 for i in range(len(ids)) if ids[i] == str(eid) and i < len(vers) and _ph_ver(vers[i]) == ver]
+        if not hit: return ""
+        recs = _with_retry(ws.get_values, "A%d:D%d" % (min(hit), max(hit)))
+        pieces = sorted(((int(float(x[2])), x[3] if len(x) > 3 else "") for x in recs if x and x[0] == str(eid) and len(x) > 2 and _ph_ver(x[1]) == ver), key=lambda p: p[0])
+        data = base64.b64decode("".join(p for _, p in pieces))
+        if not _ph_sniff(data): return ""
+        _ph_write_disk(eid, data, ext)
+        return _ph_find(eid)
+    except Exception as ex:
+        print("photo restore failed:", repr(ex)); return ""
+
+def _ph_sync_boot():
+    """Update307: at start-up (1) restore pictures missing on disk from the sheet, (2) back up pictures that exist only on disk."""
+    try:
+        time.sleep(10); idx = _ph_index()
+        for e in rows("Employees"):
+            eid = str(e.get("Employee ID", "")).strip()
+            if not eid: continue
+            f = _ph_find(eid)
+            if not f and _key(eid) in idx: _ph_restore(eid)
+            elif f and _key(eid) not in idx:
+                with open(f, "rb") as fh: _ph_backup(eid, fh.read(), f.rsplit(".", 1)[1])
+    except Exception as ex: print("photo sync skipped:", repr(ex))
+
 def _ph_url(eid, base="/admin/team/photo/"):
     try:
         f = _ph_find(eid)
-        return ("%s%s?v=%d" % (base, urllib.parse.quote(str(eid), safe=""), int(os.path.getmtime(f)))) if f else ""
+        if f: v = int(os.path.getmtime(f))
+        else:
+            r = _ph_index().get(_key(eid))
+            if not r: return ""
+            v = _ph_ver(r.get("Version"))
+        return "%s%s?v=%s" % (base, urllib.parse.quote(str(eid), safe=""), v)
     except Exception: return ""
 
 def _ph_ini(name):
@@ -17019,17 +17133,10 @@ def _ph_save(eid, data):
     except ImportError: pass
     except Exception as ex:
         print("profile picture read failed:", repr(ex)); return "That file could not be read as a picture."
-    os.makedirs(PHOTO_DIR, exist_ok=True)
-    b = _ph_base(eid); tmp = os.path.join(PHOTO_DIR, b + ".tmp" + uuid.uuid4().hex[:6])
-    with open(tmp, "wb") as fh:
-        fh.write(data); fh.flush()
-        try: os.fsync(fh.fileno())
+    _ph_write_disk(eid, data, ext)
+    if not _ph_backup(eid, data, ext):      # Update307: permanent copy in the Google Sheet
+        try: flash("Picture saved, but its permanent backup in Google Sheets could not be written (install Pillow so pictures are resized, or try again).", "error")
         except Exception: pass
-    os.replace(tmp, os.path.join(PHOTO_DIR, b + "." + ext))
-    for x in _PH_EXT:
-        if x != ext:
-            try: os.remove(os.path.join(PHOTO_DIR, b + "." + x))
-            except OSError: pass
     return ""
 
 PH_CSS = """<style>.ph-av{display:inline-grid;place-items:center;width:44px;height:44px;border-radius:50%;overflow:hidden;background:linear-gradient(135deg,#a24f7e,#3b4aa8);color:#fff;font:600 15px/1 Poppins,system-ui,sans-serif;vertical-align:middle;flex:0 0 auto}
@@ -17048,6 +17155,11 @@ def admin_employee_photo(eid):
         if request.form.get("remove"):
             f = _ph_find(eid)
             if f: os.remove(f)
+            try:
+                if _key(eid) in _ph_index():
+                    _with_retry(ws_of(PH_INDEX).append_row, [str(eid), str(int(time.time())), "", 0, 0, now_local().strftime("%Y-%m-%d %H:%M:%S"), "Deleted"], value_input_option="RAW")
+                    invalidate_cache(PH_INDEX); _ph_memo[0] = 0.0
+            except Exception as ex: print("photo delete mark failed:", repr(ex))
             flash("Profile picture removed.")
         else:
             up = request.files.get("photo"); data = up.read(PHOTO_MAX + 1) if up else b""
@@ -17062,7 +17174,7 @@ def admin_employee_photo(eid):
 def admin_team_photo(eid): return _ph_send(eid)
 
 def _ph_send(eid):
-    f = _ph_find(eid)
+    f = _ph_find(eid) or _ph_restore(eid)      # Update307: if the disk copy is gone, bring it back from the Google Sheet
     if not f: abort(404)
     resp = send_file(f, mimetype={"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}[f.rsplit(".", 1)[1]], conditional=True, max_age=3600)
     resp.headers["Cache-Control"] = "private, max-age=3600"; return resp
@@ -17075,6 +17187,9 @@ TEAM_PAGE = r"""<style>
 .tm-l h2{margin:22px 0 4px;font-size:21px;font-weight:700;color:#fff}.tm-ds{font-size:16px;opacity:.95;margin-bottom:14px}
 .tm-dl{width:100%;text-align:left;font-size:13px;line-height:1.5;border-top:1px solid #ffffff44;padding-top:12px;margin-top:2px}.tm-dl div{margin:8px 0;word-break:break-word}.tm-dl small{display:block;font-size:11px;letter-spacing:.5px;text-transform:uppercase;opacity:.75}
 .tm-hint{font-size:14px;opacity:.9;margin-top:22px}
+.tm-ds:empty{display:none}.tm-eid{display:inline-block;margin-top:2px;padding:2px 10px;border-radius:999px;background:#ffffff2e;font-size:12px;font-weight:600;letter-spacing:.4px}
+.tm-soc{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:14px}.tm-soc a{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:#ffffff2e;color:#fff;transition:transform .15s,background .15s}.tm-soc a:hover{transform:translateY(-2px);background:#ffffff55}.tm-soc svg{width:18px;height:18px;fill:currentColor}
+.tm-ci{display:block;font-size:12px;color:#9a9a9a;margin-top:2px;letter-spacing:.3px}.tm-bd{display:inline-block;margin-top:5px;padding:1px 9px;border-radius:999px;font-size:11px;font-weight:700}.tm-bd.res{background:#fde2e2;color:#b91c1c}.tm-bd.ncns{background:#ffefd2;color:#b45309}.tm-p.sepd .rg img,.tm-p.sepd .rg span{filter:grayscale(.85);opacity:.8}
 .tm-r{padding:26px 34px 34px}
 .tm-hd{display:flex;justify-content:flex-end;align-items:flex-start;gap:12px;flex-wrap:wrap}.tm-t{text-align:right}.tm-t b{display:block;font-size:22px;color:#7b7b7b;padding:0 0 6px}.tm-t i{display:block;height:4px;border-radius:2px;background:linear-gradient(90deg,#4a4aa8,#b4527a)}
 .tm-s{margin:0 auto 0 0;padding:9px 12px;border:1px solid #d5d8f0;border-radius:10px;font:inherit;font-size:14px;min-width:200px}
@@ -17091,19 +17206,32 @@ TEAM_PAGE = r"""<style>
 </style>
 <div class="head"><div><h1>{{ 'Team' if is_admin else 'Meet The Team' }}</h1><p class="mut">All employees with their profile pictures. Click a picture to see that employee's details.{% if is_admin %} Admin only.{% endif %}</p></div></div>
 <div class="tm">
-<div class="tm-l" id="tm-l" aria-live="polite"><div class="tm-big" id="tm-i">&#128100;</div><h2 id="tm-n">Select a team member</h2><div class="tm-ds" id="tm-d"></div>
-<div class="tm-dl" id="tm-x" hidden><div><small>Office Email ID</small><span id="tm-m"></span></div><div><small>Phone Number</small><span id="tm-ph"></span></div></div>
+<div class="tm-l" id="tm-l" aria-live="polite"><div class="tm-big" id="tm-i">&#128100;</div><h2 id="tm-n">Select a team member</h2><div class="tm-eid" id="tm-id" hidden></div><div class="tm-ds" id="tm-d"></div>
+<div class="tm-dl" id="tm-x" hidden><div id="tm-rm"><small>Office Email ID</small><span id="tm-m"></span></div><div id="tm-rp"><small>Phone Number</small><span id="tm-ph"></span></div><div id="tm-rs"><small>Status</small><span id="tm-st"></span></div></div>
+<div class="tm-soc" id="tm-soc"></div>
 <p class="tm-hint" id="tm-h">Click any profile picture to view the employee's details here.</p></div>
 <div class="tm-r"><div class="tm-hd"><input class="tm-s" id="tm-q" type="search" placeholder="Search name / designation" aria-label="Search team"><div class="tm-t"><b>Meet The Team</b><i></i></div></div>
-<div class="tm-g" id="tm-g">{% for p in people %}<button type="button" class="tm-p" data-n="{{p.name|e}}" data-d="{{p.desig|e}}" data-m="{{p.mail|e}}" data-ph="{{p.phone|e}}" data-img="{{p.photo|e}}" data-s="{{(p.name ~ ' ' ~ p.desig)|lower|e}}" aria-label="{{p.name|e}} - details">
-<span class="rg"><span>{% if p.photo %}<img src="{{p.photo|e}}" alt="" loading="lazy">{% else %}{{p.ini}}{% endif %}</span></span><b>{{p.name}}</b><small>{{p.desig or 'Designation not set'}}</small></button>
+<div class="tm-g" id="tm-g">{% for p in people %}<button type="button" class="tm-p{{' sepd' if p.sep else ''}}" data-id="{{p.eid|e}}" data-n="{{p.name|e}}" data-d="{{p.desig|e}}" data-m="{{p.mail|e}}" data-ph="{{p.phone|e}}" data-st="{{p.sep|e}}" data-ig="{{p.ig|e}}" data-fb="{{p.fb|e}}" data-li="{{p.li|e}}" data-x="{{p.x|e}}" data-web="{{p.web|e}}" data-img="{{p.photo|e}}" data-s="{{(p.name ~ ' ' ~ p.desig ~ ' ' ~ p.eid ~ ' ' ~ p.sep)|lower|e}}" aria-label="{{p.name|e}} - details">
+<span class="rg"><span>{% if p.photo %}<img src="{{p.photo|e}}" alt="" loading="lazy">{% else %}{{p.ini}}{% endif %}</span></span><b>{{p.name}}</b><span class="tm-ci">{{p.eid}}</span>{% if p.desig %}<small>{{p.desig}}</small>{% endif %}{% if p.sep %}<span class="tm-bd {{'res' if p.sep=='Resigned' else 'ncns'}}">{{p.sep}}</span>{% endif %}</button>
 {% else %}<div class="tm-e">No employees found.</div>{% endfor %}</div></div></div>
 <script>(function(){var g=document.getElementById('tm-g'),q=document.getElementById('tm-q'),L=document.getElementById('tm-l');if(!g)return;
 function set(b){g.querySelectorAll('.tm-p.on').forEach(function(x){x.classList.remove('on')});b.classList.add('on');
 var i=document.getElementById('tm-i'),im=b.getAttribute('data-img');i.textContent='';if(im){var t=document.createElement('img');t.src=im;t.alt='';i.appendChild(t)}else{i.textContent=b.querySelector('.rg span').textContent.trim()}
-document.getElementById('tm-n').textContent=b.getAttribute('data-n');document.getElementById('tm-d').textContent=b.getAttribute('data-d')||'Designation not set';
-document.getElementById('tm-m').textContent=b.getAttribute('data-m')||'-';document.getElementById('tm-ph').textContent=b.getAttribute('data-ph')||'-';
-document.getElementById('tm-x').hidden=false;document.getElementById('tm-h').hidden=true;
+function A(k){return b.getAttribute(k)||''}
+document.getElementById('tm-n').textContent=A('data-n');document.getElementById('tm-d').textContent=A('data-d');
+var ei=document.getElementById('tm-id');ei.textContent='EMP_ID: '+A('data-id');ei.hidden=!A('data-id');
+function row(r,s,v){document.getElementById(s).textContent=v;document.getElementById(r).hidden=!v}
+row('tm-rm','tm-m',A('data-m'));row('tm-rp','tm-ph',A('data-ph'));row('tm-rs','tm-st',A('data-st'));
+var soc=document.getElementById('tm-soc');soc.textContent='';
+var IC={ig:['Instagram','M7.8 2h8.4A5.8 5.8 0 0 1 22 7.8v8.4a5.8 5.8 0 0 1-5.8 5.8H7.8A5.8 5.8 0 0 1 2 16.2V7.8A5.8 5.8 0 0 1 7.8 2zm0 1.8A4 4 0 0 0 3.8 7.8v8.4a4 4 0 0 0 4 4h8.4a4 4 0 0 0 4-4V7.8a4 4 0 0 0-4-4H7.8zM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 1.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4zM17.3 5.5a1.2 1.2 0 1 1 0 2.4 1.2 1.2 0 0 1 0-2.4z'],
+fb:['Facebook','M13.5 22v-8.2h2.8l.5-3.3h-3.3V8.4c0-.9.3-1.6 1.7-1.6h1.7V3.9c-.3 0-1.3-.1-2.5-.1-2.5 0-4.1 1.5-4.1 4.2v2.5H7.5v3.3h2.8V22h3.2z'],
+li:['LinkedIn','M4.5 3a1.9 1.9 0 1 1 0 3.8 1.9 1.9 0 0 1 0-3.8zM3 8.6h3V21H3V8.6zm5 0h2.9v1.7c.4-.8 1.4-2 3.4-2 3.6 0 4.3 2.4 4.3 5.4V21h-3v-6.5c0-1.5 0-3.5-2.2-3.5s-2.4 1.7-2.4 3.4V21H8V8.6z'],
+x:['Twitter (X)','M17.8 3h3.1l-6.8 7.7L22 21h-6.2l-4.9-6.4L5.3 21H2.2l7.3-8.3L2 3h6.4l4.4 5.9L17.8 3zm-1.1 16.2h1.7L7.3 4.7H5.5l11.2 14.5z'],
+web:['Website','M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95a15.65 15.65 0 0 0-1.38-3.56A8.03 8.03 0 0 1 18.92 8zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.987 7.987 0 0 1 5.08 16zm2.95-8H5.08a7.987 7.987 0 0 1 4.33-3.56A15.65 15.65 0 0 0 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.1-.66-.16-1.32-.16-2 0-.68.06-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z']};
+['ig','fb','li','x','web'].forEach(function(k){var u=A('data-'+k);if(!/^https?:\/\//i.test(u))return;
+var a=document.createElement('a');a.href=u;a.target='_blank';a.rel='noopener noreferrer';a.title=IC[k][0];a.setAttribute('aria-label',IC[k][0]);
+var sv=document.createElementNS('http://www.w3.org/2000/svg','svg');sv.setAttribute('viewBox','0 0 24 24');var p=document.createElementNS('http://www.w3.org/2000/svg','path');p.setAttribute('d',IC[k][1]);sv.appendChild(p);a.appendChild(sv);soc.appendChild(a)});
+document.getElementById('tm-x').hidden=!(A('data-m')||A('data-ph')||A('data-st'));document.getElementById('tm-h').hidden=true;
 if(matchMedia('(max-width:860px)').matches)L.scrollIntoView({behavior:'smooth',block:'start'})}
 g.addEventListener('click',function(e){var b=e.target.closest('.tm-p');if(b)set(b)});
 q.addEventListener('input',function(){var v=q.value.trim().toLowerCase();g.querySelectorAll('.tm-p').forEach(function(b){b.style.display=(!v||b.getAttribute('data-s').indexOf(v)>=0)?'':'none'})});})();</script>"""
@@ -17114,14 +17242,19 @@ def _team_people(base, active_only=False):
     for e in rows("Employees"):
         eid = str(e.get("Employee ID", "")).strip()
         if not eid: continue
-        if active_only:
+        sep = emp_sep(e)      # Update307: Resigned / NCNS employees are listed too (last, with a badge)
+        if active_only and not sep:
             try:
-                if emp_locked(e): continue      # Employees see active colleagues only (locked / Resigned / NCNS are hidden)
+                if emp_locked(e): continue      # a plainly locked (not Resigned / NCNS) account stays hidden from colleagues
             except Exception: pass
-        people.append(dict(eid=eid, name=str(e.get("Name", "") or eid).strip(), desig=str(e.get("Designation", "") or "").strip(),
-                           mail=str(e.get("Office Email ID", "") or e.get("Email", "") or "").strip(), phone=str(e.get("Phone Number", "") or "").strip(),
-                           photo=_ph_url(eid, base), ini=_ph_ini(e.get("Name", "") or eid)))
-    people.sort(key=lambda x: x["name"].lower())
+        d = dict(eid=eid, name=str(e.get("Name", "") or eid).strip(), desig=str(e.get("Designation", "") or "").strip(),
+                 mail=str(e.get("Office Email ID", "") or e.get("Email", "") or "").strip(), phone=str(e.get("Phone Number", "") or "").strip(),
+                 photo=_ph_url(eid, base), ini=_ph_ini(e.get("Name", "") or eid), sep=sep, rank=sep_rank(e))
+        for k, f in (("ig", "Instagram"), ("fb", "Facebook"), ("li", "LinkedIn"), ("x", "Twitter (X)"), ("web", "Website")):
+            u = social_clean(f, e.get(f, ""))
+            d[k] = u if re.match(r"^https?://", u, re.I) else ""
+        people.append(d)
+    people.sort(key=lambda x: (x["rank"], x["name"].lower()))
     return people
 
 @app.route("/admin/team")
@@ -17138,6 +17271,8 @@ def employee_team():
 @app.route("/employee/team/photo/<eid>")
 @need("employee")
 def employee_team_photo(eid): return _ph_send(eid)
+
+threading.Thread(target=_ph_sync_boot, daemon=True).start()      # Update307: restore / back up profile pictures
 
 if __name__ == "__main__":
     # NOTE: Flask's built-in dev server (even with threaded=True) is still not

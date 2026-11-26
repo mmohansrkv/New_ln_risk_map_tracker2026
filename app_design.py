@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update304: NEW employee profile pictures (Admin uploads them on Employee Info or an employee's Personal Details tab; saved as real files in the PHOTO_DIR folder, default \"employee_photos\" next to this file) shown with Name and Designation on All Employees, and a new Admin-only Team page (/admin/team, last item of the Log menu) in the \"Meet The Team\" layout: clicking a picture shows Profile Picture, Name, Office Email ID, Phone Number and Designation. Logins and every other page are unchanged.
   * Update303: NEW Admin > /admin/loginbg \"Employee Login Background\" (linked from Theme Studio and Login Layout): an animated 3D TEAM group background for the Employee login page. Six designs (Team Spotlight, Skyline Squad, Team Carousel, Hex Network, Winners' Podium, and Your Team Photo from an https link) with a live preview of the real Employee login (Desktop / Mobile) and a small still preview of each; the Admin applies one, or removes it to return to the current page. Decorative layer only, behind the existing login window - login form, checks, routes and messages unchanged. GPU-only animation, tiny inline artwork, paused when the tab is hidden, off for reduce-motion, lighter on phones. Works with the Classic login and the new Glacier / Emerald / Lavender / Coral login themes.
   * Update302: FIX - the chosen theme / design / layout now shows on EVERY Admin and Employee page, including Daily Quotes, Theme & Layout, Celebrations Log, Theme Studio and Login Layout. Those pages have their own built-in indigo styles that the shared theme CSS could not reach; the active palette now replaces them on all pages (one place, so new pages follow automatically). Theme Studio also re-reads the saved settings after Apply and reports a lost save. Classic / Indigo Night unchanged.
   * Update301: Theme Studio now applies the chosen design to EVERY Admin and Employee page: a new all-pages layer (headings, links, tabs, Back / small buttons, totals, notices, pills, borders, focus rings, details, check boxes, text selection) carries each non-Classic design's colours into every shared component, not only cards / KPIs / tables / main buttons. Studio also sets the page LAYOUT (Left sidebar / Top bar) for Admin and Employee together with the theme (same settings as Theme & Layout), and its page previews show the chosen layout. Classic is untouched.
@@ -5301,7 +5302,7 @@ def page(body, title="Productivity Tracker", **ctx):
         # Update103: Productivity Log / Leave & Permission Log / Audit Log / Email Controls are grouped under one expandable "Log" menu.
         # Every URL is unchanged - only the sidebar grouping changed. Overview, Processes and Employee Info stay as main menu items.
         LOG_KIDS = [("/admin/log", "Productivity Log"), ("/admin/leave-permission", "Leave & Permission Log"), ("/admin/celebrations-log", "Celebrations Log"),
-                    ("/admin/audit", "Audit Log"), ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes"), ("/admin/work-time", "Work Time")]
+                    ("/admin/audit", "Audit Log"), ("/admin/email-controls", "Email Controls"), ("/admin/mail-notes", "Mail Notes"), ("/admin/work-time", "Work Time"), ("/admin/team", "Team")]      # Update304: Team (Admin only) at the bottom of the Log group
         def _on(h): return p == h or p.startswith(h + "/")
         log_kids = [(h, l, _on(h) and not (h == "/admin/work-time" and p.startswith("/admin/work-time/access"))) for h, l in LOG_KIDS]
         by_h = {n[0]: n for n in nav}
@@ -7799,8 +7800,9 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <td><span class="pill {{'out' if r.action=='Deleted' else 'act'}}">{{r.action}}</span></td><td>{{r.details or '-'}}</td><td>{{r.summary}}</td></tr>
 {% else %}<tr><td colspan="6">No employee updates yet.</td></tr>{% endfor %}</table>
 {% else %}
-<table><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Band</th><th>Status</th><th class="no-print">Account management (Admin only)</th></tr>
-{% for e in emps %}{% set lk = (e['Account locked']|string|lower) in ['yes','y','true','locked','1'] %}<tr class="{{ e.sep|sepcls }}"><td>{{e['Employee ID']}}</td>
+<table><tr><th>Photo</th><th>Employee ID</th><th>Name</th><th>Designation</th><th>Band</th><th>Status</th><th class="no-print">Account management (Admin only)</th></tr>
+{% for e in emps %}{% set lk = (e['Account locked']|string|lower) in ['yes','y','true','locked','1'] %}<tr class="{{ e.sep|sepcls }}"><td class="ph-c"><span class="ph-av">{% if e.photo %}<img src="{{e.photo}}" alt="" loading="lazy">{% else %}{{e.ini}}{% endif %}</span>
+<form method="post" action="/admin/employee-info/{{e['Employee ID']|urlencode}}/photo" enctype="multipart/form-data" class="no-print ph-f"><input type="hidden" name="back" value="list"><label class="ph-up" title="Upload profile picture">{{ 'Change' if e.photo else 'Upload' }}<input type="file" name="photo" accept="image/jpeg,image/png,image/webp" hidden onchange="this.form.submit()"></label></form></td><td>{{e['Employee ID']}}</td>
 <td><a href="/admin/employee-info/{{e['Employee ID']|urlencode}}"><b{% if e.flag %} class="emp-flag" title="Red means this employee has unseen login/logout notifications"{% endif %}>{{e['Name']}}</b></a></td>
 <td>{{e['Designation']}}</td><td>{{e['Band']}}</td>
 <td>{% if lk %}<span class="pill" style="background:#fde8e8;color:#b42318">Locked</span>{% else %}<span class="pill" style="background:#e6f6ec;color:#15803d">Active</span>{% endif %}</td>
@@ -7808,7 +7810,7 @@ EMP_LIST = """<div class="head"><div><h1>Employee Info</h1><p class="mut">{% if 
 <form method="post" action="/admin/employees/{{e['_row']}}/lock"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="do" value="{{'unlock' if lk else 'lock'}}"><button class="back sm" type="submit">{{'Unlock Account' if lk else 'Lock Account'}}</button></form>
 <form method="post" action="/admin/employees/{{e['_row']}}/reset-password" onsubmit="var p=prompt('New password for {{e['Employee ID']}} (leave empty to generate one):','');if(p===null)return false;this.newpw.value=p;return true"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><input type="hidden" name="newpw" value=""><button class="back sm" type="submit">Reset Password</button></form>
 <form method="post" action="/admin/employees/{{e['_row']}}/delete" onsubmit="return confirm('Permanently delete the account of {{e['Employee ID']}} ({{e['Name']}})? Their login is removed. Past productivity entries stay in the log.')"><input type="hidden" name="eid" value="{{e['Employee ID']}}"><input type="hidden" name="back" value="{{request.full_path.rstrip('?')}}"><button class="danger sm" type="submit">Delete Account</button></form></td></tr>
-{% else %}<tr><td colspan="6">No employees found.</td></tr>{% endfor %}</table>
+{% else %}<tr><td colspan="7">No employees found.</td></tr>{% endfor %}</table>
 {% endif %}"""
 
 EMP_HEAD = """<div class="head"><div><h1>{{emp['Name']}}</h1>
@@ -7817,7 +7819,11 @@ EMP_HEAD = """<div class="head"><div><h1>{{emp['Name']}}</h1>
 <div class="tabs no-print">{% for k,l in tabs %}<a href="/admin/employee-info/{{emp['Employee ID']|urlencode}}?tab={{k}}"
 class="{{'on' if k==tab else ''}}">{{l}}</a>{% endfor %}</div>"""
 
-T_PERSONAL = """<div class="card"><h2>Personal details</h2>
+T_PERSONAL = """<div class="card no-print"><h2>Profile picture</h2><div class="ph-row"><span class="ph-av big">{% if photo %}<img src="{{photo}}" alt="">{% else %}{{ini}}{% endif %}</span>
+<form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/photo" enctype="multipart/form-data" class="grid"><input type="hidden" name="back" value="detail"><input type="file" name="photo" accept="image/jpeg,image/png,image/webp" required><button class="primary sm" type="submit">Upload picture</button></form>
+{% if photo %}<form method="post" action="/admin/employee-info/{{emp['Employee ID']|urlencode}}/photo" onsubmit="return confirm('Remove this profile picture?')"><input type="hidden" name="back" value="detail"><input type="hidden" name="remove" value="1"><button class="danger sm" type="submit">Remove</button></form>{% endif %}</div>
+<p class="mut">JPG, PNG or WebP, up to 4 MB. The picture is saved on the server (not only shown in the browser) and appears on All Employees and the Team page.</p></div>
+<div class="card"><h2>Personal details</h2>
 <table>{% for l,v in fields %}<tr><th style="width:220px">{{l}}</th><td>{{v or '-'}}</td></tr>{% endfor %}</table><br>
 <a class="btnl no-print" href="/admin/personal/{{emp['_row']}}">Edit details</a></div>
 <div class="card no-print"><h2>Job / Joining date</h2>
@@ -7923,6 +7929,7 @@ def admin_employee_info():
     # Employees with unseen login/logout notifications get their name highlighted in red.
     unseen_ids = {str(r["Employee ID"]) for r in rows("Notifications") if str(r.get("Seen", "")).strip() != "Yes"}
     for e in emps: e["flag"] = str(e["Employee ID"]) in unseen_ids
+    for e in emps: e["photo"] = _ph_url(e["Employee ID"]); e["ini"] = _ph_ini(e.get("Name", ""))      # Update304
     log = update_log()
     return page(EMP_LIST, title="Employee Info", view="employees", emps=emps, q=request.args.get("q", ""),
                 new_count=sum(1 for r in log if r["new"]))
@@ -8055,7 +8062,7 @@ def admin_employee_detail(eid):
         fields = [("Employee ID", emp["Employee ID"]), ("Name", emp["Name"]), ("Designation", emp.get("Designation", "")),
                   ("Band", emp["Band"])] + [(f, emp.get(f, "")) for f in EDITABLE_PERSONAL] + \
                  [("Joining date", emp.get("Joining date", "")), ("Office Email ID", emp.get("Email", "")), ("Last updated", t12(emp.get("Profile updated at", "")))]
-        body = T_PERSONAL; ctx["fields"] = fields
+        body = T_PERSONAL; ctx["fields"] = fields; ctx["photo"] = _ph_url(eid); ctx["ini"] = _ph_ini(emp.get("Name", ""))      # Update304
     elif tab == "productivity":      # Update224: Productivity section of the employee log - everything counted from the joining date
         subs_e = load_subs(eid)
         leaves_e = [l for l in rows("Leave") if _key(l["Employee ID"]) == _key(eid)]
@@ -16948,6 +16955,160 @@ def _boot_warm():
         time.sleep(0.5); book(); _fetch_rows("Employees")
     except Exception as ex: print("boot warm-up skipped:", repr(ex))
 threading.Thread(target=_boot_warm, daemon=True).start()
+
+
+# ---------------------------------------------------------------- Update304: Employee profile pictures + Admin Team page (/admin/team)
+# Pictures are uploaded by the Admin (Employee Info list, or an employee's Personal Details tab) and saved as real files in PHOTO_DIR (one file per
+# employee, written atomically), so they survive page refreshes, application restarts and deployments as long as that folder is kept. Set the
+# environment variable / .env entry PHOTO_DIR to a persistent folder (e.g. a mounted disk) to keep them across deployments that replace the app folder.
+# Nothing in the login pages, the Sheets data or any other route is changed; the pictures are shown only to the signed-in Admin.
+PHOTO_DIR = os.environ.get("PHOTO_DIR", "").strip() or os.path.join(os.path.dirname(os.path.abspath(__file__)), "employee_photos")
+PHOTO_MAX = 4 * 1024 * 1024
+_PH_EXT = ("jpg", "png", "webp")
+try: os.makedirs(PHOTO_DIR, exist_ok=True)
+except Exception as _ex: print("Profile picture folder could not be created:", repr(_ex))
+
+def _ph_base(eid):
+    import hashlib as _h
+    e = str(eid).strip()
+    return re.sub(r"[^A-Za-z0-9_-]", "_", e)[:60] + "_" + _h.sha1(e.lower().encode("utf-8")).hexdigest()[:8]
+
+def _ph_find(eid):
+    b = _ph_base(eid)
+    for x in _PH_EXT:
+        f = os.path.join(PHOTO_DIR, b + "." + x)
+        if os.path.isfile(f): return f
+    return ""
+
+def _ph_url(eid):
+    try:
+        f = _ph_find(eid)
+        return ("/admin/team/photo/%s?v=%d" % (urllib.parse.quote(str(eid), safe=""), int(os.path.getmtime(f)))) if f else ""
+    except Exception: return ""
+
+def _ph_ini(name):
+    w = [x for x in re.split(r"\s+", str(name or "").strip()) if x]
+    return ((w[0][0] + (w[-1][0] if len(w) > 1 else "")).upper()) if w else "?"
+
+def _ph_sniff(b):
+    if b[:3] == b"\xff\xd8\xff": return "jpg"
+    if b[:8] == b"\x89PNG\r\n\x1a\n": return "png"
+    if b[:4] == b"RIFF" and b[8:12] == b"WEBP": return "webp"
+    return ""
+
+def _ph_save(eid, data):
+    """Validate, (resize when Pillow is installed) and store the picture; returns '' on success or an error text."""
+    if not data: return "Please choose a picture."
+    if len(data) > PHOTO_MAX: return "The picture is larger than 4 MB."
+    ext = _ph_sniff(data)
+    if not ext: return "Only JPG, PNG or WebP pictures are accepted."
+    try:
+        from PIL import Image, ImageOps
+        im = ImageOps.exif_transpose(Image.open(io.BytesIO(data))); im = im.convert("RGB")
+        im = ImageOps.fit(im, (600, 600), Image.LANCZOS); out = io.BytesIO(); im.save(out, "JPEG", quality=88, optimize=True); data, ext = out.getvalue(), "jpg"
+    except ImportError: pass
+    except Exception as ex:
+        print("profile picture read failed:", repr(ex)); return "That file could not be read as a picture."
+    os.makedirs(PHOTO_DIR, exist_ok=True)
+    b = _ph_base(eid); tmp = os.path.join(PHOTO_DIR, b + ".tmp" + uuid.uuid4().hex[:6])
+    with open(tmp, "wb") as fh:
+        fh.write(data); fh.flush()
+        try: os.fsync(fh.fileno())
+        except Exception: pass
+    os.replace(tmp, os.path.join(PHOTO_DIR, b + "." + ext))
+    for x in _PH_EXT:
+        if x != ext:
+            try: os.remove(os.path.join(PHOTO_DIR, b + "." + x))
+            except OSError: pass
+    return ""
+
+PH_CSS = """<style>.ph-av{display:inline-grid;place-items:center;width:44px;height:44px;border-radius:50%;overflow:hidden;background:linear-gradient(135deg,#a24f7e,#3b4aa8);color:#fff;font:600 15px/1 Poppins,system-ui,sans-serif;vertical-align:middle;flex:0 0 auto}
+.ph-av img{width:100%;height:100%;object-fit:cover;display:block}.ph-av.big{width:96px;height:96px;font-size:30px}
+.ph-c{white-space:nowrap}.ph-f{display:inline-block;margin:0 0 0 8px;vertical-align:middle}.ph-up{font-size:12px;color:#4f46e5;cursor:pointer;font-weight:600}.ph-up:hover{text-decoration:underline}
+.ph-row{display:flex;flex-wrap:wrap;gap:16px;align-items:center}</style>"""
+EMP_LIST = PH_CSS + EMP_LIST
+T_PERSONAL = PH_CSS + T_PERSONAL
+
+@app.route("/admin/employee-info/<eid>/photo", methods=["POST"])
+@need("admin")
+def admin_employee_photo(eid):
+    emp = emp_or_404(eid); eid = str(emp["Employee ID"])
+    back = "/admin/employee-info" if request.form.get("back") == "list" else "/admin/employee-info/%s?tab=personal" % urllib.parse.quote(eid, safe="")
+    try:
+        if request.form.get("remove"):
+            f = _ph_find(eid)
+            if f: os.remove(f)
+            flash("Profile picture removed.")
+        else:
+            up = request.files.get("photo"); data = up.read(PHOTO_MAX + 1) if up else b""
+            err = _ph_save(eid, data)
+            flash(err, "error") if err else flash("Profile picture saved for %s." % emp.get("Name", eid))
+    except Exception as ex:
+        print("profile picture error:", repr(ex)); flash("The picture could not be saved. Please try again.", "error")
+    return redirect(back)
+
+@app.route("/admin/team/photo/<eid>")
+@need("admin")
+def admin_team_photo(eid):
+    f = _ph_find(eid)
+    if not f: abort(404)
+    resp = send_file(f, mimetype={"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}[f.rsplit(".", 1)[1]], conditional=True, max_age=3600)
+    resp.headers["Cache-Control"] = "private, max-age=3600"; return resp
+
+TEAM_PAGE = r"""<style>
+.tm{display:grid;grid-template-columns:300px 1fr;min-height:560px;border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 18px 40px -22px #1c234099;font-family:Poppins,system-ui,"Segoe UI",sans-serif}
+.tm-l{background:linear-gradient(165deg,#b4527a 0%,#7d4a9e 48%,#2b3fa1 100%);color:#fff;padding:34px 22px;text-align:center;display:flex;flex-direction:column;align-items:center}
+.tm-big{width:200px;height:200px;border-radius:50%;overflow:hidden;background:#ffffff26;border:5px solid #fff;display:grid;place-items:center;font-size:62px;font-weight:600;box-shadow:0 12px 28px -12px #0008}
+.tm-big img{width:100%;height:100%;object-fit:cover;display:block}
+.tm-l h2{margin:22px 0 4px;font-size:21px;font-weight:700;color:#fff}.tm-ds{font-size:16px;opacity:.95;margin-bottom:14px}
+.tm-dl{width:100%;text-align:left;font-size:13px;line-height:1.5;border-top:1px solid #ffffff44;padding-top:12px;margin-top:2px}.tm-dl div{margin:8px 0;word-break:break-word}.tm-dl small{display:block;font-size:11px;letter-spacing:.5px;text-transform:uppercase;opacity:.75}
+.tm-hint{font-size:14px;opacity:.9;margin-top:22px}
+.tm-r{padding:26px 34px 34px}
+.tm-hd{display:flex;justify-content:flex-end;align-items:flex-start;gap:12px;flex-wrap:wrap}.tm-t{text-align:right}.tm-t b{display:block;font-size:22px;color:#7b7b7b;padding:0 0 6px}.tm-t i{display:block;height:4px;border-radius:2px;background:linear-gradient(90deg,#4a4aa8,#b4527a)}
+.tm-s{margin:0 auto 0 0;padding:9px 12px;border:1px solid #d5d8f0;border-radius:10px;font:inherit;font-size:14px;min-width:200px}
+.tm-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:34px 18px;margin-top:30px}
+.tm-p{background:none;border:0;padding:0;font:inherit;cursor:pointer;text-align:center;color:inherit}
+.tm-p .rg{display:block;width:88px;height:88px;margin:0 auto;border-radius:50%;padding:3px;background:linear-gradient(160deg,#4a4aa8,#c0527a);transition:transform .18s,box-shadow .18s}
+.tm-p .rg span{display:grid;place-items:center;width:100%;height:100%;border-radius:50%;overflow:hidden;border:2px solid #fff;background:#e9ebf7;color:#6b7390;font-weight:600;font-size:24px}
+.tm-p .rg img{width:100%;height:100%;object-fit:cover;display:block;filter:grayscale(.15)}
+.tm-p:hover .rg,.tm-p:focus-visible .rg,.tm-p.on .rg{transform:translateY(-3px) scale(1.05);box-shadow:0 12px 22px -10px #7d4a9e}
+.tm-p.on .rg{background:linear-gradient(160deg,#2b3fa1,#b4527a)}
+.tm-p b{display:block;margin-top:12px;font-size:14px;color:#7b7b7b;font-weight:700}.tm-p small{display:block;font-size:13px;color:#8d8d8d;margin-top:2px}
+.tm-e{grid-column:1/-1;text-align:center;color:#8d8d8d;padding:30px 0}
+@media(max-width:860px){.tm{grid-template-columns:1fr}.tm-r{padding:20px 16px 26px}.tm-big{width:150px;height:150px;font-size:46px}.tm-s{width:100%}.tm-hd{flex-direction:column-reverse;align-items:stretch}.tm-t{text-align:right}}
+</style>
+<div class="head"><div><h1>Team</h1><p class="mut">All employees with their profile pictures. Click a picture to see that employee's details. Admin only.</p></div></div>
+<div class="tm">
+<div class="tm-l" id="tm-l" aria-live="polite"><div class="tm-big" id="tm-i">&#128100;</div><h2 id="tm-n">Select a team member</h2><div class="tm-ds" id="tm-d"></div>
+<div class="tm-dl" id="tm-x" hidden><div><small>Office Email ID</small><span id="tm-m"></span></div><div><small>Phone Number</small><span id="tm-ph"></span></div></div>
+<p class="tm-hint" id="tm-h">Click any profile picture to view the employee's details here.</p></div>
+<div class="tm-r"><div class="tm-hd"><input class="tm-s" id="tm-q" type="search" placeholder="Search name / designation" aria-label="Search team"><div class="tm-t"><b>Meet The Team</b><i></i></div></div>
+<div class="tm-g" id="tm-g">{% for p in people %}<button type="button" class="tm-p" data-n="{{p.name|e}}" data-d="{{p.desig|e}}" data-m="{{p.mail|e}}" data-ph="{{p.phone|e}}" data-img="{{p.photo|e}}" data-s="{{(p.name ~ ' ' ~ p.desig)|lower|e}}" aria-label="{{p.name|e}} - details">
+<span class="rg"><span>{% if p.photo %}<img src="{{p.photo|e}}" alt="" loading="lazy">{% else %}{{p.ini}}{% endif %}</span></span><b>{{p.name}}</b><small>{{p.desig or 'Designation not set'}}</small></button>
+{% else %}<div class="tm-e">No employees found.</div>{% endfor %}</div></div></div>
+<script>(function(){var g=document.getElementById('tm-g'),q=document.getElementById('tm-q'),L=document.getElementById('tm-l');if(!g)return;
+function set(b){g.querySelectorAll('.tm-p.on').forEach(function(x){x.classList.remove('on')});b.classList.add('on');
+var i=document.getElementById('tm-i'),im=b.getAttribute('data-img');i.textContent='';if(im){var t=document.createElement('img');t.src=im;t.alt='';i.appendChild(t)}else{i.textContent=b.querySelector('.rg span').textContent.trim()}
+document.getElementById('tm-n').textContent=b.getAttribute('data-n');document.getElementById('tm-d').textContent=b.getAttribute('data-d')||'Designation not set';
+document.getElementById('tm-m').textContent=b.getAttribute('data-m')||'-';document.getElementById('tm-ph').textContent=b.getAttribute('data-ph')||'-';
+document.getElementById('tm-x').hidden=false;document.getElementById('tm-h').hidden=true;
+if(matchMedia('(max-width:860px)').matches)L.scrollIntoView({behavior:'smooth',block:'start'})}
+g.addEventListener('click',function(e){var b=e.target.closest('.tm-p');if(b)set(b)});
+q.addEventListener('input',function(){var v=q.value.trim().toLowerCase();g.querySelectorAll('.tm-p').forEach(function(b){b.style.display=(!v||b.getAttribute('data-s').indexOf(v)>=0)?'':'none'})});})();</script>"""
+
+@app.route("/admin/team")
+@need("admin")
+def admin_team():
+    prefetch("Employees")
+    people = []
+    for e in rows("Employees"):
+        eid = str(e.get("Employee ID", "")).strip()
+        if not eid: continue
+        people.append(dict(eid=eid, name=str(e.get("Name", "") or eid).strip(), desig=str(e.get("Designation", "") or "").strip(),
+                           mail=str(e.get("Office Email ID", "") or e.get("Email", "") or "").strip(), phone=str(e.get("Phone Number", "") or "").strip(),
+                           photo=_ph_url(eid), ini=_ph_ini(e.get("Name", "") or eid)))
+    people.sort(key=lambda x: x["name"].lower())
+    return page(TEAM_PAGE, title="Team", people=people)
 
 if __name__ == "__main__":
     # NOTE: Flask's built-in dev server (even with threaded=True) is still not

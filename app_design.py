@@ -1,4 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update305: Render deployment - start command is gunicorn <this file name without .py>:app (Flask variable \"app\"); optional GOOGLE_CREDS_JSON env variable (service-account JSON) when no credentials file is present; local run honours PORT. requirements.txt added. No other change.
   * Update304: NEW employee profile pictures (Admin uploads them on Employee Info or an employee's Personal Details tab; saved as real files in the PHOTO_DIR folder, default \"employee_photos\" next to this file) shown with Name and Designation on All Employees, and a new Admin-only Team page (/admin/team, last item of the Log menu) in the \"Meet The Team\" layout: clicking a picture shows Profile Picture, Name, Office Email ID, Phone Number and Designation. Logins and every other page are unchanged.
   * Update303: NEW Admin > /admin/loginbg \"Employee Login Background\" (linked from Theme Studio and Login Layout): an animated 3D TEAM group background for the Employee login page. Six designs (Team Spotlight, Skyline Squad, Team Carousel, Hex Network, Winners' Podium, and Your Team Photo from an https link) with a live preview of the real Employee login (Desktop / Mobile) and a small still preview of each; the Admin applies one, or removes it to return to the current page. Decorative layer only, behind the existing login window - login form, checks, routes and messages unchanged. GPU-only animation, tiny inline artwork, paused when the tab is hidden, off for reduce-motion, lighter on phones. Works with the Classic login and the new Glacier / Emerald / Lavender / Coral login themes.
   * Update302: FIX - the chosen theme / design / layout now shows on EVERY Admin and Employee page, including Daily Quotes, Theme & Layout, Celebrations Log, Theme Studio and Login Layout. Those pages have their own built-in indigo styles that the shared theme CSS could not reach; the active palette now replaces them on all pages (one place, so new pages follow automatically). Theme Studio also re-reads the saved settings after Apply and reports a lost save. Classic / Indigo Night unchanged.
@@ -498,6 +499,13 @@ def t12(v):
 
 SHEET_ID = os.getenv("SHEET_ID", "1zh_W-ZDLEa3XZCt_a0iw8m5V8VxrUg3pj55FG0ZFJJg")
 CREDS_FILE = os.getenv("GOOGLE_CREDS", "credentials.json")
+if os.getenv("GOOGLE_CREDS_JSON", "").strip() and not os.path.isfile(CREDS_FILE):      # Update305 (Render): the service-account JSON may be pasted into an environment variable instead of a file
+    try:
+        import tempfile as _tf
+        _cf = os.path.join(_tf.gettempdir(), "pt_google_credentials.json")
+        with open(_cf, "w", encoding="utf-8") as _fh: _fh.write(os.environ["GOOGLE_CREDS_JSON"].strip())
+        os.chmod(_cf, 0o600); CREDS_FILE = _cf
+    except Exception as _ex: print("GOOGLE_CREDS_JSON could not be used:", repr(_ex))
 ADMIN_USER = os.getenv("ADMIN_USER", "Admin_Mobius")
 # The fallback below only kicks in if the ADMIN_PASS environment variable is not set.
 # For real deployments, set ADMIN_PASS as a server/host environment variable (or a secrets
@@ -17122,4 +17130,4 @@ if __name__ == "__main__":
     # (4 worker processes x 4 threads comfortably covers 20 concurrent users;
     # gspread calls are I/O-bound so threads work well here.)
     debug = os.getenv("FLASK_DEBUG", "0") == "1"
-    app.run(host="0.0.0.0", port=5000, debug=debug, threaded=True)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=debug, threaded=True)

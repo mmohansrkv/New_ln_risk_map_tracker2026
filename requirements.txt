@@ -1,7 +1,7 @@
-Flask>=3.0,<4
-gunicorn>=22
+flask>=3.0,<4
 gspread>=6.0,<7
-google-auth>=2.30
+google-auth>=2.29
 requests>=2.31
+gunicorn>=22.0
 tzdata
 Pillow>=10

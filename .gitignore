@@ -1,6 +1,8 @@
 credentials.json
 *.json
 .env
+.secret_key
+employee_photos/
 __pycache__/
 *.pyc
 venv/

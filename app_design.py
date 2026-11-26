@@ -1,5 +1,6 @@
 """Productivity Tracker - Flask + Google Sheets.
   * Update305: Render deployment - start command is gunicorn <this file name without .py>:app (Flask variable \"app\"); optional GOOGLE_CREDS_JSON env variable (service-account JSON) when no credentials file is present; local run honours PORT. requirements.txt added. No other change.
+  * Update306: NEW \"Meet The Team\" tab on the Employee page (menu item for every signed-in employee, /employee/team): the same Meet The Team layout - profile pictures with name and designation under each, click a picture for Name, Office Email ID, Phone Number and Designation; photos served to signed-in employees at /employee/team/photo/<id>; locked / Resigned / NCNS employees are hidden from it. /admin/team is unchanged and still Admin only.
   * Update304: NEW employee profile pictures (Admin uploads them on Employee Info or an employee's Personal Details tab; saved as real files in the PHOTO_DIR folder, default \"employee_photos\" next to this file) shown with Name and Designation on All Employees, and a new Admin-only Team page (/admin/team, last item of the Log menu) in the \"Meet The Team\" layout: clicking a picture shows Profile Picture, Name, Office Email ID, Phone Number and Designation. Logins and every other page are unchanged.
   * Update303: NEW Admin > /admin/loginbg \"Employee Login Background\" (linked from Theme Studio and Login Layout): an animated 3D TEAM group background for the Employee login page. Six designs (Team Spotlight, Skyline Squad, Team Carousel, Hex Network, Winners' Podium, and Your Team Photo from an https link) with a live preview of the real Employee login (Desktop / Mobile) and a small still preview of each; the Admin applies one, or removes it to return to the current page. Decorative layer only, behind the existing login window - login form, checks, routes and messages unchanged. GPU-only animation, tiny inline artwork, paused when the tab is hidden, off for reduce-motion, lighter on phones. Works with the Classic login and the new Glacier / Emerald / Lavender / Coral login themes.
   * Update302: FIX - the chosen theme / design / layout now shows on EVERY Admin and Employee page, including Daily Quotes, Theme & Layout, Celebrations Log, Theme Studio and Login Layout. Those pages have their own built-in indigo styles that the shared theme CSS could not reach; the active palette now replaces them on all pages (one place, so new pages follow automatically). Theme Studio also re-reads the saved settings after Apply and reports a lost save. Classic / Indigo Night unchanged.
@@ -5298,6 +5299,7 @@ def page(body, title="Productivity Tracker", **ctx):
             if gm_allowed(session.get("emp_id", "")): items.append(("/employee/game", GM_TITLE))
         except Exception as e:
             print("Multiplayer Game menu check failed:", repr(e))
+    if session.get("role") == "employee": items.append(("/employee/team", "Meet The Team"))      # Update306
     nav = [(h, l, p == h or (h != "/employee" and p.startswith(h + "/")), []) for h, l in items]
     if session.get("role") == "admin":      # Update66: Employee Info expands to Employees / Notifications / Mahizhchi
         view = request.args.get("view", "")
@@ -16988,10 +16990,10 @@ def _ph_find(eid):
         if os.path.isfile(f): return f
     return ""
 
-def _ph_url(eid):
+def _ph_url(eid, base="/admin/team/photo/"):
     try:
         f = _ph_find(eid)
-        return ("/admin/team/photo/%s?v=%d" % (urllib.parse.quote(str(eid), safe=""), int(os.path.getmtime(f)))) if f else ""
+        return ("%s%s?v=%d" % (base, urllib.parse.quote(str(eid), safe=""), int(os.path.getmtime(f)))) if f else ""
     except Exception: return ""
 
 def _ph_ini(name):
@@ -17057,7 +17059,9 @@ def admin_employee_photo(eid):
 
 @app.route("/admin/team/photo/<eid>")
 @need("admin")
-def admin_team_photo(eid):
+def admin_team_photo(eid): return _ph_send(eid)
+
+def _ph_send(eid):
     f = _ph_find(eid)
     if not f: abort(404)
     resp = send_file(f, mimetype={"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}[f.rsplit(".", 1)[1]], conditional=True, max_age=3600)
@@ -17085,7 +17089,7 @@ TEAM_PAGE = r"""<style>
 .tm-e{grid-column:1/-1;text-align:center;color:#8d8d8d;padding:30px 0}
 @media(max-width:860px){.tm{grid-template-columns:1fr}.tm-r{padding:20px 16px 26px}.tm-big{width:150px;height:150px;font-size:46px}.tm-s{width:100%}.tm-hd{flex-direction:column-reverse;align-items:stretch}.tm-t{text-align:right}}
 </style>
-<div class="head"><div><h1>Team</h1><p class="mut">All employees with their profile pictures. Click a picture to see that employee's details. Admin only.</p></div></div>
+<div class="head"><div><h1>{{ 'Team' if is_admin else 'Meet The Team' }}</h1><p class="mut">All employees with their profile pictures. Click a picture to see that employee's details.{% if is_admin %} Admin only.{% endif %}</p></div></div>
 <div class="tm">
 <div class="tm-l" id="tm-l" aria-live="polite"><div class="tm-big" id="tm-i">&#128100;</div><h2 id="tm-n">Select a team member</h2><div class="tm-ds" id="tm-d"></div>
 <div class="tm-dl" id="tm-x" hidden><div><small>Office Email ID</small><span id="tm-m"></span></div><div><small>Phone Number</small><span id="tm-ph"></span></div></div>
@@ -17104,19 +17108,36 @@ if(matchMedia('(max-width:860px)').matches)L.scrollIntoView({behavior:'smooth',b
 g.addEventListener('click',function(e){var b=e.target.closest('.tm-p');if(b)set(b)});
 q.addEventListener('input',function(){var v=q.value.trim().toLowerCase();g.querySelectorAll('.tm-p').forEach(function(b){b.style.display=(!v||b.getAttribute('data-s').indexOf(v)>=0)?'':'none'})});})();</script>"""
 
-@app.route("/admin/team")
-@need("admin")
-def admin_team():
+def _team_people(base, active_only=False):
     prefetch("Employees")
     people = []
     for e in rows("Employees"):
         eid = str(e.get("Employee ID", "")).strip()
         if not eid: continue
+        if active_only:
+            try:
+                if emp_locked(e): continue      # Employees see active colleagues only (locked / Resigned / NCNS are hidden)
+            except Exception: pass
         people.append(dict(eid=eid, name=str(e.get("Name", "") or eid).strip(), desig=str(e.get("Designation", "") or "").strip(),
                            mail=str(e.get("Office Email ID", "") or e.get("Email", "") or "").strip(), phone=str(e.get("Phone Number", "") or "").strip(),
-                           photo=_ph_url(eid), ini=_ph_ini(e.get("Name", "") or eid)))
+                           photo=_ph_url(eid, base), ini=_ph_ini(e.get("Name", "") or eid)))
     people.sort(key=lambda x: x["name"].lower())
-    return page(TEAM_PAGE, title="Team", people=people)
+    return people
+
+@app.route("/admin/team")
+@need("admin")
+def admin_team():
+    return page(TEAM_PAGE, title="Team", people=_team_people("/admin/team/photo/"), is_admin=True)
+
+# Update306: "Meet The Team" tab on the EMPLOYEE page (/employee/team) - signed-in employees only; /admin/team stays Admin only.
+@app.route("/employee/team")
+@need("employee")
+def employee_team():
+    return page(TEAM_PAGE, title="Meet The Team", people=_team_people("/employee/team/photo/", True), is_admin=False)
+
+@app.route("/employee/team/photo/<eid>")
+@need("employee")
+def employee_team_photo(eid): return _ph_send(eid)
 
 if __name__ == "__main__":
     # NOTE: Flask's built-in dev server (even with threaded=True) is still not

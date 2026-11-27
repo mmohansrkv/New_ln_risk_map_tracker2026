@@ -1,5 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
-  * Update307: Employee profile pictures are now ALSO stored in the Google Sheet (new sheets Employee Photo Index / Employee Photo Data, created automatically) and restored to PHOTO_DIR automatically, so they no longer disappear when the server disk is wiped by a restart / redeploy (pictures already on disk are backed up at start-up). Meet The Team: Employee ID shown on every card and in the details panel; optional Instagram / Facebook / LinkedIn / Twitter (X) / Website fields (Personal details, Employee + Admin; new Employees columns added automatically) shown as icons ONLY when filled; empty details are not shown at all; Resigned / NCNS employees are now listed too (last, with a status badge). Nothing else changed.
+  * Update308: Meet The Team - fixed picture sizes (card 96x96, details 200x200, every picture cropped to a square, never stretched). Admin only: Upload / Replace / Remove profile picture buttons in the Admin Team page details panel (employees see no such controls and their photo URLs / upload route reject non-Admin). Update307: Employee profile pictures are now ALSO stored in the Google Sheet (new sheets Employee Photo Index / Employee Photo Data, created automatically) and restored to PHOTO_DIR automatically, so they no longer disappear when the server disk is wiped by a restart / redeploy (pictures already on disk are backed up at start-up). Meet The Team: Employee ID shown on every card and in the details panel; optional Instagram / Facebook / LinkedIn / Twitter (X) / Website fields (Personal details, Employee + Admin; new Employees columns added automatically) shown as icons ONLY when filled; empty details are not shown at all; Resigned / NCNS employees are now listed too (last, with a status badge). Nothing else changed.
   * Update305: Render deployment - start command is gunicorn <this file name without .py>:app (Flask variable \"app\"); optional GOOGLE_CREDS_JSON env variable (service-account JSON) when no credentials file is present; local run honours PORT. requirements.txt added. No other change.
   * Update306: NEW \"Meet The Team\" tab on the Employee page (menu item for every signed-in employee, /employee/team): the same Meet The Team layout - profile pictures with name and designation under each, click a picture for Name, Office Email ID, Phone Number and Designation; photos served to signed-in employees at /employee/team/photo/<id>; locked / Resigned / NCNS employees are hidden from it. /admin/team is unchanged and still Admin only.
   * Update304: NEW employee profile pictures (Admin uploads them on Employee Info or an employee's Personal Details tab; saved as real files in the PHOTO_DIR folder, default \"employee_photos\" next to this file) shown with Name and Designation on All Employees, and a new Admin-only Team page (/admin/team, last item of the Log menu) in the \"Meet The Team\" layout: clicking a picture shows Profile Picture, Name, Office Email ID, Phone Number and Designation. Logins and every other page are unchanged.
@@ -17150,7 +17150,8 @@ T_PERSONAL = PH_CSS + T_PERSONAL
 @need("admin")
 def admin_employee_photo(eid):
     emp = emp_or_404(eid); eid = str(emp["Employee ID"])
-    back = "/admin/employee-info" if request.form.get("back") == "list" else "/admin/employee-info/%s?tab=personal" % urllib.parse.quote(eid, safe="")
+    bk = request.form.get("back")
+    back = "/admin/employee-info" if bk == "list" else ("/admin/team?sel=%s" % urllib.parse.quote(eid, safe="") if bk == "team" else "/admin/employee-info/%s?tab=personal" % urllib.parse.quote(eid, safe=""))
     try:
         if request.form.get("remove"):
             f = _ph_find(eid)
@@ -17187,6 +17188,9 @@ TEAM_PAGE = r"""<style>
 .tm-l h2{margin:22px 0 4px;font-size:21px;font-weight:700;color:#fff}.tm-ds{font-size:16px;opacity:.95;margin-bottom:14px}
 .tm-dl{width:100%;text-align:left;font-size:13px;line-height:1.5;border-top:1px solid #ffffff44;padding-top:12px;margin-top:2px}.tm-dl div{margin:8px 0;word-break:break-word}.tm-dl small{display:block;font-size:11px;letter-spacing:.5px;text-transform:uppercase;opacity:.75}
 .tm-hint{font-size:14px;opacity:.9;margin-top:22px}
+.tm-big{flex:0 0 200px;width:200px;height:200px;min-width:200px;aspect-ratio:1/1}.tm-big img{width:200px;height:200px;object-fit:cover;object-position:center}
+.tm-p .rg{flex:0 0 96px;width:96px;height:96px;min-width:96px;aspect-ratio:1/1;box-sizing:border-box}.tm-p .rg img{width:100%;height:100%;object-fit:cover;object-position:center}
+.tm-adm{width:100%;margin-top:16px;padding-top:12px;border-top:1px solid #ffffff44;display:flex;flex-wrap:wrap;gap:8px;justify-content:center}.tm-adm form{margin:0}.tm-adm label,.tm-adm button{cursor:pointer;border:0;border-radius:8px;padding:7px 14px;font:600 13px Poppins,system-ui,sans-serif;color:#fff;background:#ffffff33}.tm-adm label:hover,.tm-adm button:hover{background:#ffffff59}.tm-adm .rm{background:#dc2626cc}.tm-adm input[type=file]{display:none}.tm-adm small{flex-basis:100%;font-size:11px;opacity:.8}
 .tm-ds:empty{display:none}.tm-eid{display:inline-block;margin-top:2px;padding:2px 10px;border-radius:999px;background:#ffffff2e;font-size:12px;font-weight:600;letter-spacing:.4px}
 .tm-soc{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:14px}.tm-soc a{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:#ffffff2e;color:#fff;transition:transform .15s,background .15s}.tm-soc a:hover{transform:translateY(-2px);background:#ffffff55}.tm-soc svg{width:18px;height:18px;fill:currentColor}
 .tm-ci{display:block;font-size:12px;color:#9a9a9a;margin-top:2px;letter-spacing:.3px}.tm-bd{display:inline-block;margin-top:5px;padding:1px 9px;border-radius:999px;font-size:11px;font-weight:700}.tm-bd.res{background:#fde2e2;color:#b91c1c}.tm-bd.ncns{background:#ffefd2;color:#b45309}.tm-p.sepd .rg img,.tm-p.sepd .rg span{filter:grayscale(.85);opacity:.8}
@@ -17202,13 +17206,17 @@ TEAM_PAGE = r"""<style>
 .tm-p.on .rg{background:linear-gradient(160deg,#2b3fa1,#b4527a)}
 .tm-p b{display:block;margin-top:12px;font-size:14px;color:#7b7b7b;font-weight:700}.tm-p small{display:block;font-size:13px;color:#8d8d8d;margin-top:2px}
 .tm-e{grid-column:1/-1;text-align:center;color:#8d8d8d;padding:30px 0}
-@media(max-width:860px){.tm{grid-template-columns:1fr}.tm-r{padding:20px 16px 26px}.tm-big{width:150px;height:150px;font-size:46px}.tm-s{width:100%}.tm-hd{flex-direction:column-reverse;align-items:stretch}.tm-t{text-align:right}}
+@media(max-width:860px){.tm{grid-template-columns:1fr}.tm-r{padding:20px 16px 26px}.tm-big{flex-basis:150px;width:150px;height:150px;min-width:150px;font-size:46px}.tm-big img{width:150px;height:150px}.tm-s{width:100%}.tm-hd{flex-direction:column-reverse;align-items:stretch}.tm-t{text-align:right}}
 </style>
 <div class="head"><div><h1>{{ 'Team' if is_admin else 'Meet The Team' }}</h1><p class="mut">All employees with their profile pictures. Click a picture to see that employee's details.{% if is_admin %} Admin only.{% endif %}</p></div></div>
 <div class="tm">
 <div class="tm-l" id="tm-l" aria-live="polite"><div class="tm-big" id="tm-i">&#128100;</div><h2 id="tm-n">Select a team member</h2><div class="tm-eid" id="tm-id" hidden></div><div class="tm-ds" id="tm-d"></div>
 <div class="tm-dl" id="tm-x" hidden><div id="tm-rm"><small>Office Email ID</small><span id="tm-m"></span></div><div id="tm-rp"><small>Phone Number</small><span id="tm-ph"></span></div><div id="tm-rs"><small>Status</small><span id="tm-st"></span></div></div>
 <div class="tm-soc" id="tm-soc"></div>
+{% if is_admin %}<div class="tm-adm" id="tm-adm" hidden>
+<form method="post" id="tm-fu" enctype="multipart/form-data"><input type="hidden" name="back" value="team"><label id="tm-ul">Upload picture<input type="file" name="photo" id="tm-file" accept="image/jpeg,image/png,image/webp"></label></form>
+<form method="post" id="tm-fr" onsubmit="return confirm('Remove this profile picture?')" hidden><input type="hidden" name="back" value="team"><input type="hidden" name="remove" value="1"><button class="rm" type="submit">Remove picture</button></form>
+<small>JPG, PNG or WebP, up to 4 MB. Saved as a square picture.</small></div>{% endif %}
 <p class="tm-hint" id="tm-h">Click any profile picture to view the employee's details here.</p></div>
 <div class="tm-r"><div class="tm-hd"><input class="tm-s" id="tm-q" type="search" placeholder="Search name / designation" aria-label="Search team"><div class="tm-t"><b>Meet The Team</b><i></i></div></div>
 <div class="tm-g" id="tm-g">{% for p in people %}<button type="button" class="tm-p{{' sepd' if p.sep else ''}}" data-id="{{p.eid|e}}" data-n="{{p.name|e}}" data-d="{{p.desig|e}}" data-m="{{p.mail|e}}" data-ph="{{p.phone|e}}" data-st="{{p.sep|e}}" data-ig="{{p.ig|e}}" data-fb="{{p.fb|e}}" data-li="{{p.li|e}}" data-x="{{p.x|e}}" data-web="{{p.web|e}}" data-img="{{p.photo|e}}" data-s="{{(p.name ~ ' ' ~ p.desig ~ ' ' ~ p.eid ~ ' ' ~ p.sep)|lower|e}}" aria-label="{{p.name|e}} - details">
@@ -17232,8 +17240,12 @@ web:['Website','M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22
 var a=document.createElement('a');a.href=u;a.target='_blank';a.rel='noopener noreferrer';a.title=IC[k][0];a.setAttribute('aria-label',IC[k][0]);
 var sv=document.createElementNS('http://www.w3.org/2000/svg','svg');sv.setAttribute('viewBox','0 0 24 24');var p=document.createElementNS('http://www.w3.org/2000/svg','path');p.setAttribute('d',IC[k][1]);sv.appendChild(p);a.appendChild(sv);soc.appendChild(a)});
 document.getElementById('tm-x').hidden=!(A('data-m')||A('data-ph')||A('data-st'));document.getElementById('tm-h').hidden=true;
+var ad=document.getElementById('tm-adm');if(ad){var u='/admin/employee-info/'+encodeURIComponent(A('data-id'))+'/photo';document.getElementById('tm-fu').action=u;document.getElementById('tm-fr').action=u;
+var hp=!!A('data-img');document.getElementById('tm-fr').hidden=!hp;document.getElementById('tm-ul').firstChild.nodeValue=hp?'Replace picture':'Upload picture';ad.hidden=false}
 if(matchMedia('(max-width:860px)').matches)L.scrollIntoView({behavior:'smooth',block:'start'})}
 g.addEventListener('click',function(e){var b=e.target.closest('.tm-p');if(b)set(b)});
+var fi=document.getElementById('tm-file');if(fi)fi.addEventListener('change',function(){var f=fi.files[0];if(!f)return;if(f.size>4*1024*1024){alert('The picture is larger than 4 MB.');fi.value='';return}if(!/^image\/(jpeg|png|webp)$/.test(f.type)){alert('Only JPG, PNG or WebP pictures are accepted.');fi.value='';return}document.getElementById('tm-fu').submit()});
+var sel={{sel|tojson}};if(sel){var c=g.querySelectorAll('.tm-p');for(var i=0;i<c.length;i++){if(c[i].getAttribute('data-id')===sel){set(c[i]);break}}}
 q.addEventListener('input',function(){var v=q.value.trim().toLowerCase();g.querySelectorAll('.tm-p').forEach(function(b){b.style.display=(!v||b.getAttribute('data-s').indexOf(v)>=0)?'':'none'})});})();</script>"""
 
 def _team_people(base, active_only=False):
@@ -17260,13 +17272,13 @@ def _team_people(base, active_only=False):
 @app.route("/admin/team")
 @need("admin")
 def admin_team():
-    return page(TEAM_PAGE, title="Team", people=_team_people("/admin/team/photo/"), is_admin=True)
+    return page(TEAM_PAGE, title="Team", people=_team_people("/admin/team/photo/"), is_admin=True, sel=request.args.get("sel", ""))
 
 # Update306: "Meet The Team" tab on the EMPLOYEE page (/employee/team) - signed-in employees only; /admin/team stays Admin only.
 @app.route("/employee/team")
 @need("employee")
 def employee_team():
-    return page(TEAM_PAGE, title="Meet The Team", people=_team_people("/employee/team/photo/", True), is_admin=False)
+    return page(TEAM_PAGE, title="Meet The Team", people=_team_people("/employee/team/photo/", True), is_admin=False, sel="")
 
 @app.route("/employee/team/photo/<eid>")
 @need("employee")

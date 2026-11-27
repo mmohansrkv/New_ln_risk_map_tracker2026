@@ -1,5 +1,5 @@
 """Productivity Tracker - Flask + Google Sheets.
-  * Update309: Employee login page - a 3D animated "Meet our team" wall (profile pictures + names of all active employees; initials card when there is no picture; Resigned / NCNS / locked employees and Employee IDs are not shown) is added under the login window (works with every login theme). Public picture URLs use an opaque token, not the Employee ID. Set LOGIN_TEAM_WALL=0 to switch it off. Update308: Meet The Team - fixed picture sizes (card 96x96, details 200x200, every picture cropped to a square, never stretched). Admin only: Upload / Replace / Remove profile picture buttons in the Admin Team page details panel (employees see no such controls and their photo URLs / upload route reject non-Admin). Update307: Employee profile pictures are now ALSO stored in the Google Sheet (new sheets Employee Photo Index / Employee Photo Data, created automatically) and restored to PHOTO_DIR automatically, so they no longer disappear when the server disk is wiped by a restart / redeploy (pictures already on disk are backed up at start-up). Meet The Team: Employee ID shown on every card and in the details panel; optional Instagram / Facebook / LinkedIn / Twitter (X) / Website fields (Personal details, Employee + Admin; new Employees columns added automatically) shown as icons ONLY when filled; empty details are not shown at all; Resigned / NCNS employees are now listed too (last, with a status badge). Nothing else changed.
+  * Update310: Login team wall is now ONE compact horizontal row (68 px pictures, name below, smooth 3D glide / float / hover tilt). Update309: Employee login page - a 3D animated "Meet our team" wall (profile pictures + names of all active employees; initials card when there is no picture; Resigned / NCNS / locked employees and Employee IDs are not shown) is added under the login window (works with every login theme). Public picture URLs use an opaque token, not the Employee ID. Set LOGIN_TEAM_WALL=0 to switch it off. Update308: Meet The Team - fixed picture sizes (card 96x96, details 200x200, every picture cropped to a square, never stretched). Admin only: Upload / Replace / Remove profile picture buttons in the Admin Team page details panel (employees see no such controls and their photo URLs / upload route reject non-Admin). Update307: Employee profile pictures are now ALSO stored in the Google Sheet (new sheets Employee Photo Index / Employee Photo Data, created automatically) and restored to PHOTO_DIR automatically, so they no longer disappear when the server disk is wiped by a restart / redeploy (pictures already on disk are backed up at start-up). Meet The Team: Employee ID shown on every card and in the details panel; optional Instagram / Facebook / LinkedIn / Twitter (X) / Website fields (Personal details, Employee + Admin; new Employees columns added automatically) shown as icons ONLY when filled; empty details are not shown at all; Resigned / NCNS employees are now listed too (last, with a status badge). Nothing else changed.
   * Update305: Render deployment - start command is gunicorn <this file name without .py>:app (Flask variable \"app\"); optional GOOGLE_CREDS_JSON env variable (service-account JSON) when no credentials file is present; local run honours PORT. requirements.txt added. No other change.
   * Update306: NEW \"Meet The Team\" tab on the Employee page (menu item for every signed-in employee, /employee/team): the same Meet The Team layout - profile pictures with name and designation under each, click a picture for Name, Office Email ID, Phone Number and Designation; photos served to signed-in employees at /employee/team/photo/<id>; locked / Resigned / NCNS employees are hidden from it. /admin/team is unchanged and still Admin only.
   * Update304: NEW employee profile pictures (Admin uploads them on Employee Info or an employee's Personal Details tab; saved as real files in the PHOTO_DIR folder, default \"employee_photos\" next to this file) shown with Name and Designation on All Employees, and a new Admin-only Team page (/admin/team, last item of the Log menu) in the \"Meet The Team\" layout: clicking a picture shows Profile Picture, Name, Office Email ID, Phone Number and Designation. Logins and every other page are unchanged.
@@ -17324,33 +17324,33 @@ def login_team_photo(tok):
     return _ph_send(eid)
 
 TW_CSS = r"""<style>
-.tw{position:relative;margin:34px auto 12px;width:100%;max-width:1200px;padding:34px 0 40px;border-radius:22px;overflow:hidden;color:#eef1ff;font-family:Poppins,system-ui,"Segoe UI",sans-serif;background:radial-gradient(800px 320px at 15% 0,#4f46e566,transparent 65%),radial-gradient(700px 300px at 90% 100%,#db277755,transparent 65%),linear-gradient(160deg,#0a0d24,#1a1038 55%,#2a0f3a);box-shadow:0 26px 60px -28px #000c}
-.tw h3{margin:0;text-align:center;font-size:26px;font-weight:700;letter-spacing:.3px;background:linear-gradient(90deg,#67e8f9,#f0abfc,#fde68a);-webkit-background-clip:text;background-clip:text;color:transparent}
-.tw p.tw-s{margin:6px 0 0;text-align:center;font-size:13px;opacity:.75}
-.tw-stage{perspective:1100px;perspective-origin:50% 30%;margin-top:18px;overflow:hidden;padding:14px 0 64px;margin-bottom:-30px}
-.tw-plane{transform-style:preserve-3d;transform:rotateX(var(--px,12deg)) rotateY(var(--py,0deg)) rotateZ(-3deg) scale(1.04);transition:transform .35s ease-out;display:flex;flex-direction:column;gap:26px}
+.tw{position:relative;margin:22px auto 10px;width:100%;max-width:1200px;padding:18px 0 14px;border-radius:22px;overflow:hidden;color:#eef1ff;font-family:Poppins,system-ui,"Segoe UI",sans-serif;background:radial-gradient(800px 320px at 15% 0,#4f46e566,transparent 65%),radial-gradient(700px 300px at 90% 100%,#db277755,transparent 65%),linear-gradient(160deg,#0a0d24,#1a1038 55%,#2a0f3a);box-shadow:0 26px 60px -28px #000c}
+.tw h3{margin:0;text-align:center;font-size:18px;font-weight:700;letter-spacing:.3px;background:linear-gradient(90deg,#67e8f9,#f0abfc,#fde68a);-webkit-background-clip:text;background-clip:text;color:transparent}
+.tw p.tw-s{margin:2px 0 0;text-align:center;font-size:12px;opacity:.75}
+.tw-stage{perspective:900px;perspective-origin:50% 40%;margin-top:6px;overflow:hidden;padding:12px 0 8px}
+.tw-plane{transform-style:preserve-3d;transform:rotateX(var(--px,8deg)) rotateY(var(--py,0deg));transition:transform .35s ease-out;display:flex;flex-direction:column}
 .tw-row{display:flex;width:max-content;animation:twL var(--d,60s) linear infinite;transform-style:preserve-3d}
 .tw-row.r{animation-name:twR}.tw-stage:hover .tw-row{animation-play-state:paused}
 @keyframes twL{to{transform:translate3d(-50%,0,0)}}@keyframes twR{from{transform:translate3d(-50%,0,0)}to{transform:translate3d(0,0,0)}}
-.tw-c{flex:0 0 auto;width:150px;margin:0 14px;text-align:center;transform-style:preserve-3d;animation:twB 5s ease-in-out infinite;animation-delay:var(--dl,0s)}
-@keyframes twB{50%{transform:translate3d(0,-10px,18px)}}
+.tw-c{flex:0 0 auto;width:92px;margin:0 8px;text-align:center;transform-style:preserve-3d;animation:twB 5s ease-in-out infinite;animation-delay:var(--dl,0s)}
+@keyframes twB{50%{transform:translate3d(0,-6px,12px)}}
 .tw-in{transform-style:preserve-3d;transform:rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) translateZ(var(--tz,0px));transition:transform .18s ease-out}
-.tw-c:hover .tw-in{--tz:70px}
-.tw-ph{position:relative;width:112px;height:112px;margin:0 auto;border-radius:50%;padding:4px;box-sizing:border-box;background:conic-gradient(from var(--a,0deg),#22d3ee,#a78bfa,#f472b6,#fbbf24,#22d3ee);animation:twS 6s linear infinite;box-shadow:0 18px 26px -12px #000c,0 0 22px -4px #a78bfa88}
+.tw-c:hover .tw-in{--tz:44px}
+.tw-ph{position:relative;width:68px;height:68px;margin:0 auto;border-radius:50%;padding:3px;box-sizing:border-box;background:conic-gradient(from var(--a,0deg),#22d3ee,#a78bfa,#f472b6,#fbbf24,#22d3ee);animation:twS 6s linear infinite;box-shadow:0 12px 16px -8px #000c,0 0 14px -4px #a78bfa88}
 @property --a{syntax:"<angle>";inherits:false;initial-value:0deg}
 @keyframes twS{to{--a:360deg}}
-.tw-ph>span,.tw-ph>img{display:grid;place-items:center;width:104px;height:104px;border-radius:50%;object-fit:cover;object-position:center;background:linear-gradient(145deg,#6366f1,#ec4899);color:#fff;font-weight:700;font-size:34px;border:3px solid #0a0d24;box-sizing:border-box}
-.tw-ph:after{content:"";position:absolute;inset:4px;border-radius:50%;background:linear-gradient(120deg,#fff5 0,transparent 40%);pointer-events:none}
-.tw-n{margin-top:12px;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 8px #000a;transform:translateZ(24px)}
+.tw-ph>span,.tw-ph>img{display:grid;place-items:center;width:62px;height:62px;border-radius:50%;object-fit:cover;object-position:center;background:linear-gradient(145deg,#6366f1,#ec4899);color:#fff;font-weight:700;font-size:20px;border:2px solid #0a0d24;box-sizing:border-box}
+.tw-ph:after{content:"";position:absolute;inset:3px;border-radius:50%;background:linear-gradient(120deg,#fff5 0,transparent 40%);pointer-events:none}
+.tw-n{margin-top:8px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 8px #000a;transform:translateZ(16px)}
 .tw-pill{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:30;border:0;border-radius:999px;padding:9px 18px;font:600 13px Poppins,system-ui,sans-serif;color:#fff;cursor:pointer;background:linear-gradient(90deg,#6366f1,#db2777);box-shadow:0 10px 24px -8px #000a;animation:twP 2s ease-in-out infinite}
 @keyframes twP{50%{transform:translateX(-50%) translateY(-5px)}}
-.tw.few .tw-row{animation:none;justify-content:center;width:auto;flex-wrap:wrap}.tw.few .tw-plane{transform:rotateX(8deg)}
-@media(max-width:640px){.tw{border-radius:14px}.tw h3{font-size:21px}.tw-c{width:128px;margin:0 9px}}
+.tw.few .tw-row{animation:none;justify-content:center;width:auto;flex-wrap:wrap}.tw.few .tw-plane{transform:rotateX(6deg)}
+@media(max-width:640px){.tw{border-radius:14px}.tw h3{font-size:16px}.tw-c{width:84px;margin:0 6px}}
 @media(prefers-reduced-motion:reduce){.tw-row,.tw-c,.tw-ph,.tw-pill{animation:none!important}.tw-plane{transform:none}.tw-row{width:auto;flex-wrap:wrap;justify-content:center}}
 </style>"""
 TW_JS = r"""<script>(function(){var w=document.getElementById('tw');if(!w)return;var pl=w.querySelector('.tw-plane'),st=w.querySelector('.tw-stage');
-st.addEventListener('pointermove',function(e){var r=st.getBoundingClientRect();var x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;pl.style.setProperty('--py',(x*10)+'deg');pl.style.setProperty('--px',(12-y*8)+'deg');
-var c=e.target.closest&&e.target.closest('.tw-c');if(c){var b=c.getBoundingClientRect(),cx=(e.clientX-b.left)/b.width-.5,cy=(e.clientY-b.top)/b.height-.5,i=c.firstElementChild;i.style.setProperty('--ry',(cx*34)+'deg');i.style.setProperty('--rx',(-cy*34)+'deg')}});
+st.addEventListener('pointermove',function(e){var r=st.getBoundingClientRect();var x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;pl.style.setProperty('--py',(x*10)+'deg');pl.style.setProperty('--px',(8-y*6)+'deg');
+var c=e.target.closest&&e.target.closest('.tw-c');if(c){var b=c.getBoundingClientRect(),cx=(e.clientX-b.left)/b.width-.5,cy=(e.clientY-b.top)/b.height-.5,i=c.firstElementChild;i.style.setProperty('--ry',(cx*28)+'deg');i.style.setProperty('--rx',(-cy*28)+'deg')}});
 st.addEventListener('pointerleave',function(){pl.style.removeProperty('--py');pl.style.removeProperty('--px');w.querySelectorAll('.tw-in').forEach(function(i){i.style.removeProperty('--rx');i.style.removeProperty('--ry')})});
 st.addEventListener('pointerout',function(e){var c=e.target.closest&&e.target.closest('.tw-c');if(c&&!c.contains(e.relatedTarget)){c.firstElementChild.style.removeProperty('--rx');c.firstElementChild.style.removeProperty('--ry')}});
 var pill=document.getElementById('tw-pill');if(pill){pill.addEventListener('click',function(){w.scrollIntoView({behavior:'smooth',block:'start'})});
@@ -17360,17 +17360,17 @@ def _tw_html():
     ppl = _tw_people()
     if not ppl: return ""
     def card(p, i):
-        img = ('<img src="/login-team/photo/%s?v=%s" alt="" loading="lazy" decoding="async" width="104" height="104" onerror="this.outerHTML=\'<span>%s</span>\'">' % (p["tok"], _html309.escape(p["v"]), _html309.escape(p["ini"]))) if p["v"] else '<span>%s</span>' % _html309.escape(p["ini"])
+        img = ('<img src="/login-team/photo/%s?v=%s" alt="" loading="lazy" decoding="async" width="62" height="62" onerror="this.outerHTML=\'<span>%s</span>\'">' % (p["tok"], _html309.escape(p["v"]), _html309.escape(p["ini"]))) if p["v"] else '<span>%s</span>' % _html309.escape(p["ini"])
         return '<div class="tw-c" style="--dl:%.1fs"><div class="tw-in"><div class="tw-ph">%s</div><div class="tw-n" title="%s">%s</div></div></div>' % ((i % 7) * .6, img, _html309.escape(p["name"]), _html309.escape(p["name"]))
     few = len(ppl) < 6
-    nrows = 1 if few else (2 if len(ppl) < 16 else 3)
+    nrows = 1      # Update310: one compact horizontal row
     rowsl = [ppl[i::nrows] for i in range(nrows)]
     out = []
     for ri, lst in enumerate(rowsl):
         half = lst[:]
-        while len(half) < 9 and not few: half += lst      # every half is wider than the screen, so the loop is seamless
+        while len(half) < 16 and not few: half += lst      # every half is wider than the screen, so the loop is seamless
         cards = "".join(card(p, i) for i, p in enumerate(half))
-        out.append('<div class="tw-row%s" style="--d:%ds">%s</div>' % (" r" if ri % 2 else "", max(40, len(half) * 6), cards if few else cards + cards))
+        out.append('<div class="tw-row%s" style="--d:%ds">%s</div>' % (" r" if ri % 2 else "", max(30, len(half) * 3), cards if few else cards + cards))
     return (TW_CSS + '<section class="tw%s" id="tw" aria-label="Meet our team"><h3>Meet our team</h3><p class="tw-s">%d people, one team</p><div class="tw-stage"><div class="tw-plane">%s</div></div></section>'
             '<button type="button" class="tw-pill" id="tw-pill">Meet our team &#8595;</button>' % (" few" if few else "", len(ppl), "".join(out))) + TW_JS
 

@@ -1,6 +1,7 @@
 """Productivity Tracker - Flask + Google Sheets.
+  * Update307: Employee profile pictures are now ALSO stored in the Google Sheet (new sheets Employee Photo Index / Employee Photo Data, created automatically) and restored to PHOTO_DIR automatically, so they no longer disappear when the server disk is wiped by a restart / redeploy (pictures already on disk are backed up at start-up). Meet The Team: Employee ID shown on every card and in the details panel; optional Instagram / Facebook / LinkedIn / Twitter (X) / Website fields (Personal details, Employee + Admin; new Employees columns added automatically) shown as icons ONLY when filled; empty details are not shown at all; Resigned / NCNS employees are now listed too (last, with a status badge). Nothing else changed.
   * Update305: Render deployment - start command is gunicorn <this file name without .py>:app (Flask variable \"app\"); optional GOOGLE_CREDS_JSON env variable (service-account JSON) when no credentials file is present; local run honours PORT. requirements.txt added. No other change.
-  * Update307: Profile pictures are now stored permanently in the Google Sheet (sheets Employee Photo Index / Employee Photo Data) and survive deployments; Meet The Team shows every picture at one fixed size, the Employee ID, and optional Instagram / Facebook / LinkedIn / Twitter (X) / Website icons (hidden when empty); Admin can upload / replace / remove pictures on the Team page.\n  * Update306: NEW \"Meet The Team\" tab on the Employee page (menu item for every signed-in employee, /employee/team): the same Meet The Team layout - profile pictures with name and designation under each, click a picture for Name, Office Email ID, Phone Number and Designation; photos served to signed-in employees at /employee/team/photo/<id>; locked / Resigned / NCNS employees are hidden from it. /admin/team is unchanged and still Admin only.
+  * Update306: NEW \"Meet The Team\" tab on the Employee page (menu item for every signed-in employee, /employee/team): the same Meet The Team layout - profile pictures with name and designation under each, click a picture for Name, Office Email ID, Phone Number and Designation; photos served to signed-in employees at /employee/team/photo/<id>; locked / Resigned / NCNS employees are hidden from it. /admin/team is unchanged and still Admin only.
   * Update304: NEW employee profile pictures (Admin uploads them on Employee Info or an employee's Personal Details tab; saved as real files in the PHOTO_DIR folder, default \"employee_photos\" next to this file) shown with Name and Designation on All Employees, and a new Admin-only Team page (/admin/team, last item of the Log menu) in the \"Meet The Team\" layout: clicking a picture shows Profile Picture, Name, Office Email ID, Phone Number and Designation. Logins and every other page are unchanged.
   * Update303: NEW Admin > /admin/loginbg \"Employee Login Background\" (linked from Theme Studio and Login Layout): an animated 3D TEAM group background for the Employee login page. Six designs (Team Spotlight, Skyline Squad, Team Carousel, Hex Network, Winners' Podium, and Your Team Photo from an https link) with a live preview of the real Employee login (Desktop / Mobile) and a small still preview of each; the Admin applies one, or removes it to return to the current page. Decorative layer only, behind the existing login window - login form, checks, routes and messages unchanged. GPU-only animation, tiny inline artwork, paused when the tab is hidden, off for reduce-motion, lighter on phones. Works with the Classic login and the new Glacier / Emerald / Lavender / Coral login themes.
   * Update302: FIX - the chosen theme / design / layout now shows on EVERY Admin and Employee page, including Daily Quotes, Theme & Layout, Celebrations Log, Theme Studio and Login Layout. Those pages have their own built-in indigo styles that the shared theme CSS could not reach; the active palette now replaces them on all pages (one place, so new pages follow automatically). Theme Studio also re-reads the saved settings after Apply and reports a lost save. Classic / Indigo Night unchanged.
@@ -568,7 +569,7 @@ HEADERS = {
                   "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                   "Emergency no", "Personal Email ID", "Office Email ID", "Designation", "Profile updated at", "Gender",
                   "Account locked", "Joining date", "Profile Name", "Separation status", "Relieving date",
-                  "Instagram", "Facebook", "LinkedIn", "Twitter (X)", "Website"],      # Update307: optional social / website links (shown on Meet The Team only when filled)      # Update252: "Separation status" = Resigned / NCNS and "Relieving date" are set by the Admin only (setting either also sets "Account locked" = Yes).      # Update225: "Profile Name" = nickname shown under the 3D character on the Employee login page. Update96: "Account locked" = Yes / blank; Update97: "Joining date" (YYYY-MM-DD, set by Admin in Employee Info)
+                  "Instagram", "Facebook", "LinkedIn", "Twitter (X)", "Website"],      # Update307: optional social links (Meet The Team).      # Update252: "Separation status" = Resigned / NCNS and "Relieving date" are set by the Admin only (setting either also sets "Account locked" = Yes).      # Update225: "Profile Name" = nickname shown under the 3D character on the Employee login page. Update96: "Account locked" = Yes / blank; Update97: "Joining date" (YYYY-MM-DD, set by Admin in Employee Info)
     "Processes": ["Process name", "Target hours", "Target 100%", "Target count / hour", "Target count / 8 hrs"],
     "Productivity log": ["Submission ID", "Date", "Band", "Employee ID", "Employee name",
                          "Type", "Process / Description", "Hour", "Count", "Target Count", "Productivity %",
@@ -610,6 +611,9 @@ HEADERS = {
     # Update275: attachments of Notes & Messages (index = one row per file; data = the file cut into base64 pieces, one piece per row)
     "Note Attachment Index": ["Attachment ID", "Note ID", "Name", "Kind", "Mime", "Size", "Parts", "Uploaded at", "Status"],
     "Note Attachment Data": ["Attachment ID", "Part", "Data"],
+    # Update307: permanent copy of the employee profile pictures (index = newest row per employee wins; data = base64 pieces)
+    "Employee Photo Index": ["Employee ID", "Version", "Ext", "Parts", "Size", "Updated at", "Status"],
+    "Employee Photo Data": ["Employee ID", "Version", "Part", "Data"],
     # Update260: Admin > Notes & Messages > Celebrations (animations on the Employee page)
     "Celebrations": ["Celebration ID", "Created at", "Occasion", "Title", "Message", "Effect", "Intensity", "Duration sec", "Frequency", "Audience", "Recipients", "Display from", "Stop at", "Status", "Created by", "Updated at"],
     "Celebration Seen": ["Celebration ID", "Employee ID", "Employee name", "Seen at"],
@@ -637,20 +641,17 @@ HEADERS = {
     "Mail Notes Log": ["Notice ID", "Employee ID", "Employee Name", "Employee Email", "Subject", "Email Sent At", "Email Status", "Detail", "CC", "Attachments"],
     # Update219: attachment bytes of a mail note (base64, split into <=40000-char chunks because a Google Sheets cell holds 50000 characters)
     "Mail Note Files": ["Notice ID", "File ID", "File Name", "Mime", "Size", "Chunk", "Data"],
-    # Update307: permanent copy of employee profile pictures (index = one row per employee; data = base64 pieces)
-    "Employee Photo Index": ["Employee ID", "Photo ID", "Mime", "Size", "Parts", "Updated at"],
-    "Employee Photo Data": ["Photo ID", "Part", "Data"],
     "Mahizhchi Connection Attempts": ["Employee ID", "Employee name", "Game", "Started at", "Closed at", "Solved", "Mistakes", "Result", "Extra seconds"],
 }
 PERSONAL_FIELDS = ["Gender", "Address Line_1", "Address Line_2", "City", "PIN", "Phone Number",
                     "Emergency no", "Personal Email ID", "Office Email ID", "Profile Name",
-                    "Instagram", "Facebook", "LinkedIn", "Twitter (X)", "Website"]
-SOCIAL_FIELDS = ["Instagram", "Facebook", "LinkedIn", "Twitter (X)", "Website"]
+                    "Instagram", "Facebook", "LinkedIn", "Twitter (X)", "Website"]      # Update307: last five are optional social links
 # Office Email ID is not typed by anyone: it always mirrors the employee's login Email.
 EDITABLE_PERSONAL = [f for f in PERSONAL_FIELDS if f != "Office Email ID"]
 # Address Line_2 (flat / landmark / area) is genuinely optional, so a blank one must not make a profile
 # "incomplete". Everything else the employee can edit is required.
-OPTIONAL_PERSONAL = {"Address Line_2", "Profile Name", "Instagram", "Facebook", "LinkedIn", "Twitter (X)", "Website"}
+SOCIAL_FIELDS = ["Instagram", "Facebook", "LinkedIn", "Twitter (X)", "Website"]      # Update307
+OPTIONAL_PERSONAL = {"Address Line_2", "Profile Name"} | set(SOCIAL_FIELDS)
 REQUIRED_PERSONAL = [f for f in EDITABLE_PERSONAL if f not in OPTIONAL_PERSONAL]
 # Gender is admin-only: employees never see or submit it on their own Personal details page,
 # so it must not appear as an editable/required field there.
@@ -10869,11 +10870,11 @@ PROFILE = """<div class="card"><h2>Personal details</h2>
 <label>Personal Email ID<input type="email" name="Personal Email ID" value="{{emp['Personal Email ID']}}"></label>
 <label>Office Email ID<input value="{{emp['Email']}}" readonly></label>
 <label title="Shown below the 3D character on the login page. Leave blank to show your full name.">Profile Name<input name="Profile Name" maxlength="40" value="{{emp['Profile Name']}}" placeholder="Your nickname"></label>
-<label>Instagram<input name="Instagram" maxlength="300" value="{{emp.get('Instagram','')}}" placeholder="Optional - link or username"></label>
-<label>Facebook<input name="Facebook" maxlength="300" value="{{emp.get('Facebook','')}}" placeholder="Optional - link or username"></label>
-<label>LinkedIn<input name="LinkedIn" maxlength="300" value="{{emp.get('LinkedIn','')}}" placeholder="Optional - link or username"></label>
-<label>Twitter (X)<input name="Twitter (X)" maxlength="300" value="{{emp.get('Twitter (X)','')}}" placeholder="Optional - link or username"></label>
-<label>Website<input name="Website" maxlength="300" value="{{emp.get('Website','')}}" placeholder="Optional - link or username"></label>
+<label title="Optional - shown on Meet The Team only when filled">Instagram<input name="Instagram" maxlength="200" value="{{emp['Instagram']}}" placeholder="@name or link (optional)"></label>
+<label title="Optional - shown on Meet The Team only when filled">Facebook<input name="Facebook" maxlength="200" value="{{emp['Facebook']}}" placeholder="name or link (optional)"></label>
+<label title="Optional - shown on Meet The Team only when filled">LinkedIn<input name="LinkedIn" maxlength="200" value="{{emp['LinkedIn']}}" placeholder="name or link (optional)"></label>
+<label title="Optional - shown on Meet The Team only when filled">Twitter (X)<input name="Twitter (X)" maxlength="200" value="{{emp['Twitter (X)']}}" placeholder="@name or link (optional)"></label>
+<label title="Optional - shown on Meet The Team only when filled">Website<input name="Website" maxlength="200" value="{{emp['Website']}}" placeholder="https://... (optional)"></label>
 <button class="primary sm">Save</button> <button type="button" class="back sm" onclick="if(history.length>1)history.back();else location.href='/employee'">Back</button></form>
 <p class="mut" style="margin-top:10px">Last updated: {{(emp['Profile updated at'] or '-')|t12}}</p></div>
 <div class="card"><h2>Change password</h2>
@@ -10947,23 +10948,18 @@ def my_emp_row_uncached():
     if not r: abort(404)
     return r
 
-_SOC_BASE = {"Instagram": "https://www.instagram.com/", "Facebook": "https://www.facebook.com/", "LinkedIn": "https://www.linkedin.com/in/", "Twitter (X)": "https://x.com/"}
-def _soc_norm(field, v):
-    """Update307: a typed link / @username -> a safe https URL ('' when empty or not a valid web address). Only http(s) links are ever produced."""
-    v = re.sub(r"[\x00-\x20\x7f<>\"'`\\]", "", str(v or ""))[:300]
+_SOCIAL_BASE = {"Instagram": "https://www.instagram.com/", "Facebook": "https://www.facebook.com/", "LinkedIn": "https://www.linkedin.com/in/", "Twitter (X)": "https://x.com/"}
+def social_clean(field, v):
+    """Update307: turn what was typed into a safe https link ('' when empty / not usable). Handles (@name) become the network's profile link; javascript: / data: etc. are refused."""
+    v = re.sub(r"[\x00-\x1f\x7f<>\"'\s]", "", str(v or ""))[:200]
     if not v: return ""
-    if re.match(r"(?i)^https?://", v): u = v
-    elif ":" in v: return ""
-    elif field == "Website":
-        if not re.match(r"(?i)^[a-z0-9-]+(\.[a-z0-9-]+)+(/|$|\?|#)", v): return ""
-        u = "https://" + v
-    elif re.match(r"(?i)^(www\.)?[a-z0-9-]+(\.[a-z0-9-]+)+/", v): u = "https://" + v
-    else:
-        h = v.lstrip("@").strip("/")
-        if not re.match(r"^[A-Za-z0-9._-]{1,100}$", h): return ""
-        u = _SOC_BASE.get(field, "https://") + h
-    p = urllib.parse.urlparse(u)
-    return u if (p.scheme in ("http", "https") and p.netloc and "." in p.netloc) else ""
+    if re.match(r"^https?://", v, re.I): return v
+    if re.match(r"^[a-z][a-z0-9+.\-]*:(?!\d)", v, re.I): return ""
+    base = _SOCIAL_BASE.get(field)
+    is_url = bool(re.search(r"(^www\.|instagram\.com|facebook\.com|fb\.com|fb\.me|linkedin\.com|lnkd\.in|twitter\.com|x\.com)", v, re.I)) or "/" in v
+    if base and not is_url: return base + v.lstrip("@")
+    if "." not in v: return ""
+    return "https://" + v.lstrip("/")
 
 def save_employee_row(row, emp_id, changes):
     """Write changes to one Employees row. Re-reads the row fresh from the sheet (so nothing another
@@ -10975,18 +10971,14 @@ def save_employee_row(row, emp_id, changes):
     cur = ws.row_values(row); cur += [""] * (len(heads) - len(cur))
     if _key(cur[heads.index("Employee ID")]) != _key(emp_id):
         invalidate_cache("Employees"); return False
-    _bad = []
     for k, v in changes.items():
-        if k in SOCIAL_FIELDS:      # Update307
-            _raw = str(v or "").strip(); v = _soc_norm(k, _raw)
-            if _raw and not v: _bad.append(k)
         if k == "Profile Name": v = re.sub(r"\s+", " ", re.sub(r"[\x00-\x1f\x7f<>]", " ", str(v))).strip()[:40]      # Update225: plain short nickname only
+        if k in SOCIAL_FIELDS: v = social_clean(k, v)      # Update307
         cur[heads.index(k)] = v
     cur[heads.index("Office Email ID")] = cur[heads.index("Email")]      # always mirrors the login email
     cur[heads.index("Profile updated at")] = now_local().strftime("%Y-%m-%d %H:%M:%S")
     _with_retry(ws.update, range_name=f"A{row}", values=[cur[:len(heads)]], value_input_option="RAW")
     invalidate_cache("Employees")
-    if _bad and has_request_context(): flash("Not saved (not a valid web address or username): %s." % ", ".join(_bad), "error")
     return True
 
 @app.route("/employee/profile", methods=["GET", "POST"])
@@ -17008,7 +17000,6 @@ threading.Thread(target=_boot_warm, daemon=True).start()
 # Nothing in the login pages, the Sheets data or any other route is changed; the pictures are shown only to the signed-in Admin.
 PHOTO_DIR = os.environ.get("PHOTO_DIR", "").strip() or os.path.join(os.path.dirname(os.path.abspath(__file__)), "employee_photos")
 PHOTO_MAX = 4 * 1024 * 1024
-PHOTO_PX = 480      # Update307: every stored picture is a fixed 480 x 480 square
 _PH_EXT = ("jpg", "png", "webp")
 try: os.makedirs(PHOTO_DIR, exist_ok=True)
 except Exception as _ex: print("Profile picture folder could not be created:", repr(_ex))
@@ -17019,106 +17010,105 @@ def _ph_base(eid):
     return re.sub(r"[^A-Za-z0-9_-]", "_", e)[:60] + "_" + _h.sha1(e.lower().encode("utf-8")).hexdigest()[:8]
 
 def _ph_find(eid):
-    """Legacy / local copy of a picture (file in PHOTO_DIR). Only a fallback and a cache now - the Google Sheet is the permanent store (Update307)."""
     b = _ph_base(eid)
     for x in _PH_EXT:
         f = os.path.join(PHOTO_DIR, b + "." + x)
         if os.path.isfile(f): return f
     return ""
 
-# ---- Update307: the permanent copy of every profile picture lives in the Google Sheet (sheets 'Employee Photo Index' + 'Employee Photo Data',
-# created automatically, same idea as the Notes attachments), so a re-deploy / restart / new server that wipes the app folder can no longer make the
-# pictures disappear. PHOTO_DIR/_cache is only a speed-up copy that is rebuilt from the sheet whenever it is missing.
-PH_IDX, PH_DAT, PH_CHUNK = "Employee Photo Index", "Employee Photo Data", 45000
-_PH_MIME = {"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
-_PH_CACHE = os.path.join(PHOTO_DIR, "_cache")
-
+PH_INDEX, PH_DATA, PH_SHEET_MAX, PH_CHUNK = "Employee Photo Index", "Employee Photo Data", 1536 * 1024, 45000
+_ph_memo = [0.0, {}]
 def _ph_index():
-    """{normalised Employee ID: {pid, mime, ver}} from the small index sheet (one read per request)."""
-    if has_request_context():
-        hit = getattr(request, "_ph_idx", None)
-        if hit is not None: return hit
+    """Update307: {normalised Employee ID: newest index row} of the pictures backed up in the Google Sheet (Deleted rows remove the entry)."""
+    if time.time() - _ph_memo[0] < 5 and _ph_memo[1] is not None: return _ph_memo[1]
     out = {}
     try:
-        for r in rows(PH_IDX):
-            k, pid = _key(r.get("Employee ID", "")), str(r.get("Photo ID", "")).strip()
-            if k and pid: out[k] = dict(pid=pid, mime=str(r.get("Mime", "")).strip() or "image/jpeg", ver=re.sub(r"\D", "", str(r.get("Updated at", ""))) or "1")
-    except Exception as ex: print("Profile picture index read failed:", repr(ex))
-    if has_request_context(): request._ph_idx = out
+        for r in rows(PH_INDEX):
+            k = _key(r.get("Employee ID", ""))
+            if not k: continue
+            if str(r.get("Status", "")).strip() == "Deleted": out.pop(k, None)
+            else: out[k] = r
+        _ph_memo[0], _ph_memo[1] = time.time(), out
+    except Exception as ex:
+        print("photo index read failed:", repr(ex)); return _ph_memo[1] or {}
     return out
+
+def _ph_ver(v):
+    try: return str(int(float(v)))
+    except (TypeError, ValueError): return str(v or "")
+
+def _ph_backup(eid, data, ext):
+    """Store the picture in the Google Sheet (data rows first, index row last). Returns True on success."""
+    import base64
+    try:
+        if len(data) > PH_SHEET_MAX: return False
+        ver = str(int(time.time())); b64 = base64.b64encode(data).decode("ascii")
+        parts = [b64[i:i + PH_CHUNK] for i in range(0, len(b64), PH_CHUNK)] or [""]
+        drows = [[str(eid), ver, i, c] for i, c in enumerate(parts)]
+        wd = ws_of(PH_DATA)
+        for i in range(0, len(drows), 40): _with_retry(wd.append_rows, drows[i:i + 40], value_input_option="RAW")
+        _with_retry(ws_of(PH_INDEX).append_row, [str(eid), ver, ext, len(parts), len(data), now_local().strftime("%Y-%m-%d %H:%M:%S"), "Active"], value_input_option="RAW")
+        invalidate_cache(PH_INDEX); invalidate_cache(PH_DATA); _ph_memo[0] = 0.0
+        return True
+    except Exception as ex:
+        print("photo backup failed:", repr(ex)); return False
+
+def _ph_write_disk(eid, data, ext):
+    os.makedirs(PHOTO_DIR, exist_ok=True)
+    b = _ph_base(eid); tmp = os.path.join(PHOTO_DIR, b + ".tmp" + uuid.uuid4().hex[:6])
+    with open(tmp, "wb") as fh:
+        fh.write(data); fh.flush()
+        try: os.fsync(fh.fileno())
+        except Exception: pass
+    os.replace(tmp, os.path.join(PHOTO_DIR, b + "." + ext))
+    for x in _PH_EXT:
+        if x != ext:
+            try: os.remove(os.path.join(PHOTO_DIR, b + "." + x))
+            except OSError: pass
+
+def _ph_restore(eid):
+    """Copy a backed-up picture from the Google Sheet back to PHOTO_DIR. Returns the file path or ''."""
+    import base64
+    try:
+        r = _ph_index().get(_key(eid))
+        if not r: return ""
+        ver, ext = _ph_ver(r.get("Version")), str(r.get("Ext", "") or "jpg").strip().lower()
+        if ext not in _PH_EXT: return ""
+        ws = ws_of(PH_DATA); ids = _with_retry(ws.col_values, 1); vers = _with_retry(ws.col_values, 2)
+        hit = [i + 1 for i in range(len(ids)) if ids[i] == str(eid) and i < len(vers) and _ph_ver(vers[i]) == ver]
+        if not hit: return ""
+        recs = _with_retry(ws.get_values, "A%d:D%d" % (min(hit), max(hit)))
+        pieces = sorted(((int(float(x[2])), x[3] if len(x) > 3 else "") for x in recs if x and x[0] == str(eid) and len(x) > 2 and _ph_ver(x[1]) == ver), key=lambda p: p[0])
+        data = base64.b64decode("".join(p for _, p in pieces))
+        if not _ph_sniff(data): return ""
+        _ph_write_disk(eid, data, ext)
+        return _ph_find(eid)
+    except Exception as ex:
+        print("photo restore failed:", repr(ex)); return ""
+
+def _ph_sync_boot():
+    """Update307: at start-up (1) restore pictures missing on disk from the sheet, (2) back up pictures that exist only on disk."""
+    try:
+        time.sleep(10); idx = _ph_index()
+        for e in rows("Employees"):
+            eid = str(e.get("Employee ID", "")).strip()
+            if not eid: continue
+            f = _ph_find(eid)
+            if not f and _key(eid) in idx: _ph_restore(eid)
+            elif f and _key(eid) not in idx:
+                with open(f, "rb") as fh: _ph_backup(eid, fh.read(), f.rsplit(".", 1)[1])
+    except Exception as ex: print("photo sync skipped:", repr(ex))
 
 def _ph_url(eid, base="/admin/team/photo/"):
     try:
-        m = _ph_index().get(_key(eid))
-        if m: return "%s%s?v=%s" % (base, urllib.parse.quote(str(eid), safe=""), m["ver"])
-        f = _ph_find(eid)      # a picture that is still only in the local folder (copied to the sheet automatically after start-up)
-        return ("%s%s?v=%d" % (base, urllib.parse.quote(str(eid), safe=""), int(os.path.getmtime(f)))) if f else ""
+        f = _ph_find(eid)
+        if f: v = int(os.path.getmtime(f))
+        else:
+            r = _ph_index().get(_key(eid))
+            if not r: return ""
+            v = _ph_ver(r.get("Version"))
+        return "%s%s?v=%s" % (base, urllib.parse.quote(str(eid), safe=""), v)
     except Exception: return ""
-
-def _ph_del_rows(ws, match):
-    col = _with_retry(ws.col_values, 1)
-    runs = []
-    for i, v in enumerate(col):
-        if i == 0 or not match(v): continue
-        r = i + 1
-        if runs and r == runs[-1][1] + 1: runs[-1][1] = r
-        else: runs.append([r, r])
-    for a, b in reversed(runs): _with_retry(ws.delete_rows, a, b)
-
-def _ph_sheet_get(pid):
-    import base64
-    ws = ws_of(PH_DAT); col = _with_retry(ws.col_values, 1)
-    hit = [i + 1 for i, v in enumerate(col) if v == pid]
-    if not hit: return None
-    recs = _with_retry(ws.get_values, "A%d:C%d" % (min(hit), max(hit)))
-    pieces = sorted(((int(float(r[1])), r[2] if len(r) > 2 else "") for r in recs if r and r[0] == pid), key=lambda x: x[0])
-    return base64.b64decode("".join(p for _, p in pieces))
-
-def _ph_sheet_put(eid, data, ext):
-    """Store / replace the picture in the sheet. Data rows first, index row last (a picture is listed only when complete); old rows are removed afterwards. Returns the new photo id."""
-    import base64
-    pid = "P" + uuid.uuid4().hex[:14]; b64 = base64.b64encode(data).decode("ascii")
-    parts = [b64[i:i + PH_CHUNK] for i in range(0, len(b64), PH_CHUNK)] or [""]
-    recs = [[pid, i, c] for i, c in enumerate(parts)]
-    wd = ws_of(PH_DAT)
-    for i in range(0, len(recs), 40): _with_retry(wd.append_rows, recs[i:i + 40], value_input_option="RAW")
-    wi = ws_of(PH_IDX); col = _with_retry(wi.col_values, 1)
-    hit = [i + 1 for i, v in enumerate(col) if i > 0 and _key(v) == _key(eid)]
-    new = [str(eid), pid, _PH_MIME[ext], len(data), len(parts), now_local().strftime("%Y-%m-%d %H:%M:%S")]
-    old = []
-    if hit:
-        old = [str(r[1]) for r in (_with_retry(wi.get_values, "A%d:B%d" % (hit[0], hit[-1])) or []) if len(r) > 1]
-        _with_retry(wi.update, range_name="A%d" % hit[0], values=[new], value_input_option="RAW")
-        for extra in reversed(hit[1:]): _with_retry(wi.delete_rows, extra)
-    else:
-        _with_retry(wi.append_row, new, value_input_option="RAW")
-    invalidate_cache(PH_IDX); invalidate_cache(PH_DAT)
-    if has_request_context() and hasattr(request, "_ph_idx"): del request._ph_idx
-    for o in old:
-        try: _ph_del_rows(wd, lambda v, o=o: v == o)
-        except Exception as ex: print("old picture rows not removed:", repr(ex))
-    return pid
-
-def _ph_sheet_remove(eid):
-    wi = ws_of(PH_IDX); col = _with_retry(wi.col_values, 1)
-    hit = [i + 1 for i, v in enumerate(col) if i > 0 and _key(v) == _key(eid)]
-    if not hit: return
-    pids = [str(r[1]) for r in (_with_retry(wi.get_values, "A%d:B%d" % (hit[0], hit[-1])) or []) if len(r) > 1]
-    _ph_del_rows(wi, lambda v: _key(v) == _key(eid))
-    invalidate_cache(PH_IDX)
-    if has_request_context() and hasattr(request, "_ph_idx"): del request._ph_idx
-    wd = ws_of(PH_DAT)
-    for p in pids:
-        try: _ph_del_rows(wd, lambda v, p=p: v == p)
-        except Exception as ex: print("picture rows not removed:", repr(ex))
-    invalidate_cache(PH_DAT)
-
-def _ph_cache_write(pid, ext, data):
-    try:
-        os.makedirs(_PH_CACHE, exist_ok=True); f = os.path.join(_PH_CACHE, pid + "." + ext); tmp = f + ".tmp" + uuid.uuid4().hex[:6]
-        with open(tmp, "wb") as fh: fh.write(data)
-        os.replace(tmp, f)
-    except Exception as ex: print("picture cache not written:", repr(ex))
 
 def _ph_ini(name):
     w = [x for x in re.split(r"\s+", str(name or "").strip()) if x]
@@ -17131,7 +17121,7 @@ def _ph_sniff(b):
     return ""
 
 def _ph_save(eid, data):
-    """Validate, resize to a fixed square (when Pillow is installed) and store the picture in the Google Sheet; returns '' on success or an error text."""
+    """Validate, (resize when Pillow is installed) and store the picture; returns '' on success or an error text."""
     if not data: return "Please choose a picture."
     if len(data) > PHOTO_MAX: return "The picture is larger than 4 MB."
     ext = _ph_sniff(data)
@@ -17139,22 +17129,18 @@ def _ph_save(eid, data):
     try:
         from PIL import Image, ImageOps
         im = ImageOps.exif_transpose(Image.open(io.BytesIO(data))); im = im.convert("RGB")
-        im = ImageOps.fit(im, (PHOTO_PX, PHOTO_PX), Image.LANCZOS); out = io.BytesIO(); im.save(out, "JPEG", quality=85, optimize=True); data, ext = out.getvalue(), "jpg"
-    except ImportError:
-        if len(data) > 1024 * 1024: return "The picture is larger than 1 MB (install Pillow on the server to upload larger pictures - they are then resized automatically)."
+        im = ImageOps.fit(im, (600, 600), Image.LANCZOS); out = io.BytesIO(); im.save(out, "JPEG", quality=88, optimize=True); data, ext = out.getvalue(), "jpg"
+    except ImportError: pass
     except Exception as ex:
         print("profile picture read failed:", repr(ex)); return "That file could not be read as a picture."
-    try: pid = _ph_sheet_put(eid, data, ext)
-    except Exception as ex:
-        print("profile picture sheet save failed:", repr(ex)); return "The picture could not be saved to the Google Sheet. Please try again."
-    _ph_cache_write(pid, ext, data)
-    for x in _PH_EXT:      # a replaced picture must never be shadowed by an old local file
-        try: os.remove(os.path.join(PHOTO_DIR, _ph_base(eid) + "." + x))
-        except OSError: pass
+    _ph_write_disk(eid, data, ext)
+    if not _ph_backup(eid, data, ext):      # Update307: permanent copy in the Google Sheet
+        try: flash("Picture saved, but its permanent backup in Google Sheets could not be written (install Pillow so pictures are resized, or try again).", "error")
+        except Exception: pass
     return ""
 
-PH_CSS = """<style>.ph-av{display:inline-grid;place-items:center;width:44px;height:44px;min-width:44px;border-radius:50%;overflow:hidden;background:linear-gradient(135deg,#a24f7e,#3b4aa8);color:#fff;font:600 15px/1 Poppins,system-ui,sans-serif;vertical-align:middle;flex:0 0 auto}
-.ph-av img{width:100%;height:100%;object-fit:cover;display:block}.ph-av.big{width:96px;height:96px;min-width:96px;font-size:30px}
+PH_CSS = """<style>.ph-av{display:inline-grid;place-items:center;width:44px;height:44px;border-radius:50%;overflow:hidden;background:linear-gradient(135deg,#a24f7e,#3b4aa8);color:#fff;font:600 15px/1 Poppins,system-ui,sans-serif;vertical-align:middle;flex:0 0 auto}
+.ph-av img{width:100%;height:100%;object-fit:cover;display:block}.ph-av.big{width:96px;height:96px;font-size:30px}
 .ph-c{white-space:nowrap}.ph-f{display:inline-block;margin:0 0 0 8px;vertical-align:middle}.ph-up{font-size:12px;color:#4f46e5;cursor:pointer;font-weight:600}.ph-up:hover{text-decoration:underline}
 .ph-row{display:flex;flex-wrap:wrap;gap:16px;align-items:center}</style>"""
 EMP_LIST = PH_CSS + EMP_LIST
@@ -17163,18 +17149,17 @@ T_PERSONAL = PH_CSS + T_PERSONAL
 @app.route("/admin/employee-info/<eid>/photo", methods=["POST"])
 @need("admin")
 def admin_employee_photo(eid):
-    """Admin only: upload, replace or remove an employee's profile picture."""
     emp = emp_or_404(eid); eid = str(emp["Employee ID"])
-    bk = request.form.get("back")
-    back = "/admin/employee-info" if bk == "list" else ("/admin/team?sel=%s" % urllib.parse.quote(eid, safe="") if bk == "team" else "/admin/employee-info/%s?tab=personal" % urllib.parse.quote(eid, safe=""))
+    back = "/admin/employee-info" if request.form.get("back") == "list" else "/admin/employee-info/%s?tab=personal" % urllib.parse.quote(eid, safe="")
     try:
         if request.form.get("remove"):
-            try: _ph_sheet_remove(eid)
-            except Exception as ex:
-                print("profile picture remove failed:", repr(ex)); flash("The picture could not be removed. Please try again.", "error"); return redirect(back)
-            for x in _PH_EXT:
-                try: os.remove(os.path.join(PHOTO_DIR, _ph_base(eid) + "." + x))
-                except OSError: pass
+            f = _ph_find(eid)
+            if f: os.remove(f)
+            try:
+                if _key(eid) in _ph_index():
+                    _with_retry(ws_of(PH_INDEX).append_row, [str(eid), str(int(time.time())), "", 0, 0, now_local().strftime("%Y-%m-%d %H:%M:%S"), "Deleted"], value_input_option="RAW")
+                    invalidate_cache(PH_INDEX); _ph_memo[0] = 0.0
+            except Exception as ex: print("photo delete mark failed:", repr(ex))
             flash("Profile picture removed.")
         else:
             up = request.files.get("photo"); data = up.read(PHOTO_MAX + 1) if up else b""
@@ -17189,94 +17174,67 @@ def admin_employee_photo(eid):
 def admin_team_photo(eid): return _ph_send(eid)
 
 def _ph_send(eid):
-    m = _ph_index().get(_key(eid)); resp = None
-    if m:
-        ext = {v: k for k, v in _PH_MIME.items()}.get(m["mime"], "jpg"); cf = os.path.join(_PH_CACHE, m["pid"] + "." + ext)
-        try:
-            if os.path.isfile(cf): resp = send_file(cf, mimetype=m["mime"], conditional=True, max_age=3600)
-            else:
-                data = _ph_sheet_get(m["pid"])      # cache missing (new server / wiped folder): rebuild it from the sheet
-                if data:
-                    _ph_cache_write(m["pid"], ext, data); resp = send_file(io.BytesIO(data), mimetype=m["mime"], max_age=3600)
-        except Exception as ex: print("profile picture load failed:", repr(ex))
-    if resp is None:
-        f = _ph_find(eid)
-        if not f: abort(404)
-        resp = send_file(f, mimetype=_PH_MIME[f.rsplit(".", 1)[1]], conditional=True, max_age=3600)
+    f = _ph_find(eid) or _ph_restore(eid)      # Update307: if the disk copy is gone, bring it back from the Google Sheet
+    if not f: abort(404)
+    resp = send_file(f, mimetype={"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}[f.rsplit(".", 1)[1]], conditional=True, max_age=3600)
     resp.headers["Cache-Control"] = "private, max-age=3600"; return resp
 
 TEAM_PAGE = r"""<style>
 .tm{display:grid;grid-template-columns:300px 1fr;min-height:560px;border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 18px 40px -22px #1c234099;font-family:Poppins,system-ui,"Segoe UI",sans-serif}
 .tm-l{background:linear-gradient(165deg,#b4527a 0%,#7d4a9e 48%,#2b3fa1 100%);color:#fff;padding:34px 22px;text-align:center;display:flex;flex-direction:column;align-items:center}
-/* Update307: FIXED picture sizes - every picture is the same square size (cropped, never stretched) whatever the uploaded file's shape */
-.tm-big{width:200px;height:200px;min-width:200px;min-height:200px;max-width:200px;max-height:200px;flex:0 0 200px;border-radius:50%;overflow:hidden;background:#ffffff26;border:5px solid #fff;display:grid;place-items:center;font-size:62px;font-weight:600;box-shadow:0 12px 28px -12px #0008;box-sizing:border-box}
-.tm-big img{width:100%;height:100%;object-fit:cover;object-position:center;display:block}
+.tm-big{width:200px;height:200px;border-radius:50%;overflow:hidden;background:#ffffff26;border:5px solid #fff;display:grid;place-items:center;font-size:62px;font-weight:600;box-shadow:0 12px 28px -12px #0008}
+.tm-big img{width:100%;height:100%;object-fit:cover;display:block}
 .tm-l h2{margin:22px 0 4px;font-size:21px;font-weight:700;color:#fff}.tm-ds{font-size:16px;opacity:.95;margin-bottom:14px}
 .tm-dl{width:100%;text-align:left;font-size:13px;line-height:1.5;border-top:1px solid #ffffff44;padding-top:12px;margin-top:2px}.tm-dl div{margin:8px 0;word-break:break-word}.tm-dl small{display:block;font-size:11px;letter-spacing:.5px;text-transform:uppercase;opacity:.75}
-.tm-so{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}.tm-so[hidden]{display:none}
-.tm-so a{display:inline-grid;place-items:center;width:36px;height:36px;border-radius:50%;background:#ffffff2e;color:#fff;transition:background .15s,transform .15s}
-.tm-so a:hover,.tm-so a:focus-visible{background:#ffffff66;transform:translateY(-2px)}.tm-so svg{width:18px;height:18px;fill:currentColor;display:block}
-.tm-ad{width:100%;border-top:1px solid #ffffff44;margin-top:14px;padding-top:12px;text-align:left}.tm-ad small{display:block;font-size:11px;letter-spacing:.5px;text-transform:uppercase;opacity:.75;margin-bottom:8px}
-.tm-ad .row{display:flex;gap:8px;flex-wrap:wrap}.tm-ad form{margin:0}
-.tm-ad label.bt,.tm-ad button{display:inline-block;padding:7px 12px;border-radius:9px;border:1px solid #ffffff88;background:#ffffff26;color:#fff;font:600 12px Poppins,system-ui,sans-serif;cursor:pointer}
-.tm-ad label.bt:hover,.tm-ad button:hover{background:#ffffff4d}.tm-ad button.rm{border-color:#ffb4b4;color:#ffe3e3}
-.tm-ad p{font-size:11px;opacity:.8;margin:8px 0 0}
 .tm-hint{font-size:14px;opacity:.9;margin-top:22px}
+.tm-ds:empty{display:none}.tm-eid{display:inline-block;margin-top:2px;padding:2px 10px;border-radius:999px;background:#ffffff2e;font-size:12px;font-weight:600;letter-spacing:.4px}
+.tm-soc{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:14px}.tm-soc a{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:#ffffff2e;color:#fff;transition:transform .15s,background .15s}.tm-soc a:hover{transform:translateY(-2px);background:#ffffff55}.tm-soc svg{width:18px;height:18px;fill:currentColor}
+.tm-ci{display:block;font-size:12px;color:#9a9a9a;margin-top:2px;letter-spacing:.3px}.tm-bd{display:inline-block;margin-top:5px;padding:1px 9px;border-radius:999px;font-size:11px;font-weight:700}.tm-bd.res{background:#fde2e2;color:#b91c1c}.tm-bd.ncns{background:#ffefd2;color:#b45309}.tm-p.sepd .rg img,.tm-p.sepd .rg span{filter:grayscale(.85);opacity:.8}
 .tm-r{padding:26px 34px 34px}
 .tm-hd{display:flex;justify-content:flex-end;align-items:flex-start;gap:12px;flex-wrap:wrap}.tm-t{text-align:right}.tm-t b{display:block;font-size:22px;color:#7b7b7b;padding:0 0 6px}.tm-t i{display:block;height:4px;border-radius:2px;background:linear-gradient(90deg,#4a4aa8,#b4527a)}
 .tm-s{margin:0 auto 0 0;padding:9px 12px;border:1px solid #d5d8f0;border-radius:10px;font:inherit;font-size:14px;min-width:200px}
 .tm-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:34px 18px;margin-top:30px}
 .tm-p{background:none;border:0;padding:0;font:inherit;cursor:pointer;text-align:center;color:inherit}
-.tm-p .rg{display:block;width:88px;height:88px;min-width:88px;min-height:88px;max-width:88px;max-height:88px;margin:0 auto;border-radius:50%;padding:3px;box-sizing:border-box;background:linear-gradient(160deg,#4a4aa8,#c0527a);transition:transform .18s,box-shadow .18s}
-.tm-p .rg span{display:grid;place-items:center;width:100%;height:100%;border-radius:50%;overflow:hidden;border:2px solid #fff;box-sizing:border-box;background:#e9ebf7;color:#6b7390;font-weight:600;font-size:24px}
-.tm-p .rg img{width:100%;height:100%;object-fit:cover;object-position:center;display:block;filter:grayscale(.15)}
+.tm-p .rg{display:block;width:88px;height:88px;margin:0 auto;border-radius:50%;padding:3px;background:linear-gradient(160deg,#4a4aa8,#c0527a);transition:transform .18s,box-shadow .18s}
+.tm-p .rg span{display:grid;place-items:center;width:100%;height:100%;border-radius:50%;overflow:hidden;border:2px solid #fff;background:#e9ebf7;color:#6b7390;font-weight:600;font-size:24px}
+.tm-p .rg img{width:100%;height:100%;object-fit:cover;display:block;filter:grayscale(.15)}
 .tm-p:hover .rg,.tm-p:focus-visible .rg,.tm-p.on .rg{transform:translateY(-3px) scale(1.05);box-shadow:0 12px 22px -10px #7d4a9e}
 .tm-p.on .rg{background:linear-gradient(160deg,#2b3fa1,#b4527a)}
-.tm-p b{display:block;margin-top:12px;font-size:14px;color:#7b7b7b;font-weight:700}.tm-p small{display:block;font-size:13px;color:#8d8d8d;margin-top:2px}.tm-p small.tm-eid{font-size:12px;color:#9a9ab8;letter-spacing:.3px}
+.tm-p b{display:block;margin-top:12px;font-size:14px;color:#7b7b7b;font-weight:700}.tm-p small{display:block;font-size:13px;color:#8d8d8d;margin-top:2px}
 .tm-e{grid-column:1/-1;text-align:center;color:#8d8d8d;padding:30px 0}
-@media(max-width:860px){.tm{grid-template-columns:1fr}.tm-r{padding:20px 16px 26px}.tm-s{width:100%}.tm-hd{flex-direction:column-reverse;align-items:stretch}.tm-t{text-align:right}}
+@media(max-width:860px){.tm{grid-template-columns:1fr}.tm-r{padding:20px 16px 26px}.tm-big{width:150px;height:150px;font-size:46px}.tm-s{width:100%}.tm-hd{flex-direction:column-reverse;align-items:stretch}.tm-t{text-align:right}}
 </style>
-<div class="head"><div><h1>{{ 'Team' if is_admin else 'Meet The Team' }}</h1><p class="mut">All employees with their profile pictures. Click a picture to see that employee's details.{% if is_admin %} Admin only: you can upload, replace or remove a picture after selecting an employee.{% endif %}</p></div></div>
+<div class="head"><div><h1>{{ 'Team' if is_admin else 'Meet The Team' }}</h1><p class="mut">All employees with their profile pictures. Click a picture to see that employee's details.{% if is_admin %} Admin only.{% endif %}</p></div></div>
 <div class="tm">
-<div class="tm-l" id="tm-l" aria-live="polite"><div class="tm-big" id="tm-i">&#128100;</div><h2 id="tm-n">Select a team member</h2><div class="tm-ds" id="tm-d" hidden></div>
-<div class="tm-dl" id="tm-x" hidden>
-<div id="tm-rid"><small>Employee ID</small><span id="tm-id"></span></div>
-<div id="tm-rm" hidden><small>Office Email ID</small><span id="tm-m"></span></div>
-<div id="tm-rp" hidden><small>Phone Number</small><span id="tm-ph"></span></div>
-<div id="tm-rs" hidden><small>Connect</small><span class="tm-so" id="tm-so"></span></div></div>
-{% if is_admin %}<div class="tm-ad" id="tm-ad" hidden><small>Profile picture (Admin)</small><div class="row">
-<form method="post" id="tm-fu" enctype="multipart/form-data"><input type="hidden" name="back" value="team"><label class="bt" id="tm-ul">Upload picture<input type="file" name="photo" accept="image/jpeg,image/png,image/webp" hidden></label></form>
-<form method="post" id="tm-fr" onsubmit="return confirm('Remove this profile picture?')"><input type="hidden" name="back" value="team"><input type="hidden" name="remove" value="1"><button type="submit" class="rm" id="tm-rb">Remove</button></form></div>
-<p>JPG, PNG or WebP, up to 4 MB. Saved permanently and shown at one fixed size.</p></div>{% endif %}
+<div class="tm-l" id="tm-l" aria-live="polite"><div class="tm-big" id="tm-i">&#128100;</div><h2 id="tm-n">Select a team member</h2><div class="tm-eid" id="tm-id" hidden></div><div class="tm-ds" id="tm-d"></div>
+<div class="tm-dl" id="tm-x" hidden><div id="tm-rm"><small>Office Email ID</small><span id="tm-m"></span></div><div id="tm-rp"><small>Phone Number</small><span id="tm-ph"></span></div><div id="tm-rs"><small>Status</small><span id="tm-st"></span></div></div>
+<div class="tm-soc" id="tm-soc"></div>
 <p class="tm-hint" id="tm-h">Click any profile picture to view the employee's details here.</p></div>
-<div class="tm-r"><div class="tm-hd"><input class="tm-s" id="tm-q" type="search" placeholder="Search name / ID / designation" aria-label="Search team"><div class="tm-t"><b>Meet The Team</b><i></i></div></div>
-<div class="tm-g" id="tm-g">{% for p in people %}<button type="button" class="tm-p" data-id="{{p.eid|e}}" data-n="{{p.name|e}}" data-d="{{p.desig|e}}" data-m="{{p.mail|e}}" data-ph="{{p.phone|e}}" data-img="{{p.photo|e}}" data-ig="{{p.ig|e}}" data-fb="{{p.fb|e}}" data-li="{{p.li|e}}" data-tw="{{p.tw|e}}" data-web="{{p.web|e}}" data-s="{{(p.name ~ ' ' ~ p.eid ~ ' ' ~ p.desig)|lower|e}}" aria-label="{{p.name|e}} - details">
-<span class="rg"><span>{% if p.photo %}<img src="{{p.photo|e}}" alt="" loading="lazy" width="88" height="88">{% else %}{{p.ini}}{% endif %}</span></span><b>{{p.name}}</b><small class="tm-eid">ID: {{p.eid}}</small>{% if p.desig %}<small>{{p.desig}}</small>{% endif %}</button>
+<div class="tm-r"><div class="tm-hd"><input class="tm-s" id="tm-q" type="search" placeholder="Search name / designation" aria-label="Search team"><div class="tm-t"><b>Meet The Team</b><i></i></div></div>
+<div class="tm-g" id="tm-g">{% for p in people %}<button type="button" class="tm-p{{' sepd' if p.sep else ''}}" data-id="{{p.eid|e}}" data-n="{{p.name|e}}" data-d="{{p.desig|e}}" data-m="{{p.mail|e}}" data-ph="{{p.phone|e}}" data-st="{{p.sep|e}}" data-ig="{{p.ig|e}}" data-fb="{{p.fb|e}}" data-li="{{p.li|e}}" data-x="{{p.x|e}}" data-web="{{p.web|e}}" data-img="{{p.photo|e}}" data-s="{{(p.name ~ ' ' ~ p.desig ~ ' ' ~ p.eid ~ ' ' ~ p.sep)|lower|e}}" aria-label="{{p.name|e}} - details">
+<span class="rg"><span>{% if p.photo %}<img src="{{p.photo|e}}" alt="" loading="lazy">{% else %}{{p.ini}}{% endif %}</span></span><b>{{p.name}}</b><span class="tm-ci">{{p.eid}}</span>{% if p.desig %}<small>{{p.desig}}</small>{% endif %}{% if p.sep %}<span class="tm-bd {{'res' if p.sep=='Resigned' else 'ncns'}}">{{p.sep}}</span>{% endif %}</button>
 {% else %}<div class="tm-e">No employees found.</div>{% endfor %}</div></div></div>
 <script>(function(){var g=document.getElementById('tm-g'),q=document.getElementById('tm-q'),L=document.getElementById('tm-l');if(!g)return;
-var IC={ig:'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="17.3" cy="6.7" r="1.2"/></svg>',
-fb:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.500 21v-8h2.700l.4-3.200h-3.100V7.900c0-.9.3-1.500 1.600-1.500h1.700V3.500c-.3 0-1.300-.1-2.400-.1-2.400 0-4.100 1.500-4.100 4.200v2.200H7.500V13h2.800v8h3.200z"/></svg>',
-li:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.500 9h3.800v12H4.500zM6.400 3.200a2.200 2.200 0 1 1 0 4.400 2.200 2.200 0 0 1 0-4.400zM10.500 9h3.600v1.700c.5-.9 1.800-2 3.700-2 3.800 0 4.500 2.500 4.500 5.700V21h-3.800v-5.600c0-1.300 0-3.100-1.900-3.100s-2.200 1.500-2.200 3V21h-3.900z"/></svg>',
-tw:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.200 3h3.100l-6.800 7.700L22.500 21h-6.200l-4.900-6.400L5.700 21H2.600l7.300-8.300L2 3h6.400l4.400 5.900L18.200 3zm-1.100 16.200h1.700L7.400 4.700H5.600l11.500 14.500z"/></svg>',
-web:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.900 9h-3.100a15.600 15.600 0 0 0-1.400-6A8 8 0 0 1 18.900 11zM12 4.100c.8 1 1.700 3 1.900 6.900h-3.800C10.300 7.100 11.200 5.100 12 4.100zM4.300 13h3.900c.1 2 .5 3.900 1.200 5.400A8 8 0 0 1 4.300 13zm3.900-2H4.300a8 8 0 0 1 5.100-5.400C8.700 7.100 8.300 9 8.200 11zM12 19.900c-.8-1-1.700-3-1.900-6.900h3.800c-.2 3.900-1.100 5.900-1.900 6.900zM14.600 18.400c.7-1.500 1.100-3.400 1.200-5.400h3.900a8 8 0 0 1-5.100 5.400z"/></svg>'};
-var LB={ig:'Instagram',fb:'Facebook',li:'LinkedIn',tw:'Twitter (X)',web:'Website'};
-function row(id,v){var r=document.getElementById(id);if(r)r.hidden=!v;return r}
 function set(b){g.querySelectorAll('.tm-p.on').forEach(function(x){x.classList.remove('on')});b.classList.add('on');
-var i=document.getElementById('tm-i'),im=b.getAttribute('data-img'),nm=b.getAttribute('data-n'),id=b.getAttribute('data-id'),ds=b.getAttribute('data-d'),ml=b.getAttribute('data-m'),pn=b.getAttribute('data-ph');
-i.textContent='';if(im){var t=document.createElement('img');t.src=im;t.alt='';i.appendChild(t)}else{i.textContent=b.querySelector('.rg span').textContent.trim()}
-document.getElementById('tm-n').textContent=nm;var d=document.getElementById('tm-d');d.textContent=ds||'';d.hidden=!ds;
-document.getElementById('tm-id').textContent=id;document.getElementById('tm-m').textContent=ml||'';document.getElementById('tm-ph').textContent=pn||'';row('tm-rm',ml);row('tm-rp',pn);
-var so=document.getElementById('tm-so'),n=0;so.textContent='';
-['ig','fb','li','tw','web'].forEach(function(k){var u=b.getAttribute('data-'+k)||'';if(!/^https?:\/\//i.test(u))return;var a=document.createElement('a');a.href=u;a.target='_blank';a.rel='noopener noreferrer nofollow';a.title=LB[k];a.setAttribute('aria-label',LB[k]+' - '+nm);a.innerHTML=IC[k];so.appendChild(a);n++});
-row('tm-rs',n);
-document.getElementById('tm-x').hidden=false;document.getElementById('tm-h').hidden=true;
-var ad=document.getElementById('tm-ad');if(ad){var act='/admin/employee-info/'+encodeURIComponent(id)+'/photo';var fu=document.getElementById('tm-fu'),fr=document.getElementById('tm-fr');fu.action=act;fr.action=act;
-var ul=document.getElementById('tm-ul');ul.firstChild.nodeValue=im?'Replace picture':'Upload picture';fr.hidden=!im;ad.hidden=false}
+var i=document.getElementById('tm-i'),im=b.getAttribute('data-img');i.textContent='';if(im){var t=document.createElement('img');t.src=im;t.alt='';i.appendChild(t)}else{i.textContent=b.querySelector('.rg span').textContent.trim()}
+function A(k){return b.getAttribute(k)||''}
+document.getElementById('tm-n').textContent=A('data-n');document.getElementById('tm-d').textContent=A('data-d');
+var ei=document.getElementById('tm-id');ei.textContent='EMP_ID: '+A('data-id');ei.hidden=!A('data-id');
+function row(r,s,v){document.getElementById(s).textContent=v;document.getElementById(r).hidden=!v}
+row('tm-rm','tm-m',A('data-m'));row('tm-rp','tm-ph',A('data-ph'));row('tm-rs','tm-st',A('data-st'));
+var soc=document.getElementById('tm-soc');soc.textContent='';
+var IC={ig:['Instagram','M7.8 2h8.4A5.8 5.8 0 0 1 22 7.8v8.4a5.8 5.8 0 0 1-5.8 5.8H7.8A5.8 5.8 0 0 1 2 16.2V7.8A5.8 5.8 0 0 1 7.8 2zm0 1.8A4 4 0 0 0 3.8 7.8v8.4a4 4 0 0 0 4 4h8.4a4 4 0 0 0 4-4V7.8a4 4 0 0 0-4-4H7.8zM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 1.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4zM17.3 5.5a1.2 1.2 0 1 1 0 2.4 1.2 1.2 0 0 1 0-2.4z'],
+fb:['Facebook','M13.5 22v-8.2h2.8l.5-3.3h-3.3V8.4c0-.9.3-1.6 1.7-1.6h1.7V3.9c-.3 0-1.3-.1-2.5-.1-2.5 0-4.1 1.5-4.1 4.2v2.5H7.5v3.3h2.8V22h3.2z'],
+li:['LinkedIn','M4.5 3a1.9 1.9 0 1 1 0 3.8 1.9 1.9 0 0 1 0-3.8zM3 8.6h3V21H3V8.6zm5 0h2.9v1.7c.4-.8 1.4-2 3.4-2 3.6 0 4.3 2.4 4.3 5.4V21h-3v-6.5c0-1.5 0-3.5-2.2-3.5s-2.4 1.7-2.4 3.4V21H8V8.6z'],
+x:['Twitter (X)','M17.8 3h3.1l-6.8 7.7L22 21h-6.2l-4.9-6.4L5.3 21H2.2l7.3-8.3L2 3h6.4l4.4 5.9L17.8 3zm-1.1 16.2h1.7L7.3 4.7H5.5l11.2 14.5z'],
+web:['Website','M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95a15.65 15.65 0 0 0-1.38-3.56A8.03 8.03 0 0 1 18.92 8zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.987 7.987 0 0 1 5.08 16zm2.95-8H5.08a7.987 7.987 0 0 1 4.33-3.56A15.65 15.65 0 0 0 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.1-.66-.16-1.32-.16-2 0-.68.06-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z']};
+['ig','fb','li','x','web'].forEach(function(k){var u=A('data-'+k);if(!/^https?:\/\//i.test(u))return;
+var a=document.createElement('a');a.href=u;a.target='_blank';a.rel='noopener noreferrer';a.title=IC[k][0];a.setAttribute('aria-label',IC[k][0]);
+var sv=document.createElementNS('http://www.w3.org/2000/svg','svg');sv.setAttribute('viewBox','0 0 24 24');var p=document.createElementNS('http://www.w3.org/2000/svg','path');p.setAttribute('d',IC[k][1]);sv.appendChild(p);a.appendChild(sv);soc.appendChild(a)});
+document.getElementById('tm-x').hidden=!(A('data-m')||A('data-ph')||A('data-st'));document.getElementById('tm-h').hidden=true;
 if(matchMedia('(max-width:860px)').matches)L.scrollIntoView({behavior:'smooth',block:'start'})}
 g.addEventListener('click',function(e){var b=e.target.closest('.tm-p');if(b)set(b)});
-var fi=document.querySelector('#tm-fu input[type=file]');if(fi)fi.addEventListener('change',function(){if(fi.files&&fi.files.length)fi.form.submit()});
-q.addEventListener('input',function(){var v=q.value.trim().toLowerCase();g.querySelectorAll('.tm-p').forEach(function(b){b.style.display=(!v||b.getAttribute('data-s').indexOf(v)>=0)?'':'none'})});
-var sel=new URLSearchParams(location.search).get('sel');if(sel){var m=Array.prototype.find.call(g.querySelectorAll('.tm-p'),function(b){return b.getAttribute('data-id')===sel});if(m)set(m)}})();</script>"""
+q.addEventListener('input',function(){var v=q.value.trim().toLowerCase();g.querySelectorAll('.tm-p').forEach(function(b){b.style.display=(!v||b.getAttribute('data-s').indexOf(v)>=0)?'':'none'})});})();</script>"""
 
 def _team_people(base, active_only=False):
     prefetch("Employees")
@@ -17284,16 +17242,19 @@ def _team_people(base, active_only=False):
     for e in rows("Employees"):
         eid = str(e.get("Employee ID", "")).strip()
         if not eid: continue
-        if active_only:
+        sep = emp_sep(e)      # Update307: Resigned / NCNS employees are listed too (last, with a badge)
+        if active_only and not sep:
             try:
-                if emp_locked(e): continue      # Employees see active colleagues only (locked / Resigned / NCNS are hidden)
+                if emp_locked(e): continue      # a plainly locked (not Resigned / NCNS) account stays hidden from colleagues
             except Exception: pass
-        people.append(dict(eid=eid, name=str(e.get("Name", "") or eid).strip(), desig=str(e.get("Designation", "") or "").strip(),
-                           mail=str(e.get("Office Email ID", "") or e.get("Email", "") or "").strip(), phone=str(e.get("Phone Number", "") or "").strip(),
-                           photo=_ph_url(eid, base), ini=_ph_ini(e.get("Name", "") or eid),
-                           ig=_soc_norm("Instagram", e.get("Instagram", "")), fb=_soc_norm("Facebook", e.get("Facebook", "")), li=_soc_norm("LinkedIn", e.get("LinkedIn", "")),
-                           tw=_soc_norm("Twitter (X)", e.get("Twitter (X)", "")), web=_soc_norm("Website", e.get("Website", ""))))
-    people.sort(key=lambda x: x["name"].lower())
+        d = dict(eid=eid, name=str(e.get("Name", "") or eid).strip(), desig=str(e.get("Designation", "") or "").strip(),
+                 mail=str(e.get("Office Email ID", "") or e.get("Email", "") or "").strip(), phone=str(e.get("Phone Number", "") or "").strip(),
+                 photo=_ph_url(eid, base), ini=_ph_ini(e.get("Name", "") or eid), sep=sep, rank=sep_rank(e))
+        for k, f in (("ig", "Instagram"), ("fb", "Facebook"), ("li", "LinkedIn"), ("x", "Twitter (X)"), ("web", "Website")):
+            u = social_clean(f, e.get(f, ""))
+            d[k] = u if re.match(r"^https?://", u, re.I) else ""
+        people.append(d)
+    people.sort(key=lambda x: (x["rank"], x["name"].lower()))
     return people
 
 @app.route("/admin/team")
@@ -17311,22 +17272,7 @@ def employee_team():
 @need("employee")
 def employee_team_photo(eid): return _ph_send(eid)
 
-def _ph_migrate():
-    """Update307: pictures that so far exist only in the local folder are copied to the Google Sheet once, automatically, after start-up."""
-    try:
-        import random as _r; time.sleep(8 + _r.random() * 8)
-        if not os.path.isdir(PHOTO_DIR): return
-        _tl.fresh = True
-        idx = _ph_index()
-        for e in rows("Employees"):
-            eid = str(e.get("Employee ID", "")).strip()
-            if not eid or _key(eid) in idx: continue
-            f = _ph_find(eid)
-            if not f: continue
-            with open(f, "rb") as fh: data = fh.read()
-            _ph_sheet_put(eid, data, f.rsplit(".", 1)[1]); print("Profile picture copied to the Google Sheet:", eid)
-    except Exception as ex: print("profile picture migration skipped:", repr(ex))
-threading.Thread(target=_ph_migrate, daemon=True).start()
+threading.Thread(target=_ph_sync_boot, daemon=True).start()      # Update307: restore / back up profile pictures
 
 if __name__ == "__main__":
     # NOTE: Flask's built-in dev server (even with threaded=True) is still not
